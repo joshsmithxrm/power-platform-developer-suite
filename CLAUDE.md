@@ -143,3 +143,23 @@ Extracted by:
 | `PPDS.Plugins.snk` | Strong name key (DO NOT regenerate) |
 | `CHANGELOG.md` | Release notes |
 | `.editorconfig` | Code style settings |
+
+---
+
+## Testing Requirements
+
+- **Target 80% code coverage.** Tests must pass before PR.
+- Unit tests for all public API (attributes, enums)
+- Run `dotnet test` before submitting PR
+
+---
+
+## Decision Presentation
+
+When presenting choices or asking questions:
+1. **Lead with your recommendation** and rationale
+2. **List alternatives considered** and why they're not preferred
+3. **Ask for confirmation**, not open-ended input
+
+❌ "What testing approach should we use?"
+✅ "I recommend X because Y. Alternatives considered: A (rejected because B), C (rejected because D). Do you agree?"

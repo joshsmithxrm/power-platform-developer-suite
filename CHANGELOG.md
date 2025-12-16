@@ -7,18 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2025-01-XX
+## [1.0.0] - 2025-12-15
 
 ### Added
+
 - `PluginStepAttribute` for declarative plugin step registration
+  - `Message`, `EntityLogicalName`, `Stage` (required)
+  - `Mode`, `FilteringAttributes`, `ExecutionOrder` (optional)
+  - `UnsecureConfiguration`, `SecureConfiguration` for plugin settings
+  - `StepId` for multi-step plugins
 - `PluginImageAttribute` for defining pre/post images
-- `PluginStage` enum (PreValidation, PreOperation, PostOperation)
-- `PluginMode` enum (Synchronous, Asynchronous)
-- `PluginImageType` enum (PreImage, PostImage, Both)
-- Multi-targeting: net462, net6.0, net8.0
+  - `ImageType`, `Name` (required)
+  - `Attributes`, `EntityAlias`, `StepId` (optional)
+- `PluginStage` enum (`PreValidation`, `PreOperation`, `PostOperation`)
+- `PluginMode` enum (`Synchronous`, `Asynchronous`)
+- `PluginImageType` enum (`PreImage`, `PostImage`, `Both`)
+- Multi-targeting: `net462`, `net6.0`, `net8.0`
 - Strong name signing for Dataverse compatibility
 - Full XML documentation
 - GitHub Actions workflows for build and NuGet publishing
+- Comprehensive unit test suite
 
 [Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/v1.0.0
