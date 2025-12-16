@@ -2,17 +2,36 @@
 
 **NuGet packages for Power Platform plugin development.**
 
----
-
-## Project Overview
-
-This repository contains the PPDS.Plugins NuGet package, providing attribute-based plugin step registration for Dataverse/Dynamics 365.
-
 **Part of the PPDS Ecosystem** - See `C:\VS\ppds\CLAUDE.md` for cross-project context.
 
 ---
 
-## Tech Stack
+## 🚫 NEVER
+
+| Rule | Why |
+|------|-----|
+| Regenerate `PPDS.Plugins.snk` | Breaks strong naming; existing assemblies won't load |
+| Remove nullable reference types | Type safety prevents runtime errors |
+| Skip XML documentation on public APIs | Consumers need IntelliSense documentation |
+| Multi-target without testing all frameworks | Dataverse has specific .NET requirements |
+| Commit with failing tests | All tests must pass before merge |
+
+---
+
+## ✅ ALWAYS
+
+| Rule | Why |
+|------|-----|
+| Strong name all assemblies | Required for Dataverse plugin sandbox |
+| XML documentation for public APIs | IntelliSense support for consumers |
+| Multi-target 4.6.2, 6.0, 8.0 | Dataverse compatibility across versions |
+| Run `dotnet test` before PR | Ensures no regressions |
+| Update `CHANGELOG.md` with changes | Release notes for consumers |
+| Follow SemVer versioning | Clear compatibility expectations |
+
+---
+
+## 💻 Tech Stack
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
@@ -23,7 +42,7 @@ This repository contains the PPDS.Plugins NuGet package, providing attribute-bas
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 ppds-sdk/
@@ -32,7 +51,7 @@ ppds-sdk/
 │       ├── Attributes/          # PluginStepAttribute, PluginImageAttribute
 │       ├── Enums/               # PluginStage, PluginMode, PluginImageType
 │       ├── PPDS.Plugins.csproj
-│       └── PPDS.Plugins.snk     # Strong name key
+│       └── PPDS.Plugins.snk     # Strong name key (DO NOT regenerate)
 ├── tests/
 │   └── PPDS.Plugins.Tests/
 ├── .github/workflows/
@@ -45,7 +64,7 @@ ppds-sdk/
 
 ---
 
-## Common Commands
+## 🛠️ Common Commands
 
 ```powershell
 # Build
@@ -65,7 +84,7 @@ dotnet clean
 
 ---
 
-## Development Workflow
+## 🔄 Development Workflow
 
 ### Making Changes
 
@@ -75,7 +94,40 @@ dotnet clean
 4. Update `CHANGELOG.md`
 5. Create PR to `main`
 
-### Version Management
+### Code Conventions
+
+```csharp
+// ✅ Correct - Use nullable reference types
+public string? OptionalProperty { get; set; }
+
+// ❌ Wrong - Missing nullability
+public string OptionalProperty { get; set; }
+```
+
+```csharp
+// ✅ Correct - XML documentation on public API
+/// <summary>
+/// Defines a plugin step registration.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public class PluginStepAttribute : Attribute { }
+
+// ❌ Wrong - No documentation
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public class PluginStepAttribute : Attribute { }
+```
+
+### Namespaces
+
+```csharp
+namespace PPDS.Plugins;              // Root
+namespace PPDS.Plugins.Attributes;   // Attributes
+namespace PPDS.Plugins.Enums;        // Enums
+```
+
+---
+
+## 📦 Version Management
 
 - Version is in `src/PPDS.Plugins/PPDS.Plugins.csproj`
 - Follow SemVer: `MAJOR.MINOR.PATCH`
@@ -84,7 +136,7 @@ dotnet clean
 
 ---
 
-## Branching Strategy
+## 🔀 Git Branch & Merge Strategy
 
 | Branch | Purpose |
 |--------|---------|
@@ -96,7 +148,7 @@ dotnet clean
 
 ---
 
-## Release Process
+## 🚀 Release Process
 
 1. Update version in `PPDS.Plugins.csproj`
 2. Update `CHANGELOG.md`
@@ -108,34 +160,18 @@ dotnet clean
 
 ---
 
-## Code Conventions
+## 🔗 Ecosystem Integration
 
-### Namespaces
-```csharp
-namespace PPDS.Plugins;              // Root
-namespace PPDS.Plugins.Attributes;   // Attributes
-namespace PPDS.Plugins.Enums;        // Enums
-```
-
-### Coding Standards
-- Nullable reference types enabled
-- XML documentation for public APIs
-- Strong naming required (Dataverse compatibility)
-
----
-
-## Ecosystem Integration
-
-This package is used by:
+**This package is used by:**
 - **ppds-demo** - Reference implementation
 - **Customer plugin projects** - Via NuGet reference
 
-Extracted by:
+**Extracted by:**
 - **ppds-tools** - `Get-DataversePluginRegistrations` reads these attributes
 
 ---
 
-## Key Files
+## 📋 Key Files
 
 | File | Purpose |
 |------|---------|
@@ -146,15 +182,16 @@ Extracted by:
 
 ---
 
-## Testing Requirements
+## 🧪 Testing Requirements
 
-- **Target 80% code coverage.** Tests must pass before PR.
+- **Target 80% code coverage**
 - Unit tests for all public API (attributes, enums)
 - Run `dotnet test` before submitting PR
+- All tests must pass before merge
 
 ---
 
-## Decision Presentation
+## ⚖️ Decision Presentation
 
 When presenting choices or asking questions:
 1. **Lead with your recommendation** and rationale
