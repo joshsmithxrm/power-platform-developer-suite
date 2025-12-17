@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-12-16
+
+### Added
+
+- `SecureConfiguration` property on `PluginStepAttribute` for secure plugin settings
+
+### Changed
+
+- Updated GitHub Actions dependencies (checkout v6, setup-dotnet v5, upload-artifact v6)
+
 ## [1.0.0] - 2025-12-15
 
 ### Added
@@ -14,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PluginStepAttribute` for declarative plugin step registration
   - `Message`, `EntityLogicalName`, `Stage` (required)
   - `Mode`, `FilteringAttributes`, `ExecutionOrder` (optional)
-  - `UnsecureConfiguration`, `SecureConfiguration` for plugin settings
+  - `UnsecureConfiguration` for plugin settings
   - `StepId` for multi-step plugins
 - `PluginImageAttribute` for defining pre/post images
   - `ImageType`, `Name` (required)
@@ -28,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions workflows for build and NuGet publishing
 - Comprehensive unit test suite
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/joshsmithxrm/ppds-sdk/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/v1.0.0

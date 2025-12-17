@@ -15,7 +15,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>PPDS.Plugins</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Josh Smith</Authors>
     <Company>Power Platform Developer Suite</Company>
     <Description>Plugin development attributes for Dataverse. Provides PluginStep and PluginImage attributes for declarative plugin registration configuration that can be extracted and deployed using PPDS.Tools.</Description>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/joshsmithxrm/ppds-sdk.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Initial release with PluginStep, PluginImage attributes and related enums.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added SecureConfiguration property to PluginStepAttribute. Updated CI dependencies.</PackageReleaseNotes>
 
     <!-- Source Link for debugging -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
