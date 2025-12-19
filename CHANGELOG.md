@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated target frameworks: dropped `net6.0` (out of support), added `net10.0` (current LTS)
+  - Now targets: `net462`, `net8.0`, `net10.0`
+
 ## [1.1.0] - 2025-12-16
 
 ### Added
