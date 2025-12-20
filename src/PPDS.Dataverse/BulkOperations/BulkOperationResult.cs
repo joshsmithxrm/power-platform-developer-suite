@@ -37,6 +37,12 @@ namespace PPDS.Dataverse.BulkOperations
         /// Gets the total number of operations attempted.
         /// </summary>
         public int TotalCount => SuccessCount + FailureCount;
+
+        /// <summary>
+        /// Gets the IDs of successfully created records from CreateMultiple operations.
+        /// Only populated for create operations; null for update/upsert/delete.
+        /// </summary>
+        public IReadOnlyList<Guid>? CreatedIds { get; init; }
     }
 
     /// <summary>

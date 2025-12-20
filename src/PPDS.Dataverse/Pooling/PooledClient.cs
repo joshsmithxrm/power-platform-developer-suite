@@ -70,7 +70,7 @@ namespace PPDS.Dataverse.Pooling
         public string ConnectedOrgUniqueName => _client.ConnectedOrgUniqueName;
 
         /// <inheritdoc />
-        public string ConnectedOrgVersion => _client.ConnectedOrgVersion;
+        public Version? ConnectedOrgVersion => _client.ConnectedOrgVersion;
 
         /// <inheritdoc />
         public string? LastError => _client.LastError;

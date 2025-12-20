@@ -518,7 +518,7 @@ namespace PPDS.Dataverse.Pooling
                 IdleConnections = GetTotalIdleConnections(),
                 ThrottledConnections = connectionStats.Values.Count(s => s.IsThrottled),
                 RequestsServed = _totalRequestsServed,
-                ThrottleEvents = 0, // TODO: Track from throttle tracker
+                ThrottleEvents = _throttleTracker.TotalThrottleEvents,
                 ConnectionStats = connectionStats
             };
         }

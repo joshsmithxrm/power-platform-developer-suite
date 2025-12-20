@@ -23,13 +23,6 @@ namespace PPDS.Dataverse.Pooling
         public string ConnectionString { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the weight for load balancing.
-        /// Higher weight means more traffic is routed to this connection.
-        /// Default: 1
-        /// </summary>
-        public int Weight { get; set; } = 1;
-
-        /// <summary>
         /// Gets or sets the maximum connections to create for this configuration.
         /// Default: 10
         /// </summary>
@@ -58,12 +51,10 @@ namespace PPDS.Dataverse.Pooling
         /// </summary>
         /// <param name="name">The unique name for this connection.</param>
         /// <param name="connectionString">The Dataverse connection string.</param>
-        /// <param name="weight">The weight for load balancing.</param>
         /// <param name="maxPoolSize">The maximum connections for this configuration.</param>
-        public DataverseConnection(string name, string connectionString, int weight, int maxPoolSize)
+        public DataverseConnection(string name, string connectionString, int maxPoolSize)
             : this(name, connectionString)
         {
-            Weight = weight;
             MaxPoolSize = maxPoolSize;
         }
     }

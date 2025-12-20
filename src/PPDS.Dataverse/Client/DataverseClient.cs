@@ -57,7 +57,7 @@ namespace PPDS.Dataverse.Client
         public string ConnectedOrgUniqueName => _serviceClient.ConnectedOrgUniqueName;
 
         /// <inheritdoc />
-        public string ConnectedOrgVersion => _serviceClient.ConnectedOrgVersion?.ToString() ?? string.Empty;
+        public Version? ConnectedOrgVersion => _serviceClient.ConnectedOrgVersion;
 
         /// <inheritdoc />
         public string? LastError => _serviceClient.LastError;

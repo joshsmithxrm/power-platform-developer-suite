@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 
@@ -99,31 +97,6 @@ namespace PPDS.Dataverse.Resilience
             }
 
             return state.ExpiresAt;
-        }
-
-        /// <inheritdoc />
-        public IEnumerable<string> GetAvailableConnections()
-        {
-            // Clean up expired entries while iterating
-            var expired = new List<string>();
-
-            foreach (var kvp in _throttleStates)
-            {
-                if (kvp.Value.IsExpired)
-                {
-                    expired.Add(kvp.Key);
-                }
-            }
-
-            foreach (var key in expired)
-            {
-                _throttleStates.TryRemove(key, out _);
-            }
-
-            // Return connections that are not in the throttle dictionary
-            // (This method is typically called with a list of all connections,
-            // so the caller filters based on this)
-            return _throttleStates.Keys.Where(k => !IsThrottled(k));
         }
 
         /// <inheritdoc />

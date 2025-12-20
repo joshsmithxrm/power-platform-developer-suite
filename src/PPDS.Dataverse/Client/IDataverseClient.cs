@@ -37,7 +37,7 @@ namespace PPDS.Dataverse.Client
         /// <summary>
         /// Gets the connected organization version.
         /// </summary>
-        string ConnectedOrgVersion { get; }
+        Version? ConnectedOrgVersion { get; }
 
         /// <summary>
         /// Gets the last error message from the service.

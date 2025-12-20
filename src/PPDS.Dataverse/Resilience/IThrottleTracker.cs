@@ -31,12 +31,6 @@ namespace PPDS.Dataverse.Resilience
         DateTime? GetThrottleExpiry(string connectionName);
 
         /// <summary>
-        /// Gets all connections that are not currently throttled.
-        /// </summary>
-        /// <returns>Names of available connections.</returns>
-        IEnumerable<string> GetAvailableConnections();
-
-        /// <summary>
         /// Clears throttle state for a connection.
         /// </summary>
         /// <param name="connectionName">The connection to clear.</param>

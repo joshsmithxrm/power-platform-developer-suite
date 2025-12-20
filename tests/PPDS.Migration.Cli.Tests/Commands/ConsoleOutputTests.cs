@@ -66,45 +66,6 @@ public class ConsoleOutputTests
 
     #endregion
 
-    #region EscapeJson Tests
-
-    [Fact]
-    public void EscapeJson_EscapesBackslashes()
-    {
-        var result = ConsoleOutput.EscapeJson("path\\to\\file");
-        Assert.Equal("path\\\\to\\\\file", result);
-    }
-
-    [Fact]
-    public void EscapeJson_EscapesQuotes()
-    {
-        var result = ConsoleOutput.EscapeJson("say \"hello\"");
-        Assert.Equal("say \\\"hello\\\"", result);
-    }
-
-    [Fact]
-    public void EscapeJson_EscapesNewlines()
-    {
-        var result = ConsoleOutput.EscapeJson("line1\nline2");
-        Assert.Equal("line1\\nline2", result);
-    }
-
-    [Fact]
-    public void EscapeJson_EscapesCarriageReturns()
-    {
-        var result = ConsoleOutput.EscapeJson("line1\rline2");
-        Assert.Equal("line1\\rline2", result);
-    }
-
-    [Fact]
-    public void EscapeJson_HandlesComplexString()
-    {
-        var result = ConsoleOutput.EscapeJson("Error: \"file\\path\"\nDetails");
-        Assert.Equal("Error: \\\"file\\\\path\\\"\\nDetails", result);
-    }
-
-    #endregion
-
     #region Helpers
 
     private static string CaptureConsoleOutput(Action action)

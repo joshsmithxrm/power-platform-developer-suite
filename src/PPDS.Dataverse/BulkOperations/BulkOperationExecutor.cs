@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using Newtonsoft.Json;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 
@@ -15,6 +16,7 @@ namespace PPDS.Dataverse.BulkOperations
 {
     /// <summary>
     /// Executes bulk operations using modern Dataverse APIs.
+    /// Uses CreateMultipleRequest, UpdateMultipleRequest, UpsertMultipleRequest for optimal performance.
     /// </summary>
     public sealed class BulkOperationExecutor : IBulkOperationExecutor
     {
@@ -48,38 +50,40 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            _logger.LogInformation("CreateMultiple starting. Entity: {Entity}, Count: {Count}", entityLogicalName, entityList.Count);
+            _logger.LogInformation("CreateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
+                entityLogicalName, entityList.Count, options.ElasticTable);
 
             var stopwatch = Stopwatch.StartNew();
-            var errors = new List<BulkOperationError>();
+            var allCreatedIds = new List<Guid>();
+            var allErrors = new List<BulkOperationError>();
             var successCount = 0;
 
             foreach (var batch in Batch(entityList, options.BatchSize))
             {
-                var batchResult = await ExecuteBatchAsync(
-                    entityLogicalName,
-                    batch,
-                    "CreateMultiple",
-                    e => new CreateRequest { Target = e },
-                    options,
-                    cancellationToken);
+                var batchResult = await ExecuteCreateMultipleBatchAsync(
+                    entityLogicalName, batch, options, cancellationToken);
 
                 successCount += batchResult.SuccessCount;
-                errors.AddRange(batchResult.Errors);
+                allErrors.AddRange(batchResult.Errors);
+                if (batchResult.CreatedIds != null)
+                {
+                    allCreatedIds.AddRange(batchResult.CreatedIds);
+                }
             }
 
             stopwatch.Stop();
 
             _logger.LogInformation(
                 "CreateMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, errors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
 
             return new BulkOperationResult
             {
                 SuccessCount = successCount,
-                FailureCount = errors.Count,
-                Errors = errors,
-                Duration = stopwatch.Elapsed
+                FailureCount = allErrors.Count,
+                Errors = allErrors,
+                Duration = stopwatch.Elapsed,
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
             };
         }
 
@@ -93,37 +97,33 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            _logger.LogInformation("UpdateMultiple starting. Entity: {Entity}, Count: {Count}", entityLogicalName, entityList.Count);
+            _logger.LogInformation("UpdateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
+                entityLogicalName, entityList.Count, options.ElasticTable);
 
             var stopwatch = Stopwatch.StartNew();
-            var errors = new List<BulkOperationError>();
+            var allErrors = new List<BulkOperationError>();
             var successCount = 0;
 
             foreach (var batch in Batch(entityList, options.BatchSize))
             {
-                var batchResult = await ExecuteBatchAsync(
-                    entityLogicalName,
-                    batch,
-                    "UpdateMultiple",
-                    e => new UpdateRequest { Target = e },
-                    options,
-                    cancellationToken);
+                var batchResult = await ExecuteUpdateMultipleBatchAsync(
+                    entityLogicalName, batch, options, cancellationToken);
 
                 successCount += batchResult.SuccessCount;
-                errors.AddRange(batchResult.Errors);
+                allErrors.AddRange(batchResult.Errors);
             }
 
             stopwatch.Stop();
 
             _logger.LogInformation(
                 "UpdateMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, errors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
 
             return new BulkOperationResult
             {
                 SuccessCount = successCount,
-                FailureCount = errors.Count,
-                Errors = errors,
+                FailureCount = allErrors.Count,
+                Errors = allErrors,
                 Duration = stopwatch.Elapsed
             };
         }
@@ -138,37 +138,33 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            _logger.LogInformation("UpsertMultiple starting. Entity: {Entity}, Count: {Count}", entityLogicalName, entityList.Count);
+            _logger.LogInformation("UpsertMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
+                entityLogicalName, entityList.Count, options.ElasticTable);
 
             var stopwatch = Stopwatch.StartNew();
-            var errors = new List<BulkOperationError>();
+            var allErrors = new List<BulkOperationError>();
             var successCount = 0;
 
             foreach (var batch in Batch(entityList, options.BatchSize))
             {
-                var batchResult = await ExecuteBatchAsync(
-                    entityLogicalName,
-                    batch,
-                    "UpsertMultiple",
-                    e => new UpsertRequest { Target = e },
-                    options,
-                    cancellationToken);
+                var batchResult = await ExecuteUpsertMultipleBatchAsync(
+                    entityLogicalName, batch, options, cancellationToken);
 
                 successCount += batchResult.SuccessCount;
-                errors.AddRange(batchResult.Errors);
+                allErrors.AddRange(batchResult.Errors);
             }
 
             stopwatch.Stop();
 
             _logger.LogInformation(
                 "UpsertMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, errors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
 
             return new BulkOperationResult
             {
                 SuccessCount = successCount,
-                FailureCount = errors.Count,
-                Errors = errors,
+                FailureCount = allErrors.Count,
+                Errors = allErrors,
                 Duration = stopwatch.Elapsed
             };
         }
@@ -183,58 +179,295 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var idList = ids.ToList();
 
-            _logger.LogInformation("DeleteMultiple starting. Entity: {Entity}, Count: {Count}", entityLogicalName, idList.Count);
+            _logger.LogInformation("DeleteMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
+                entityLogicalName, idList.Count, options.ElasticTable);
 
             var stopwatch = Stopwatch.StartNew();
-            var errors = new List<BulkOperationError>();
+            var allErrors = new List<BulkOperationError>();
             var successCount = 0;
 
-            // Convert IDs to EntityReferences for deletion
-            var entities = idList.Select((id, index) => new Entity(entityLogicalName, id)).ToList();
-
-            foreach (var batch in Batch(entities, options.BatchSize))
+            foreach (var batch in Batch(idList, options.BatchSize))
             {
-                var batchResult = await ExecuteBatchAsync(
-                    entityLogicalName,
-                    batch,
-                    "DeleteMultiple",
-                    e => new DeleteRequest { Target = e.ToEntityReference() },
-                    options,
-                    cancellationToken);
+                BulkOperationResult batchResult;
+                if (options.ElasticTable)
+                {
+                    batchResult = await ExecuteElasticDeleteBatchAsync(
+                        entityLogicalName, batch, options, cancellationToken);
+                }
+                else
+                {
+                    batchResult = await ExecuteStandardDeleteBatchAsync(
+                        entityLogicalName, batch, options, cancellationToken);
+                }
 
                 successCount += batchResult.SuccessCount;
-                errors.AddRange(batchResult.Errors);
+                allErrors.AddRange(batchResult.Errors);
             }
 
             stopwatch.Stop();
 
             _logger.LogInformation(
                 "DeleteMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, errors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
 
             return new BulkOperationResult
             {
                 SuccessCount = successCount,
-                FailureCount = errors.Count,
-                Errors = errors,
+                FailureCount = allErrors.Count,
+                Errors = allErrors,
                 Duration = stopwatch.Elapsed
             };
         }
 
-        private async Task<BulkOperationResult> ExecuteBatchAsync(
+        private async Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
-            string operationName,
-            Func<Entity, OrganizationRequest> requestFactory,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            var errors = new List<BulkOperationError>();
-            var successCount = 0;
-
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
 
-            // Build ExecuteMultiple request
+            var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
+            var request = new CreateMultipleRequest { Targets = targets };
+
+            ApplyBypassOptions(request, options);
+
+            try
+            {
+                var response = (CreateMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = response.Ids.Length,
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>(),
+                    Duration = TimeSpan.Zero,
+                    CreatedIds = response.Ids
+                };
+            }
+            catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
+            {
+                // Elastic tables support partial success
+                return new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = errors.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex)
+            {
+                // Standard tables: entire batch fails
+                _logger.LogError(ex, "CreateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
+                    entityLogicalName, batch.Count);
+
+                var errors = batch.Select((e, i) => new BulkOperationError
+                {
+                    Index = i,
+                    RecordId = e.Id != Guid.Empty ? e.Id : null,
+                    ErrorCode = -1,
+                    Message = ex.Message
+                }).ToList();
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = 0,
+                    FailureCount = batch.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+        }
+
+        private async Task<BulkOperationResult> ExecuteUpdateMultipleBatchAsync(
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+
+            var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
+            var request = new UpdateMultipleRequest { Targets = targets };
+
+            ApplyBypassOptions(request, options);
+
+            try
+            {
+                await client.ExecuteAsync(request, cancellationToken);
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = batch.Count,
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>(),
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
+            {
+                return new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = errors.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UpdateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
+                    entityLogicalName, batch.Count);
+
+                var errors = batch.Select((e, i) => new BulkOperationError
+                {
+                    Index = i,
+                    RecordId = e.Id,
+                    ErrorCode = -1,
+                    Message = ex.Message
+                }).ToList();
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = 0,
+                    FailureCount = batch.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+        }
+
+        private async Task<BulkOperationResult> ExecuteUpsertMultipleBatchAsync(
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+
+            var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
+            var request = new UpsertMultipleRequest { Targets = targets };
+
+            ApplyBypassOptions(request, options);
+
+            try
+            {
+                var response = (UpsertMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = batch.Count,
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>(),
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
+            {
+                return new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = errors.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UpsertMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
+                    entityLogicalName, batch.Count);
+
+                var errors = batch.Select((e, i) => new BulkOperationError
+                {
+                    Index = i,
+                    RecordId = e.Id != Guid.Empty ? e.Id : null,
+                    ErrorCode = -1,
+                    Message = ex.Message
+                }).ToList();
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = 0,
+                    FailureCount = batch.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+        }
+
+        private async Task<BulkOperationResult> ExecuteElasticDeleteBatchAsync(
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+
+            var entityReferences = batch
+                .Select(id => new EntityReference(entityLogicalName, id))
+                .ToList();
+
+            var request = new OrganizationRequest("DeleteMultiple")
+            {
+                Parameters = { { "Targets", new EntityReferenceCollection(entityReferences) } }
+            };
+
+            ApplyBypassOptions(request, options);
+
+            try
+            {
+                await client.ExecuteAsync(request, cancellationToken);
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = batch.Count,
+                    FailureCount = 0,
+                    Errors = Array.Empty<BulkOperationError>(),
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex) when (TryExtractBulkApiErrorsForDelete(ex, batch, out var errors, out var successCount))
+            {
+                return new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = errors.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DeleteMultiple (elastic) batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
+                    entityLogicalName, batch.Count);
+
+                var errors = batch.Select((id, i) => new BulkOperationError
+                {
+                    Index = i,
+                    RecordId = id,
+                    ErrorCode = -1,
+                    Message = ex.Message
+                }).ToList();
+
+                return new BulkOperationResult
+                {
+                    SuccessCount = 0,
+                    FailureCount = batch.Count,
+                    Errors = errors,
+                    Duration = TimeSpan.Zero
+                };
+            }
+        }
+
+        private async Task<BulkOperationResult> ExecuteStandardDeleteBatchAsync(
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+
             var executeMultiple = new ExecuteMultipleRequest
             {
                 Requests = new OrganizationRequestCollection(),
@@ -245,27 +478,22 @@ namespace PPDS.Dataverse.BulkOperations
                 }
             };
 
-            foreach (var entity in batch)
+            foreach (var id in batch)
             {
-                var request = requestFactory(entity);
-
-                // Apply bypass options
-                if (options.BypassCustomPluginExecution)
+                var deleteRequest = new DeleteRequest
                 {
-                    request.Parameters["BypassCustomPluginExecution"] = true;
-                }
+                    Target = new EntityReference(entityLogicalName, id)
+                };
 
-                if (options.SuppressDuplicateDetection)
-                {
-                    request.Parameters["SuppressDuplicateDetection"] = true;
-                }
-
-                executeMultiple.Requests.Add(request);
+                ApplyBypassOptions(deleteRequest, options);
+                executeMultiple.Requests.Add(deleteRequest);
             }
 
             var response = (ExecuteMultipleResponse)await client.ExecuteAsync(executeMultiple, cancellationToken);
 
-            // Process responses
+            var errors = new List<BulkOperationError>();
+            var successCount = 0;
+
             for (int i = 0; i < batch.Count; i++)
             {
                 var itemResponse = response.Responses.FirstOrDefault(r => r.RequestIndex == i);
@@ -275,7 +503,7 @@ namespace PPDS.Dataverse.BulkOperations
                     errors.Add(new BulkOperationError
                     {
                         Index = i,
-                        RecordId = batch[i].Id != Guid.Empty ? batch[i].Id : null,
+                        RecordId = batch[i],
                         ErrorCode = itemResponse.Fault.ErrorCode,
                         Message = itemResponse.Fault.Message
                     });
@@ -293,6 +521,145 @@ namespace PPDS.Dataverse.BulkOperations
                 Errors = errors,
                 Duration = TimeSpan.Zero
             };
+        }
+
+        private static void ApplyBypassOptions(OrganizationRequest request, BulkOperationOptions options)
+        {
+            // Preferred: BypassBusinessLogicExecution (newer, more control)
+            if (!string.IsNullOrEmpty(options.BypassBusinessLogicExecution))
+            {
+                request.Parameters["BypassBusinessLogicExecution"] = options.BypassBusinessLogicExecution;
+            }
+            // Fallback: BypassCustomPluginExecution (legacy)
+            else if (options.BypassCustomPluginExecution)
+            {
+                request.Parameters["BypassCustomPluginExecution"] = true;
+            }
+
+            // Power Automate flows bypass
+            if (options.BypassPowerAutomateFlows)
+            {
+                request.Parameters["SuppressCallbackRegistrationExpanderJob"] = true;
+            }
+
+            // Duplicate detection
+            if (options.SuppressDuplicateDetection)
+            {
+                request.Parameters["SuppressDuplicateDetection"] = true;
+            }
+        }
+
+        private bool TryExtractBulkApiErrors(
+            Exception ex,
+            List<Entity> batch,
+            out List<BulkOperationError> errors,
+            out int successCount)
+        {
+            errors = new List<BulkOperationError>();
+            successCount = 0;
+
+            // Check for Plugin.BulkApiErrorDetails in FaultException
+            if (ex is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> faultEx)
+            {
+                return TryExtractFromFault(faultEx.Detail, batch.Count, out errors, out successCount);
+            }
+
+            return false;
+        }
+
+        private bool TryExtractBulkApiErrorsForDelete(
+            Exception ex,
+            List<Guid> batch,
+            out List<BulkOperationError> errors,
+            out int successCount)
+        {
+            errors = new List<BulkOperationError>();
+            successCount = 0;
+
+            if (ex is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> faultEx)
+            {
+                return TryExtractFromFaultForDelete(faultEx.Detail, batch, out errors, out successCount);
+            }
+
+            return false;
+        }
+
+        private bool TryExtractFromFault(
+            Microsoft.Xrm.Sdk.OrganizationServiceFault fault,
+            int batchCount,
+            out List<BulkOperationError> errors,
+            out int successCount)
+        {
+            errors = new List<BulkOperationError>();
+            successCount = 0;
+
+            if (fault.ErrorDetails.TryGetValue("Plugin.BulkApiErrorDetails", out var errorDetails))
+            {
+                try
+                {
+                    var details = JsonConvert.DeserializeObject<List<BulkApiErrorDetail>>(errorDetails.ToString()!);
+                    if (details != null)
+                    {
+                        var failedIndexes = new HashSet<int>(details.Select(d => d.RequestIndex));
+                        successCount = batchCount - failedIndexes.Count;
+
+                        errors = details.Select(d => new BulkOperationError
+                        {
+                            Index = d.RequestIndex,
+                            RecordId = !string.IsNullOrEmpty(d.Id) ? Guid.Parse(d.Id) : null,
+                            ErrorCode = d.StatusCode,
+                            Message = $"Bulk operation failed at index {d.RequestIndex}"
+                        }).ToList();
+
+                        return true;
+                    }
+                }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Failed to parse BulkApiErrorDetails");
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryExtractFromFaultForDelete(
+            Microsoft.Xrm.Sdk.OrganizationServiceFault fault,
+            List<Guid> batch,
+            out List<BulkOperationError> errors,
+            out int successCount)
+        {
+            errors = new List<BulkOperationError>();
+            successCount = 0;
+
+            if (fault.ErrorDetails.TryGetValue("Plugin.BulkApiErrorDetails", out var errorDetails))
+            {
+                try
+                {
+                    var details = JsonConvert.DeserializeObject<List<BulkApiErrorDetail>>(errorDetails.ToString()!);
+                    if (details != null)
+                    {
+                        var failedIndexes = new HashSet<int>(details.Select(d => d.RequestIndex));
+                        successCount = batch.Count - failedIndexes.Count;
+
+                        errors = details.Select(d => new BulkOperationError
+                        {
+                            Index = d.RequestIndex,
+                            RecordId = d.RequestIndex < batch.Count ? batch[d.RequestIndex] : null,
+                            ErrorCode = d.StatusCode,
+                            Message = $"Delete failed at index {d.RequestIndex}"
+                        }).ToList();
+
+                        return true;
+                    }
+                }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Failed to parse BulkApiErrorDetails for delete");
+                }
+            }
+
+            return false;
         }
 
         private static IEnumerable<List<T>> Batch<T>(IEnumerable<T> source, int batchSize)
@@ -314,6 +681,16 @@ namespace PPDS.Dataverse.BulkOperations
             {
                 yield return batch;
             }
+        }
+
+        /// <summary>
+        /// Error detail structure returned by elastic table bulk operations.
+        /// </summary>
+        private class BulkApiErrorDetail
+        {
+            public int RequestIndex { get; set; }
+            public string? Id { get; set; }
+            public int StatusCode { get; set; }
         }
     }
 }
