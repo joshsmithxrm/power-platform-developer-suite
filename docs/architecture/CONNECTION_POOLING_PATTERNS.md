@@ -51,10 +51,10 @@ public class MyService
 The pooled client returns to the pool on dispose. Use `await using` or `using`:
 
 ```csharp
-// ✓ Good - client returns to pool
+// ✅ Correct - client returns to pool
 await using var client = await _pool.GetClientAsync();
 
-// ✗ Bad - connection leak
+// ❌ Wrong - connection leak
 var client = await _pool.GetClientAsync();
 // forgot to dispose
 ```
@@ -64,7 +64,7 @@ var client = await _pool.GetClientAsync();
 Get a client, use it, dispose it. Don't store it in a field:
 
 ```csharp
-// ✗ Bad - holding a pooled connection
+// ❌ Wrong - holding a pooled connection
 public class BadService
 {
     private IPooledClient _client; // Don't do this
@@ -75,7 +75,7 @@ public class BadService
     }
 }
 
-// ✓ Good - get per operation
+// ✅ Correct - get per operation
 public class GoodService
 {
     private readonly IDataverseConnectionPool _pool;

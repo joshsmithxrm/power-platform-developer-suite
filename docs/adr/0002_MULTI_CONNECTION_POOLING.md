@@ -1,7 +1,6 @@
 # ADR-0002: Multi-Connection Pooling
 
 **Status:** Accepted
-**Date:** 2024-12-19
 **Applies to:** PPDS.Dataverse
 
 ## Context

@@ -37,7 +37,7 @@ public class AccountCreatePlugin : IPlugin
 }
 ```
 
-See [PPDS.Plugins documentation](src/PPDS.Plugins/README.md) for details.
+See [PPDS.Plugins on NuGet](https://www.nuget.org/packages/PPDS.Plugins/) for details.
 
 ---
 
@@ -70,14 +70,14 @@ See [PPDS.Dataverse documentation](src/PPDS.Dataverse/README.md) for details.
 
 Key design decisions are documented as ADRs:
 
-- [ADR-0001: Disable Affinity Cookie by Default](docs/adr/0001-disable-affinity-cookie.md)
-- [ADR-0002: Multi-Connection Pooling](docs/adr/0002-multi-connection-pooling.md)
-- [ADR-0003: Throttle-Aware Connection Selection](docs/adr/0003-throttle-aware-selection.md)
+- [ADR-0001: Disable Affinity Cookie by Default](docs/adr/0001_DISABLE_AFFINITY_COOKIE.md)
+- [ADR-0002: Multi-Connection Pooling](docs/adr/0002_MULTI_CONNECTION_POOLING.md)
+- [ADR-0003: Throttle-Aware Connection Selection](docs/adr/0003_THROTTLE_AWARE_SELECTION.md)
 
 ## Patterns
 
-- [Connection Pooling](docs/patterns/connection-pooling.md) - When and how to use connection pooling
-- [Bulk Operations](docs/patterns/bulk-operations.md) - High-throughput data operations
+- [Connection Pooling](docs/architecture/CONNECTION_POOLING_PATTERNS.md) - When and how to use connection pooling
+- [Bulk Operations](docs/architecture/BULK_OPERATIONS_PATTERNS.md) - High-throughput data operations
 
 ---
 

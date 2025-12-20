@@ -1,7 +1,6 @@
 # ADR-0001: Disable Affinity Cookie by Default
 
 **Status:** Accepted
-**Date:** 2024-12-19
 **Applies to:** PPDS.Dataverse
 
 ## Context
