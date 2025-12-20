@@ -15,7 +15,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>PPDS.Dataverse</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.0-alpha.1</Version>
     <Authors>Josh Smith</Authors>
     <Company>Power Platform Developer Suite</Company>
     <Description>High-performance Dataverse connectivity layer with connection pooling, bulk operations, and resilience. Provides multi-connection support for load distribution, throttle-aware connection selection, and modern bulk API wrappers (CreateMultiple, UpsertMultiple).</Description>
