@@ -248,6 +248,7 @@ namespace PPDS.Migration.Formats
                 await writer.WriteStartElementAsync(null, "entity", null).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "name", null, entity.LogicalName).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "displayname", null, entity.DisplayName).ConfigureAwait(false);
+                await writer.WriteAttributeStringAsync(null, "etc", null, (entity.ObjectTypeCode ?? 0).ToString()).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "primaryidfield", null, entity.PrimaryIdField).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "primarynamefield", null, entity.PrimaryNameField).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "disableplugins", null, entity.DisablePlugins.ToString().ToLowerInvariant()).ConfigureAwait(false);
@@ -260,6 +261,10 @@ namespace PPDS.Migration.Formats
                     await writer.WriteAttributeStringAsync(null, "name", null, field.LogicalName).ConfigureAwait(false);
                     await writer.WriteAttributeStringAsync(null, "displayname", null, field.DisplayName).ConfigureAwait(false);
                     await writer.WriteAttributeStringAsync(null, "type", null, field.Type).ConfigureAwait(false);
+                    if (field.IsPrimaryKey)
+                    {
+                        await writer.WriteAttributeStringAsync(null, "primaryKey", null, "true").ConfigureAwait(false);
+                    }
                     if (!string.IsNullOrEmpty(field.LookupEntity))
                     {
                         await writer.WriteAttributeStringAsync(null, "lookupType", null, field.LookupEntity).ConfigureAwait(false);
@@ -277,8 +282,28 @@ namespace PPDS.Migration.Formats
                     {
                         await writer.WriteStartElementAsync(null, "relationship", null).ConfigureAwait(false);
                         await writer.WriteAttributeStringAsync(null, "name", null, rel.Name).ConfigureAwait(false);
-                        await writer.WriteAttributeStringAsync(null, "m2m", null, rel.IsManyToMany.ToString().ToLowerInvariant()).ConfigureAwait(false);
+                        await writer.WriteAttributeStringAsync(null, "manyToMany", null, rel.IsManyToMany.ToString().ToLowerInvariant()).ConfigureAwait(false);
                         await writer.WriteAttributeStringAsync(null, "relatedEntityName", null, rel.Entity2).ConfigureAwait(false);
+
+                        if (rel.IsManyToMany)
+                        {
+                            // M2M relationship attributes
+                            await writer.WriteAttributeStringAsync(null, "m2mTargetEntity", null, rel.Entity2).ConfigureAwait(false);
+                            await writer.WriteAttributeStringAsync(null, "m2mTargetEntityPrimaryKey", null, rel.Entity2Attribute).ConfigureAwait(false);
+                            if (!string.IsNullOrEmpty(rel.IntersectEntity))
+                            {
+                                await writer.WriteAttributeStringAsync(null, "intersectEntityName", null, rel.IntersectEntity).ConfigureAwait(false);
+                            }
+                        }
+                        else
+                        {
+                            // One-to-many relationship attributes
+                            await writer.WriteAttributeStringAsync(null, "referencingEntity", null, rel.Entity1).ConfigureAwait(false);
+                            await writer.WriteAttributeStringAsync(null, "referencingAttribute", null, rel.Entity1Attribute).ConfigureAwait(false);
+                            await writer.WriteAttributeStringAsync(null, "referencedEntity", null, rel.Entity2).ConfigureAwait(false);
+                            await writer.WriteAttributeStringAsync(null, "referencedAttribute", null, rel.Entity2Attribute).ConfigureAwait(false);
+                        }
+
                         await writer.WriteEndElementAsync().ConfigureAwait(false); // relationship
                     }
                     await writer.WriteEndElementAsync().ConfigureAwait(false); // relationships

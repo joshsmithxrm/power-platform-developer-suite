@@ -1,4 +1,7 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Migration.Cli.Infrastructure;
+using PPDS.Migration.Import;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -80,6 +83,14 @@ public static class ImportCommand
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
+            // Validate data file exists first (explicit argument)
+            if (!data.Exists)
+            {
+                ConsoleOutput.WriteError($"Data file not found: {data.FullName}", json);
+                context.ExitCode = ExitCodes.InvalidArguments;
+                return;
+            }
+
             // Resolve connection string from argument or environment variable
             string connection;
             try
@@ -118,46 +129,41 @@ public static class ImportCommand
     {
         try
         {
-            // Validate data file exists
-            if (!data.Exists)
+            // Create service provider and get importer
+            await using var serviceProvider = ServiceFactory.CreateProvider(connection);
+            var importer = serviceProvider.GetRequiredService<IImporter>();
+            var progressReporter = ServiceFactory.CreateProgressReporter(json);
+
+            // Configure import options
+            var importOptions = new ImportOptions
             {
-                ConsoleOutput.WriteError($"Data file not found: {data.FullName}", json);
-                return ExitCodes.InvalidArguments;
+                BatchSize = batchSize,
+                BypassCustomPluginExecution = bypassPlugins,
+                BypassPowerAutomateFlows = bypassFlows,
+                ContinueOnError = continueOnError,
+                Mode = MapImportMode(mode)
+            };
+
+            // Execute import
+            var result = await importer.ImportAsync(
+                data.FullName,
+                importOptions,
+                progressReporter,
+                cancellationToken);
+
+            // Report completion
+            if (!result.Success)
+            {
+                ConsoleOutput.WriteError($"Import completed with {result.Errors.Count} error(s).", json);
+                return ExitCodes.Failure;
             }
-
-            ConsoleOutput.WriteProgress("analyzing", "Reading data archive...", json);
-            ConsoleOutput.WriteProgress("analyzing", "Building dependency graph...", json);
-
-            // TODO: Implement when PPDS.Migration is ready
-            // var options = new ImportOptions
-            // {
-            //     ConnectionString = connection,
-            //     DataPath = data.FullName,
-            //     BatchSize = batchSize,
-            //     BypassPlugins = bypassPlugins,
-            //     BypassFlows = bypassFlows,
-            //     ContinueOnError = continueOnError,
-            //     Mode = mode
-            // };
-            //
-            // var importer = new DataverseImporter(options);
-            // if (json)
-            // {
-            //     importer.Progress += (sender, e) => ConsoleOutput.WriteProgress("import", e.Entity, e.Current, e.Total, e.RecordsPerSecond);
-            // }
-            // var result = await importer.ImportAsync(cancellationToken);
-
-            ConsoleOutput.WriteProgress("import", "Import not yet implemented - waiting for PPDS.Migration", json);
-            await Task.Delay(100, cancellationToken); // Placeholder
 
             if (!json)
             {
                 Console.WriteLine();
                 Console.WriteLine("Import completed successfully.");
-            }
-            else
-            {
-                ConsoleOutput.WriteCompletion(TimeSpan.Zero, 0, 0, json);
+                Console.WriteLine($"Tiers: {result.TiersProcessed}, Records: {result.RecordsImported:N0}");
+                Console.WriteLine($"Duration: {result.Duration:hh\\:mm\\:ss}, Rate: {result.RecordsPerSecond:F1} rec/s");
             }
 
             return ExitCodes.Success;
@@ -177,4 +183,15 @@ public static class ImportCommand
             return ExitCodes.Failure;
         }
     }
+
+    /// <summary>
+    /// Maps CLI ImportMode to Migration library ImportMode.
+    /// </summary>
+    private static PPDS.Migration.Import.ImportMode MapImportMode(ImportMode mode) => mode switch
+    {
+        ImportMode.Create => PPDS.Migration.Import.ImportMode.Create,
+        ImportMode.Update => PPDS.Migration.Import.ImportMode.Update,
+        ImportMode.Upsert => PPDS.Migration.Import.ImportMode.Upsert,
+        _ => PPDS.Migration.Import.ImportMode.Upsert
+    };
 }

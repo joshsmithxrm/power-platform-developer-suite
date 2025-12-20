@@ -1,4 +1,7 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Migration.Cli.Infrastructure;
+using PPDS.Migration.Export;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -127,39 +130,41 @@ public static class ExportCommand
                 return ExitCodes.InvalidArguments;
             }
 
-            ConsoleOutput.WriteProgress("analyzing", "Parsing schema...", json);
-            ConsoleOutput.WriteProgress("analyzing", "Building dependency graph...", json);
+            // Create service provider and get exporter
+            await using var serviceProvider = ServiceFactory.CreateProvider(connection);
+            var exporter = serviceProvider.GetRequiredService<IExporter>();
+            var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
-            // TODO: Implement when PPDS.Migration is ready
-            // var options = new ExportOptions
-            // {
-            //     ConnectionString = connection,
-            //     SchemaPath = schema.FullName,
-            //     OutputPath = output.FullName,
-            //     DegreeOfParallelism = parallel,
-            //     PageSize = pageSize,
-            //     IncludeFiles = includeFiles
-            // };
-            //
-            // var exporter = new DataverseExporter(options);
-            // if (json)
-            // {
-            //     exporter.Progress += (sender, e) => ConsoleOutput.WriteProgress("export", e.Entity, e.Current, e.Total, e.RecordsPerSecond);
-            // }
-            // await exporter.ExportAsync(cancellationToken);
+            // Configure export options
+            var exportOptions = new ExportOptions
+            {
+                DegreeOfParallelism = parallel,
+                PageSize = pageSize,
+                ExportFiles = includeFiles
+            };
 
-            ConsoleOutput.WriteProgress("export", "Export not yet implemented - waiting for PPDS.Migration", json);
-            await Task.Delay(100, cancellationToken); // Placeholder
+            // Execute export
+            var result = await exporter.ExportAsync(
+                schema.FullName,
+                output.FullName,
+                exportOptions,
+                progressReporter,
+                cancellationToken);
+
+            // Report completion
+            if (!result.Success)
+            {
+                ConsoleOutput.WriteError($"Export completed with {result.Errors.Count} error(s).", json);
+                return ExitCodes.Failure;
+            }
 
             if (!json)
             {
                 Console.WriteLine();
                 Console.WriteLine("Export completed successfully.");
                 Console.WriteLine($"Output: {output.FullName}");
-            }
-            else
-            {
-                ConsoleOutput.WriteCompletion(TimeSpan.Zero, 0, 0, json);
+                Console.WriteLine($"Entities: {result.EntitiesExported}, Records: {result.RecordsExported:N0}");
+                Console.WriteLine($"Duration: {result.Duration:hh\\:mm\\:ss}, Rate: {result.RecordsPerSecond:F1} rec/s");
             }
 
             return ExitCodes.Success;

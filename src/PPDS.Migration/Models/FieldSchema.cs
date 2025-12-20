@@ -38,6 +38,11 @@ namespace PPDS.Migration.Models
         public bool IsRequired { get; set; }
 
         /// <summary>
+        /// Gets or sets whether this field is the primary key.
+        /// </summary>
+        public bool IsPrimaryKey { get; set; }
+
+        /// <summary>
         /// Gets or sets the maximum length for string fields.
         /// </summary>
         public int? MaxLength { get; set; }

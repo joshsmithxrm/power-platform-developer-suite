@@ -1,5 +1,10 @@
 using System.CommandLine;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Migration.Analysis;
+using PPDS.Migration.Cli.Infrastructure;
+using PPDS.Migration.Formats;
+using PPDS.Migration.Models;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -61,22 +66,19 @@ public static class AnalyzeCommand
                 return ExitCodes.InvalidArguments;
             }
 
-            // TODO: Implement when PPDS.Migration is ready
-            // var analyzer = new SchemaAnalyzer();
-            // var analysis = await analyzer.AnalyzeAsync(schema.FullName, cancellationToken);
+            // Create service provider for analysis (no Dataverse connection needed)
+            await using var serviceProvider = ServiceFactory.CreateAnalysisProvider();
+            var schemaReader = serviceProvider.GetRequiredService<ICmtSchemaReader>();
+            var graphBuilder = serviceProvider.GetRequiredService<IDependencyGraphBuilder>();
 
-            // Placeholder analysis result
-            var analysis = new SchemaAnalysis
-            {
-                EntityCount = 0,
-                DependencyCount = 0,
-                CircularReferenceCount = 0,
-                Tiers = [],
-                DeferredFields = new Dictionary<string, string[]>(),
-                ManyToManyRelationships = []
-            };
+            // Parse schema
+            var migrationSchema = await schemaReader.ReadAsync(schema.FullName, cancellationToken);
 
-            await Task.CompletedTask; // Placeholder for async operation
+            // Build dependency graph
+            var graph = graphBuilder.Build(migrationSchema);
+
+            // Convert to analysis result
+            var analysis = BuildAnalysis(graph, migrationSchema);
 
             if (outputFormat == OutputFormat.Json)
             {
@@ -105,6 +107,63 @@ public static class AnalyzeCommand
         }
     }
 
+    private static SchemaAnalysis BuildAnalysis(DependencyGraph graph, MigrationSchema schema)
+    {
+        // Build tier info
+        var tierInfos = new List<TierInfo>();
+        for (int i = 0; i < graph.Tiers.Count; i++)
+        {
+            var tierEntities = graph.Tiers[i];
+            var hasCircular = graph.CircularReferences.Any(cr =>
+                cr.Entities.Any(e => tierEntities.Contains(e)));
+
+            tierInfos.Add(new TierInfo
+            {
+                Tier = i + 1,
+                Entities = tierEntities.ToArray(),
+                HasCircular = hasCircular
+            });
+        }
+
+        // Extract deferred fields from circular references
+        var deferredFields = new Dictionary<string, string[]>();
+        foreach (var circular in graph.CircularReferences)
+        {
+            foreach (var edge in circular.Edges)
+            {
+                if (!deferredFields.ContainsKey(edge.FromEntity))
+                {
+                    deferredFields[edge.FromEntity] = [];
+                }
+
+                var existing = deferredFields[edge.FromEntity].ToList();
+                if (!existing.Contains(edge.FieldName))
+                {
+                    existing.Add(edge.FieldName);
+                    deferredFields[edge.FromEntity] = existing.ToArray();
+                }
+            }
+        }
+
+        // Extract M2M relationships from schema
+        var m2mRelationships = schema.Entities
+            .SelectMany(e => e.Relationships ?? [])
+            .Where(r => r.IsManyToMany)
+            .Select(r => r.IntersectEntity ?? r.Name)
+            .Distinct()
+            .ToArray();
+
+        return new SchemaAnalysis
+        {
+            EntityCount = graph.Entities.Count,
+            DependencyCount = graph.Dependencies.Count,
+            CircularReferenceCount = graph.CircularReferences.Count,
+            Tiers = tierInfos.ToArray(),
+            DeferredFields = deferredFields,
+            ManyToManyRelationships = m2mRelationships
+        };
+    }
+
     private static void WriteTextOutput(SchemaAnalysis analysis, string schemaPath)
     {
         Console.WriteLine("Schema Analysis");
@@ -114,14 +173,7 @@ public static class AnalyzeCommand
 
         if (analysis.EntityCount == 0)
         {
-            Console.WriteLine("Note: Analysis not yet implemented - waiting for PPDS.Migration");
-            Console.WriteLine();
-            Console.WriteLine("When implemented, this command will display:");
-            Console.WriteLine("  - Entity count and dependency count");
-            Console.WriteLine("  - Circular reference detection");
-            Console.WriteLine("  - Import tier ordering");
-            Console.WriteLine("  - Deferred fields for circular dependencies");
-            Console.WriteLine("  - Many-to-many relationship mappings");
+            Console.WriteLine("No entities found in schema.");
             return;
         }
 
@@ -176,10 +228,7 @@ public static class AnalyzeCommand
                 hasCircular = t.HasCircular
             }),
             deferredFields = analysis.DeferredFields,
-            manyToManyRelationships = analysis.ManyToManyRelationships,
-            note = analysis.EntityCount == 0
-                ? "Analysis not yet implemented - waiting for PPDS.Migration"
-                : null
+            manyToManyRelationships = analysis.ManyToManyRelationships
         };
 
         var options = new JsonSerializerOptions
