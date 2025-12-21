@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,6 +61,13 @@ namespace PPDS.Migration.Formats
 
             using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
 
+            // Write [Content_Types].xml (required by CMT)
+            var contentTypesEntry = archive.CreateEntry("[Content_Types].xml", CompressionLevel.Optimal);
+            using (var contentTypesStream = contentTypesEntry.Open())
+            {
+                await WriteContentTypesAsync(contentTypesStream).ConfigureAwait(false);
+            }
+
             // Write data.xml
             progress?.Report(new ProgressEventArgs
             {
@@ -89,6 +97,32 @@ namespace PPDS.Migration.Formats
             _logger?.LogInformation("Wrote {RecordCount} total records", data.TotalRecordCount);
         }
 
+        private static async Task WriteContentTypesAsync(Stream stream)
+        {
+            var settings = new XmlWriterSettings
+            {
+                Async = true,
+                Indent = true,
+                Encoding = new UTF8Encoding(false)
+            };
+
+#if NET8_0_OR_GREATER
+            await using var writer = XmlWriter.Create(stream, settings);
+#else
+            using var writer = XmlWriter.Create(stream, settings);
+#endif
+
+            await writer.WriteStartDocumentAsync().ConfigureAwait(false);
+            await writer.WriteStartElementAsync(null, "Types", "http://schemas.openxmlformats.org/package/2006/content-types").ConfigureAwait(false);
+            await writer.WriteStartElementAsync(null, "Default", null).ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync(null, "Extension", null, "xml").ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync(null, "ContentType", null, "application/octet-stream").ConfigureAwait(false);
+            await writer.WriteEndElementAsync().ConfigureAwait(false); // Default
+            await writer.WriteEndElementAsync().ConfigureAwait(false); // Types
+            await writer.WriteEndDocumentAsync().ConfigureAwait(false);
+            await writer.FlushAsync().ConfigureAwait(false);
+        }
+
         private async Task WriteDataXmlAsync(MigrationData data, Stream stream, IProgressReporter? progress, CancellationToken cancellationToken)
         {
             var settings = new XmlWriterSettings
@@ -106,15 +140,21 @@ namespace PPDS.Migration.Formats
 
             await writer.WriteStartDocumentAsync().ConfigureAwait(false);
             await writer.WriteStartElementAsync(null, "entities", null).ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "timestamp", null, DateTime.UtcNow.ToString("O")).ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync("xmlns", "xsd", null, "http://www.w3.org/2001/XMLSchema").ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync("xmlns", "xsi", null, "http://www.w3.org/2001/XMLSchema-instance").ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync(null, "timestamp", null, DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")).ConfigureAwait(false);
 
             foreach (var (entityName, records) in data.EntityData)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Get display name from schema
+                var entitySchema = data.Schema.Entities.FirstOrDefault(e => e.LogicalName == entityName);
+                var displayName = entitySchema?.DisplayName ?? entityName;
+
                 await writer.WriteStartElementAsync(null, "entity", null).ConfigureAwait(false);
                 await writer.WriteAttributeStringAsync(null, "name", null, entityName).ConfigureAwait(false);
-                await writer.WriteAttributeStringAsync(null, "recordcount", null, records.Count.ToString()).ConfigureAwait(false);
+                await writer.WriteAttributeStringAsync(null, "displayname", null, displayName).ConfigureAwait(false);
 
                 await writer.WriteStartElementAsync(null, "records", null).ConfigureAwait(false);
 
@@ -124,6 +164,8 @@ namespace PPDS.Migration.Formats
                 }
 
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // records
+                await writer.WriteStartElementAsync(null, "m2mrelationships", null).ConfigureAwait(false);
+                await writer.WriteEndElementAsync().ConfigureAwait(false); // m2mrelationships
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // entity
             }
 
@@ -139,11 +181,6 @@ namespace PPDS.Migration.Formats
 
             foreach (var attribute in record.Attributes)
             {
-                if (attribute.Key == record.LogicalName + "id")
-                {
-                    continue; // Skip primary ID field as it's in the record id attribute
-                }
-
                 await WriteFieldAsync(writer, attribute.Key, attribute.Value).ConfigureAwait(false);
             }
 
@@ -160,53 +197,55 @@ namespace PPDS.Migration.Formats
             await writer.WriteStartElementAsync(null, "field", null).ConfigureAwait(false);
             await writer.WriteAttributeStringAsync(null, "name", null, name).ConfigureAwait(false);
 
-            // CMT format: value as element content, type-specific attributes
+            // CMT format: value in attribute, type-specific additional attributes
+            string stringValue;
             switch (value)
             {
                 case EntityReference er:
+                    await writer.WriteAttributeStringAsync(null, "value", null, er.Id.ToString()).ConfigureAwait(false);
                     await writer.WriteAttributeStringAsync(null, "lookupentity", null, er.LogicalName).ConfigureAwait(false);
                     if (!string.IsNullOrEmpty(er.Name))
                     {
                         await writer.WriteAttributeStringAsync(null, "lookupentityname", null, er.Name).ConfigureAwait(false);
                     }
-                    await writer.WriteStringAsync(er.Id.ToString()).ConfigureAwait(false);
                     break;
 
                 case OptionSetValue osv:
-                    await writer.WriteStringAsync(osv.Value.ToString()).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, osv.Value.ToString()).ConfigureAwait(false);
                     break;
 
                 case Money m:
-                    await writer.WriteStringAsync(m.Value.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, m.Value.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
                     break;
 
                 case DateTime dt:
-                    // CMT uses specific date format
-                    await writer.WriteStringAsync(dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                    // CMT uses ISO 8601 format with 7 decimal places
+                    stringValue = dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
+                    await writer.WriteAttributeStringAsync(null, "value", null, stringValue).ConfigureAwait(false);
                     break;
 
                 case bool b:
-                    await writer.WriteStringAsync(b ? "1" : "0").ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, b ? "1" : "0").ConfigureAwait(false);
                     break;
 
                 case Guid g:
-                    await writer.WriteStringAsync(g.ToString()).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, g.ToString()).ConfigureAwait(false);
                     break;
 
                 case int i:
-                    await writer.WriteStringAsync(i.ToString()).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, i.ToString()).ConfigureAwait(false);
                     break;
 
                 case decimal d:
-                    await writer.WriteStringAsync(d.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, d.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
                     break;
 
                 case double dbl:
-                    await writer.WriteStringAsync(dbl.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, dbl.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
                     break;
 
                 default:
-                    await writer.WriteStringAsync(value.ToString() ?? string.Empty).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "value", null, value.ToString() ?? string.Empty).ConfigureAwait(false);
                     break;
             }
 
@@ -230,17 +269,6 @@ namespace PPDS.Migration.Formats
 
             await writer.WriteStartDocumentAsync().ConfigureAwait(false);
             await writer.WriteStartElementAsync(null, "entities", null).ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "dateMode", null, "absolute").ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "version", null, schema.Version).ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "timestamp", null, DateTime.UtcNow.ToString("O")).ConfigureAwait(false);
-
-            // Write entityImportOrder (required by CMT)
-            await writer.WriteStartElementAsync(null, "entityImportOrder", null).ConfigureAwait(false);
-            foreach (var entity in schema.Entities)
-            {
-                await writer.WriteElementStringAsync(null, "entityName", null, entity.LogicalName).ConfigureAwait(false);
-            }
-            await writer.WriteEndElementAsync().ConfigureAwait(false); // entityImportOrder
 
             foreach (var entity in schema.Entities)
             {
@@ -259,8 +287,8 @@ namespace PPDS.Migration.Formats
                 foreach (var field in entity.Fields)
                 {
                     await writer.WriteStartElementAsync(null, "field", null).ConfigureAwait(false);
-                    await writer.WriteAttributeStringAsync(null, "name", null, field.LogicalName).ConfigureAwait(false);
                     await writer.WriteAttributeStringAsync(null, "displayname", null, field.DisplayName).ConfigureAwait(false);
+                    await writer.WriteAttributeStringAsync(null, "name", null, field.LogicalName).ConfigureAwait(false);
                     await writer.WriteAttributeStringAsync(null, "type", null, field.Type).ConfigureAwait(false);
                     if (field.IsPrimaryKey)
                     {
@@ -270,44 +298,14 @@ namespace PPDS.Migration.Formats
                     {
                         await writer.WriteAttributeStringAsync(null, "lookupType", null, field.LookupEntity).ConfigureAwait(false);
                     }
-                    await writer.WriteAttributeStringAsync(null, "customfield", null, field.IsCustomField.ToString().ToLowerInvariant()).ConfigureAwait(false);
                     await writer.WriteEndElementAsync().ConfigureAwait(false); // field
                 }
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // fields
 
-                // Write relationships
-                if (entity.Relationships.Count > 0)
+                // Write filter if present (HTML-encoded)
+                if (!string.IsNullOrEmpty(entity.FetchXmlFilter))
                 {
-                    await writer.WriteStartElementAsync(null, "relationships", null).ConfigureAwait(false);
-                    foreach (var rel in entity.Relationships)
-                    {
-                        await writer.WriteStartElementAsync(null, "relationship", null).ConfigureAwait(false);
-                        await writer.WriteAttributeStringAsync(null, "name", null, rel.Name).ConfigureAwait(false);
-                        await writer.WriteAttributeStringAsync(null, "manyToMany", null, rel.IsManyToMany.ToString().ToLowerInvariant()).ConfigureAwait(false);
-                        await writer.WriteAttributeStringAsync(null, "relatedEntityName", null, rel.Entity2).ConfigureAwait(false);
-
-                        if (rel.IsManyToMany)
-                        {
-                            // M2M relationship attributes
-                            await writer.WriteAttributeStringAsync(null, "m2mTargetEntity", null, rel.Entity2).ConfigureAwait(false);
-                            await writer.WriteAttributeStringAsync(null, "m2mTargetEntityPrimaryKey", null, rel.Entity2Attribute).ConfigureAwait(false);
-                            if (!string.IsNullOrEmpty(rel.IntersectEntity))
-                            {
-                                await writer.WriteAttributeStringAsync(null, "intersectEntityName", null, rel.IntersectEntity).ConfigureAwait(false);
-                            }
-                        }
-                        else
-                        {
-                            // One-to-many relationship attributes
-                            await writer.WriteAttributeStringAsync(null, "referencingEntity", null, rel.Entity1).ConfigureAwait(false);
-                            await writer.WriteAttributeStringAsync(null, "referencingAttribute", null, rel.Entity1Attribute).ConfigureAwait(false);
-                            await writer.WriteAttributeStringAsync(null, "referencedEntity", null, rel.Entity2).ConfigureAwait(false);
-                            await writer.WriteAttributeStringAsync(null, "referencedAttribute", null, rel.Entity2Attribute).ConfigureAwait(false);
-                        }
-
-                        await writer.WriteEndElementAsync().ConfigureAwait(false); // relationship
-                    }
-                    await writer.WriteEndElementAsync().ConfigureAwait(false); // relationships
+                    await writer.WriteElementStringAsync(null, "filter", null, entity.FetchXmlFilter).ConfigureAwait(false);
                 }
 
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // entity

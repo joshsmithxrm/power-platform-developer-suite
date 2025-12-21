@@ -69,15 +69,6 @@ namespace PPDS.Migration.Formats
 
             await writer.WriteStartDocumentAsync().ConfigureAwait(false);
             await writer.WriteStartElementAsync(null, "entities", null).ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "dateMode", null, "absolute").ConfigureAwait(false);
-
-            // Write entityImportOrder (required by CMT)
-            await writer.WriteStartElementAsync(null, "entityImportOrder", null).ConfigureAwait(false);
-            foreach (var entity in schema.Entities)
-            {
-                await writer.WriteElementStringAsync(null, "entityName", null, entity.LogicalName).ConfigureAwait(false);
-            }
-            await writer.WriteEndElementAsync().ConfigureAwait(false); // entityImportOrder
 
             foreach (var entity in schema.Entities)
             {
@@ -121,12 +112,10 @@ namespace PPDS.Migration.Formats
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // relationships
             }
 
-            // Write filter if present
+            // Write filter if present (HTML-encoded)
             if (!string.IsNullOrEmpty(entity.FetchXmlFilter))
             {
-                await writer.WriteStartElementAsync(null, "filter", null).ConfigureAwait(false);
-                await writer.WriteRawAsync(entity.FetchXmlFilter).ConfigureAwait(false);
-                await writer.WriteEndElementAsync().ConfigureAwait(false); // filter
+                await writer.WriteElementStringAsync(null, "filter", null, entity.FetchXmlFilter).ConfigureAwait(false);
             }
 
             await writer.WriteEndElementAsync().ConfigureAwait(false); // entity
@@ -135,8 +124,8 @@ namespace PPDS.Migration.Formats
         private static async Task WriteFieldAsync(XmlWriter writer, FieldSchema field)
         {
             await writer.WriteStartElementAsync(null, "field", null).ConfigureAwait(false);
-            await writer.WriteAttributeStringAsync(null, "name", null, field.LogicalName).ConfigureAwait(false);
             await writer.WriteAttributeStringAsync(null, "displayname", null, field.DisplayName).ConfigureAwait(false);
+            await writer.WriteAttributeStringAsync(null, "name", null, field.LogicalName).ConfigureAwait(false);
             await writer.WriteAttributeStringAsync(null, "type", null, field.Type).ConfigureAwait(false);
 
             if (field.IsPrimaryKey)
@@ -149,8 +138,6 @@ namespace PPDS.Migration.Formats
             {
                 await writer.WriteAttributeStringAsync(null, "lookupType", null, field.LookupEntity).ConfigureAwait(false);
             }
-
-            await writer.WriteAttributeStringAsync(null, "customfield", null, field.IsCustomField.ToString().ToLowerInvariant()).ConfigureAwait(false);
 
             await writer.WriteEndElementAsync().ConfigureAwait(false); // field
         }
