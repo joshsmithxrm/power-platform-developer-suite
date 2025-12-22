@@ -137,6 +137,37 @@ var accounts = externalData.Select(d => new Entity("account")
 await _bulk.UpsertMultipleAsync("account", accounts);
 ```
 
+## UpsertMultiple Pitfalls
+
+### Duplicate Key Error with Alternate Keys
+
+When using `UpsertMultiple` with alternate keys, set the key column in `KeyAttributes` ONLY. Do not also set it in `Attributes`.
+
+```csharp
+// ✅ Correct - key column only in KeyAttributes
+var entity = new Entity("account");
+entity.KeyAttributes["accountnumber"] = "ACCT-001";
+entity["name"] = "Contoso";
+entity["telephone1"] = "555-1234";
+
+// ❌ Wrong - causes "An item with the same key has already been added"
+var entity = new Entity("account");
+entity.KeyAttributes["accountnumber"] = "ACCT-001";
+entity["accountnumber"] = "ACCT-001";  // DO NOT SET THIS
+entity["name"] = "Contoso";
+```
+
+**Why it happens:** Dataverse's `ClassifyEntitiesForUpdateAndCreateV2` processor copies `KeyAttributes` values into `Attributes` internally. When the attribute already exists, `Dictionary.Insert` throws a duplicate key exception.
+
+**Symptoms:**
+- Error: `An item with the same key has already been added`
+- Stack trace includes `UpsertMultipleProcessor.ClassifyEntitiesForUpdateAndCreateV2`
+- ALL batches fail (not just some), even though records are unique
+
+**Sources:**
+- [Power Platform Community Thread](https://community.powerplatform.com/forums/thread/details/?threadid=b86c1b19-3f91-ef11-ac21-6045bdd3c2dc)
+- [Microsoft Docs: Bulk Operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/bulk-operations)
+
 ## Parallel Bulk Operations
 
 For very large datasets, parallelize across connections:

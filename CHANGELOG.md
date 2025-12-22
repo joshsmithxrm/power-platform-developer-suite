@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Affinity cookie disabled by default for improved throughput
   - Targets: `net8.0`, `net10.0`
 
+### Documentation
+
+- Added UpsertMultiple pitfalls section to `BULK_OPERATIONS_PATTERNS.md` - documents the duplicate key error when setting alternate key columns in both `KeyAttributes` and `Attributes`
+
 ### Changed
 
 - Updated publish workflow to support multiple packages and extract version from git tag
