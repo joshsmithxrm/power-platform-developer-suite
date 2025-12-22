@@ -305,32 +305,50 @@ namespace PPDS.Migration.Schema
             {
                 foreach (var rel in metadata.ManyToManyRelationships)
                 {
-                    // Determine the "other" entity
-                    var otherEntity = rel.Entity1LogicalName == metadata.LogicalName
-                        ? rel.Entity2LogicalName
-                        : rel.Entity1LogicalName;
+                    // Determine the "other" entity and correct attributes
+                    // The relationship must be relative to the current entity (source)
+                    string sourceEntity, targetEntity, sourceAttribute, targetAttribute;
+                    if (rel.Entity1LogicalName.Equals(metadata.LogicalName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sourceEntity = rel.Entity1LogicalName;
+                        sourceAttribute = rel.Entity1IntersectAttribute;
+                        targetEntity = rel.Entity2LogicalName;
+                        targetAttribute = rel.Entity2IntersectAttribute;
+                    }
+                    else
+                    {
+                        sourceEntity = rel.Entity2LogicalName;
+                        sourceAttribute = rel.Entity2IntersectAttribute;
+                        targetEntity = rel.Entity1LogicalName;
+                        targetAttribute = rel.Entity1IntersectAttribute;
+                    }
 
-                    // Only include if other entity is in our set
-                    if (!includedEntities.Contains(otherEntity))
+                    // Only include if target entity is in our set
+                    if (!includedEntities.Contains(targetEntity))
                     {
                         continue;
                     }
 
                     // Only emit from one side to avoid duplicates
-                    if (string.Compare(metadata.LogicalName, otherEntity, StringComparison.OrdinalIgnoreCase) > 0)
+                    if (string.Compare(metadata.LogicalName, targetEntity, StringComparison.OrdinalIgnoreCase) > 0)
                     {
                         continue;
                     }
+
+                    // Check for reflexive relationship (self-referencing M2M)
+                    var isReflexive = sourceEntity.Equals(targetEntity, StringComparison.OrdinalIgnoreCase);
 
                     yield return new RelationshipSchema
                     {
                         Name = rel.SchemaName,
                         IsManyToMany = true,
-                        Entity1 = rel.Entity1LogicalName,
-                        Entity1Attribute = rel.Entity1IntersectAttribute,
-                        Entity2 = rel.Entity2LogicalName,
-                        Entity2Attribute = rel.Entity2IntersectAttribute,
-                        IntersectEntity = rel.IntersectEntityName
+                        IsReflexive = isReflexive,
+                        Entity1 = sourceEntity,
+                        Entity1Attribute = sourceAttribute,
+                        Entity2 = targetEntity,
+                        Entity2Attribute = targetAttribute,
+                        IntersectEntity = rel.IntersectEntityName,
+                        TargetEntityPrimaryKey = targetAttribute
                     };
                 }
             }
