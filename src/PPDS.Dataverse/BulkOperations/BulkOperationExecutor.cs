@@ -22,6 +22,11 @@ namespace PPDS.Dataverse.BulkOperations
     /// </summary>
     public sealed class BulkOperationExecutor : IBulkOperationExecutor
     {
+        /// <summary>
+        /// Maximum number of retries when connection pool is exhausted.
+        /// </summary>
+        private const int MaxPoolExhaustionRetries = 3;
+
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly DataverseOptions _options;
         private readonly ILogger<BulkOperationExecutor> _logger;
@@ -309,6 +314,37 @@ namespace PPDS.Dataverse.BulkOperations
             return result;
         }
 
+        /// <summary>
+        /// Gets a connection from the pool with retry logic for pool exhaustion.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A pooled client.</returns>
+        /// <exception cref="PoolExhaustedException">Thrown when the pool remains exhausted after all retries.</exception>
+        private async Task<IPooledClient> GetClientWithRetryAsync(CancellationToken cancellationToken)
+        {
+            // Attempts are 1-indexed for clearer logging
+            for (int attempt = 1; attempt <= MaxPoolExhaustionRetries; attempt++)
+            {
+                try
+                {
+                    return await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                }
+                catch (PoolExhaustedException) when (attempt < MaxPoolExhaustionRetries)
+                {
+                    // Exponential backoff: 1s, 2s before attempts 2 and 3
+                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+                    _logger.LogWarning(
+                        "Connection pool exhausted, waiting for connection (attempt {Attempt}/{MaxRetries}, delay: {Delay}s)",
+                        attempt, MaxPoolExhaustionRetries, delay.TotalSeconds);
+                    await Task.Delay(delay, cancellationToken);
+                }
+                // On final attempt, PoolExhaustedException propagates to caller
+            }
+
+            // Unreachable: loop either returns a client or throws on final attempt
+            throw new InvalidOperationException("Unexpected code path in connection pool retry logic");
+        }
+
         private async Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
@@ -318,7 +354,7 @@ namespace PPDS.Dataverse.BulkOperations
             _logger.LogDebug("Executing CreateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
                 entityLogicalName, batch.Count);
 
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            await using var client = await GetClientWithRetryAsync(cancellationToken);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new CreateMultipleRequest { Targets = targets };
@@ -385,7 +421,7 @@ namespace PPDS.Dataverse.BulkOperations
             _logger.LogDebug("Executing UpdateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
                 entityLogicalName, batch.Count);
 
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            await using var client = await GetClientWithRetryAsync(cancellationToken);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpdateMultipleRequest { Targets = targets };
@@ -449,7 +485,7 @@ namespace PPDS.Dataverse.BulkOperations
             _logger.LogDebug("Executing UpsertMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
                 entityLogicalName, batch.Count);
 
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            await using var client = await GetClientWithRetryAsync(cancellationToken);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpsertMultipleRequest { Targets = targets };
@@ -510,7 +546,7 @@ namespace PPDS.Dataverse.BulkOperations
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            await using var client = await GetClientWithRetryAsync(cancellationToken);
 
             var entityReferences = batch
                 .Select(id => new EntityReference(entityLogicalName, id))
@@ -574,7 +610,7 @@ namespace PPDS.Dataverse.BulkOperations
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            await using var client = await GetClientWithRetryAsync(cancellationToken);
 
             var executeMultiple = new ExecuteMultipleRequest
             {

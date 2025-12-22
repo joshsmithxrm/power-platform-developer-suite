@@ -116,8 +116,10 @@ namespace PPDS.Dataverse.Pooling
             var acquired = await _connectionSemaphore.WaitAsync(_options.Pool.AcquireTimeout, cancellationToken);
             if (!acquired)
             {
-                throw new TimeoutException(
-                    $"Timed out waiting for a connection. Active: {GetTotalActiveConnections()}, MaxPoolSize: {_options.Pool.MaxPoolSize}");
+                throw new PoolExhaustedException(
+                    GetTotalActiveConnections(),
+                    _options.Pool.MaxPoolSize,
+                    _options.Pool.AcquireTimeout);
             }
 
             try
@@ -144,8 +146,10 @@ namespace PPDS.Dataverse.Pooling
             var acquired = _connectionSemaphore.Wait(_options.Pool.AcquireTimeout);
             if (!acquired)
             {
-                throw new TimeoutException(
-                    $"Timed out waiting for a connection. Active: {GetTotalActiveConnections()}, MaxPoolSize: {_options.Pool.MaxPoolSize}");
+                throw new PoolExhaustedException(
+                    GetTotalActiveConnections(),
+                    _options.Pool.MaxPoolSize,
+                    _options.Pool.AcquireTimeout);
             }
 
             try
@@ -426,9 +430,19 @@ namespace PPDS.Dataverse.Pooling
             foreach (var connection in _options.Connections)
             {
                 var pool = _pools[connection.Name];
-                var toCreate = Math.Min(_options.Pool.MinPoolSize, connection.MaxPoolSize);
+                var activeCount = _activeConnections.GetValueOrDefault(connection.Name, 0);
+                var currentTotal = pool.Count + activeCount;
+                var targetMin = Math.Min(_options.Pool.MinPoolSize, connection.MaxPoolSize);
+                var toCreate = Math.Max(0, targetMin - currentTotal);
 
-                for (int i = 0; i < toCreate && pool.Count < toCreate; i++)
+                if (toCreate > 0)
+                {
+                    _logger.LogDebug(
+                        "Pool {ConnectionName}: Active={Active}, Idle={Idle}, Target={Target}, Creating={ToCreate}",
+                        connection.Name, activeCount, pool.Count, targetMin, toCreate);
+                }
+
+                for (int i = 0; i < toCreate; i++)
                 {
                     try
                     {

@@ -471,9 +471,9 @@ namespace PPDS.Migration.Import
             {
                 var result = options.Mode switch
                 {
-                    ImportMode.Create => await _bulkExecutor.CreateMultipleAsync(entityName, batch, bulkOptions, cancellationToken).ConfigureAwait(false),
-                    ImportMode.Update => await _bulkExecutor.UpdateMultipleAsync(entityName, batch, bulkOptions, cancellationToken).ConfigureAwait(false),
-                    _ => await _bulkExecutor.UpsertMultipleAsync(entityName, batch, bulkOptions, cancellationToken).ConfigureAwait(false)
+                    ImportMode.Create => await _bulkExecutor.CreateMultipleAsync(entityName, batch, bulkOptions, progress: null, cancellationToken).ConfigureAwait(false),
+                    ImportMode.Update => await _bulkExecutor.UpdateMultipleAsync(entityName, batch, bulkOptions, progress: null, cancellationToken).ConfigureAwait(false),
+                    _ => await _bulkExecutor.UpsertMultipleAsync(entityName, batch, bulkOptions, progress: null, cancellationToken).ConfigureAwait(false)
                 };
 
                 return new BatchImportResult
