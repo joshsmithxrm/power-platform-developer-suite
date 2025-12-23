@@ -96,6 +96,9 @@ namespace PPDS.Dataverse.DependencyInjection
             // Throttle tracker (singleton - shared state)
             services.AddSingleton<IThrottleTracker, ThrottleTracker>();
 
+            // Adaptive rate controller (singleton - maintains per-connection state)
+            services.AddSingleton<IAdaptiveRateController, AdaptiveRateController>();
+
             // Connection pool (singleton - long-lived)
             services.AddSingleton<IDataverseConnectionPool, DataverseConnectionPool>();
 

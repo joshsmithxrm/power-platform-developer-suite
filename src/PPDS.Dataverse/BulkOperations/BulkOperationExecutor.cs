@@ -53,6 +53,7 @@ namespace PPDS.Dataverse.BulkOperations
         private static readonly TimeSpan FallbackRetryAfter = TimeSpan.FromSeconds(30);
 
         private readonly IDataverseConnectionPool _connectionPool;
+        private readonly IAdaptiveRateController _adaptiveRateController;
         private readonly DataverseOptions _options;
         private readonly ILogger<BulkOperationExecutor> _logger;
 
@@ -60,50 +61,62 @@ namespace PPDS.Dataverse.BulkOperations
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
-        /// <param name="throttleTracker">The throttle tracker. No longer used - pool handles throttle recording via PooledClient callback. Parameter kept for backwards compatibility.</param>
+        /// <param name="throttleTracker">The throttle tracker. No longer used - pool handles throttle recording via PooledClient callback.</param>
+        /// <param name="adaptiveRateController">The adaptive rate controller for dynamic parallelism.</param>
         /// <param name="options">Configuration options.</param>
         /// <param name="logger">Logger instance.</param>
         public BulkOperationExecutor(
             IDataverseConnectionPool connectionPool,
             IThrottleTracker throttleTracker,
+            IAdaptiveRateController adaptiveRateController,
             IOptions<DataverseOptions> options,
             ILogger<BulkOperationExecutor> logger)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
-            // throttleTracker parameter kept for backwards compatibility - pool now handles throttle recording
+            // throttleTracker parameter kept - pool handles throttle recording via PooledClient callback
             _ = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
+            _adaptiveRateController = adaptiveRateController ?? throw new ArgumentNullException(nameof(adaptiveRateController));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>
         /// Resolves the parallelism to use for batch processing.
-        /// Uses the explicit value if provided, otherwise queries the ServiceClient's RecommendedDegreesOfParallelism.
+        /// Uses adaptive rate control if enabled, otherwise uses RecommendedDegreesOfParallelism.
         /// </summary>
-        private async Task<int> ResolveParallelismAsync(int? maxParallelBatches, CancellationToken cancellationToken)
+        private async Task<(int Parallelism, string ConnectionName)> ResolveParallelismAsync(int? maxParallelBatches, CancellationToken cancellationToken)
         {
+            // Get RecommendedDegreesOfParallelism from a connection
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            var connectionName = client.ConnectionName;
+            var recommended = client.RecommendedDegreesOfParallelism;
+
+            if (recommended <= 0)
+            {
+                _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
+                return (1, connectionName);
+            }
+
             int parallelism;
 
             if (maxParallelBatches.HasValue)
             {
+                // Explicit override - use as-is
                 parallelism = maxParallelBatches.Value;
+            }
+            else if (_adaptiveRateController.IsEnabled)
+            {
+                // Use adaptive rate controller
+                parallelism = _adaptiveRateController.GetParallelism(connectionName, recommended);
+                _logger.LogDebug(
+                    "Using adaptive parallelism: {Parallelism} (max: {Max}) for connection {Connection}",
+                    parallelism, recommended, connectionName);
             }
             else
             {
-                // Get RecommendedDegreesOfParallelism from a connection
-                await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-                var recommended = client.RecommendedDegreesOfParallelism;
-
-                if (recommended > 0)
-                {
-                    _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", recommended);
-                    parallelism = recommended;
-                }
-                else
-                {
-                    _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
-                    return 1;
-                }
+                // Use full recommended parallelism
+                parallelism = recommended;
+                _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", parallelism);
             }
 
             // Cap parallelism to pool capacity - can't run more parallel operations than available connections
@@ -118,7 +131,7 @@ namespace PPDS.Dataverse.BulkOperations
                 parallelism = poolCapacity;
             }
 
-            return parallelism;
+            return (parallelism, connectionName);
         }
 
         /// <inheritdoc />
@@ -131,7 +144,7 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
+            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
             _logger.LogInformation(
                 "CreateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
@@ -204,7 +217,7 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
+            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
             _logger.LogInformation(
                 "UpdateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
@@ -271,7 +284,7 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
+            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
             _logger.LogInformation(
                 "UpsertMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
@@ -338,7 +351,7 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var idList = ids.ToList();
-            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
+            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
             _logger.LogInformation(
                 "DeleteMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
