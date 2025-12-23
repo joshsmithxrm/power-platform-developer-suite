@@ -1,4 +1,9 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Migration.Cli.Infrastructure;
+using PPDS.Migration.Export;
+using PPDS.Migration.Import;
+using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -142,46 +147,84 @@ public static class MigrateCommand
             // Create temp file path for intermediate data
             tempDataFile = Path.Combine(tempDirectory, $"ppds-migrate-{Guid.NewGuid():N}.zip");
 
-            ConsoleOutput.WriteProgress("analyzing", "Parsing schema...", json);
-            ConsoleOutput.WriteProgress("analyzing", "Building dependency graph...", json);
+            // Create progress reporter
+            var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
-            // TODO: Implement when PPDS.Migration is ready
             // Phase 1: Export from source
-            // ConsoleOutput.WriteProgress("export", "Connecting to source environment...", json);
-            // var exportOptions = new ExportOptions
-            // {
-            //     ConnectionString = sourceConnection,
-            //     SchemaPath = schema.FullName,
-            //     OutputPath = tempDataFile
-            // };
-            // var exporter = new DataverseExporter(exportOptions);
-            // await exporter.ExportAsync(cancellationToken);
+            if (!json)
+            {
+                Console.WriteLine("Phase 1: Exporting from source environment...");
+            }
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = "Connecting to source environment..."
+            });
+
+            await using var sourceProvider = ServiceFactory.CreateProvider(sourceConnection, "Source");
+            var exporter = sourceProvider.GetRequiredService<IExporter>();
+
+            var exportResult = await exporter.ExportAsync(
+                schema.FullName,
+                tempDataFile,
+                new ExportOptions(),
+                progressReporter,
+                cancellationToken);
+
+            if (!exportResult.Success)
+            {
+                ConsoleOutput.WriteError($"Export failed with {exportResult.Errors.Count} error(s).", json);
+                return ExitCodes.Failure;
+            }
 
             // Phase 2: Import to target
-            // ConsoleOutput.WriteProgress("import", "Connecting to target environment...", json);
-            // var importOptions = new ImportOptions
-            // {
-            //     ConnectionString = targetConnection,
-            //     DataPath = tempDataFile,
-            //     BatchSize = batchSize,
-            //     BypassPlugins = bypassPlugins,
-            //     BypassFlows = bypassFlows
-            // };
-            // var importer = new DataverseImporter(importOptions);
-            // await importer.ImportAsync(cancellationToken);
+            if (!json)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Phase 2: Importing to target environment...");
+            }
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = "Connecting to target environment..."
+            });
 
-            ConsoleOutput.WriteProgress("export", "Export phase not yet implemented - waiting for PPDS.Migration", json);
-            ConsoleOutput.WriteProgress("import", "Import phase not yet implemented - waiting for PPDS.Migration", json);
-            await Task.Delay(100, cancellationToken); // Placeholder
+            await using var targetProvider = ServiceFactory.CreateProvider(targetConnection, "Target");
+            var importer = targetProvider.GetRequiredService<IImporter>();
 
+            var importOptions = new ImportOptions
+            {
+                BatchSize = batchSize,
+                BypassCustomPluginExecution = bypassPlugins,
+                BypassPowerAutomateFlows = bypassFlows
+            };
+
+            var importResult = await importer.ImportAsync(
+                tempDataFile,
+                importOptions,
+                progressReporter,
+                cancellationToken);
+
+            if (!importResult.Success)
+            {
+                ConsoleOutput.WriteError($"Import failed with {importResult.Errors.Count} error(s).", json);
+                return ExitCodes.Failure;
+            }
+
+            // Report completion
             if (!json)
             {
                 Console.WriteLine();
                 Console.WriteLine("Migration completed successfully.");
+                Console.WriteLine($"Exported: {exportResult.RecordsExported:N0} records");
+                Console.WriteLine($"Imported: {importResult.RecordsImported:N0} records");
+                Console.WriteLine($"Total duration: {exportResult.Duration + importResult.Duration:hh\\:mm\\:ss}");
             }
             else
             {
-                ConsoleOutput.WriteCompletion(TimeSpan.Zero, 0, 0, json);
+                var totalRecords = exportResult.RecordsExported;
+                var totalDuration = exportResult.Duration + importResult.Duration;
+                ConsoleOutput.WriteCompletion(totalDuration, totalRecords, 0, json);
             }
 
             return ExitCodes.Success;

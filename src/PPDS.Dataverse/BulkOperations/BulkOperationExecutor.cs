@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -11,6 +15,9 @@ using Microsoft.Xrm.Sdk.Messages;
 using Newtonsoft.Json;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Progress;
+using PPDS.Dataverse.Resilience;
+using PPDS.Dataverse.Security;
 
 namespace PPDS.Dataverse.BulkOperations
 {
@@ -20,6 +27,31 @@ namespace PPDS.Dataverse.BulkOperations
     /// </summary>
     public sealed class BulkOperationExecutor : IBulkOperationExecutor
     {
+        /// <summary>
+        /// Maximum number of retries when connection pool is exhausted.
+        /// </summary>
+        private const int MaxPoolExhaustionRetries = 3;
+
+        /// <summary>
+        /// Maximum number of retries for TVP race condition errors on new tables.
+        /// </summary>
+        private const int MaxTvpRetries = 3;
+
+        /// <summary>
+        /// Maximum number of retries for SQL deadlock errors.
+        /// </summary>
+        private const int MaxDeadlockRetries = 3;
+
+        /// <summary>
+        /// CRM error code for generic SQL error wrapper that may contain TVP race condition.
+        /// </summary>
+        private const int SqlErrorCode = unchecked((int)0x80044150);
+
+        /// <summary>
+        /// Fallback Retry-After duration when not provided by the server.
+        /// </summary>
+        private static readonly TimeSpan FallbackRetryAfter = TimeSpan.FromSeconds(30);
+
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly DataverseOptions _options;
         private readonly ILogger<BulkOperationExecutor> _logger;
@@ -28,16 +60,65 @@ namespace PPDS.Dataverse.BulkOperations
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
+        /// <param name="throttleTracker">The throttle tracker. No longer used - pool handles throttle recording via PooledClient callback. Parameter kept for backwards compatibility.</param>
         /// <param name="options">Configuration options.</param>
         /// <param name="logger">Logger instance.</param>
         public BulkOperationExecutor(
             IDataverseConnectionPool connectionPool,
+            IThrottleTracker throttleTracker,
             IOptions<DataverseOptions> options,
             ILogger<BulkOperationExecutor> logger)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
+            // throttleTracker parameter kept for backwards compatibility - pool now handles throttle recording
+            _ = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <summary>
+        /// Resolves the parallelism to use for batch processing.
+        /// Uses the explicit value if provided, otherwise queries the ServiceClient's RecommendedDegreesOfParallelism.
+        /// </summary>
+        private async Task<int> ResolveParallelismAsync(int? maxParallelBatches, CancellationToken cancellationToken)
+        {
+            int parallelism;
+
+            if (maxParallelBatches.HasValue)
+            {
+                parallelism = maxParallelBatches.Value;
+            }
+            else
+            {
+                // Get RecommendedDegreesOfParallelism from a connection
+                await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                var recommended = client.RecommendedDegreesOfParallelism;
+
+                if (recommended > 0)
+                {
+                    _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", recommended);
+                    parallelism = recommended;
+                }
+                else
+                {
+                    _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
+                    return 1;
+                }
+            }
+
+            // Cap parallelism to pool size - can't run more parallel operations than available connections
+            var maxPoolSize = _options.Pool.MaxPoolSize;
+            if (parallelism > maxPoolSize)
+            {
+                _logger.LogWarning(
+                    "MaxParallelBatches ({Parallelism}) exceeds MaxPoolSize ({MaxPoolSize}). " +
+                    "Capping parallelism to {MaxPoolSize}. " +
+                    "Consider increasing MaxPoolSize for optimal throughput.",
+                    parallelism, maxPoolSize, maxPoolSize);
+                parallelism = maxPoolSize;
+            }
+
+            return parallelism;
         }
 
         /// <inheritdoc />
@@ -45,46 +126,72 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
+            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation("CreateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
-                entityLogicalName, entityList.Count, options.ElasticTable);
+            _logger.LogInformation(
+                "CreateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
+                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
 
             var stopwatch = Stopwatch.StartNew();
-            var allCreatedIds = new List<Guid>();
-            var allErrors = new List<BulkOperationError>();
-            var successCount = 0;
+            var batches = Batch(entityList, options.BatchSize).ToList();
+            var tracker = new ProgressTracker(entityList.Count);
 
-            foreach (var batch in Batch(entityList, options.BatchSize))
+            BulkOperationResult result;
+            if (parallelism > 1 && batches.Count > 1)
             {
-                var batchResult = await ExecuteCreateMultipleBatchAsync(
-                    entityLogicalName, batch, options, cancellationToken);
+                result = await ExecuteBatchesParallelAsync(
+                    batches,
+                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    parallelism,
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                var allCreatedIds = new List<Guid>();
+                var allErrors = new List<BulkOperationError>();
+                var successCount = 0;
 
-                successCount += batchResult.SuccessCount;
-                allErrors.AddRange(batchResult.Errors);
-                if (batchResult.CreatedIds != null)
+                foreach (var batch in batches)
                 {
-                    allCreatedIds.AddRange(batchResult.CreatedIds);
+                    var batchResult = await ExecuteCreateMultipleBatchAsync(
+                        entityLogicalName, batch, options, cancellationToken);
+
+                    successCount += batchResult.SuccessCount;
+                    allErrors.AddRange(batchResult.Errors);
+                    if (batchResult.CreatedIds != null)
+                    {
+                        allCreatedIds.AddRange(batchResult.CreatedIds);
+                    }
+
+                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                    progress?.Report(tracker.GetSnapshot());
                 }
+
+                result = new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = allErrors.Count,
+                    Errors = allErrors,
+                    Duration = stopwatch.Elapsed,
+                    CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
+                };
             }
 
             stopwatch.Stop();
+            result = result with { Duration = stopwatch.Elapsed };
 
             _logger.LogInformation(
                 "CreateMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, result.SuccessCount, result.FailureCount, stopwatch.ElapsedMilliseconds);
 
-            return new BulkOperationResult
-            {
-                SuccessCount = successCount,
-                FailureCount = allErrors.Count,
-                Errors = allErrors,
-                Duration = stopwatch.Elapsed,
-                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
-            };
+            return result;
         }
 
         /// <inheritdoc />
@@ -92,40 +199,66 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
+            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation("UpdateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
-                entityLogicalName, entityList.Count, options.ElasticTable);
+            _logger.LogInformation(
+                "UpdateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
+                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
 
             var stopwatch = Stopwatch.StartNew();
-            var allErrors = new List<BulkOperationError>();
-            var successCount = 0;
+            var batches = Batch(entityList, options.BatchSize).ToList();
+            var tracker = new ProgressTracker(entityList.Count);
 
-            foreach (var batch in Batch(entityList, options.BatchSize))
+            BulkOperationResult result;
+            if (parallelism > 1 && batches.Count > 1)
             {
-                var batchResult = await ExecuteUpdateMultipleBatchAsync(
-                    entityLogicalName, batch, options, cancellationToken);
+                result = await ExecuteBatchesParallelAsync(
+                    batches,
+                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    parallelism,
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                var allErrors = new List<BulkOperationError>();
+                var successCount = 0;
 
-                successCount += batchResult.SuccessCount;
-                allErrors.AddRange(batchResult.Errors);
+                foreach (var batch in batches)
+                {
+                    var batchResult = await ExecuteUpdateMultipleBatchAsync(
+                        entityLogicalName, batch, options, cancellationToken);
+
+                    successCount += batchResult.SuccessCount;
+                    allErrors.AddRange(batchResult.Errors);
+
+                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                    progress?.Report(tracker.GetSnapshot());
+                }
+
+                result = new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = allErrors.Count,
+                    Errors = allErrors,
+                    Duration = stopwatch.Elapsed
+                };
             }
 
             stopwatch.Stop();
+            result = result with { Duration = stopwatch.Elapsed };
 
             _logger.LogInformation(
                 "UpdateMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, result.SuccessCount, result.FailureCount, stopwatch.ElapsedMilliseconds);
 
-            return new BulkOperationResult
-            {
-                SuccessCount = successCount,
-                FailureCount = allErrors.Count,
-                Errors = allErrors,
-                Duration = stopwatch.Elapsed
-            };
+            return result;
         }
 
         /// <inheritdoc />
@@ -133,40 +266,66 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
+            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation("UpsertMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
-                entityLogicalName, entityList.Count, options.ElasticTable);
+            _logger.LogInformation(
+                "UpsertMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
+                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
 
             var stopwatch = Stopwatch.StartNew();
-            var allErrors = new List<BulkOperationError>();
-            var successCount = 0;
+            var batches = Batch(entityList, options.BatchSize).ToList();
+            var tracker = new ProgressTracker(entityList.Count);
 
-            foreach (var batch in Batch(entityList, options.BatchSize))
+            BulkOperationResult result;
+            if (parallelism > 1 && batches.Count > 1)
             {
-                var batchResult = await ExecuteUpsertMultipleBatchAsync(
-                    entityLogicalName, batch, options, cancellationToken);
+                result = await ExecuteBatchesParallelAsync(
+                    batches,
+                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    parallelism,
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                var allErrors = new List<BulkOperationError>();
+                var successCount = 0;
 
-                successCount += batchResult.SuccessCount;
-                allErrors.AddRange(batchResult.Errors);
+                foreach (var batch in batches)
+                {
+                    var batchResult = await ExecuteUpsertMultipleBatchAsync(
+                        entityLogicalName, batch, options, cancellationToken);
+
+                    successCount += batchResult.SuccessCount;
+                    allErrors.AddRange(batchResult.Errors);
+
+                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                    progress?.Report(tracker.GetSnapshot());
+                }
+
+                result = new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = allErrors.Count,
+                    Errors = allErrors,
+                    Duration = stopwatch.Elapsed
+                };
             }
 
             stopwatch.Stop();
+            result = result with { Duration = stopwatch.Elapsed };
 
             _logger.LogInformation(
                 "UpsertMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, result.SuccessCount, result.FailureCount, stopwatch.ElapsedMilliseconds);
 
-            return new BulkOperationResult
-            {
-                SuccessCount = successCount,
-                FailureCount = allErrors.Count,
-                Errors = allErrors,
-                Duration = stopwatch.Elapsed
-            };
+            return result;
         }
 
         /// <inheritdoc />
@@ -174,58 +333,530 @@ namespace PPDS.Dataverse.BulkOperations
             string entityLogicalName,
             IEnumerable<Guid> ids,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
         {
             options ??= _options.BulkOperations;
             var idList = ids.ToList();
+            var parallelism = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation("DeleteMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}",
-                entityLogicalName, idList.Count, options.ElasticTable);
+            _logger.LogInformation(
+                "DeleteMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
+                entityLogicalName, idList.Count, options.ElasticTable, parallelism);
 
             var stopwatch = Stopwatch.StartNew();
-            var allErrors = new List<BulkOperationError>();
-            var successCount = 0;
+            var batches = Batch(idList, options.BatchSize).ToList();
+            var tracker = new ProgressTracker(idList.Count);
 
-            foreach (var batch in Batch(idList, options.BatchSize))
+            // Select the appropriate batch execution function based on table type
+            Func<List<Guid>, CancellationToken, Task<BulkOperationResult>> executeBatch = options.ElasticTable
+                ? (batch, ct) => ExecuteElasticDeleteBatchAsync(entityLogicalName, batch, options, ct)
+                : (batch, ct) => ExecuteStandardDeleteBatchAsync(entityLogicalName, batch, options, ct);
+
+            BulkOperationResult result;
+            if (parallelism > 1 && batches.Count > 1)
             {
-                BulkOperationResult batchResult;
-                if (options.ElasticTable)
+                result = await ExecuteBatchesParallelAsync(batches, executeBatch, parallelism, tracker, progress, cancellationToken);
+            }
+            else
+            {
+                var allErrors = new List<BulkOperationError>();
+                var successCount = 0;
+
+                foreach (var batch in batches)
                 {
-                    batchResult = await ExecuteElasticDeleteBatchAsync(
-                        entityLogicalName, batch, options, cancellationToken);
-                }
-                else
-                {
-                    batchResult = await ExecuteStandardDeleteBatchAsync(
-                        entityLogicalName, batch, options, cancellationToken);
+                    var batchResult = await executeBatch(batch, cancellationToken);
+                    successCount += batchResult.SuccessCount;
+                    allErrors.AddRange(batchResult.Errors);
+
+                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                    progress?.Report(tracker.GetSnapshot());
                 }
 
-                successCount += batchResult.SuccessCount;
-                allErrors.AddRange(batchResult.Errors);
+                result = new BulkOperationResult
+                {
+                    SuccessCount = successCount,
+                    FailureCount = allErrors.Count,
+                    Errors = allErrors,
+                    Duration = stopwatch.Elapsed
+                };
             }
 
             stopwatch.Stop();
+            result = result with { Duration = stopwatch.Elapsed };
 
             _logger.LogInformation(
                 "DeleteMultiple completed. Entity: {Entity}, Success: {Success}, Failed: {Failed}, Duration: {Duration}ms",
-                entityLogicalName, successCount, allErrors.Count, stopwatch.ElapsedMilliseconds);
+                entityLogicalName, result.SuccessCount, result.FailureCount, stopwatch.ElapsedMilliseconds);
 
-            return new BulkOperationResult
-            {
-                SuccessCount = successCount,
-                FailureCount = allErrors.Count,
-                Errors = allErrors,
-                Duration = stopwatch.Elapsed
-            };
+            return result;
         }
 
-        private async Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
+        /// <summary>
+        /// Gets a connection from the pool with retry logic for pool exhaustion.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A pooled client.</returns>
+        /// <exception cref="PoolExhaustedException">Thrown when the pool remains exhausted after all retries.</exception>
+        private async Task<IPooledClient> GetClientWithRetryAsync(CancellationToken cancellationToken)
+        {
+            // Attempts are 1-indexed for clearer logging
+            for (int attempt = 1; attempt <= MaxPoolExhaustionRetries; attempt++)
+            {
+                try
+                {
+                    return await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                }
+                catch (PoolExhaustedException) when (attempt < MaxPoolExhaustionRetries)
+                {
+                    // Exponential backoff: 1s, 2s before attempts 2 and 3
+                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+                    _logger.LogWarning(
+                        "Connection pool exhausted, waiting for connection (attempt {Attempt}/{MaxRetries}, delay: {Delay}s)",
+                        attempt, MaxPoolExhaustionRetries, delay.TotalSeconds);
+                    await Task.Delay(delay, cancellationToken);
+                }
+                // On final attempt, PoolExhaustedException propagates to caller
+            }
+
+            // Unreachable: loop either returns a client or throws on final attempt
+            throw new InvalidOperationException("Unexpected code path in connection pool retry logic");
+        }
+
+        /// <summary>
+        /// Checks if an exception is a service protection throttle error and extracts the Retry-After duration.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <param name="retryAfter">The Retry-After duration if this is a throttle error.</param>
+        /// <param name="errorCode">The service protection error code if this is a throttle error.</param>
+        /// <returns>True if this is a service protection error.</returns>
+        private bool TryGetThrottleInfo(Exception exception, out TimeSpan retryAfter, out int errorCode)
+        {
+            retryAfter = TimeSpan.Zero;
+            errorCode = 0;
+
+            // Check if this is a FaultException with OrganizationServiceFault
+            if (exception is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+            errorCode = fault.ErrorCode;
+
+            // Check if this is a service protection error
+            if (!ServiceProtectionException.IsServiceProtectionError(errorCode))
+            {
+                return false;
+            }
+
+            // Extract Retry-After from ErrorDetails
+            if (fault.ErrorDetails != null &&
+                fault.ErrorDetails.TryGetValue("Retry-After", out var retryAfterObj))
+            {
+                if (retryAfterObj is TimeSpan retryAfterSpan)
+                {
+                    retryAfter = retryAfterSpan;
+                }
+                else if (retryAfterObj is int retryAfterSeconds)
+                {
+                    retryAfter = TimeSpan.FromSeconds(retryAfterSeconds);
+                }
+                else if (retryAfterObj is double retryAfterDouble)
+                {
+                    retryAfter = TimeSpan.FromSeconds(retryAfterDouble);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Unexpected Retry-After type: {Type}. Using fallback.",
+                        retryAfterObj?.GetType().Name ?? "null");
+                    retryAfter = FallbackRetryAfter;
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Service protection error without Retry-After. ErrorCode: {ErrorCode}. Using fallback: {Fallback}s",
+                    errorCode, FallbackRetryAfter.TotalSeconds);
+                retryAfter = FallbackRetryAfter;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if an exception indicates an authentication/authorization failure.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is an authentication failure.</returns>
+        private static bool IsAuthFailure(Exception exception)
+        {
+            // Check for common auth failure patterns in FaultException
+            if (exception is FaultException<OrganizationServiceFault> faultEx)
+            {
+                var fault = faultEx.Detail;
+
+                // Common auth error codes
+                // -2147180286: Caller does not have privilege
+                // -2147204720: User is disabled
+                // -2147180285: AccessDenied
+                var authErrorCodes = new[]
+                {
+                    -2147180286, // No privilege
+                    -2147204720, // User disabled
+                    -2147180285, // Access denied
+                };
+
+                if (authErrorCodes.Contains(fault.ErrorCode))
+                {
+                    return true;
+                }
+
+                // Check message for auth-related keywords
+                var message = fault.Message?.ToLowerInvariant() ?? "";
+                if (message.Contains("authentication") ||
+                    message.Contains("authorization") ||
+                    message.Contains("token") ||
+                    message.Contains("expired") ||
+                    message.Contains("credential"))
+                {
+                    return true;
+                }
+            }
+
+            // Check for HTTP 401/403 in inner exceptions
+            if (exception.InnerException is HttpRequestException httpEx)
+            {
+                var message = httpEx.Message?.ToLowerInvariant() ?? "";
+                if (message.Contains("401") || message.Contains("403") ||
+                    message.Contains("unauthorized") || message.Contains("forbidden"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if an exception indicates a connection/network failure.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is a connection failure.</returns>
+        private static bool IsConnectionFailure(Exception exception)
+        {
+            return exception is HttpRequestException ||
+                   exception is SocketException ||
+                   exception is DataverseConnectionException ||
+                   exception.InnerException is SocketException ||
+                   exception.InnerException is HttpRequestException;
+        }
+
+        /// <summary>
+        /// Extracts the connection name from an exception when the client is null.
+        /// This handles the case where connection creation itself failed.
+        /// </summary>
+        /// <param name="exception">The exception to extract from.</param>
+        /// <param name="fallback">The fallback value if connection name cannot be extracted.</param>
+        /// <returns>The connection name or fallback.</returns>
+        private static string GetConnectionNameFromException(Exception exception, string fallback)
+        {
+            if (exception is DataverseConnectionException dce && !string.IsNullOrEmpty(dce.ConnectionName))
+            {
+                return dce.ConnectionName;
+            }
+
+            return fallback;
+        }
+
+        /// <summary>
+        /// Checks if an exception is a TVP race condition error that occurs on newly created tables.
+        /// This happens when parallel bulk operations hit a table before Dataverse has created
+        /// the internal TVP types and stored procedures.
+        /// SQL Error 3732: Cannot drop type because it is being referenced by another object.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is a TVP race condition error.</returns>
+        private static bool IsTvpRaceConditionError(Exception exception)
+        {
+            if (exception is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+
+            // Check for the generic SQL error wrapper code
+            if (fault.ErrorCode != SqlErrorCode)
+            {
+                return false;
+            }
+
+            // Check the message for the specific SQL error 3732 (Cannot drop type)
+            var message = fault.Message ?? string.Empty;
+            return message.Contains("3732") || message.Contains("Cannot drop type");
+        }
+
+        /// <summary>
+        /// Checks if an exception is a SQL deadlock error.
+        /// SQL Error 1205: Transaction was deadlocked on resources with another process and has been chosen as the deadlock victim.
+        /// These are transient errors that occur under high concurrency and should be retried.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is a deadlock error.</returns>
+        private static bool IsDeadlockError(Exception exception)
+        {
+            if (exception is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+
+            // Check for the generic SQL error wrapper code (same as TVP)
+            if (fault.ErrorCode != SqlErrorCode)
+            {
+                return false;
+            }
+
+            // Check the message for SQL error 1205 (deadlock)
+            var message = fault.Message ?? string.Empty;
+            return message.Contains("1205") || message.Contains("deadlock", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Logs a throttle error. The pool handles retry timing via GetClientAsync.
+        /// PooledClient automatically records the throttle via callback.
+        /// </summary>
+        /// <param name="connectionName">The name of the connection that was throttled.</param>
+        /// <param name="retryAfter">The Retry-After duration.</param>
+        /// <param name="errorCode">The service protection error code.</param>
+        private void LogThrottle(string connectionName, TimeSpan retryAfter, int errorCode)
+        {
+            // Note: PooledClient already recorded this throttle via callback.
+            // We just log for visibility - pool handles waiting via GetClientAsync.
+            _logger.LogWarning(
+                "Service protection limit hit. Connection: {Connection}, ErrorCode: {ErrorCode}, " +
+                "RetryAfter: {RetryAfter}. Pool will wait for non-throttled connection.",
+                connectionName, errorCode, retryAfter);
+        }
+
+        /// <summary>
+        /// Executes a batch operation with throttle detection, connection health management, and intelligent retry.
+        /// Service protection errors retry indefinitely - the pool handles waiting for non-throttled connections.
+        /// On auth/connection failure, marks the connection as invalid and retries with a new connection.
+        /// </summary>
+        private async Task<BulkOperationResult> ExecuteBatchWithThrottleHandlingAsync<T>(
+            string operationName,
+            string entityLogicalName,
+            List<T> batch,
+            BulkOperationOptions options,
+            Func<IPooledClient, List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            CancellationToken cancellationToken)
+        {
+            var attempt = 0;
+            var maxRetries = _options.Pool.MaxConnectionRetries;
+
+            // Loop indefinitely for service protection errors - only CancellationToken stops us.
+            // Other transient errors (auth, connection, TVP, deadlock) have finite retry limits.
+            while (true)
+            {
+                attempt++;
+                IPooledClient? client = null;
+                string connectionName = "unknown";
+
+                try
+                {
+                    client = await GetClientWithRetryAsync(cancellationToken);
+                    connectionName = client.ConnectionName;
+
+                    return await executeBatch(client, batch, cancellationToken);
+                }
+                catch (Exception ex) when (TryGetThrottleInfo(ex, out var retryAfter, out var errorCode))
+                {
+                    // Service protection is transient - always retry, never fail.
+                    // PooledClient already recorded the throttle via callback.
+                    // GetClientAsync will wait for a non-throttled connection.
+                    LogThrottle(connectionName, retryAfter, errorCode);
+
+                    // Continue to next iteration - pool handles the waiting
+                }
+                catch (Exception ex) when (IsAuthFailure(ex))
+                {
+                    // Extract connection name from exception if client is null
+                    var failedConnection = client?.ConnectionName
+                        ?? GetConnectionNameFromException(ex, connectionName);
+
+                    _logger.LogWarning(
+                        "Authentication failure on connection {Connection}. " +
+                        "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
+                        failedConnection, attempt, maxRetries, ex.Message);
+
+                    // Mark connection as invalid - it won't be returned to pool
+                    client?.MarkInvalid($"Auth failure: {ex.Message}");
+
+                    // Record the failure for statistics
+                    _connectionPool.RecordAuthFailure();
+
+                    if (attempt >= maxRetries)
+                    {
+                        throw new DataverseConnectionException(
+                            failedConnection,
+                            $"Authentication failure after {attempt} attempts",
+                            ex);
+                    }
+
+                    // Continue to next iteration to retry with new connection
+                }
+                catch (Exception ex) when (IsConnectionFailure(ex))
+                {
+                    // Extract connection name from exception if client is null (connection creation failed)
+                    var failedConnection = client?.ConnectionName
+                        ?? GetConnectionNameFromException(ex, connectionName);
+
+                    _logger.LogWarning(
+                        "Connection failure on {Connection}. " +
+                        "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
+                        failedConnection, attempt, maxRetries, ex.Message);
+
+                    // Mark connection as invalid (only if we have a client instance)
+                    client?.MarkInvalid($"Connection failure: {ex.Message}");
+
+                    // Record the failure for statistics
+                    _connectionPool.RecordConnectionFailure();
+
+                    if (attempt >= maxRetries)
+                    {
+                        throw new DataverseConnectionException(
+                            failedConnection,
+                            $"Connection failure after {attempt} attempts",
+                            ex);
+                    }
+
+                    // Continue to next iteration to retry with new connection
+                }
+                catch (Exception ex) when (IsTvpRaceConditionError(ex))
+                {
+                    // Exponential backoff: 500ms, 1s, 2s
+                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+
+                    _logger.LogWarning(
+                        "TVP race condition detected for {Entity}. " +
+                        "This is transient on new tables. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxTvpRetries}",
+                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxTvpRetries);
+
+                    if (attempt >= MaxTvpRetries)
+                    {
+                        _logger.LogError(
+                            "TVP race condition persisted after {MaxRetries} retries for {Entity}. " +
+                            "This may indicate a schema issue or concurrent schema modification.",
+                            MaxTvpRetries, entityLogicalName);
+                        throw;
+                    }
+
+                    await Task.Delay(delay, cancellationToken);
+
+                    // Continue to next iteration to retry
+                }
+                catch (Exception ex) when (IsDeadlockError(ex))
+                {
+                    // Exponential backoff: 500ms, 1s, 2s
+                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+
+                    _logger.LogWarning(
+                        "SQL deadlock detected for {Entity}. " +
+                        "This is transient under high concurrency. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxDeadlockRetries}",
+                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxDeadlockRetries);
+
+                    if (attempt >= MaxDeadlockRetries)
+                    {
+                        _logger.LogError(
+                            "SQL deadlock persisted after {MaxRetries} retries for {Entity}. " +
+                            "Consider reducing parallelism or batch size.",
+                            MaxDeadlockRetries, entityLogicalName);
+                        throw;
+                    }
+
+                    await Task.Delay(delay, cancellationToken);
+
+                    // Continue to next iteration to retry
+                }
+                catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException)
+                {
+                    // Cancellation is expected when Parallel.ForEachAsync cancels remaining operations
+                    // after one batch fails. Don't log as error - just return a canceled result.
+                    _logger.LogDebug(
+                        "{Operation} batch canceled. Entity: {Entity}, BatchSize: {BatchSize}",
+                        operationName, entityLogicalName, batch.Count);
+
+                    // Return empty result - the batch wasn't processed, not failed
+                    return new BulkOperationResult
+                    {
+                        SuccessCount = 0,
+                        FailureCount = 0,
+                        Errors = Array.Empty<BulkOperationError>(),
+                        Duration = TimeSpan.Zero
+                    };
+                }
+                catch (Exception ex)
+                {
+                    // Non-retryable error - convert to failure result
+                    _logger.LogError(ex, "{Operation} batch failed with non-retryable error. Entity: {Entity}, BatchSize: {BatchSize}",
+                        operationName, entityLogicalName, batch.Count);
+
+                    // Create appropriate failure result based on batch type
+                    if (batch is List<Entity> entityBatch)
+                    {
+                        return CreateFailureResultForEntities(entityBatch, ex);
+                    }
+                    else if (batch is List<Guid> idBatch)
+                    {
+                        return CreateFailureResultForIds(idBatch, ex);
+                    }
+                    else
+                    {
+                        // Unknown batch type - rethrow
+                        throw;
+                    }
+                }
+                finally
+                {
+                    if (client != null)
+                    {
+                        await client.DisposeAsync();
+                    }
+                }
+            }
+
+            // Unreachable: loop only exits via return (success/failure result),
+            // throw (non-retryable error), or cancellation (throws OperationCanceledException)
+        }
+
+        private Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "CreateMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteCreateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteCreateMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing CreateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new CreateMultipleRequest { Targets = targets };
@@ -235,6 +866,9 @@ namespace PPDS.Dataverse.BulkOperations
             try
             {
                 var response = (CreateMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
+
+                _logger.LogDebug("CreateMultiple batch completed. Entity: {Entity}, Created: {Created}",
+                    entityLogicalName, response.Ids.Length);
 
                 return new BulkOperationResult
                 {
@@ -247,7 +881,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
             catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
             {
-                // Elastic tables support partial success
+                // Elastic tables support partial success - this is expected behavior, not an error
                 return new BulkOperationResult
                 {
                     SuccessCount = successCount,
@@ -256,37 +890,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
-            {
-                // Standard tables: entire batch fails
-                _logger.LogError(ex, "CreateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
-                    entityLogicalName, batch.Count);
-
-                var errors = batch.Select((e, i) => new BulkOperationError
-                {
-                    Index = i,
-                    RecordId = e.Id != Guid.Empty ? e.Id : null,
-                    ErrorCode = -1,
-                    Message = ex.Message
-                }).ToList();
-
-                return new BulkOperationResult
-                {
-                    SuccessCount = 0,
-                    FailureCount = batch.Count,
-                    Errors = errors,
-                    Duration = TimeSpan.Zero
-                };
-            }
+            // All other errors propagate to wrapper for retry or failure handling
         }
 
-        private async Task<BulkOperationResult> ExecuteUpdateMultipleBatchAsync(
+        private Task<BulkOperationResult> ExecuteUpdateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "UpdateMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteUpdateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteUpdateMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing UpdateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpdateMultipleRequest { Targets = targets };
@@ -297,6 +927,9 @@ namespace PPDS.Dataverse.BulkOperations
             {
                 await client.ExecuteAsync(request, cancellationToken);
 
+                _logger.LogDebug("UpdateMultiple batch completed. Entity: {Entity}, Updated: {Updated}",
+                    entityLogicalName, batch.Count);
+
                 return new BulkOperationResult
                 {
                     SuccessCount = batch.Count,
@@ -307,6 +940,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
             catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
             {
+                // Elastic tables support partial success - this is expected behavior, not an error
                 return new BulkOperationResult
                 {
                     SuccessCount = successCount,
@@ -315,36 +949,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "UpdateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
-                    entityLogicalName, batch.Count);
-
-                var errors = batch.Select((e, i) => new BulkOperationError
-                {
-                    Index = i,
-                    RecordId = e.Id,
-                    ErrorCode = -1,
-                    Message = ex.Message
-                }).ToList();
-
-                return new BulkOperationResult
-                {
-                    SuccessCount = 0,
-                    FailureCount = batch.Count,
-                    Errors = errors,
-                    Duration = TimeSpan.Zero
-                };
-            }
+            // All other errors propagate to wrapper for retry or failure handling
         }
 
-        private async Task<BulkOperationResult> ExecuteUpsertMultipleBatchAsync(
+        private Task<BulkOperationResult> ExecuteUpsertMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "UpsertMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteUpsertMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteUpsertMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing UpsertMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpsertMultipleRequest { Targets = targets };
@@ -355,6 +986,9 @@ namespace PPDS.Dataverse.BulkOperations
             {
                 var response = (UpsertMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
 
+                _logger.LogDebug("UpsertMultiple batch completed. Entity: {Entity}, Success: {Success}",
+                    entityLogicalName, batch.Count);
+
                 return new BulkOperationResult
                 {
                     SuccessCount = batch.Count,
@@ -365,6 +999,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
             catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
             {
+                // Elastic tables support partial success - this is expected behavior, not an error
                 return new BulkOperationResult
                 {
                     SuccessCount = successCount,
@@ -373,36 +1008,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "UpsertMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
-                    entityLogicalName, batch.Count);
-
-                var errors = batch.Select((e, i) => new BulkOperationError
-                {
-                    Index = i,
-                    RecordId = e.Id != Guid.Empty ? e.Id : null,
-                    ErrorCode = -1,
-                    Message = ex.Message
-                }).ToList();
-
-                return new BulkOperationResult
-                {
-                    SuccessCount = 0,
-                    FailureCount = batch.Count,
-                    Errors = errors,
-                    Duration = TimeSpan.Zero
-                };
-            }
+            // All other errors propagate to wrapper for retry or failure handling
         }
 
-        private async Task<BulkOperationResult> ExecuteElasticDeleteBatchAsync(
+        private Task<BulkOperationResult> ExecuteElasticDeleteBatchAsync(
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "DeleteMultiple (elastic)",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteElasticDeleteCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteElasticDeleteCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing DeleteMultiple (elastic) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var entityReferences = batch
                 .Select(id => new EntityReference(entityLogicalName, id))
@@ -429,6 +1061,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
             catch (Exception ex) when (TryExtractBulkApiErrorsForDelete(ex, batch, out var errors, out var successCount))
             {
+                // DeleteMultiple supports partial success - this is expected behavior, not an error
                 return new BulkOperationResult
                 {
                     SuccessCount = successCount,
@@ -437,36 +1070,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "DeleteMultiple (elastic) batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
-                    entityLogicalName, batch.Count);
-
-                var errors = batch.Select((id, i) => new BulkOperationError
-                {
-                    Index = i,
-                    RecordId = id,
-                    ErrorCode = -1,
-                    Message = ex.Message
-                }).ToList();
-
-                return new BulkOperationResult
-                {
-                    SuccessCount = 0,
-                    FailureCount = batch.Count,
-                    Errors = errors,
-                    Duration = TimeSpan.Zero
-                };
-            }
+            // All other errors propagate to wrapper for retry or failure handling
         }
 
-        private async Task<BulkOperationResult> ExecuteStandardDeleteBatchAsync(
+        private Task<BulkOperationResult> ExecuteStandardDeleteBatchAsync(
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "DeleteMultiple (standard)",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteStandardDeleteCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteStandardDeleteCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing DeleteMultiple (standard) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var executeMultiple = new ExecuteMultipleRequest
             {
@@ -489,6 +1119,8 @@ namespace PPDS.Dataverse.BulkOperations
                 executeMultiple.Requests.Add(deleteRequest);
             }
 
+            // Note: ExecuteMultiple can also throw service protection errors
+            // These will propagate to the wrapper for retry
             var response = (ExecuteMultipleResponse)await client.ExecuteAsync(executeMultiple, cancellationToken);
 
             var errors = new List<BulkOperationError>();
@@ -660,6 +1292,109 @@ namespace PPDS.Dataverse.BulkOperations
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Executes batches in parallel with bounded concurrency.
+        /// </summary>
+        private static async Task<BulkOperationResult> ExecuteBatchesParallelAsync<T>(
+            List<List<T>> batches,
+            Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            int maxParallelism,
+            ProgressTracker tracker,
+            IProgress<ProgressSnapshot>? progress,
+            CancellationToken cancellationToken)
+        {
+            var allErrors = new ConcurrentBag<BulkOperationError>();
+            var allCreatedIds = new ConcurrentBag<Guid>();
+            var successCount = 0;
+            var failureCount = 0;
+
+            await Parallel.ForEachAsync(
+                batches,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxParallelism,
+                    CancellationToken = cancellationToken
+                },
+                async (batch, ct) =>
+                {
+                    // Use the combined cancellation token (ct) which includes Parallel.ForEachAsync's internal cancellation
+                    var batchResult = await executeBatch(batch, ct).ConfigureAwait(false);
+
+                    Interlocked.Add(ref successCount, batchResult.SuccessCount);
+                    Interlocked.Add(ref failureCount, batchResult.FailureCount);
+
+                    foreach (var error in batchResult.Errors)
+                    {
+                        allErrors.Add(error);
+                    }
+
+                    if (batchResult.CreatedIds != null)
+                    {
+                        foreach (var id in batchResult.CreatedIds)
+                        {
+                            allCreatedIds.Add(id);
+                        }
+                    }
+
+                    // Report progress after each batch
+                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                    progress?.Report(tracker.GetSnapshot());
+                }).ConfigureAwait(false);
+
+            return new BulkOperationResult
+            {
+                SuccessCount = successCount,
+                FailureCount = failureCount,
+                Errors = allErrors.ToList(),
+                Duration = TimeSpan.Zero,
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds.ToList() : null
+            };
+        }
+
+        /// <summary>
+        /// Creates a failure result for a batch of entities that failed due to a non-retryable error.
+        /// </summary>
+        private static BulkOperationResult CreateFailureResultForEntities(List<Entity> batch, Exception ex)
+        {
+            var errors = batch.Select((e, i) => new BulkOperationError
+            {
+                Index = i,
+                RecordId = e.Id != Guid.Empty ? e.Id : null,
+                ErrorCode = -1,
+                Message = ex.Message
+            }).ToList();
+
+            return new BulkOperationResult
+            {
+                SuccessCount = 0,
+                FailureCount = batch.Count,
+                Errors = errors,
+                Duration = TimeSpan.Zero
+            };
+        }
+
+        /// <summary>
+        /// Creates a failure result for a batch of IDs that failed due to a non-retryable error.
+        /// </summary>
+        private static BulkOperationResult CreateFailureResultForIds(List<Guid> batch, Exception ex)
+        {
+            var errors = batch.Select((id, i) => new BulkOperationError
+            {
+                Index = i,
+                RecordId = id,
+                ErrorCode = -1,
+                Message = ex.Message
+            }).ToList();
+
+            return new BulkOperationResult
+            {
+                SuccessCount = 0,
+                FailureCount = batch.Count,
+                Errors = errors,
+                Duration = TimeSpan.Zero
+            };
         }
 
         private static IEnumerable<List<T>> Batch<T>(IEnumerable<T> source, int batchSize)

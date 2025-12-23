@@ -7,10 +7,10 @@ namespace PPDS.Dataverse.BulkOperations
     {
         /// <summary>
         /// Gets or sets the number of records per batch.
-        /// Recommendation: 1000 for standard tables, 100 for elastic tables.
-        /// Default: 1000 (Dataverse maximum for standard tables)
+        /// Benchmarks show 100 is optimal for both standard and elastic tables.
+        /// Default: 100
         /// </summary>
-        public int BatchSize { get; set; } = 1000;
+        public int BatchSize { get; set; } = 100;
 
         /// <summary>
         /// Gets or sets a value indicating whether the target is an elastic table (Cosmos DB-backed).
@@ -79,5 +79,19 @@ namespace PPDS.Dataverse.BulkOperations
         /// Default: false
         /// </summary>
         public bool SuppressDuplicateDetection { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets the maximum number of batches to process in parallel.
+        /// <para>
+        /// When null (default), uses the ServiceClient's RecommendedDegreesOfParallelism
+        /// which comes from the x-ms-dop-hint response header from Dataverse.
+        /// </para>
+        /// <para>
+        /// Set to 1 for sequential processing, or a specific value to override
+        /// Microsoft's recommendation.
+        /// </para>
+        /// Default: null (use RecommendedDegreesOfParallelism)
+        /// </summary>
+        public int? MaxParallelBatches { get; set; } = null;
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
+using PPDS.Dataverse.Progress;
 
 namespace PPDS.Dataverse.BulkOperations
 {
@@ -18,12 +19,14 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to create.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
         Task<BulkOperationResult> CreateMultipleAsync(
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -32,12 +35,14 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to update.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
         Task<BulkOperationResult> UpdateMultipleAsync(
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -46,12 +51,14 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="entities">The entities to upsert.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
         Task<BulkOperationResult> UpsertMultipleAsync(
             string entityLogicalName,
             IEnumerable<Entity> entities,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -60,12 +67,14 @@ namespace PPDS.Dataverse.BulkOperations
         /// <param name="entityLogicalName">The entity logical name.</param>
         /// <param name="ids">The IDs of the records to delete.</param>
         /// <param name="options">Bulk operation options.</param>
+        /// <param name="progress">Optional progress reporter for tracking operation progress.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The result of the operation.</returns>
         Task<BulkOperationResult> DeleteMultipleAsync(
             string entityLogicalName,
             IEnumerable<Guid> ids,
             BulkOperationOptions? options = null,
+            IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default);
     }
 }

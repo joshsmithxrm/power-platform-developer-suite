@@ -20,6 +20,7 @@ public static class Program
         rootCommand.AddCommand(ImportCommand.Create());
         rootCommand.AddCommand(AnalyzeCommand.Create());
         rootCommand.AddCommand(MigrateCommand.Create());
+        rootCommand.AddCommand(SchemaCommand.Create());
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();

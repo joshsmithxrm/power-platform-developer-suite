@@ -6,7 +6,7 @@ namespace PPDS.Dataverse.BulkOperations
     /// <summary>
     /// Result of a bulk operation.
     /// </summary>
-    public class BulkOperationResult
+    public record BulkOperationResult
     {
         /// <summary>
         /// Gets the number of successful operations.

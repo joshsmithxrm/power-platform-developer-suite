@@ -40,5 +40,22 @@ namespace PPDS.Dataverse.Resilience
         /// Gets the total number of throttle events recorded.
         /// </summary>
         long TotalThrottleEvents { get; }
+
+        /// <summary>
+        /// Gets the number of currently throttled connections.
+        /// </summary>
+        int ThrottledConnectionCount { get; }
+
+        /// <summary>
+        /// Gets the names of all currently throttled connections.
+        /// </summary>
+        IReadOnlyCollection<string> ThrottledConnections { get; }
+
+        /// <summary>
+        /// Gets the shortest time until any throttled connection expires.
+        /// Returns <see cref="TimeSpan.Zero"/> if no connections are throttled.
+        /// </summary>
+        /// <returns>The shortest time until a throttle expires, or <see cref="TimeSpan.Zero"/> if none are throttled.</returns>
+        TimeSpan GetShortestExpiry();
     }
 }

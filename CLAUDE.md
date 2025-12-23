@@ -1,6 +1,6 @@
 # CLAUDE.md - ppds-sdk
 
-**NuGet packages for Power Platform plugin development.**
+**NuGet packages for Power Platform development: plugin attributes, Dataverse connectivity, and migration tooling.**
 
 **Part of the PPDS Ecosystem** - See `C:\VS\ppds\CLAUDE.md` for cross-project context.
 
@@ -15,6 +15,10 @@
 | Skip XML documentation on public APIs | Consumers need IntelliSense documentation |
 | Multi-target without testing all frameworks | Dataverse has specific .NET requirements |
 | Commit with failing tests | All tests must pass before merge |
+| Create new ServiceClient per request | 42,000x slower than Clone/pool pattern; wastes ~446ms per instance |
+| Guess parallelism values | Use `RecommendedDegreesOfParallelism` from server; guessing degrades performance |
+| Enable affinity cookie for bulk operations | Routes all requests to single backend node; 10x throughput loss |
+| Store pooled clients in fields | Causes connection leaks; get per operation, dispose immediately |
 
 ---
 
@@ -28,6 +32,10 @@
 | Run `dotnet test` before PR | Ensures no regressions |
 | Update `CHANGELOG.md` with changes | Release notes for consumers |
 | Follow SemVer versioning | Clear compatibility expectations |
+| Use connection pool for multi-request scenarios | Reuses connections, applies performance settings automatically |
+| Dispose pooled clients with `await using` | Returns connections to pool; prevents leaks |
+| Use bulk APIs (`CreateMultiple`, `UpdateMultiple`, `UpsertMultiple`) | 5x faster than `ExecuteMultiple` (~10M vs ~2M records/hour) |
+| Reference Microsoft Learn docs in ADRs | Authoritative source for Dataverse best practices |
 
 ---
 
@@ -47,13 +55,25 @@
 ```
 ppds-sdk/
 ├── src/
-│   └── PPDS.Plugins/
-│       ├── Attributes/          # PluginStepAttribute, PluginImageAttribute
-│       ├── Enums/               # PluginStage, PluginMode, PluginImageType
-│       ├── PPDS.Plugins.csproj
-│       └── PPDS.Plugins.snk     # Strong name key (DO NOT regenerate)
+│   ├── PPDS.Plugins/
+│   │   ├── Attributes/          # PluginStepAttribute, PluginImageAttribute
+│   │   ├── Enums/               # PluginStage, PluginMode, PluginImageType
+│   │   ├── PPDS.Plugins.csproj
+│   │   └── PPDS.Plugins.snk     # Strong name key (DO NOT regenerate)
+│   ├── PPDS.Dataverse/
+│   │   ├── BulkOperations/      # CreateMultiple, UpdateMultiple, UpsertMultiple
+│   │   ├── Client/              # DataverseClient, IDataverseClient
+│   │   ├── Pooling/             # Connection pool, strategies
+│   │   ├── Resilience/          # Throttle tracking, retry logic
+│   │   └── PPDS.Dataverse.csproj
+│   ├── PPDS.Migration/          # Migration engine library
+│   └── PPDS.Migration.Cli/      # CLI tool (ppds-migrate)
 ├── tests/
-│   └── PPDS.Plugins.Tests/
+│   ├── PPDS.Plugins.Tests/
+│   └── PPDS.Dataverse.Tests/
+├── docs/
+│   ├── adr/                     # Architecture Decision Records
+│   └── architecture/            # Pattern documentation
 ├── .github/workflows/
 │   ├── build.yml               # CI build
 │   ├── test.yml                # CI tests
@@ -200,8 +220,61 @@ namespace PPDS.Plugins.Enums;        // Enums
 |------|---------|
 | `PPDS.Plugins.csproj` | Project config, version, NuGet metadata |
 | `PPDS.Plugins.snk` | Strong name key (DO NOT regenerate) |
+| `PPDS.Dataverse.csproj` | Dataverse client library |
 | `CHANGELOG.md` | Release notes |
 | `.editorconfig` | Code style settings |
+
+---
+
+## ⚡ Dataverse Performance (PPDS.Dataverse)
+
+### Microsoft's Required Settings for Maximum Throughput
+
+The connection pool automatically applies these settings. If bypassing the pool, you MUST apply them manually:
+
+```csharp
+ThreadPool.SetMinThreads(100, 100);           // Default is 4
+ServicePointManager.DefaultConnectionLimit = 65000;  // Default is 2
+ServicePointManager.Expect100Continue = false;
+ServicePointManager.UseNagleAlgorithm = false;
+```
+
+### Service Protection Limits (Per User, Per 5-Minute Window)
+
+| Limit | Value |
+|-------|-------|
+| Requests | 6,000 |
+| Execution time | 20 minutes |
+| Concurrent requests | 52 (check `x-ms-dop-hint` header) |
+
+### Throughput Benchmarks (Microsoft Reference)
+
+| Approach | Throughput |
+|----------|------------|
+| Single requests | ~50K records/hour |
+| ExecuteMultiple | ~2M records/hour |
+| CreateMultiple/UpdateMultiple | ~10M records/hour |
+| Elastic tables | ~120M writes/hour |
+
+### Key Documentation
+
+- [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update)
+- [Send parallel requests](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/send-parallel-requests)
+- [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
+- [Use bulk operation messages](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/bulk-operations)
+
+### Throttle Recovery (Known Limitation)
+
+The pool handles service protection errors transparently (waits and retries). However, it currently resumes at **full parallelism** after recovery, which can cause re-throttling with extended `Retry-After` durations.
+
+**Microsoft recommends** gradual ramp-up after throttle recovery. This is planned for a future enhancement (see ADR-0004).
+
+**Workaround**: Use lower `MaxParallelBatches` to reduce throttle frequency:
+
+```csharp
+var options = new BulkOperationOptions { MaxParallelBatches = 10 };
+await executor.UpsertMultipleAsync(entities, options);
+```
 
 ---
 

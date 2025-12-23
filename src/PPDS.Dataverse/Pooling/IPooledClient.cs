@@ -41,5 +41,23 @@ namespace PPDS.Dataverse.Pooling
         /// Gets when this connection was last used.
         /// </summary>
         DateTime LastUsedAt { get; }
+
+        /// <summary>
+        /// Gets whether this connection has been marked as invalid.
+        /// Invalid connections will be disposed instead of returned to the pool.
+        /// </summary>
+        bool IsInvalid { get; }
+
+        /// <summary>
+        /// Gets the reason the connection was marked invalid, if any.
+        /// </summary>
+        string? InvalidReason { get; }
+
+        /// <summary>
+        /// Marks this connection as invalid. It will be disposed on return instead of being pooled.
+        /// Call this when an unrecoverable error occurs (auth failure, connection failure, etc.).
+        /// </summary>
+        /// <param name="reason">The reason for invalidation (for logging/diagnostics).</param>
+        void MarkInvalid(string reason);
     }
 }

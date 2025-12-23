@@ -38,6 +38,21 @@ namespace PPDS.Dataverse.Pooling
         public long ThrottleEvents { get; init; }
 
         /// <summary>
+        /// Gets the number of connections that were invalidated due to failures.
+        /// </summary>
+        public long InvalidConnections { get; init; }
+
+        /// <summary>
+        /// Gets the number of authentication failures detected.
+        /// </summary>
+        public long AuthFailures { get; init; }
+
+        /// <summary>
+        /// Gets the number of connection failures detected.
+        /// </summary>
+        public long ConnectionFailures { get; init; }
+
+        /// <summary>
         /// Gets per-connection statistics.
         /// </summary>
         public IReadOnlyDictionary<string, ConnectionStatistics> ConnectionStats { get; init; }

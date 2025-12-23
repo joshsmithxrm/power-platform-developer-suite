@@ -48,6 +48,16 @@ namespace PPDS.Migration.Progress
         public double? RecordsPerSecond { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of records that succeeded in the current batch/phase.
+        /// </summary>
+        public int SuccessCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records that failed in the current batch/phase.
+        /// </summary>
+        public int FailureCount { get; set; }
+
+        /// <summary>
         /// Gets or sets a descriptive message.
         /// </summary>
         public string? Message { get; set; }

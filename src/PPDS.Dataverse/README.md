@@ -134,6 +134,91 @@ services.AddDataverseConnectionPool(options =>
 services.AddDataverseConnectionPool(configuration);
 ```
 
+## Multi-Environment Scenarios
+
+When working with multiple environments (Dev, QA, Prod), **do not put them in the same connection pool**. The pool is designed for load-balancing within a single organization, not for cross-environment operations.
+
+### Wrong: Multiple Orgs in One Pool
+
+```json
+{
+  "Dataverse": {
+    "Connections": [
+      { "Name": "Dev", "ConnectionString": "Url=https://dev.crm.dynamics.com;..." },
+      { "Name": "QA", "ConnectionString": "Url=https://qa.crm.dynamics.com;..." }
+    ]
+  }
+}
+```
+
+This will load-balance requests randomly across Dev and QA, which is almost never intended. The SDK will log a warning if it detects this configuration.
+
+### Correct: Separate Providers per Environment
+
+Structure your configuration with separate environment sections:
+
+```json
+{
+  "Environments": {
+    "Dev": {
+      "ConnectionString": "AuthType=OAuth;Url=https://dev.crm.dynamics.com;..."
+    },
+    "QA": {
+      "ConnectionString": "AuthType=OAuth;Url=https://qa.crm.dynamics.com;..."
+    },
+    "Prod": {
+      "ConnectionString": "AuthType=OAuth;Url=https://prod.crm.dynamics.com;..."
+    }
+  }
+}
+```
+
+Then create separate service providers for each environment:
+
+```csharp
+// Create separate providers per environment
+await using var devProvider = CreateProvider(config["Environments:Dev:ConnectionString"]);
+await using var qaProvider = CreateProvider(config["Environments:QA:ConnectionString"]);
+
+// Export from Dev
+var devExporter = devProvider.GetRequiredService<IExporter>();
+await devExporter.ExportAsync(schema, "data.zip", options);
+
+// Import to QA
+var qaImporter = qaProvider.GetRequiredService<IImporter>();
+await qaImporter.ImportAsync("data.zip", importOptions);
+
+ServiceProvider CreateProvider(string connectionString)
+{
+    var services = new ServiceCollection();
+    services.AddDataverseConnectionPool(options =>
+    {
+        options.Connections.Add(new DataverseConnection("Primary", connectionString));
+    });
+    // Add other services...
+    return services.BuildServiceProvider();
+}
+```
+
+### When to Use Multiple Connections in One Pool
+
+Multiple connections in a single pool are appropriate when:
+
+1. **Same organization, multiple Application Users** - Multiply your API quota by using multiple registered applications:
+
+   ```json
+   {
+     "Dataverse": {
+       "Connections": [
+         { "Name": "AppUser1", "ConnectionString": "Url=https://org.crm.dynamics.com;ClientId=app1;..." },
+         { "Name": "AppUser2", "ConnectionString": "Url=https://org.crm.dynamics.com;ClientId=app2;..." }
+       ]
+     }
+   }
+   ```
+
+2. **High-availability within one org** - Multiple connections to the same org for resilience.
+
 ## Impersonation
 
 Execute operations on behalf of another user:

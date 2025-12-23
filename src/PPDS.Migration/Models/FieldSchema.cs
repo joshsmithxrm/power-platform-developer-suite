@@ -38,6 +38,11 @@ namespace PPDS.Migration.Models
         public bool IsRequired { get; set; }
 
         /// <summary>
+        /// Gets or sets whether this field is the primary key.
+        /// </summary>
+        public bool IsPrimaryKey { get; set; }
+
+        /// <summary>
         /// Gets or sets the maximum length for string fields.
         /// </summary>
         public int? MaxLength { get; set; }
@@ -48,9 +53,10 @@ namespace PPDS.Migration.Models
         public int? Precision { get; set; }
 
         /// <summary>
-        /// Gets whether this field is a lookup type (lookup, customer, owner).
+        /// Gets whether this field is a lookup type.
         /// </summary>
-        public bool IsLookup => Type.Equals("lookup", StringComparison.OrdinalIgnoreCase) ||
+        public bool IsLookup => Type.Equals("entityreference", StringComparison.OrdinalIgnoreCase) ||
+                                Type.Equals("lookup", StringComparison.OrdinalIgnoreCase) ||
                                 Type.Equals("customer", StringComparison.OrdinalIgnoreCase) ||
                                 Type.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
                                 Type.Equals("partylist", StringComparison.OrdinalIgnoreCase);

@@ -1,24 +1,28 @@
 using System;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Client;
+using PPDS.Dataverse.Resilience;
 
 namespace PPDS.Dataverse.Pooling
 {
     /// <summary>
     /// A client wrapper that returns the connection to the pool on dispose.
+    /// Automatically detects and records throttle events.
     /// </summary>
     internal sealed class PooledClient : IPooledClient
     {
         private readonly IDataverseClient _client;
         private readonly Action<PooledClient> _returnToPool;
+        private readonly Action<string, TimeSpan>? _onThrottle;
         private readonly Guid _originalCallerId;
         private readonly Guid? _originalCallerAADObjectId;
         private readonly int _originalMaxRetryCount;
         private readonly TimeSpan _originalRetryPauseTime;
-        private bool _disposed;
+        private int _returned;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PooledClient"/> class.
@@ -26,10 +30,16 @@ namespace PPDS.Dataverse.Pooling
         /// <param name="client">The underlying client.</param>
         /// <param name="connectionName">The name of the connection configuration.</param>
         /// <param name="returnToPool">Action to call when returning to pool.</param>
-        internal PooledClient(IDataverseClient client, string connectionName, Action<PooledClient> returnToPool)
+        /// <param name="onThrottle">Optional callback when throttle is detected (connectionName, retryAfter).</param>
+        internal PooledClient(
+            IDataverseClient client,
+            string connectionName,
+            Action<PooledClient> returnToPool,
+            Action<string, TimeSpan>? onThrottle = null)
         {
             _client = client ?? throw new ArgumentNullException(nameof(client));
             _returnToPool = returnToPool ?? throw new ArgumentNullException(nameof(returnToPool));
+            _onThrottle = onThrottle;
             ConnectionName = connectionName ?? throw new ArgumentNullException(nameof(connectionName));
             ConnectionId = Guid.NewGuid();
             CreatedAt = DateTime.UtcNow;
@@ -53,6 +63,19 @@ namespace PPDS.Dataverse.Pooling
 
         /// <inheritdoc />
         public DateTime LastUsedAt { get; internal set; }
+
+        /// <inheritdoc />
+        public bool IsInvalid { get; private set; }
+
+        /// <inheritdoc />
+        public string? InvalidReason { get; private set; }
+
+        /// <inheritdoc />
+        public void MarkInvalid(string reason)
+        {
+            IsInvalid = true;
+            InvalidReason = reason;
+        }
 
         /// <inheritdoc />
         public bool IsReady => _client.IsReady;
@@ -118,7 +141,7 @@ namespace PPDS.Dataverse.Pooling
         }
 
         /// <summary>
-        /// Resets the client to its original state.
+        /// Resets the client to its original state and marks it available for reuse.
         /// </summary>
         internal void Reset()
         {
@@ -126,6 +149,13 @@ namespace PPDS.Dataverse.Pooling
             _client.CallerAADObjectId = _originalCallerAADObjectId;
             _client.MaxRetryCount = _originalMaxRetryCount;
             _client.RetryPauseTime = _originalRetryPauseTime;
+
+            // Reset the invalid state
+            IsInvalid = false;
+            InvalidReason = null;
+
+            // Reset the returned flag so this client can be returned again on next use
+            Interlocked.Exchange(ref _returned, 0);
         }
 
         /// <summary>
@@ -165,117 +195,237 @@ namespace PPDS.Dataverse.Pooling
             }
         }
 
+        #region Throttle Detection
+
+        private static readonly TimeSpan FallbackRetryAfter = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// Checks if an exception is a service protection error and extracts the RetryAfter.
+        /// </summary>
+        private bool TryHandleThrottle(Exception ex)
+        {
+            if (ex is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+            if (!ServiceProtectionException.IsServiceProtectionError(fault.ErrorCode))
+            {
+                return false;
+            }
+
+            // Extract RetryAfter and notify the pool
+            var retryAfter = ExtractRetryAfter(fault);
+            _onThrottle?.Invoke(ConnectionName, retryAfter);
+            return true;
+        }
+
+        /// <summary>
+        /// Extracts the Retry-After duration from a fault.
+        /// </summary>
+        private static TimeSpan ExtractRetryAfter(OrganizationServiceFault fault)
+        {
+            if (fault.ErrorDetails != null &&
+                fault.ErrorDetails.TryGetValue("Retry-After", out var retryAfterObj))
+            {
+                return retryAfterObj switch
+                {
+                    TimeSpan ts => ts,
+                    int seconds => TimeSpan.FromSeconds(seconds),
+                    double seconds => TimeSpan.FromSeconds(seconds),
+                    _ => FallbackRetryAfter
+                };
+            }
+
+            return FallbackRetryAfter;
+        }
+
+        /// <summary>
+        /// Wraps a synchronous operation with throttle detection.
+        /// </summary>
+        private T ExecuteWithThrottleDetection<T>(Func<T> operation)
+        {
+            try
+            {
+                return operation();
+            }
+            catch (Exception ex) when (TryHandleThrottle(ex))
+            {
+                throw; // Re-throw after recording throttle
+            }
+        }
+
+        /// <summary>
+        /// Wraps a synchronous void operation with throttle detection.
+        /// </summary>
+        private void ExecuteWithThrottleDetection(Action operation)
+        {
+            try
+            {
+                operation();
+            }
+            catch (Exception ex) when (TryHandleThrottle(ex))
+            {
+                throw; // Re-throw after recording throttle
+            }
+        }
+
+        /// <summary>
+        /// Wraps an async operation with throttle detection.
+        /// </summary>
+        private async Task<T> ExecuteWithThrottleDetectionAsync<T>(Func<Task<T>> operation)
+        {
+            try
+            {
+                return await operation().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (TryHandleThrottle(ex))
+            {
+                throw; // Re-throw after recording throttle
+            }
+        }
+
+        /// <summary>
+        /// Wraps an async void operation with throttle detection.
+        /// </summary>
+        private async Task ExecuteWithThrottleDetectionAsync(Func<Task> operation)
+        {
+            try
+            {
+                await operation().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (TryHandleThrottle(ex))
+            {
+                throw; // Re-throw after recording throttle
+            }
+        }
+
+        #endregion
+
         #region IOrganizationService Implementation
 
         /// <inheritdoc />
-        public Guid Create(Entity entity) => _client.Create(entity);
+        public Guid Create(Entity entity) =>
+            ExecuteWithThrottleDetection(() => _client.Create(entity));
 
         /// <inheritdoc />
-        public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet)
-            => _client.Retrieve(entityName, id, columnSet);
+        public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet) =>
+            ExecuteWithThrottleDetection(() => _client.Retrieve(entityName, id, columnSet));
 
         /// <inheritdoc />
-        public void Update(Entity entity) => _client.Update(entity);
+        public void Update(Entity entity) =>
+            ExecuteWithThrottleDetection(() => _client.Update(entity));
 
         /// <inheritdoc />
-        public void Delete(string entityName, Guid id) => _client.Delete(entityName, id);
+        public void Delete(string entityName, Guid id) =>
+            ExecuteWithThrottleDetection(() => _client.Delete(entityName, id));
 
         /// <inheritdoc />
-        public OrganizationResponse Execute(OrganizationRequest request) => _client.Execute(request);
+        public OrganizationResponse Execute(OrganizationRequest request) =>
+            ExecuteWithThrottleDetection(() => _client.Execute(request));
 
         /// <inheritdoc />
-        public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
-            => _client.Associate(entityName, entityId, relationship, relatedEntities);
+        public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) =>
+            ExecuteWithThrottleDetection(() => _client.Associate(entityName, entityId, relationship, relatedEntities));
 
         /// <inheritdoc />
-        public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
-            => _client.Disassociate(entityName, entityId, relationship, relatedEntities);
+        public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) =>
+            ExecuteWithThrottleDetection(() => _client.Disassociate(entityName, entityId, relationship, relatedEntities));
 
         /// <inheritdoc />
-        public EntityCollection RetrieveMultiple(QueryBase query) => _client.RetrieveMultiple(query);
+        public EntityCollection RetrieveMultiple(QueryBase query) =>
+            ExecuteWithThrottleDetection(() => _client.RetrieveMultiple(query));
 
         #endregion
 
         #region IOrganizationServiceAsync Implementation
 
         /// <inheritdoc />
-        public Task<Guid> CreateAsync(Entity entity) => _client.CreateAsync(entity);
+        public Task<Guid> CreateAsync(Entity entity) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.CreateAsync(entity));
 
         /// <inheritdoc />
-        public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet)
-            => _client.RetrieveAsync(entityName, id, columnSet);
+        public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.RetrieveAsync(entityName, id, columnSet));
 
         /// <inheritdoc />
-        public Task UpdateAsync(Entity entity) => _client.UpdateAsync(entity);
+        public Task UpdateAsync(Entity entity) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.UpdateAsync(entity));
 
         /// <inheritdoc />
-        public Task DeleteAsync(string entityName, Guid id) => _client.DeleteAsync(entityName, id);
+        public Task DeleteAsync(string entityName, Guid id) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.DeleteAsync(entityName, id));
 
         /// <inheritdoc />
-        public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request) => _client.ExecuteAsync(request);
+        public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.ExecuteAsync(request));
 
         /// <inheritdoc />
-        public Task AssociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
-            => _client.AssociateAsync(entityName, entityId, relationship, relatedEntities);
+        public Task AssociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.AssociateAsync(entityName, entityId, relationship, relatedEntities));
 
         /// <inheritdoc />
-        public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
-            => _client.DisassociateAsync(entityName, entityId, relationship, relatedEntities);
+        public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.DisassociateAsync(entityName, entityId, relationship, relatedEntities));
 
         /// <inheritdoc />
-        public Task<EntityCollection> RetrieveMultipleAsync(QueryBase query) => _client.RetrieveMultipleAsync(query);
+        public Task<EntityCollection> RetrieveMultipleAsync(QueryBase query) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.RetrieveMultipleAsync(query));
 
         #endregion
 
         #region IOrganizationServiceAsync2 Implementation
 
         /// <inheritdoc />
-        public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken)
-            => _client.CreateAsync(entity, cancellationToken);
+        public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.CreateAsync(entity, cancellationToken));
 
         /// <inheritdoc />
-        public Task<Entity> CreateAndReturnAsync(Entity entity, CancellationToken cancellationToken)
-            => _client.CreateAndReturnAsync(entity, cancellationToken);
+        public Task<Entity> CreateAndReturnAsync(Entity entity, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.CreateAndReturnAsync(entity, cancellationToken));
 
         /// <inheritdoc />
-        public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken)
-            => _client.RetrieveAsync(entityName, id, columnSet, cancellationToken);
+        public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.RetrieveAsync(entityName, id, columnSet, cancellationToken));
 
         /// <inheritdoc />
-        public Task UpdateAsync(Entity entity, CancellationToken cancellationToken)
-            => _client.UpdateAsync(entity, cancellationToken);
+        public Task UpdateAsync(Entity entity, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.UpdateAsync(entity, cancellationToken));
 
         /// <inheritdoc />
-        public Task DeleteAsync(string entityName, Guid id, CancellationToken cancellationToken)
-            => _client.DeleteAsync(entityName, id, cancellationToken);
+        public Task DeleteAsync(string entityName, Guid id, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.DeleteAsync(entityName, id, cancellationToken));
 
         /// <inheritdoc />
-        public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken)
-            => _client.ExecuteAsync(request, cancellationToken);
+        public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.ExecuteAsync(request, cancellationToken));
 
         /// <inheritdoc />
-        public Task AssociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken)
-            => _client.AssociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken);
+        public Task AssociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.AssociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken));
 
         /// <inheritdoc />
-        public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken)
-            => _client.DisassociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken);
+        public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.DisassociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken));
 
         /// <inheritdoc />
-        public Task<EntityCollection> RetrieveMultipleAsync(QueryBase query, CancellationToken cancellationToken)
-            => _client.RetrieveMultipleAsync(query, cancellationToken);
+        public Task<EntityCollection> RetrieveMultipleAsync(QueryBase query, CancellationToken cancellationToken) =>
+            ExecuteWithThrottleDetectionAsync(() => _client.RetrieveMultipleAsync(query, cancellationToken));
 
         #endregion
 
         /// <inheritdoc />
         public void Dispose()
         {
-            if (_disposed)
+            // Use Interlocked.Exchange to ensure we only return to pool once per checkout.
+            // This prevents double-release of the semaphore if Dispose is called multiple times.
+            // The flag is reset in Reset() when the connection is returned to the pool.
+            if (Interlocked.Exchange(ref _returned, 1) != 0)
             {
                 return;
             }
 
-            _disposed = true;
             _returnToPool(this);
         }
 

@@ -1,0 +1,75 @@
+# =============================================================================
+# Security: CodeQL Analysis
+# =============================================================================
+# Performs semantic code analysis to find security vulnerabilities and
+# code quality issues in C# code.
+#
+# Triggers:
+#   - Push to main branch
+#   - Pull requests to main
+#   - Weekly schedule (Monday 9 AM UTC)
+#
+# For more info: https://docs.github.com/en/code-security/code-scanning
+# =============================================================================
+
+name: 'Security: CodeQL'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.cs'
+      - '**/*.csproj'
+      - '*.sln'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.cs'
+      - '**/*.csproj'
+      - '*.sln'
+
+  schedule:
+    # Weekly scan on Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze C#
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          # Use security-and-quality for comprehensive analysis
+          queries: security-and-quality
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.x'
+
+      - name: Build solution
+        run: |
+          dotnet restore
+          dotnet build --no-restore --configuration Release
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:csharp"

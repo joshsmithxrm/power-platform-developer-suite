@@ -104,6 +104,30 @@ var tasks = accountIds.Select(async id =>
 var results = await Task.WhenAll(tasks);
 ```
 
+### Using Server-Recommended Parallelism
+
+Microsoft provides a recommended degree of parallelism via the `x-ms-dop-hint` response header, exposed as `RecommendedDegreesOfParallelism` on the client. **Performance degrades if you exceed this value.**
+
+```csharp
+await using var client = await _pool.GetClientAsync();
+
+// Get server-recommended parallelism (typically varies by environment)
+int recommendedDop = client.RecommendedDegreesOfParallelism;
+
+var parallelOptions = new ParallelOptions
+{
+    MaxDegreeOfParallelism = recommendedDop
+};
+
+await Parallel.ForEachAsync(records, parallelOptions, async (record, ct) =>
+{
+    await using var innerClient = await _pool.GetClientAsync();
+    await innerClient.CreateAsync(record, ct);
+});
+```
+
+> **Note:** The recommended value varies based on environment resources and current load. Always query it dynamically rather than hardcoding.
+
 ## Scaling Pattern
 
 For high-throughput scenarios, use multiple Application Users:
@@ -151,3 +175,23 @@ _logger.LogInformation(
 | `MaxLifetime` | 30m | Recycle connections after |
 | `DisableAffinityCookie` | true | Distribute across backend nodes |
 | `SelectionStrategy` | ThrottleAware | How to pick connections |
+
+## Performance Settings Applied Automatically
+
+The connection pool automatically applies Microsoft's recommended performance settings:
+
+```csharp
+ThreadPool.SetMinThreads(100, 100);           // Default is 4
+ServicePointManager.DefaultConnectionLimit = 65000;  // Default is 2
+ServicePointManager.Expect100Continue = false;
+ServicePointManager.UseNagleAlgorithm = false;
+```
+
+These are applied once when the first pool is created. If you bypass the pool and create `ServiceClient` instances directly, you must apply these settings manually.
+
+## References
+
+- [Send parallel requests](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/send-parallel-requests) - Parallelism patterns and `x-ms-dop-hint`
+- [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update) - Connection optimization settings
+- [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits) - Throttling thresholds
+- [Scaling Dynamics 365 CRM Integrations in Azure](https://techcommunity.microsoft.com/blog/microsoftmissioncriticalblog/scaling-dynamics-365-crm-integrations-in-azure-the-right-way-to-use-the-sdk-s/4447143) - Clone pattern and anti-patterns

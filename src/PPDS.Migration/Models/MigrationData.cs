@@ -23,10 +23,10 @@ namespace PPDS.Migration.Models
 
         /// <summary>
         /// Gets or sets the many-to-many relationship data.
-        /// Key is relationship name, value is list of associations.
+        /// Key is entity logical name (source entity), value is list of grouped associations.
         /// </summary>
-        public IReadOnlyDictionary<string, IReadOnlyList<ManyToManyAssociation>> RelationshipData { get; set; }
-            = new Dictionary<string, IReadOnlyList<ManyToManyAssociation>>();
+        public IReadOnlyDictionary<string, IReadOnlyList<ManyToManyRelationshipData>> RelationshipData { get; set; }
+            = new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>();
 
         /// <summary>
         /// Gets or sets the export timestamp.
@@ -56,33 +56,39 @@ namespace PPDS.Migration.Models
     }
 
     /// <summary>
-    /// Represents a many-to-many association between two records.
+    /// Represents grouped M2M associations for one source record.
+    /// Matches CMT data.xml format where each source has a list of targets.
     /// </summary>
-    public class ManyToManyAssociation
+    public class ManyToManyRelationshipData
     {
         /// <summary>
-        /// Gets or sets the relationship name.
+        /// Gets or sets the relationship schema name.
         /// </summary>
         public string RelationshipName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the first entity logical name.
+        /// Gets or sets the source entity logical name.
         /// </summary>
-        public string Entity1LogicalName { get; set; } = string.Empty;
+        public string SourceEntityName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the first record ID.
+        /// Gets or sets the source record ID.
         /// </summary>
-        public Guid Entity1Id { get; set; }
+        public Guid SourceId { get; set; }
 
         /// <summary>
-        /// Gets or sets the second entity logical name.
+        /// Gets or sets the target entity logical name.
         /// </summary>
-        public string Entity2LogicalName { get; set; } = string.Empty;
+        public string TargetEntityName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the second record ID.
+        /// Gets or sets the target entity's primary key field name.
         /// </summary>
-        public Guid Entity2Id { get; set; }
+        public string TargetEntityPrimaryKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the target record IDs.
+        /// </summary>
+        public List<Guid> TargetIds { get; set; } = new();
     }
 }

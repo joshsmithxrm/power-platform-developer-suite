@@ -7,6 +7,7 @@ using PPDS.Migration.Export;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
 using PPDS.Migration.Progress;
+using PPDS.Migration.Schema;
 
 namespace PPDS.Migration.DependencyInjection
 {
@@ -42,8 +43,12 @@ namespace PPDS.Migration.DependencyInjection
 
             // Formats
             services.AddTransient<ICmtSchemaReader, CmtSchemaReader>();
+            services.AddTransient<ICmtSchemaWriter, CmtSchemaWriter>();
             services.AddTransient<ICmtDataReader, CmtDataReader>();
             services.AddTransient<ICmtDataWriter, CmtDataWriter>();
+
+            // Schema generation
+            services.AddTransient<ISchemaGenerator, DataverseSchemaGenerator>();
 
             // Analysis
             services.AddTransient<IDependencyGraphBuilder, DependencyGraphBuilder>();
@@ -53,6 +58,7 @@ namespace PPDS.Migration.DependencyInjection
             services.AddTransient<IExporter, ParallelExporter>();
 
             // Import
+            services.AddTransient<IPluginStepManager, PluginStepManager>();
             services.AddTransient<IImporter, TieredImporter>();
 
             // Progress reporters

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 
 namespace PPDS.Migration.Progress
 {
@@ -8,6 +9,8 @@ namespace PPDS.Migration.Progress
     /// </summary>
     public class ConsoleProgressReporter : IProgressReporter
     {
+        private const int MaxErrorsToDisplay = 10;
+
         private readonly Stopwatch _stopwatch = new();
         private string? _lastEntity;
         private int _lastProgress;
@@ -41,7 +44,12 @@ namespace PPDS.Migration.Progress
                         var rps = args.RecordsPerSecond.HasValue ? $" @ {args.RecordsPerSecond:F1} rec/s" : "";
                         var pct = args.Total > 0 ? $" ({args.PercentComplete:F0}%)" : "";
 
-                        Console.WriteLine($"{prefix} [{phase}] {args.Entity}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}");
+                        // Show success/failure breakdown if there are failures
+                        var failureInfo = args.FailureCount > 0
+                            ? $" [{args.SuccessCount} ok, {args.FailureCount} failed]"
+                            : "";
+
+                        Console.WriteLine($"{prefix} [{phase}] {args.Entity}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{failureInfo}");
 
                         _lastEntity = args.Entity;
                         _lastProgress = args.Current;
@@ -49,7 +57,16 @@ namespace PPDS.Migration.Progress
                     break;
 
                 case MigrationPhase.ProcessingDeferredFields:
-                    Console.WriteLine($"{prefix} [Deferred] {args.Entity}.{args.Field}: {args.Current:N0}/{args.Total:N0}");
+                    // Handle cases where Field might be null or empty
+                    if (!string.IsNullOrEmpty(args.Field) && args.Total > 0)
+                    {
+                        var successInfo = args.SuccessCount > 0 ? $" ({args.SuccessCount} updated)" : "";
+                        Console.WriteLine($"{prefix} [Deferred] {args.Entity}.{args.Field}: {args.Current:N0}/{args.Total:N0}{successInfo}");
+                    }
+                    else if (!string.IsNullOrEmpty(args.Message))
+                    {
+                        Console.WriteLine($"{prefix} [Deferred] {args.Entity}: {args.Message}");
+                    }
                     break;
 
                 case MigrationPhase.ProcessingRelationships:
@@ -71,16 +88,53 @@ namespace PPDS.Migration.Progress
             _stopwatch.Stop();
             Console.WriteLine();
             Console.WriteLine(new string('=', 60));
-            Console.WriteLine(result.Success ? "Migration Completed Successfully" : "Migration Completed with Errors");
+
+            if (result.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Migration Completed Successfully");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("Migration Completed with Errors");
+            }
+            Console.ResetColor();
+
             Console.WriteLine(new string('=', 60));
             Console.WriteLine($"Duration:    {result.Duration:hh\\:mm\\:ss}");
-            Console.WriteLine($"Records:     {result.RecordsProcessed:N0}");
-            Console.WriteLine($"Throughput:  {result.RecordsPerSecond:F1} records/second");
+            Console.WriteLine($"Succeeded:   {result.SuccessCount:N0}");
 
             if (result.FailureCount > 0)
             {
-                Console.WriteLine($"Failures:    {result.FailureCount:N0}");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Failed:      {result.FailureCount:N0}");
+                Console.ResetColor();
             }
+
+            Console.WriteLine($"Throughput:  {result.RecordsPerSecond:F1} records/second");
+
+            // Display error details if available
+            if (result.Errors?.Count > 0)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Errors ({result.Errors.Count}):");
+
+                foreach (var error in result.Errors.Take(MaxErrorsToDisplay))
+                {
+                    var entity = !string.IsNullOrEmpty(error.EntityLogicalName) ? $"{error.EntityLogicalName}: " : "";
+                    var index = error.RecordIndex.HasValue ? $"[{error.RecordIndex}] " : "";
+                    Console.WriteLine($"  - {entity}{index}{error.Message}");
+                }
+
+                if (result.Errors.Count > MaxErrorsToDisplay)
+                {
+                    Console.WriteLine($"  ... and {result.Errors.Count - MaxErrorsToDisplay} more errors");
+                }
+                Console.ResetColor();
+            }
+
             Console.WriteLine();
         }
 
@@ -99,7 +153,7 @@ namespace PPDS.Migration.Progress
 
         private bool ShouldUpdate(int current)
         {
-            // Update every 1000 records or 10% progress
+            // Update every 1000 records or 100 records, whichever comes first
             return current - _lastProgress >= 1000 || current - _lastProgress >= 100;
         }
     }

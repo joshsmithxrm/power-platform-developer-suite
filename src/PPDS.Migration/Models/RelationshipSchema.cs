@@ -40,6 +40,17 @@ namespace PPDS.Migration.Models
         /// </summary>
         public string? IntersectEntity { get; set; }
 
+        /// <summary>
+        /// Gets or sets whether this is a reflexive (self-referential) relationship.
+        /// </summary>
+        public bool IsReflexive { get; set; }
+
+        /// <summary>
+        /// Gets or sets the target entity's primary key field name (e.g., "roleid").
+        /// Required for CMT format compatibility.
+        /// </summary>
+        public string? TargetEntityPrimaryKey { get; set; }
+
         /// <inheritdoc />
         public override string ToString() => IsManyToMany
             ? $"{Name} (M2M: {Entity1} <-> {Entity2})"

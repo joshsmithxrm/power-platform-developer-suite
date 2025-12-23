@@ -135,6 +135,16 @@ namespace PPDS.Migration.Export
                         }
                     }).ConfigureAwait(false);
 
+                // Export M2M relationships
+                progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Exporting,
+                    Message = "Exporting M2M relationships..."
+                });
+
+                var relationshipData = await ExportM2MRelationshipsAsync(
+                    schema, entityData, options, progress, cancellationToken).ConfigureAwait(false);
+
                 // Write to output file
                 progress?.Report(new ProgressEventArgs
                 {
@@ -146,6 +156,7 @@ namespace PPDS.Migration.Export
                 {
                     Schema = schema,
                     EntityData = entityData,
+                    RelationshipData = relationshipData,
                     ExportedAt = DateTime.UtcNow
                 };
 
@@ -218,7 +229,7 @@ namespace PPDS.Migration.Export
             {
                 _logger?.LogDebug("Exporting entity {Entity}", entitySchema.LogicalName);
 
-                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken).ConfigureAwait(false);
+                await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
 
                 // Build FetchXML
                 var fetchXml = BuildFetchXml(entitySchema, options.PageSize);
@@ -294,6 +305,136 @@ namespace PPDS.Migration.Export
                     Records = null
                 };
             }
+        }
+
+        private async Task<IReadOnlyDictionary<string, IReadOnlyList<ManyToManyRelationshipData>>> ExportM2MRelationshipsAsync(
+            MigrationSchema schema,
+            ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
+            ExportOptions options,
+            IProgressReporter? progress,
+            CancellationToken cancellationToken)
+        {
+            var result = new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entitySchema in schema.Entities)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var m2mRelationships = entitySchema.Relationships.Where(r => r.IsManyToMany).ToList();
+                if (m2mRelationships.Count == 0)
+                {
+                    continue;
+                }
+
+                // Only export M2M for records we actually exported
+                if (!entityData.TryGetValue(entitySchema.LogicalName, out var exportedRecords) || exportedRecords.Count == 0)
+                {
+                    continue;
+                }
+
+                var exportedIds = exportedRecords.Select(r => r.Id).ToHashSet();
+                var entityM2MData = new List<ManyToManyRelationshipData>();
+
+                foreach (var rel in m2mRelationships)
+                {
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = entitySchema.LogicalName,
+                        Message = $"Exporting M2M relationship {rel.Name}..."
+                    });
+
+                    try
+                    {
+                        var relData = await ExportM2MRelationshipAsync(
+                            entitySchema, rel, exportedIds, options, cancellationToken).ConfigureAwait(false);
+                        entityM2MData.AddRange(relData);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger?.LogWarning(ex, "Failed to export M2M relationship {Relationship} for entity {Entity}",
+                            rel.Name, entitySchema.LogicalName);
+                    }
+                }
+
+                if (entityM2MData.Count > 0)
+                {
+                    result[entitySchema.LogicalName] = entityM2MData;
+                    _logger?.LogDebug("Exported {Count} M2M relationship groups for entity {Entity}",
+                        entityM2MData.Count, entitySchema.LogicalName);
+                }
+            }
+
+            return result;
+        }
+
+        private async Task<List<ManyToManyRelationshipData>> ExportM2MRelationshipAsync(
+            EntitySchema entitySchema,
+            RelationshipSchema rel,
+            HashSet<Guid> exportedSourceIds,
+            ExportOptions options,
+            CancellationToken cancellationToken)
+        {
+            await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            // Query intersect entity to get all associations
+            var intersectEntity = rel.IntersectEntity ?? rel.Name;
+            var sourceIdField = $"{entitySchema.LogicalName}id";
+            var targetIdField = rel.TargetEntityPrimaryKey ?? $"{rel.Entity2}id";
+
+            // Build FetchXML to query intersect entity
+            var fetchXml = $@"<fetch>
+                <entity name='{intersectEntity}'>
+                    <attribute name='{sourceIdField}' />
+                    <attribute name='{targetIdField}' />
+                </entity>
+            </fetch>";
+
+            var pageNumber = 1;
+            string? pagingCookie = null;
+            var associations = new List<(Guid SourceId, Guid TargetId)>();
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
+                var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
+
+                // Only include associations where both fields exist and source was exported
+                var validAssociations = response.Entities
+                    .Where(entity => entity.Contains(sourceIdField) && entity.Contains(targetIdField))
+                    .Select(entity => (
+                        SourceId: entity.GetAttributeValue<Guid>(sourceIdField),
+                        TargetId: entity.GetAttributeValue<Guid>(targetIdField)))
+                    .Where(assoc => exportedSourceIds.Contains(assoc.SourceId));
+
+                associations.AddRange(validAssociations);
+
+                if (!response.MoreRecords)
+                {
+                    break;
+                }
+
+                pagingCookie = response.PagingCookie;
+                pageNumber++;
+            }
+
+            // Group by source ID (CMT format requirement)
+            var grouped = associations
+                .GroupBy(x => x.SourceId)
+                .Select(g => new ManyToManyRelationshipData
+                {
+                    RelationshipName = rel.Name,
+                    SourceEntityName = entitySchema.LogicalName,
+                    SourceId = g.Key,
+                    TargetEntityName = rel.Entity2,
+                    TargetEntityPrimaryKey = targetIdField,
+                    TargetIds = g.Select(x => x.TargetId).ToList()
+                })
+                .ToList();
+
+            return grouped;
         }
 
         private string BuildFetchXml(EntitySchema entitySchema, int pageSize)

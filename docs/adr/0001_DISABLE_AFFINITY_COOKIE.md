@@ -49,3 +49,5 @@ Set `DisableAffinityCookie = false` for:
 
 - [ServiceClient Discussion #312](https://github.com/microsoft/PowerPlatform-DataverseServiceClient/discussions/312) - Microsoft confirms order-of-magnitude improvement
 - [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
+- [Send parallel requests](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/send-parallel-requests) - Microsoft's guidance on disabling affinity cookie
+- [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update) - Performance optimization patterns

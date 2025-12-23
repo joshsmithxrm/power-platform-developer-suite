@@ -58,5 +58,7 @@ Request N → AppUser1 (cooldown expired, available again) ✓
 
 ## References
 
-- [Retry-After header](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits#retry-operations)
-- [Service protection limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
+- [Retry-After header](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits#retry-operations) - How to handle throttle responses
+- [Service protection limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits) - Throttling thresholds and error codes
+- [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update) - Throttle handling best practices
+- [Maximize API throughput](https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/data-entities/service-protection-maximizing-api-throughput) - Strategies for high-throughput scenarios

@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  # Dependency review for PRs - checks for vulnerabilities in dependency changes
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # Allow existing vulnerabilities, only fail on new ones
+          deny-licenses: ''
+
   build:
     runs-on: windows-latest
 
@@ -22,6 +38,21 @@ jobs:
 
     - name: Restore dependencies
       run: dotnet restore
+
+    - name: Check for vulnerable packages
+      shell: pwsh
+      run: |
+        $output = dotnet list package --vulnerable --include-transitive 2>&1
+        $output | Write-Host
+
+        if ($output -match "has the following vulnerable packages") {
+          Write-Host ""
+          Write-Host "::warning::Vulnerable packages detected - review security advisories above"
+          # Note: Not failing the build to avoid blocking on transitive dependencies
+          # that require upstream fixes. Dependency-review-action will catch new vulns.
+        } else {
+          Write-Host "No known vulnerabilities found in packages"
+        }
 
     - name: Build
       run: dotnet build --configuration Release --no-restore

@@ -61,5 +61,7 @@ services.AddDataverseConnectionPool(options =>
 
 ## References
 
-- [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
-- [Application User setup](https://learn.microsoft.com/en-us/power-platform/admin/manage-application-users)
+- [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits) - Throttling thresholds per user
+- [Application User setup](https://learn.microsoft.com/en-us/power-platform/admin/manage-application-users) - Provisioning app registrations
+- [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update) - User multiplexing guidance
+- [Scaling Dynamics 365 CRM Integrations in Azure](https://techcommunity.microsoft.com/blog/microsoftmissioncriticalblog/scaling-dynamics-365-crm-integrations-in-azure-the-right-way-to-use-the-sdk-s/4447143) - Multi-user distribution patterns

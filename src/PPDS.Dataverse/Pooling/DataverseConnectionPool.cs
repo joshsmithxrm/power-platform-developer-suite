@@ -3,11 +3,13 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling.Strategies;
@@ -30,12 +32,16 @@ namespace PPDS.Dataverse.Pooling
         private readonly ConcurrentDictionary<string, int> _activeConnections;
         private readonly ConcurrentDictionary<string, long> _requestCounts;
         private readonly SemaphoreSlim _connectionSemaphore;
+        private readonly object _poolLock = new();
 
         private readonly CancellationTokenSource _validationCts;
         private readonly Task _validationTask;
 
         private long _totalRequestsServed;
-        private bool _disposed;
+        private long _invalidConnectionCount;
+        private long _authFailureCount;
+        private long _connectionFailureCount;
+        private int _disposed;
         private static bool _performanceSettingsApplied;
         private static readonly object _performanceSettingsLock = new();
 
@@ -104,6 +110,7 @@ namespace PPDS.Dataverse.Pooling
         /// <inheritdoc />
         public async Task<IPooledClient> GetClientAsync(
             DataverseClientOptions? options = null,
+            string? excludeConnectionName = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -113,21 +120,46 @@ namespace PPDS.Dataverse.Pooling
                 return CreateDirectClient(options);
             }
 
-            var acquired = await _connectionSemaphore.WaitAsync(_options.Pool.AcquireTimeout, cancellationToken);
-            if (!acquired)
+            // Loop until we get a connection
+            while (true)
             {
-                throw new TimeoutException(
-                    $"Timed out waiting for a connection. Active: {GetTotalActiveConnections()}, MaxPoolSize: {_options.Pool.MaxPoolSize}");
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
-                return GetConnectionFromPool(options);
-            }
-            catch
-            {
-                _connectionSemaphore.Release();
-                throw;
+                // Phase 1: Wait for non-throttled connection BEFORE acquiring semaphore
+                // This prevents holding semaphore slots while waiting for throttle to clear
+                await WaitForNonThrottledConnectionAsync(excludeConnectionName, cancellationToken);
+
+                // Phase 2: Acquire semaphore
+                var acquired = await _connectionSemaphore.WaitAsync(_options.Pool.AcquireTimeout, cancellationToken);
+                if (!acquired)
+                {
+                    throw new PoolExhaustedException(
+                        GetTotalActiveConnections(),
+                        _options.Pool.MaxPoolSize,
+                        _options.Pool.AcquireTimeout);
+                }
+
+                try
+                {
+                    // Phase 3: Select connection and check throttle (quick, no waiting)
+                    var connectionName = SelectConnection(excludeConnectionName);
+
+                    // Race check: throttle status could have changed while waiting for semaphore
+                    if (_throttleTracker.IsThrottled(connectionName))
+                    {
+                        // Connection became throttled - release semaphore and retry
+                        _connectionSemaphore.Release();
+                        continue;
+                    }
+
+                    // Phase 4: Get the actual connection from pool
+                    return GetConnectionFromPoolCore(connectionName, options);
+                }
+                catch
+                {
+                    _connectionSemaphore.Release();
+                    throw;
+                }
             }
         }
 
@@ -144,8 +176,10 @@ namespace PPDS.Dataverse.Pooling
             var acquired = _connectionSemaphore.Wait(_options.Pool.AcquireTimeout);
             if (!acquired)
             {
-                throw new TimeoutException(
-                    $"Timed out waiting for a connection. Active: {GetTotalActiveConnections()}, MaxPoolSize: {_options.Pool.MaxPoolSize}");
+                throw new PoolExhaustedException(
+                    GetTotalActiveConnections(),
+                    _options.Pool.MaxPoolSize,
+                    _options.Pool.AcquireTimeout);
             }
 
             try
@@ -159,49 +193,99 @@ namespace PPDS.Dataverse.Pooling
             }
         }
 
+        /// <summary>
+        /// Waits until at least one connection is not throttled.
+        /// This method does NOT hold the semaphore, allowing other requests to also wait.
+        /// </summary>
+        private async Task WaitForNonThrottledConnectionAsync(
+            string? excludeConnectionName,
+            CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Check if any non-excluded connection is available (not throttled)
+                var hasAvailable = _options.Connections
+                    .Where(c => string.IsNullOrEmpty(excludeConnectionName) ||
+                                !string.Equals(c.Name, excludeConnectionName, StringComparison.OrdinalIgnoreCase))
+                    .Any(c => !_throttleTracker.IsThrottled(c.Name));
+
+                if (hasAvailable)
+                {
+                    return; // At least one connection is available
+                }
+
+                // All connections are throttled - wait for shortest expiry
+                var waitTime = _throttleTracker.GetShortestExpiry();
+                if (waitTime <= TimeSpan.Zero)
+                {
+                    return; // Throttle already expired
+                }
+
+                // Add a small buffer for timing
+                waitTime += TimeSpan.FromMilliseconds(100);
+
+                _logger.LogInformation(
+                    "All connections throttled. Waiting {WaitTime} for throttle to clear...",
+                    waitTime);
+
+                await Task.Delay(waitTime, cancellationToken);
+
+                _logger.LogInformation("Throttle wait completed. Resuming operations.");
+
+                // Loop back and check again
+            }
+        }
+
         private PooledClient GetConnectionFromPool(DataverseClientOptions? options)
         {
-            var connectionName = SelectConnection();
+            var connectionName = SelectConnection(excludeConnectionName: null);
+            return GetConnectionFromPoolCore(connectionName, options);
+        }
+
+        private PooledClient GetConnectionFromPoolCore(string connectionName, DataverseClientOptions? options)
+        {
             var pool = _pools[connectionName];
 
-            // Try to get from pool (bounded iteration, not recursion)
-            const int maxAttempts = 10;
-            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            // Loop to find valid connection, draining any invalid ones
+            while (true)
             {
-                if (pool.TryDequeue(out var existingClient))
+                PooledClient? existingClient = null;
+                lock (_poolLock)
                 {
-                    if (IsValidConnection(existingClient))
+                    if (pool.IsEmpty || !pool.TryDequeue(out existingClient))
                     {
-                        _activeConnections.AddOrUpdate(connectionName, 1, (_, v) => v + 1);
-                        Interlocked.Increment(ref _totalRequestsServed);
-                        _requestCounts.AddOrUpdate(connectionName, 1, (_, v) => v + 1);
+                        break; // Pool empty, exit to create new connection
+                    }
+                }
 
-                        existingClient.UpdateLastUsed();
-                        if (options != null)
-                        {
-                            existingClient.ApplyOptions(options);
-                        }
+                if (IsValidConnection(existingClient))
+                {
+                    _activeConnections.AddOrUpdate(connectionName, 1, (_, v) => v + 1);
+                    Interlocked.Increment(ref _totalRequestsServed);
+                    _requestCounts.AddOrUpdate(connectionName, 1, (_, v) => v + 1);
 
-                        _logger.LogDebug(
-                            "Retrieved connection from pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
-                            existingClient.ConnectionId,
-                            connectionName);
-
-                        return existingClient;
+                    existingClient.UpdateLastUsed();
+                    if (options != null)
+                    {
+                        existingClient.ApplyOptions(options);
                     }
 
-                    // Invalid connection, dispose and try again
-                    existingClient.ForceDispose();
-                    _logger.LogDebug("Disposed invalid connection. ConnectionId: {ConnectionId}", existingClient.ConnectionId);
+                    _logger.LogDebug(
+                        "Retrieved connection from pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
+                        existingClient.ConnectionId,
+                        connectionName);
+
+                    return existingClient;
                 }
-                else
-                {
-                    // Pool is empty, break and create new
-                    break;
-                }
+
+                // Invalid connection, dispose and continue loop to try next
+                existingClient.ForceDispose();
+                _logger.LogDebug("Disposed invalid connection. ConnectionId: {ConnectionId}", existingClient.ConnectionId);
             }
 
-            // Create new connection
+            // Pool is empty (or drained of invalid connections), create new connection
             var newClient = CreateNewConnection(connectionName);
             _activeConnections.AddOrUpdate(connectionName, 1, (_, v) => v + 1);
             Interlocked.Increment(ref _totalRequestsServed);
@@ -215,12 +299,33 @@ namespace PPDS.Dataverse.Pooling
             return newClient;
         }
 
-        private string SelectConnection()
+        private string SelectConnection(string? excludeConnectionName)
         {
             var connections = _options.Connections.AsReadOnly();
+
+            // If an exclusion is requested and we have multiple connections, filter
+            IReadOnlyList<DataverseConnection> filteredConnections;
+            if (!string.IsNullOrEmpty(excludeConnectionName) && connections.Count > 1)
+            {
+                filteredConnections = connections
+                    .Where(c => !string.Equals(c.Name, excludeConnectionName, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+                    .AsReadOnly();
+
+                // If filtering would leave no connections, use all
+                if (filteredConnections.Count == 0)
+                {
+                    filteredConnections = connections;
+                }
+            }
+            else
+            {
+                filteredConnections = connections;
+            }
+
             var activeDict = _activeConnections.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
-            return _selectionStrategy.SelectConnection(connections, _throttleTracker, activeDict);
+            return _selectionStrategy.SelectConnection(filteredConnections, _throttleTracker, activeDict);
         }
 
         private PooledClient CreateNewConnection(string connectionName)
@@ -264,8 +369,13 @@ namespace PPDS.Dataverse.Pooling
                 serviceClient.EnableAffinityCookie = false;
             }
 
+            // Disable SDK internal retry - we handle throttling ourselves for visibility
+            // Without this, ServiceClient silently waits on 429 and retries internally,
+            // giving no visibility into throttle events
+            serviceClient.MaxRetryCount = 0;
+
             var client = new DataverseClient(serviceClient);
-            var pooledClient = new PooledClient(client, connectionName, ReturnConnection);
+            var pooledClient = new PooledClient(client, connectionName, ReturnConnection, OnThrottleDetected);
 
             _logger.LogDebug(
                 "Created new connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}, IsReady: {IsReady}",
@@ -274,6 +384,14 @@ namespace PPDS.Dataverse.Pooling
                 pooledClient.IsReady);
 
             return pooledClient;
+        }
+
+        /// <summary>
+        /// Called by PooledClient when a throttle is detected.
+        /// </summary>
+        private void OnThrottleDetected(string connectionName, TimeSpan retryAfter)
+        {
+            _throttleTracker.RecordThrottle(connectionName, retryAfter);
         }
 
         private PooledClient CreateDirectClient(DataverseClientOptions? options)
@@ -294,7 +412,7 @@ namespace PPDS.Dataverse.Pooling
 
         private void ReturnConnection(PooledClient client)
         {
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) != 0)
             {
                 client.ForceDispose();
                 return;
@@ -302,7 +420,23 @@ namespace PPDS.Dataverse.Pooling
 
             try
             {
+                // Decrement active connections counter first
                 _activeConnections.AddOrUpdate(client.ConnectionName, 0, (_, v) => Math.Max(0, v - 1));
+
+                // Check if connection was marked as invalid - dispose instead of returning to pool
+                if (client.IsInvalid)
+                {
+                    _logger.LogInformation(
+                        "Connection marked invalid, disposing instead of returning. " +
+                        "ConnectionId: {ConnectionId}, Name: {ConnectionName}, Reason: {Reason}",
+                        client.ConnectionId,
+                        client.ConnectionName,
+                        client.InvalidReason);
+
+                    Interlocked.Increment(ref _invalidConnectionCount);
+                    client.ForceDispose();
+                    return;
+                }
 
                 var pool = _pools.GetValueOrDefault(client.ConnectionName);
                 if (pool == null)
@@ -311,26 +445,30 @@ namespace PPDS.Dataverse.Pooling
                     return;
                 }
 
-                // Reset client to original state
+                // Reset client to original state (this also resets the _returned flag for reuse)
                 client.Reset();
                 client.UpdateLastUsed();
 
-                // Check if pool is full
-                if (pool.Count < _options.Connections.First(c => c.Name == client.ConnectionName).MaxPoolSize)
+                // Lock around pool enqueue to synchronize with GetConnectionFromPool
+                lock (_poolLock)
                 {
-                    pool.Enqueue(client);
-                    _logger.LogDebug(
-                        "Returned connection to pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
-                        client.ConnectionId,
-                        client.ConnectionName);
-                }
-                else
-                {
-                    client.ForceDispose();
-                    _logger.LogDebug(
-                        "Pool full, disposed connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
-                        client.ConnectionId,
-                        client.ConnectionName);
+                    // Check if pool is full
+                    if (pool.Count < _options.Connections.First(c => c.Name == client.ConnectionName).MaxPoolSize)
+                    {
+                        pool.Enqueue(client);
+                        _logger.LogDebug(
+                            "Returned connection to pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
+                            client.ConnectionId,
+                            client.ConnectionName);
+                    }
+                    else
+                    {
+                        client.ForceDispose();
+                        _logger.LogDebug(
+                            "Pool full, disposed connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
+                            client.ConnectionId,
+                            client.ConnectionName);
+                    }
                 }
             }
             finally
@@ -350,6 +488,14 @@ namespace PPDS.Dataverse.Pooling
         {
             try
             {
+                // Check if marked as invalid
+                if (client.IsInvalid)
+                {
+                    _logger.LogDebug("Connection marked invalid. ConnectionId: {ConnectionId}, Reason: {Reason}",
+                        client.ConnectionId, client.InvalidReason);
+                    return false;
+                }
+
                 // Check idle timeout
                 if (DateTime.UtcNow - client.LastUsedAt > _options.Pool.MaxIdleTime)
                 {
@@ -426,9 +572,19 @@ namespace PPDS.Dataverse.Pooling
             foreach (var connection in _options.Connections)
             {
                 var pool = _pools[connection.Name];
-                var toCreate = Math.Min(_options.Pool.MinPoolSize, connection.MaxPoolSize);
+                var activeCount = _activeConnections.GetValueOrDefault(connection.Name, 0);
+                var currentTotal = pool.Count + activeCount;
+                var targetMin = Math.Min(_options.Pool.MinPoolSize, connection.MaxPoolSize);
+                var toCreate = Math.Max(0, targetMin - currentTotal);
 
-                for (int i = 0; i < toCreate && pool.Count < toCreate; i++)
+                if (toCreate > 0)
+                {
+                    _logger.LogDebug(
+                        "Pool {ConnectionName}: Active={Active}, Idle={Idle}, Target={Target}, Creating={ToCreate}",
+                        connection.Name, activeCount, pool.Count, targetMin, toCreate);
+                }
+
+                for (int i = 0; i < toCreate; i++)
                 {
                     try
                     {
@@ -520,6 +676,67 @@ namespace PPDS.Dataverse.Pooling
                     throw new InvalidOperationException($"Connection string for '{connection.Name}' cannot be empty.");
                 }
             }
+
+            // Warn if multiple connections target different organizations
+            WarnIfMultipleOrganizations();
+        }
+
+        private void WarnIfMultipleOrganizations()
+        {
+            if (_options.Connections.Count < 2)
+            {
+                return;
+            }
+
+            var orgUrls = new Dictionary<string, string>(); // connectionName -> orgUrl
+
+            foreach (var connection in _options.Connections)
+            {
+                var orgUrl = ExtractOrgUrl(connection.ConnectionString);
+                if (!string.IsNullOrEmpty(orgUrl))
+                {
+                    orgUrls[connection.Name] = orgUrl;
+                }
+            }
+
+            var distinctOrgs = orgUrls.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            if (distinctOrgs.Count > 1)
+            {
+                _logger.LogWarning(
+                    "Connection pool contains connections to {OrgCount} different organizations: {Orgs}. " +
+                    "Requests will be load-balanced across these organizations, which is likely unintended. " +
+                    "For multi-environment scenarios (Dev/QA/Prod), create separate service providers per environment. " +
+                    "See documentation for the recommended pattern.",
+                    distinctOrgs.Count,
+                    string.Join(", ", distinctOrgs));
+            }
+        }
+
+        private static string? ExtractOrgUrl(string connectionString)
+        {
+            // Parse connection string to extract Url parameter
+            // Format: "AuthType=...;Url=https://org.crm.dynamics.com;..."
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                return null;
+            }
+
+            var url = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Split('=', 2))
+                .Where(kv => kv.Length == 2 && kv[0].Trim().Equals("Url", StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv[1].Trim())
+                .FirstOrDefault();
+
+            if (url == null)
+            {
+                return null;
+            }
+
+            // Extract just the host for comparison
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                ? uri.Host.ToLowerInvariant()
+                : url.ToLowerInvariant();
         }
 
         private PoolStatistics GetStatistics()
@@ -547,6 +764,9 @@ namespace PPDS.Dataverse.Pooling
                 ThrottledConnections = connectionStats.Values.Count(s => s.IsThrottled),
                 RequestsServed = _totalRequestsServed,
                 ThrottleEvents = _throttleTracker.TotalThrottleEvents,
+                InvalidConnections = Interlocked.Read(ref _invalidConnectionCount),
+                AuthFailures = Interlocked.Read(ref _authFailureCount),
+                ConnectionFailures = Interlocked.Read(ref _connectionFailureCount),
                 ConnectionStats = connectionStats
             };
         }
@@ -557,23 +777,65 @@ namespace PPDS.Dataverse.Pooling
 
         private int GetTotalIdleConnections() => _pools.Values.Sum(p => p.Count);
 
+        /// <inheritdoc />
+        public void RecordAuthFailure()
+        {
+            Interlocked.Increment(ref _authFailureCount);
+        }
+
+        /// <inheritdoc />
+        public void RecordConnectionFailure()
+        {
+            Interlocked.Increment(ref _connectionFailureCount);
+        }
+
         private void ThrowIfDisposed()
         {
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) != 0)
             {
                 throw new ObjectDisposedException(nameof(DataverseConnectionPool));
             }
         }
 
         /// <inheritdoc />
+        public async Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            // Retry forever on service protection errors - only CancellationToken stops us
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await using var client = await GetClientAsync(cancellationToken: cancellationToken);
+
+                try
+                {
+                    return await client.ExecuteAsync(request, cancellationToken);
+                }
+                catch (FaultException<OrganizationServiceFault> faultEx)
+                    when (ServiceProtectionException.IsServiceProtectionError(faultEx.Detail.ErrorCode))
+                {
+                    // Throttle was already recorded by PooledClient via callback.
+                    // Log and retry - GetClientAsync will wait for non-throttled connection.
+                    _logger.LogDebug(
+                        "Request throttled on connection {Connection}. Will retry with next available connection.",
+                        client.ConnectionName);
+
+                    // Loop continues - GetClientAsync will wait for a non-throttled connection
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public void Dispose()
         {
-            if (_disposed)
+            // Use Interlocked.Exchange for atomic disposal check
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
                 return;
             }
 
-            _disposed = true;
             _validationCts.Cancel();
 
             foreach (var pool in _pools.Values)
@@ -591,12 +853,12 @@ namespace PPDS.Dataverse.Pooling
         /// <inheritdoc />
         public async ValueTask DisposeAsync()
         {
-            if (_disposed)
+            // Use Interlocked.Exchange for atomic disposal check
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
                 return;
             }
 
-            _disposed = true;
             _validationCts.Cancel();
 
             try

@@ -107,6 +107,7 @@ namespace PPDS.Migration.Formats
         {
             var logicalName = element.Attribute("name")?.Value ?? string.Empty;
             var displayName = element.Attribute("displayname")?.Value ?? logicalName;
+            var objectTypeCode = ParseInt(element.Attribute("etc")?.Value);
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
             var disablePlugins = ParseBool(element.Attribute("disableplugins")?.Value);
@@ -144,7 +145,7 @@ namespace PPDS.Migration.Formats
                 PrimaryIdField = primaryIdField,
                 PrimaryNameField = primaryNameField,
                 DisablePlugins = disablePlugins,
-                ObjectTypeCode = ParseInt(element.Attribute("objecttypecode")?.Value),
+                ObjectTypeCode = objectTypeCode,
                 Fields = fields,
                 Relationships = relationships,
                 FetchXmlFilter = fetchXmlFilter
@@ -159,6 +160,7 @@ namespace PPDS.Migration.Formats
             var lookupEntity = element.Attribute("lookupType")?.Value;
             var isCustomField = ParseBool(element.Attribute("customfield")?.Value);
             var isRequired = ParseBool(element.Attribute("isrequired")?.Value);
+            var isPrimaryKey = ParseBool(element.Attribute("primaryKey")?.Value);
 
             return new FieldSchema
             {
@@ -168,6 +170,7 @@ namespace PPDS.Migration.Formats
                 LookupEntity = lookupEntity,
                 IsCustomField = isCustomField,
                 IsRequired = isRequired,
+                IsPrimaryKey = isPrimaryKey,
                 MaxLength = ParseInt(element.Attribute("maxlength")?.Value),
                 Precision = ParseInt(element.Attribute("precision")?.Value)
             };
@@ -176,19 +179,49 @@ namespace PPDS.Migration.Formats
         private RelationshipSchema ParseRelationship(XElement element, string parentEntity)
         {
             var name = element.Attribute("name")?.Value ?? string.Empty;
-            var isManyToMany = ParseBool(element.Attribute("m2m")?.Value);
+            var isManyToMany = ParseBool(element.Attribute("manyToMany")?.Value);
+            var isReflexive = ParseBool(element.Attribute("isreflexive")?.Value);
             var relatedEntity = element.Attribute("relatedEntityName")?.Value ?? string.Empty;
-            var intersectEntity = element.Attribute("intersectentity")?.Value;
+            var intersectEntity = element.Attribute("intersectEntityName")?.Value;
+
+            string entity1, entity1Attribute, entity2, entity2Attribute;
+            string? targetEntityPrimaryKey = null;
+
+            if (isManyToMany)
+            {
+                // M2M relationship
+                // In CMT format: relatedEntityName is the intersect entity, m2mTargetEntity is the target
+                entity1 = parentEntity;
+                entity1Attribute = string.Empty;
+                entity2 = element.Attribute("m2mTargetEntity")?.Value ?? relatedEntity;
+                entity2Attribute = string.Empty;
+                targetEntityPrimaryKey = element.Attribute("m2mTargetEntityPrimaryKey")?.Value;
+                // If intersectEntity not explicitly set, use relatedEntityName for M2M
+                if (string.IsNullOrEmpty(intersectEntity))
+                {
+                    intersectEntity = relatedEntity;
+                }
+            }
+            else
+            {
+                // One-to-Many relationship
+                entity1 = element.Attribute("referencingEntity")?.Value ?? parentEntity;
+                entity1Attribute = element.Attribute("referencingAttribute")?.Value ?? string.Empty;
+                entity2 = element.Attribute("referencedEntity")?.Value ?? relatedEntity;
+                entity2Attribute = element.Attribute("referencedAttribute")?.Value ?? string.Empty;
+            }
 
             return new RelationshipSchema
             {
                 Name = name,
-                Entity1 = parentEntity,
-                Entity1Attribute = element.Attribute("entity1attribute")?.Value ?? string.Empty,
-                Entity2 = relatedEntity,
-                Entity2Attribute = element.Attribute("entity2attribute")?.Value ?? string.Empty,
+                Entity1 = entity1,
+                Entity1Attribute = entity1Attribute,
+                Entity2 = entity2,
+                Entity2Attribute = entity2Attribute,
                 IsManyToMany = isManyToMany,
-                IntersectEntity = intersectEntity
+                IsReflexive = isReflexive,
+                IntersectEntity = intersectEntity,
+                TargetEntityPrimaryKey = targetEntityPrimaryKey
             };
         }
 

@@ -1,3 +1,5 @@
+using PPDS.Migration.Models;
+
 namespace PPDS.Migration.Import
 {
     /// <summary>
@@ -58,6 +60,18 @@ namespace PPDS.Migration.Import
         /// Default: 100
         /// </summary>
         public int ProgressInterval { get; set; } = 100;
+
+        /// <summary>
+        /// Gets or sets the user mappings for remapping user references.
+        /// If null, user references are not remapped.
+        /// </summary>
+        public UserMappingCollection? UserMappings { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether to disable plugins on entities marked with disableplugins=true in schema.
+        /// Default: true (respects schema setting)
+        /// </summary>
+        public bool RespectDisablePluginsSetting { get; set; } = true;
     }
 
     /// <summary>

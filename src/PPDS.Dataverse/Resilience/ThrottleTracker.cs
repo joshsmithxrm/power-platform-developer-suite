@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +28,26 @@ namespace PPDS.Dataverse.Resilience
 
         /// <inheritdoc />
         public long TotalThrottleEvents => _totalThrottleEvents;
+
+        /// <inheritdoc />
+        public int ThrottledConnectionCount
+        {
+            get
+            {
+                CleanupExpired();
+                return _throttleStates.Count;
+            }
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyCollection<string> ThrottledConnections
+        {
+            get
+            {
+                CleanupExpired();
+                return _throttleStates.Keys.ToList().AsReadOnly();
+            }
+        }
 
         /// <inheritdoc />
         public void RecordThrottle(string connectionName, TimeSpan retryAfter)
@@ -110,6 +132,43 @@ namespace PPDS.Dataverse.Resilience
             if (_throttleStates.TryRemove(connectionName, out _))
             {
                 _logger.LogInformation("Cleared throttle for connection: {ConnectionName}", connectionName);
+            }
+        }
+
+        /// <inheritdoc />
+        public TimeSpan GetShortestExpiry()
+        {
+            CleanupExpired();
+
+            if (_throttleStates.IsEmpty)
+            {
+                return TimeSpan.Zero;
+            }
+
+            var now = DateTime.UtcNow;
+            var shortest = _throttleStates.Values
+                .Select(s => s.ExpiresAt - now)
+                .Where(t => t > TimeSpan.Zero)
+                .DefaultIfEmpty(TimeSpan.Zero)
+                .Min();
+
+            return shortest;
+        }
+
+        /// <summary>
+        /// Removes expired throttle states from the dictionary.
+        /// </summary>
+        private void CleanupExpired()
+        {
+            var now = DateTime.UtcNow;
+            var expired = _throttleStates
+                .Where(kvp => kvp.Value.ExpiresAt <= now)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expired.Where(k => _throttleStates.TryRemove(k, out _)))
+            {
+                _logger.LogDebug("Throttle expired for connection: {ConnectionName}", key);
             }
         }
     }
