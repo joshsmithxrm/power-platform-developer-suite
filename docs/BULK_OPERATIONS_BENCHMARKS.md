@@ -7,7 +7,7 @@ Performance testing for bulk operations against Dataverse.
 - **Entity:** `ppds_zipcode` (simple entity with alternate key)
 - **Record count:** 42,366
 - **Environment:** Developer environment (single tenant)
-- **Parallel workers:** 4
+- **Parallel workers:** Server-recommended (`RecommendedDegreesOfParallelism`)
 
 ## Microsoft's Reference Benchmarks
 
@@ -33,25 +33,31 @@ For elastic tables specifically:
 
 ## Results: Creates (UpsertMultiple)
 
-| Approach | Batch Size | Time (s) | Throughput (rec/s) | Notes |
-|----------|------------|----------|-------------------|-------|
-| Single ServiceClient | 100 | 933 | 45.4 | Baseline |
-| Connection Pool | 100 | 888 | **47.7** | 5% faster than baseline |
-| Connection Pool | 1000 | 919 | 46.1 | 3% slower than batch 100 |
+| Approach | Batch Size | Parallelism | Time (s) | Throughput (rec/s) | Notes |
+|----------|------------|-------------|----------|-------------------|-------|
+| Single ServiceClient | 100 | 4 | 933 | 45.4 | Baseline |
+| Connection Pool | 100 | 4 | 888 | 47.7 | 5% faster than baseline |
+| Connection Pool | 1000 | 4 | 919 | 46.1 | 3% slower than batch 100 |
+| Connection Pool | 100 | 5 (server) | 704 | **60.2** | +26% using server-recommended parallelism |
 
 ### Key Findings
 
-1. **Connection Pool is faster than Single ServiceClient** (+5%)
+1. **Server-recommended parallelism is optimal** (+26% vs hardcoded)
+   - `RecommendedDegreesOfParallelism` returns server-tuned value
+   - Automatically adapts to environment capacity
+   - No guesswork required
+
+2. **Connection Pool is faster than Single ServiceClient** (+5%)
    - True parallelism with independent connections
    - No internal locking/serialization overhead
    - Affinity cookie disabled improves server-side distribution
 
-2. **Batch size 100 is optimal** (+3% vs batch 1000)
+3. **Batch size 100 is optimal** (+3% vs batch 1000)
    - Aligns with Microsoft's recommendation
    - More granular parallelism
    - Less memory pressure per request
 
-3. **Optimal configuration:** Connection Pool + Batch Size 100 = **47.7 records/sec**
+4. **Optimal configuration:** Connection Pool + Batch Size 100 + Server Parallelism = **60.2 records/sec** (~217K/hour)
 
 ## Results: Updates (UpsertMultiple)
 
@@ -73,7 +79,7 @@ For elastic tables specifically:
     "Pool": {
       "Enabled": true,
       "MaxPoolSize": 50,
-      "MinPoolSize": 0,
+      "MinPoolSize": 5,
       "DisableAffinityCookie": true
     }
   }
@@ -83,20 +89,29 @@ For elastic tables specifically:
 ```csharp
 var options = new BulkOperationOptions
 {
-    BatchSize = 100,
-    MaxParallelBatches = 4
+    BatchSize = 100
+    // MaxParallelBatches omitted - uses RecommendedDegreesOfParallelism from server
 };
 ```
 
 ## Analysis: Our Results vs Microsoft Benchmarks
 
-Our measured throughput of **47.7 records/sec** (~172K records/hour) is significantly lower than Microsoft's reference of ~10M records/hour. This is expected due to:
+Our measured throughput of **60.2 records/sec** (~217K records/hour) is lower than Microsoft's reference of ~10M records/hour. This is expected due to:
 
 1. **Developer environment** - Single-tenant dev environments have lower resource allocation than production
 2. **Entity complexity** - Alternate key lookups add overhead
-3. **Parallel workers: 4** - Microsoft recommends using `RecommendedDegreesOfParallelism` from server (typically higher)
+3. **Service protection limits** - Dev environments have stricter throttling
 
-**Key finding:** Batch size 100 outperformed batch size 1000 by 3% in our tests, aligning with Microsoft's recommendation for smaller batch sizes with higher parallelism.
+### Progression Summary
+
+| Change | Improvement |
+|--------|-------------|
+| Single client → Connection pool | +5% |
+| Batch 1000 → Batch 100 | +3% |
+| Hardcoded parallelism → Server-recommended | +26% |
+| **Total improvement** | **+33%** (45.4 → 60.2 rec/s) |
+
+**Key finding:** Using `RecommendedDegreesOfParallelism` from the server provided the largest single improvement (+26%), validating Microsoft's guidance to query this value rather than hardcoding parallelism.
 
 ## References
 
