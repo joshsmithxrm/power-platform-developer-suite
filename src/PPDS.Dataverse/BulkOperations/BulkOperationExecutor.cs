@@ -53,23 +53,42 @@ namespace PPDS.Dataverse.BulkOperations
         /// </summary>
         private async Task<int> ResolveParallelismAsync(int? maxParallelBatches, CancellationToken cancellationToken)
         {
+            int parallelism;
+
             if (maxParallelBatches.HasValue)
             {
-                return maxParallelBatches.Value;
+                parallelism = maxParallelBatches.Value;
             }
-
-            // Get RecommendedDegreesOfParallelism from a connection
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var recommended = client.RecommendedDegreesOfParallelism;
-
-            if (recommended > 0)
+            else
             {
-                _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", recommended);
-                return recommended;
+                // Get RecommendedDegreesOfParallelism from a connection
+                await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                var recommended = client.RecommendedDegreesOfParallelism;
+
+                if (recommended > 0)
+                {
+                    _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", recommended);
+                    parallelism = recommended;
+                }
+                else
+                {
+                    _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
+                    return 1;
+                }
             }
 
-            _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
-            return 1;
+            // Warn if parallelism exceeds pool size
+            var maxPoolSize = _options.Pool.MaxPoolSize;
+            if (parallelism > maxPoolSize)
+            {
+                _logger.LogWarning(
+                    "MaxParallelBatches ({Parallelism}) exceeds MaxPoolSize ({MaxPoolSize}). " +
+                    "Effective parallelism will be limited to {MaxPoolSize}. " +
+                    "Consider increasing MaxPoolSize for optimal throughput.",
+                    parallelism, maxPoolSize, maxPoolSize);
+            }
+
+            return parallelism;
         }
 
         /// <inheritdoc />
