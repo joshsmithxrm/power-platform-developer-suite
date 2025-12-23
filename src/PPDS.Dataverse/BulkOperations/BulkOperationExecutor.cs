@@ -657,7 +657,6 @@ namespace PPDS.Dataverse.BulkOperations
         {
             var attempt = 0;
             var maxRetries = _options.Pool.MaxConnectionRetries;
-            Exception? lastException = null;
 
             // Loop indefinitely for service protection errors - only CancellationToken stops us.
             // Other transient errors (auth, connection, TVP, deadlock) have finite retry limits.
@@ -685,8 +684,6 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsAuthFailure(ex))
                 {
-                    lastException = ex;
-
                     // Extract connection name from exception if client is null
                     var failedConnection = client?.ConnectionName
                         ?? GetConnectionNameFromException(ex, connectionName);
@@ -714,8 +711,6 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsConnectionFailure(ex))
                 {
-                    lastException = ex;
-
                     // Extract connection name from exception if client is null (connection creation failed)
                     var failedConnection = client?.ConnectionName
                         ?? GetConnectionNameFromException(ex, connectionName);
@@ -743,8 +738,6 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsTvpRaceConditionError(ex))
                 {
-                    lastException = ex;
-
                     // Exponential backoff: 500ms, 1s, 2s
                     var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
 
@@ -768,8 +761,6 @@ namespace PPDS.Dataverse.BulkOperations
                 }
                 catch (Exception ex) when (IsDeadlockError(ex))
                 {
-                    lastException = ex;
-
                     // Exponential backoff: 500ms, 1s, 2s
                     var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
 
