@@ -166,12 +166,9 @@ namespace PPDS.Dataverse.Resilience
                 .Select(kvp => kvp.Key)
                 .ToList();
 
-            foreach (var key in expired)
+            foreach (var key in expired.Where(k => _throttleStates.TryRemove(k, out _)))
             {
-                if (_throttleStates.TryRemove(key, out _))
-                {
-                    _logger.LogDebug("Throttle expired for connection: {ConnectionName}", key);
-                }
+                _logger.LogDebug("Throttle expired for connection: {ConnectionName}", key);
             }
         }
     }

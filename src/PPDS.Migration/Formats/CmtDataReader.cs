@@ -202,18 +202,12 @@ namespace PPDS.Migration.Formats
                     continue;
                 }
 
-                var targetIds = new List<Guid>();
                 var targetIdsElement = m2mRel.Element("targetids");
-                if (targetIdsElement != null)
-                {
-                    foreach (var targetIdElement in targetIdsElement.Elements("targetid"))
-                    {
-                        if (Guid.TryParse(targetIdElement.Value, out var targetGuid))
-                        {
-                            targetIds.Add(targetGuid);
-                        }
-                    }
-                }
+                var targetIds = targetIdsElement?.Elements("targetid")
+                    .Select(e => Guid.TryParse(e.Value, out var g) ? g : (Guid?)null)
+                    .Where(g => g.HasValue)
+                    .Select(g => g!.Value)
+                    .ToList() ?? new List<Guid>();
 
                 if (targetIds.Count > 0)
                 {

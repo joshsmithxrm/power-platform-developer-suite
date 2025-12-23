@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace PPDS.Migration.Schema
@@ -69,38 +70,19 @@ namespace PPDS.Migration.Schema
             // Whitelist mode: only include specified attributes
             if (IncludeAttributes != null && IncludeAttributes.Count > 0)
             {
-                foreach (var attr in IncludeAttributes)
-                {
-                    if (attr.Equals(attributeName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                return false;
+                return IncludeAttributes.Any(attr => attr.Equals(attributeName, StringComparison.OrdinalIgnoreCase));
             }
 
             // Blacklist mode: exclude specified attributes
-            if (ExcludeAttributes != null)
+            if (ExcludeAttributes?.Any(attr => attr.Equals(attributeName, StringComparison.OrdinalIgnoreCase)) == true)
             {
-                foreach (var attr in ExcludeAttributes)
-                {
-                    if (attr.Equals(attributeName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return false;
-                    }
-                }
+                return false;
             }
 
             // Pattern exclusion
-            if (ExcludeAttributePatterns != null)
+            if (ExcludeAttributePatterns?.Any(pattern => MatchesPattern(attributeName, pattern)) == true)
             {
-                foreach (var pattern in ExcludeAttributePatterns)
-                {
-                    if (MatchesPattern(attributeName, pattern))
-                    {
-                        return false;
-                    }
-                }
+                return false;
             }
 
             return true;

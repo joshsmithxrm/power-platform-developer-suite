@@ -66,35 +66,32 @@ namespace PPDS.Migration.Analysis
                     }
 
                     // Handle polymorphic lookups (e.g., "account|contact")
-                    var targetEntities = field.LookupEntity.Split('|');
-
-                    foreach (var targetEntity in targetEntities)
-                    {
-                        var trimmedTarget = targetEntity.Trim();
-
-                        // Only add edge if target entity is in schema
-                        if (!entitySet.Contains(trimmedTarget))
+                    var targetEntities = field.LookupEntity.Split('|')
+                        .Select(t => t.Trim())
+                        .Where(trimmedTarget =>
                         {
-                            _logger?.LogDebug("Ignoring lookup {Entity}.{Field} -> {Target} (not in schema)",
-                                entity.LogicalName, field.LogicalName, trimmedTarget);
-                            continue;
-                        }
-
-                        var dependencyType = field.Type.ToLowerInvariant() switch
-                        {
-                            "owner" => DependencyType.Owner,
-                            "customer" => DependencyType.Customer,
-                            _ => DependencyType.Lookup
-                        };
-
-                        edges.Add(new DependencyEdge
+                            if (!entitySet.Contains(trimmedTarget))
+                            {
+                                _logger?.LogDebug("Ignoring lookup {Entity}.{Field} -> {Target} (not in schema)",
+                                    entity.LogicalName, field.LogicalName, trimmedTarget);
+                                return false;
+                            }
+                            return true;
+                        })
+                        .Select(trimmedTarget => new DependencyEdge
                         {
                             FromEntity = entity.LogicalName,
                             ToEntity = trimmedTarget,
                             FieldName = field.LogicalName,
-                            Type = dependencyType
+                            Type = field.Type.ToLowerInvariant() switch
+                            {
+                                "owner" => DependencyType.Owner,
+                                "customer" => DependencyType.Customer,
+                                _ => DependencyType.Lookup
+                            }
                         });
-                    }
+
+                    edges.AddRange(targetEntities);
                 }
             }
 

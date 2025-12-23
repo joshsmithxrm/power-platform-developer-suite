@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -146,9 +147,21 @@ namespace PPDS.Migration.Schema
                 response = (RetrieveEntityResponse)await client.ExecuteAsync(request, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (FaultException ex)
             {
-                _logger?.LogWarning(ex, "Failed to retrieve metadata for entity {Entity}", entityName);
+                _logger?.LogWarning(ex, "Dataverse fault retrieving metadata for entity {Entity}: {Message}",
+                    entityName, ex.Message);
+                return null;
+            }
+            catch (TimeoutException ex)
+            {
+                _logger?.LogWarning(ex, "Timeout retrieving metadata for entity {Entity}", entityName);
+                return null;
+            }
+            catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or OperationCanceledException)
+            {
+                _logger?.LogWarning(ex, "Network error retrieving metadata for entity {Entity}: {Message}",
+                    entityName, ex.Message);
                 return null;
             }
 

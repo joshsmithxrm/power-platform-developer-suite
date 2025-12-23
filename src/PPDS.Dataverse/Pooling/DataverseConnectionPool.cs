@@ -613,26 +613,21 @@ namespace PPDS.Dataverse.Pooling
                 return null;
             }
 
-            var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var part in parts)
+            var url = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Split('=', 2))
+                .Where(kv => kv.Length == 2 && kv[0].Trim().Equals("Url", StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv[1].Trim())
+                .FirstOrDefault();
+
+            if (url == null)
             {
-                var keyValue = part.Split('=', 2);
-                if (keyValue.Length == 2 &&
-                    keyValue[0].Trim().Equals("Url", StringComparison.OrdinalIgnoreCase))
-                {
-                    var url = keyValue[1].Trim();
-
-                    // Extract just the host for comparison
-                    if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-                    {
-                        return uri.Host.ToLowerInvariant();
-                    }
-
-                    return url.ToLowerInvariant();
-                }
+                return null;
             }
 
-            return null;
+            // Extract just the host for comparison
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                ? uri.Host.ToLowerInvariant()
+                : url.ToLowerInvariant();
         }
 
         private PoolStatistics GetStatistics()

@@ -375,8 +375,6 @@ namespace PPDS.Migration.Export
             ExportOptions options,
             CancellationToken cancellationToken)
         {
-            var result = new List<ManyToManyRelationshipData>();
-
             await using var client = await _connectionPool.GetClientAsync(null, cancellationToken).ConfigureAwait(false);
 
             // Query intersect entity to get all associations
@@ -403,20 +401,15 @@ namespace PPDS.Migration.Export
                 var pagedFetchXml = AddPaging(fetchXml, pageNumber, pagingCookie);
                 var response = await client.RetrieveMultipleAsync(new FetchExpression(pagedFetchXml)).ConfigureAwait(false);
 
-                foreach (var entity in response.Entities)
-                {
-                    if (entity.Contains(sourceIdField) && entity.Contains(targetIdField))
-                    {
-                        var sourceId = entity.GetAttributeValue<Guid>(sourceIdField);
-                        var targetId = entity.GetAttributeValue<Guid>(targetIdField);
+                // Only include associations where both fields exist and source was exported
+                var validAssociations = response.Entities
+                    .Where(entity => entity.Contains(sourceIdField) && entity.Contains(targetIdField))
+                    .Select(entity => (
+                        SourceId: entity.GetAttributeValue<Guid>(sourceIdField),
+                        TargetId: entity.GetAttributeValue<Guid>(targetIdField)))
+                    .Where(assoc => exportedSourceIds.Contains(assoc.SourceId));
 
-                        // Only include associations for exported source records
-                        if (exportedSourceIds.Contains(sourceId))
-                        {
-                            associations.Add((sourceId, targetId));
-                        }
-                    }
-                }
+                associations.AddRange(validAssociations);
 
                 if (!response.MoreRecords)
                 {
