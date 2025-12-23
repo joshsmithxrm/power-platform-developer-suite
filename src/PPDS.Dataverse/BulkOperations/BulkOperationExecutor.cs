@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ using Newtonsoft.Json;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
+using PPDS.Dataverse.Resilience;
 
 namespace PPDS.Dataverse.BulkOperations
 {
@@ -27,7 +29,18 @@ namespace PPDS.Dataverse.BulkOperations
         /// </summary>
         private const int MaxPoolExhaustionRetries = 3;
 
+        /// <summary>
+        /// Maximum number of retries when service protection limits are hit.
+        /// </summary>
+        private const int MaxThrottleRetries = 3;
+
+        /// <summary>
+        /// Fallback Retry-After duration when not provided by the server.
+        /// </summary>
+        private static readonly TimeSpan FallbackRetryAfter = TimeSpan.FromSeconds(30);
+
         private readonly IDataverseConnectionPool _connectionPool;
+        private readonly IThrottleTracker _throttleTracker;
         private readonly DataverseOptions _options;
         private readonly ILogger<BulkOperationExecutor> _logger;
 
@@ -35,14 +48,17 @@ namespace PPDS.Dataverse.BulkOperations
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
+        /// <param name="throttleTracker">The throttle tracker for recording service protection events.</param>
         /// <param name="options">Configuration options.</param>
         /// <param name="logger">Logger instance.</param>
         public BulkOperationExecutor(
             IDataverseConnectionPool connectionPool,
+            IThrottleTracker throttleTracker,
             IOptions<DataverseOptions> options,
             ILogger<BulkOperationExecutor> logger)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
+            _throttleTracker = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -393,16 +409,225 @@ namespace PPDS.Dataverse.BulkOperations
             throw new InvalidOperationException("Unexpected code path in connection pool retry logic");
         }
 
-        private async Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
+        /// <summary>
+        /// Checks if an exception is a service protection throttle error and extracts the Retry-After duration.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <param name="retryAfter">The Retry-After duration if this is a throttle error.</param>
+        /// <param name="errorCode">The service protection error code if this is a throttle error.</param>
+        /// <returns>True if this is a service protection error.</returns>
+        private bool TryGetThrottleInfo(Exception exception, out TimeSpan retryAfter, out int errorCode)
+        {
+            retryAfter = TimeSpan.Zero;
+            errorCode = 0;
+
+            // Check if this is a FaultException with OrganizationServiceFault
+            if (exception is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+            errorCode = fault.ErrorCode;
+
+            // Check if this is a service protection error
+            if (!ServiceProtectionException.IsServiceProtectionError(errorCode))
+            {
+                return false;
+            }
+
+            // Extract Retry-After from ErrorDetails
+            if (fault.ErrorDetails != null &&
+                fault.ErrorDetails.TryGetValue("Retry-After", out var retryAfterObj))
+            {
+                if (retryAfterObj is TimeSpan retryAfterSpan)
+                {
+                    retryAfter = retryAfterSpan;
+                }
+                else if (retryAfterObj is int retryAfterSeconds)
+                {
+                    retryAfter = TimeSpan.FromSeconds(retryAfterSeconds);
+                }
+                else if (retryAfterObj is double retryAfterDouble)
+                {
+                    retryAfter = TimeSpan.FromSeconds(retryAfterDouble);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Unexpected Retry-After type: {Type}. Using fallback.",
+                        retryAfterObj?.GetType().Name ?? "null");
+                    retryAfter = FallbackRetryAfter;
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Service protection error without Retry-After. ErrorCode: {ErrorCode}. Using fallback: {Fallback}s",
+                    errorCode, FallbackRetryAfter.TotalSeconds);
+                retryAfter = FallbackRetryAfter;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if there are any connections available (not currently throttled).
+        /// </summary>
+        /// <param name="totalConnections">The total number of configured connections.</param>
+        /// <returns>True if at least one connection is available.</returns>
+        private bool HasAvailableConnections(int totalConnections)
+        {
+            var throttledCount = _throttleTracker.ThrottledConnectionCount;
+            return throttledCount < totalConnections;
+        }
+
+        /// <summary>
+        /// Handles a throttle error by recording it and determining if retry is possible.
+        /// </summary>
+        /// <param name="connectionName">The name of the connection that was throttled.</param>
+        /// <param name="retryAfter">The Retry-After duration.</param>
+        /// <param name="errorCode">The service protection error code.</param>
+        /// <param name="attempt">The current attempt number.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if the operation should be retried.</returns>
+        private async Task<bool> HandleThrottleAsync(
+            string connectionName,
+            TimeSpan retryAfter,
+            int errorCode,
+            int attempt,
+            CancellationToken cancellationToken)
+        {
+            // Record the throttle event
+            _throttleTracker.RecordThrottle(connectionName, retryAfter);
+
+            _logger.LogWarning(
+                "Service protection limit hit. Connection: {Connection}, ErrorCode: {ErrorCode}, " +
+                "RetryAfter: {RetryAfter}, Attempt: {Attempt}/{MaxRetries}",
+                connectionName, errorCode, retryAfter, attempt, MaxThrottleRetries);
+
+            // Check if we should retry
+            if (attempt >= MaxThrottleRetries)
+            {
+                _logger.LogError(
+                    "Max throttle retries exceeded. Connection: {Connection}, Attempts: {Attempts}",
+                    connectionName, attempt);
+                return false;
+            }
+
+            // Get total connection count from pool statistics
+            var stats = _connectionPool.Statistics;
+            var totalConnections = stats.TotalConnections;
+
+            // Check if other connections are available
+            if (HasAvailableConnections(totalConnections))
+            {
+                _logger.LogDebug(
+                    "Other connections available. Retrying immediately on different connection.");
+                return true; // Retry immediately with different connection
+            }
+
+            // All connections throttled - wait for shortest expiry
+            var shortestExpiry = _throttleTracker.GetShortestExpiry();
+            if (shortestExpiry > TimeSpan.Zero)
+            {
+                // Add a small buffer to account for timing
+                var waitTime = shortestExpiry + TimeSpan.FromSeconds(1);
+                _logger.LogInformation(
+                    "All connections throttled. Waiting {WaitTime} before retry.",
+                    waitTime);
+                await Task.Delay(waitTime, cancellationToken);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Executes a batch operation with throttle detection and intelligent retry.
+        /// On throttle, records the event and either retries immediately on a different connection
+        /// or waits for the shortest throttle expiry if all connections are throttled.
+        /// </summary>
+        private async Task<BulkOperationResult> ExecuteBatchWithThrottleHandlingAsync<T>(
+            string operationName,
+            string entityLogicalName,
+            List<T> batch,
+            BulkOperationOptions options,
+            Func<IPooledClient, List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            CancellationToken cancellationToken)
+        {
+            var attempt = 0;
+            Exception? lastException = null;
+
+            while (attempt < MaxThrottleRetries)
+            {
+                attempt++;
+                IPooledClient? client = null;
+                string connectionName = "unknown";
+
+                try
+                {
+                    client = await GetClientWithRetryAsync(cancellationToken);
+                    connectionName = client.ConnectionName;
+
+                    return await executeBatch(client, batch, cancellationToken);
+                }
+                catch (Exception ex) when (TryGetThrottleInfo(ex, out var retryAfter, out var errorCode))
+                {
+                    lastException = ex;
+
+                    // Handle throttle and determine if we should retry
+                    var shouldRetry = await HandleThrottleAsync(
+                        connectionName, retryAfter, errorCode, attempt, cancellationToken);
+
+                    if (!shouldRetry)
+                    {
+                        // Max retries exceeded - throw as ServiceProtectionException
+                        throw new ServiceProtectionException(connectionName, retryAfter, errorCode, ex);
+                    }
+
+                    // Continue to next iteration to retry
+                }
+                finally
+                {
+                    if (client != null)
+                    {
+                        await client.DisposeAsync();
+                    }
+                }
+            }
+
+            // This shouldn't be reached, but handle it gracefully
+            throw new ServiceProtectionException(
+                "unknown",
+                FallbackRetryAfter,
+                0,
+                lastException ?? new InvalidOperationException($"Max throttle retries ({MaxThrottleRetries}) exceeded for {operationName}"));
+        }
+
+        private Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            _logger.LogDebug("Executing CreateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
-                entityLogicalName, batch.Count);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "CreateMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteCreateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
 
-            await using var client = await GetClientWithRetryAsync(cancellationToken);
+        private async Task<BulkOperationResult> ExecuteCreateMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing CreateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new CreateMultipleRequest { Targets = targets };
@@ -436,9 +661,9 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!TryGetThrottleInfo(ex, out _, out _))
             {
-                // Standard tables: entire batch fails
+                // Non-throttle error on standard tables: entire batch fails
                 _logger.LogError(ex, "CreateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
                     entityLogicalName, batch.Count);
 
@@ -458,18 +683,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
+            // Throttle exceptions are not caught here - they propagate to the wrapper for retry
         }
 
-        private async Task<BulkOperationResult> ExecuteUpdateMultipleBatchAsync(
+        private Task<BulkOperationResult> ExecuteUpdateMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            _logger.LogDebug("Executing UpdateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
-                entityLogicalName, batch.Count);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "UpdateMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteUpdateMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
 
-            await using var client = await GetClientWithRetryAsync(cancellationToken);
+        private async Task<BulkOperationResult> ExecuteUpdateMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing UpdateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpdateMultipleRequest { Targets = targets };
@@ -501,7 +741,7 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!TryGetThrottleInfo(ex, out _, out _))
             {
                 _logger.LogError(ex, "UpdateMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
                     entityLogicalName, batch.Count);
@@ -522,18 +762,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
+            // Throttle exceptions propagate to wrapper for retry
         }
 
-        private async Task<BulkOperationResult> ExecuteUpsertMultipleBatchAsync(
+        private Task<BulkOperationResult> ExecuteUpsertMultipleBatchAsync(
             string entityLogicalName,
             List<Entity> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            _logger.LogDebug("Executing UpsertMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}",
-                entityLogicalName, batch.Count);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "UpsertMultiple",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteUpsertMultipleCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
 
-            await using var client = await GetClientWithRetryAsync(cancellationToken);
+        private async Task<BulkOperationResult> ExecuteUpsertMultipleCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Entity> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing UpsertMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpsertMultipleRequest { Targets = targets };
@@ -565,7 +820,7 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!TryGetThrottleInfo(ex, out _, out _))
             {
                 _logger.LogError(ex, "UpsertMultiple batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
                     entityLogicalName, batch.Count);
@@ -586,15 +841,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
+            // Throttle exceptions propagate to wrapper for retry
         }
 
-        private async Task<BulkOperationResult> ExecuteElasticDeleteBatchAsync(
+        private Task<BulkOperationResult> ExecuteElasticDeleteBatchAsync(
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await GetClientWithRetryAsync(cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "DeleteMultiple (elastic)",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteElasticDeleteCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteElasticDeleteCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing DeleteMultiple (elastic) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var entityReferences = batch
                 .Select(id => new EntityReference(entityLogicalName, id))
@@ -629,7 +902,7 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!TryGetThrottleInfo(ex, out _, out _))
             {
                 _logger.LogError(ex, "DeleteMultiple (elastic) batch failed. Entity: {Entity}, BatchSize: {BatchSize}",
                     entityLogicalName, batch.Count);
@@ -650,15 +923,33 @@ namespace PPDS.Dataverse.BulkOperations
                     Duration = TimeSpan.Zero
                 };
             }
+            // Throttle exceptions propagate to wrapper for retry
         }
 
-        private async Task<BulkOperationResult> ExecuteStandardDeleteBatchAsync(
+        private Task<BulkOperationResult> ExecuteStandardDeleteBatchAsync(
             string entityLogicalName,
             List<Guid> batch,
             BulkOperationOptions options,
             CancellationToken cancellationToken)
         {
-            await using var client = await GetClientWithRetryAsync(cancellationToken);
+            return ExecuteBatchWithThrottleHandlingAsync(
+                "DeleteMultiple (standard)",
+                entityLogicalName,
+                batch,
+                options,
+                (client, b, ct) => ExecuteStandardDeleteCoreAsync(client, entityLogicalName, b, options, ct),
+                cancellationToken);
+        }
+
+        private async Task<BulkOperationResult> ExecuteStandardDeleteCoreAsync(
+            IPooledClient client,
+            string entityLogicalName,
+            List<Guid> batch,
+            BulkOperationOptions options,
+            CancellationToken cancellationToken)
+        {
+            _logger.LogDebug("Executing DeleteMultiple (standard) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
+                entityLogicalName, batch.Count, client.ConnectionName);
 
             var executeMultiple = new ExecuteMultipleRequest
             {
@@ -681,6 +972,8 @@ namespace PPDS.Dataverse.BulkOperations
                 executeMultiple.Requests.Add(deleteRequest);
             }
 
+            // Note: ExecuteMultiple can also throw service protection errors
+            // These will propagate to the wrapper for retry
             var response = (ExecuteMultipleResponse)await client.ExecuteAsync(executeMultiple, cancellationToken);
 
             var errors = new List<BulkOperationError>();
