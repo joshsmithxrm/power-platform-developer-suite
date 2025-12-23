@@ -55,6 +55,19 @@ namespace PPDS.Dataverse.Pooling
         public DateTime LastUsedAt { get; internal set; }
 
         /// <inheritdoc />
+        public bool IsInvalid { get; private set; }
+
+        /// <inheritdoc />
+        public string? InvalidReason { get; private set; }
+
+        /// <inheritdoc />
+        public void MarkInvalid(string reason)
+        {
+            IsInvalid = true;
+            InvalidReason = reason;
+        }
+
+        /// <inheritdoc />
         public bool IsReady => _client.IsReady;
 
         /// <inheritdoc />
@@ -126,6 +139,10 @@ namespace PPDS.Dataverse.Pooling
             _client.CallerAADObjectId = _originalCallerAADObjectId;
             _client.MaxRetryCount = _originalMaxRetryCount;
             _client.RetryPauseTime = _originalRetryPauseTime;
+
+            // Reset the invalid state
+            IsInvalid = false;
+            InvalidReason = null;
 
             // Reset the returned flag so this client can be returned again on next use
             Interlocked.Exchange(ref _returned, 0);

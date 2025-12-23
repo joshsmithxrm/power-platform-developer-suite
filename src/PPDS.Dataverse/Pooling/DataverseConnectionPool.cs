@@ -36,6 +36,9 @@ namespace PPDS.Dataverse.Pooling
         private readonly Task _validationTask;
 
         private long _totalRequestsServed;
+        private long _invalidConnectionCount;
+        private long _authFailureCount;
+        private long _connectionFailureCount;
         private int _disposed;
         private static bool _performanceSettingsApplied;
         private static readonly object _performanceSettingsLock = new();
@@ -311,6 +314,21 @@ namespace PPDS.Dataverse.Pooling
                 // Decrement active connections counter first
                 _activeConnections.AddOrUpdate(client.ConnectionName, 0, (_, v) => Math.Max(0, v - 1));
 
+                // Check if connection was marked as invalid - dispose instead of returning to pool
+                if (client.IsInvalid)
+                {
+                    _logger.LogInformation(
+                        "Connection marked invalid, disposing instead of returning. " +
+                        "ConnectionId: {ConnectionId}, Name: {ConnectionName}, Reason: {Reason}",
+                        client.ConnectionId,
+                        client.ConnectionName,
+                        client.InvalidReason);
+
+                    Interlocked.Increment(ref _invalidConnectionCount);
+                    client.ForceDispose();
+                    return;
+                }
+
                 var pool = _pools.GetValueOrDefault(client.ConnectionName);
                 if (pool == null)
                 {
@@ -361,6 +379,14 @@ namespace PPDS.Dataverse.Pooling
         {
             try
             {
+                // Check if marked as invalid
+                if (client.IsInvalid)
+                {
+                    _logger.LogDebug("Connection marked invalid. ConnectionId: {ConnectionId}, Reason: {Reason}",
+                        client.ConnectionId, client.InvalidReason);
+                    return false;
+                }
+
                 // Check idle timeout
                 if (DateTime.UtcNow - client.LastUsedAt > _options.Pool.MaxIdleTime)
                 {
@@ -634,6 +660,9 @@ namespace PPDS.Dataverse.Pooling
                 ThrottledConnections = connectionStats.Values.Count(s => s.IsThrottled),
                 RequestsServed = _totalRequestsServed,
                 ThrottleEvents = _throttleTracker.TotalThrottleEvents,
+                InvalidConnections = Interlocked.Read(ref _invalidConnectionCount),
+                AuthFailures = Interlocked.Read(ref _authFailureCount),
+                ConnectionFailures = Interlocked.Read(ref _connectionFailureCount),
                 ConnectionStats = connectionStats
             };
         }
@@ -643,6 +672,18 @@ namespace PPDS.Dataverse.Pooling
         private int GetTotalActiveConnections() => _activeConnections.Values.Sum();
 
         private int GetTotalIdleConnections() => _pools.Values.Sum(p => p.Count);
+
+        /// <inheritdoc />
+        public void RecordAuthFailure()
+        {
+            Interlocked.Increment(ref _authFailureCount);
+        }
+
+        /// <inheritdoc />
+        public void RecordConnectionFailure()
+        {
+            Interlocked.Increment(ref _connectionFailureCount);
+        }
 
         private void ThrowIfDisposed()
         {

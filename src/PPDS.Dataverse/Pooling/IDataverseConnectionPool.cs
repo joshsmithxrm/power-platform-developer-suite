@@ -41,5 +41,15 @@ namespace PPDS.Dataverse.Pooling
         /// Gets a value indicating whether the pool is enabled.
         /// </summary>
         bool IsEnabled { get; }
+
+        /// <summary>
+        /// Records an authentication failure for statistics.
+        /// </summary>
+        void RecordAuthFailure();
+
+        /// <summary>
+        /// Records a connection failure for statistics.
+        /// </summary>
+        void RecordConnectionFailure();
     }
 }

@@ -39,9 +39,10 @@ namespace PPDS.Dataverse.Pooling
 
         /// <summary>
         /// Gets or sets the maximum connection lifetime.
-        /// Default: 30 minutes
+        /// Set within OAuth token validity window for stable long-running scenarios.
+        /// Default: 60 minutes
         /// </summary>
-        public TimeSpan MaxLifetime { get; set; } = TimeSpan.FromMinutes(30);
+        public TimeSpan MaxLifetime { get; set; } = TimeSpan.FromMinutes(60);
 
         /// <summary>
         /// Gets or sets a value indicating whether to disable the affinity cookie for load distribution.
@@ -75,6 +76,21 @@ namespace PPDS.Dataverse.Pooling
         /// Default: true
         /// </summary>
         public bool EnableValidation { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to validate connection health on checkout.
+        /// When true, connections are checked for IsReady, age, and validity before being returned.
+        /// Default: true
+        /// </summary>
+        public bool ValidateOnCheckout { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets the maximum number of retry attempts for auth/connection failures.
+        /// When a connection fails due to auth or connectivity issues, operations will retry
+        /// with a new connection up to this many times.
+        /// Default: 2
+        /// </summary>
+        public int MaxConnectionRetries { get; set; } = 2;
     }
 
     /// <summary>

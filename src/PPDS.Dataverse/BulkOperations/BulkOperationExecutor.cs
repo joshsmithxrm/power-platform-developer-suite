@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +17,7 @@ using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
 using PPDS.Dataverse.Resilience;
+using PPDS.Dataverse.Security;
 
 namespace PPDS.Dataverse.BulkOperations
 {
@@ -33,6 +36,16 @@ namespace PPDS.Dataverse.BulkOperations
         /// Maximum number of retries when service protection limits are hit.
         /// </summary>
         private const int MaxThrottleRetries = 3;
+
+        /// <summary>
+        /// Maximum number of retries for TVP race condition errors on new tables.
+        /// </summary>
+        private const int MaxTvpRetries = 3;
+
+        /// <summary>
+        /// CRM error code for generic SQL error wrapper that may contain TVP race condition.
+        /// </summary>
+        private const int SqlErrorCode = unchecked((int)0x80044150);
 
         /// <summary>
         /// Fallback Retry-After duration when not provided by the server.
@@ -472,6 +485,101 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
+        /// Checks if an exception indicates an authentication/authorization failure.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is an authentication failure.</returns>
+        private static bool IsAuthFailure(Exception exception)
+        {
+            // Check for common auth failure patterns in FaultException
+            if (exception is FaultException<OrganizationServiceFault> faultEx)
+            {
+                var fault = faultEx.Detail;
+
+                // Common auth error codes
+                // -2147180286: Caller does not have privilege
+                // -2147204720: User is disabled
+                // -2147180285: AccessDenied
+                var authErrorCodes = new[]
+                {
+                    -2147180286, // No privilege
+                    -2147204720, // User disabled
+                    -2147180285, // Access denied
+                };
+
+                if (authErrorCodes.Contains(fault.ErrorCode))
+                {
+                    return true;
+                }
+
+                // Check message for auth-related keywords
+                var message = fault.Message?.ToLowerInvariant() ?? "";
+                if (message.Contains("authentication") ||
+                    message.Contains("authorization") ||
+                    message.Contains("token") ||
+                    message.Contains("expired") ||
+                    message.Contains("credential"))
+                {
+                    return true;
+                }
+            }
+
+            // Check for HTTP 401/403 in inner exceptions
+            if (exception.InnerException is HttpRequestException httpEx)
+            {
+                var message = httpEx.Message?.ToLowerInvariant() ?? "";
+                if (message.Contains("401") || message.Contains("403") ||
+                    message.Contains("unauthorized") || message.Contains("forbidden"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if an exception indicates a connection/network failure.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is a connection failure.</returns>
+        private static bool IsConnectionFailure(Exception exception)
+        {
+            return exception is HttpRequestException ||
+                   exception is SocketException ||
+                   exception.InnerException is SocketException ||
+                   exception.InnerException is HttpRequestException;
+        }
+
+        /// <summary>
+        /// Checks if an exception is a TVP race condition error that occurs on newly created tables.
+        /// This happens when parallel bulk operations hit a table before Dataverse has created
+        /// the internal TVP types and stored procedures.
+        /// SQL Error 3732: Cannot drop type because it is being referenced by another object.
+        /// </summary>
+        /// <param name="exception">The exception to check.</param>
+        /// <returns>True if this is a TVP race condition error.</returns>
+        private static bool IsTvpRaceConditionError(Exception exception)
+        {
+            if (exception is not FaultException<OrganizationServiceFault> faultEx)
+            {
+                return false;
+            }
+
+            var fault = faultEx.Detail;
+
+            // Check for the generic SQL error wrapper code
+            if (fault.ErrorCode != SqlErrorCode)
+            {
+                return false;
+            }
+
+            // Check the message for the specific SQL error 3732 (Cannot drop type)
+            var message = fault.Message ?? string.Empty;
+            return message.Contains("3732") || message.Contains("Cannot drop type");
+        }
+
+        /// <summary>
         /// Checks if there are any connections available (not currently throttled).
         /// </summary>
         /// <param name="totalConnections">The total number of configured connections.</param>
@@ -543,9 +651,10 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
-        /// Executes a batch operation with throttle detection and intelligent retry.
+        /// Executes a batch operation with throttle detection, connection health management, and intelligent retry.
         /// On throttle, records the event and either retries immediately on a different connection
         /// or waits for the shortest throttle expiry if all connections are throttled.
+        /// On auth/connection failure, marks the connection as invalid and retries with a new connection.
         /// </summary>
         private async Task<BulkOperationResult> ExecuteBatchWithThrottleHandlingAsync<T>(
             string operationName,
@@ -556,9 +665,10 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             var attempt = 0;
+            var maxRetries = Math.Max(MaxThrottleRetries, _options.Pool.MaxConnectionRetries);
             Exception? lastException = null;
 
-            while (attempt < MaxThrottleRetries)
+            while (attempt < maxRetries)
             {
                 attempt++;
                 IPooledClient? client = null;
@@ -587,6 +697,81 @@ namespace PPDS.Dataverse.BulkOperations
 
                     // Continue to next iteration to retry
                 }
+                catch (Exception ex) when (IsAuthFailure(ex))
+                {
+                    lastException = ex;
+
+                    _logger.LogWarning(
+                        "Authentication failure on connection {Connection}. " +
+                        "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
+                        connectionName, attempt, maxRetries, ex.Message);
+
+                    // Mark connection as invalid - it won't be returned to pool
+                    client?.MarkInvalid($"Auth failure: {ex.Message}");
+
+                    // Record the failure for statistics
+                    _connectionPool.RecordAuthFailure();
+
+                    if (attempt >= maxRetries)
+                    {
+                        throw new DataverseConnectionException(
+                            connectionName,
+                            $"Authentication failure after {attempt} attempts",
+                            ex);
+                    }
+
+                    // Continue to next iteration to retry with new connection
+                }
+                catch (Exception ex) when (IsConnectionFailure(ex))
+                {
+                    lastException = ex;
+
+                    _logger.LogWarning(
+                        "Connection failure on {Connection}. " +
+                        "Marking invalid and retrying. Attempt: {Attempt}/{MaxRetries}. Error: {Error}",
+                        connectionName, attempt, maxRetries, ex.Message);
+
+                    // Mark connection as invalid
+                    client?.MarkInvalid($"Connection failure: {ex.Message}");
+
+                    // Record the failure for statistics
+                    _connectionPool.RecordConnectionFailure();
+
+                    if (attempt >= maxRetries)
+                    {
+                        throw new DataverseConnectionException(
+                            connectionName,
+                            $"Connection failure after {attempt} attempts",
+                            ex);
+                    }
+
+                    // Continue to next iteration to retry with new connection
+                }
+                catch (Exception ex) when (IsTvpRaceConditionError(ex))
+                {
+                    lastException = ex;
+
+                    // Exponential backoff: 500ms, 1s, 2s
+                    var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+
+                    _logger.LogWarning(
+                        "TVP race condition detected for {Entity}. " +
+                        "This is transient on new tables. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxTvpRetries}",
+                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxTvpRetries);
+
+                    if (attempt >= MaxTvpRetries)
+                    {
+                        _logger.LogError(
+                            "TVP race condition persisted after {MaxRetries} retries for {Entity}. " +
+                            "This may indicate a schema issue or concurrent schema modification.",
+                            MaxTvpRetries, entityLogicalName);
+                        throw;
+                    }
+
+                    await Task.Delay(delay, cancellationToken);
+
+                    // Continue to next iteration to retry
+                }
                 finally
                 {
                     if (client != null)
@@ -601,7 +786,7 @@ namespace PPDS.Dataverse.BulkOperations
                 "unknown",
                 FallbackRetryAfter,
                 0,
-                lastException ?? new InvalidOperationException($"Max throttle retries ({MaxThrottleRetries}) exceeded for {operationName}"));
+                lastException ?? new InvalidOperationException($"Max retries ({maxRetries}) exceeded for {operationName}"));
         }
 
         private Task<BulkOperationResult> ExecuteCreateMultipleBatchAsync(
