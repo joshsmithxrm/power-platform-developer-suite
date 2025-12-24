@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Dataverse.Configuration;
@@ -66,6 +67,41 @@ public static class ServiceFactory
                 TenantId = tenantId,
                 AuthType = DataverseAuthType.ClientSecret
             });
+            options.Pool.Enabled = true;
+            options.Pool.MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16);
+            options.Pool.DisableAffinityCookie = true;
+        });
+
+        // Add migration services
+        services.AddDataverseMigration();
+
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Creates a service provider from configuration file using the specified environment.
+    /// </summary>
+    /// <param name="configuration">The configuration root.</param>
+    /// <param name="environmentName">The environment name to use.</param>
+    /// <returns>A configured service provider.</returns>
+    public static ServiceProvider CreateProviderFromConfig(
+        IConfiguration configuration,
+        string environmentName)
+    {
+        var services = new ServiceCollection();
+
+        // Add logging (minimal for CLI - no console output to avoid interfering with CLI)
+        services.AddLogging(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Warning);
+        });
+
+        // Use SDK's config-based overload with environment selection
+        services.AddDataverseConnectionPool(configuration, environment: environmentName);
+
+        // Override pool settings for CLI usage (high parallelism, no affinity cookie)
+        services.Configure<DataverseOptions>(options =>
+        {
             options.Pool.Enabled = true;
             options.Pool.MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16);
             options.Pool.DisableAffinityCookie = true;

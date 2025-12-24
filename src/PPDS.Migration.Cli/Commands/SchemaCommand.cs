@@ -84,10 +84,20 @@ public static class SchemaCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConnectionResolver.GetHelpDescription())
+        var envOption = new Option<string?>(
+            name: "--env",
+            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+
+        var configOption = new Option<FileInfo?>(
+            name: "--config",
+            description: "Path to configuration file (default: appsettings.json in current directory)");
+
+        var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConnectionResolver.GetHybridHelpDescription())
         {
             entitiesOption,
             outputOption,
+            envOption,
+            configOption,
             includeSystemFieldsOption,
             includeRelationshipsOption,
             disablePluginsOption,
@@ -102,6 +112,8 @@ public static class SchemaCommand
         {
             var entities = context.ParseResult.GetValueForOption(entitiesOption)!;
             var output = context.ParseResult.GetValueForOption(outputOption)!;
+            var env = context.ParseResult.GetValueForOption(envOption);
+            var config = context.ParseResult.GetValueForOption(configOption);
             var includeSystemFields = context.ParseResult.GetValueForOption(includeSystemFieldsOption);
             var includeRelationships = context.ParseResult.GetValueForOption(includeRelationshipsOption);
             var disablePlugins = context.ParseResult.GetValueForOption(disablePluginsOption);
@@ -111,13 +123,13 @@ public static class SchemaCommand
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            // Resolve connection from environment variables
-            ConnectionResolver.ConnectionConfig connection;
+            // Resolve connection from config or environment variables
+            ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                connection = ConnectionResolver.Resolve();
+                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 context.ExitCode = ExitCodes.InvalidArguments;
@@ -144,7 +156,7 @@ public static class SchemaCommand
             var excludePatternList = ParseAttributeList(excludePatterns);
 
             context.ExitCode = await ExecuteGenerateAsync(
-                connection, entityList, output,
+                resolved.Config, entityList, output,
                 includeSystemFields, includeRelationships, disablePlugins,
                 includeAttrList, excludeAttrList, excludePatternList,
                 json, verbose, context.GetCancellationToken());
@@ -169,9 +181,19 @@ public static class SchemaCommand
             getDefaultValue: () => false,
             description: "Output as JSON");
 
-        var command = new Command("list", "List available entities in Dataverse. " + ConnectionResolver.GetHelpDescription())
+        var envOption = new Option<string?>(
+            name: "--env",
+            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+
+        var configOption = new Option<FileInfo?>(
+            name: "--config",
+            description: "Path to configuration file (default: appsettings.json in current directory)");
+
+        var command = new Command("list", "List available entities in Dataverse. " + ConnectionResolver.GetHybridHelpDescription())
         {
             filterOption,
+            envOption,
+            configOption,
             customOnlyOption,
             jsonOption
         };
@@ -179,16 +201,18 @@ public static class SchemaCommand
         command.SetHandler(async (context) =>
         {
             var filter = context.ParseResult.GetValueForOption(filterOption);
+            var env = context.ParseResult.GetValueForOption(envOption);
+            var config = context.ParseResult.GetValueForOption(configOption);
             var customOnly = context.ParseResult.GetValueForOption(customOnlyOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
 
-            // Resolve connection from environment variables
-            ConnectionResolver.ConnectionConfig connection;
+            // Resolve connection from config or environment variables
+            ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                connection = ConnectionResolver.Resolve();
+                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 context.ExitCode = ExitCodes.InvalidArguments;
@@ -196,7 +220,7 @@ public static class SchemaCommand
             }
 
             context.ExitCode = await ExecuteListAsync(
-                connection, filter, customOnly, json, context.GetCancellationToken());
+                resolved.Config, filter, customOnly, json, context.GetCancellationToken());
         });
 
         return command;

@@ -51,10 +51,20 @@ public static class ExportCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConnectionResolver.GetHelpDescription())
+        var envOption = new Option<string?>(
+            name: "--env",
+            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+
+        var configOption = new Option<FileInfo?>(
+            name: "--config",
+            description: "Path to configuration file (default: appsettings.json in current directory)");
+
+        var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConnectionResolver.GetHybridHelpDescription())
         {
             schemaOption,
             outputOption,
+            envOption,
+            configOption,
             parallelOption,
             pageSizeOption,
             includeFilesOption,
@@ -66,19 +76,21 @@ public static class ExportCommand
         {
             var schema = context.ParseResult.GetValueForOption(schemaOption)!;
             var output = context.ParseResult.GetValueForOption(outputOption)!;
+            var env = context.ParseResult.GetValueForOption(envOption);
+            var config = context.ParseResult.GetValueForOption(configOption);
             var parallel = context.ParseResult.GetValueForOption(parallelOption);
             var pageSize = context.ParseResult.GetValueForOption(pageSizeOption);
             var includeFiles = context.ParseResult.GetValueForOption(includeFilesOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            // Resolve connection from environment variables
-            ConnectionResolver.ConnectionConfig connection;
+            // Resolve connection from config or environment variables
+            ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                connection = ConnectionResolver.Resolve();
+                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 context.ExitCode = ExitCodes.InvalidArguments;
@@ -86,7 +98,7 @@ public static class ExportCommand
             }
 
             context.ExitCode = await ExecuteAsync(
-                connection, schema, output, parallel, pageSize,
+                resolved.Config, schema, output, parallel, pageSize,
                 includeFiles, json, verbose, context.GetCancellationToken());
         });
 

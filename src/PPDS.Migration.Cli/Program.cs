@@ -21,6 +21,7 @@ public static class Program
         rootCommand.AddCommand(AnalyzeCommand.Create());
         rootCommand.AddCommand(MigrateCommand.Create());
         rootCommand.AddCommand(SchemaCommand.Create());
+        rootCommand.AddCommand(ConfigCommand.Create());
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();

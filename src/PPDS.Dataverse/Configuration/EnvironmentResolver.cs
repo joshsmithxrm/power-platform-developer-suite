@@ -11,6 +11,7 @@ namespace PPDS.Dataverse.Configuration
     {
         /// <summary>
         /// Gets a named environment from the configuration.
+        /// Environment name matching is case-insensitive.
         /// </summary>
         /// <param name="options">The Dataverse options.</param>
         /// <param name="environmentName">The environment name to retrieve.</param>
@@ -30,9 +31,19 @@ namespace PPDS.Dataverse.Configuration
                 throw new ArgumentException("Environment name cannot be empty.", nameof(environmentName));
             }
 
+            // Try exact match first
             if (options.Environments.TryGetValue(environmentName, out var environment))
             {
                 return environment;
+            }
+
+            // Fall back to case-insensitive match
+            foreach (var kvp in options.Environments)
+            {
+                if (string.Equals(kvp.Key, environmentName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return kvp.Value;
+                }
             }
 
             throw new KeyNotFoundException(
@@ -80,10 +91,31 @@ namespace PPDS.Dataverse.Configuration
 
         /// <summary>
         /// Checks if a named environment exists in the configuration.
+        /// Environment name matching is case-insensitive.
         /// </summary>
         public static bool HasEnvironment(DataverseOptions options, string environmentName)
         {
-            return options?.Environments.ContainsKey(environmentName) == true;
+            if (options?.Environments == null || string.IsNullOrWhiteSpace(environmentName))
+            {
+                return false;
+            }
+
+            // Try exact match first
+            if (options.Environments.ContainsKey(environmentName))
+            {
+                return true;
+            }
+
+            // Fall back to case-insensitive match
+            foreach (var key in options.Environments.Keys)
+            {
+                if (string.Equals(key, environmentName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

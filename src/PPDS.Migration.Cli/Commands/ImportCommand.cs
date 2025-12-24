@@ -60,9 +60,19 @@ public static class ImportCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var command = new Command("import", "Import data from a ZIP file into Dataverse. " + ConnectionResolver.GetHelpDescription())
+        var envOption = new Option<string?>(
+            name: "--env",
+            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+
+        var configOption = new Option<FileInfo?>(
+            name: "--config",
+            description: "Path to configuration file (default: appsettings.json in current directory)");
+
+        var command = new Command("import", "Import data from a ZIP file into Dataverse. " + ConnectionResolver.GetHybridHelpDescription())
         {
             dataOption,
+            envOption,
+            configOption,
             batchSizeOption,
             bypassPluginsOption,
             bypassFlowsOption,
@@ -76,6 +86,8 @@ public static class ImportCommand
         command.SetHandler(async (context) =>
         {
             var data = context.ParseResult.GetValueForOption(dataOption)!;
+            var env = context.ParseResult.GetValueForOption(envOption);
+            var config = context.ParseResult.GetValueForOption(configOption);
             var batchSize = context.ParseResult.GetValueForOption(batchSizeOption);
             var bypassPlugins = context.ParseResult.GetValueForOption(bypassPluginsOption);
             var bypassFlows = context.ParseResult.GetValueForOption(bypassFlowsOption);
@@ -101,13 +113,13 @@ public static class ImportCommand
                 return;
             }
 
-            // Resolve connection from environment variables
-            ConnectionResolver.ConnectionConfig connection;
+            // Resolve connection from config or environment variables
+            ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                connection = ConnectionResolver.Resolve();
+                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 context.ExitCode = ExitCodes.InvalidArguments;
@@ -115,7 +127,7 @@ public static class ImportCommand
             }
 
             context.ExitCode = await ExecuteAsync(
-                connection, data, batchSize, bypassPlugins, bypassFlows,
+                resolved.Config, data, batchSize, bypassPlugins, bypassFlows,
                 continueOnError, mode, userMappingFile, json, verbose, context.GetCancellationToken());
         });
 
