@@ -43,6 +43,18 @@ namespace PPDS.Dataverse.BulkOperations
         /// Only populated for create operations; null for update/upsert/delete.
         /// </summary>
         public IReadOnlyList<Guid>? CreatedIds { get; init; }
+
+        /// <summary>
+        /// Gets the number of records that were created during an UpsertMultiple operation.
+        /// Only populated for upsert operations; null for create/update/delete.
+        /// </summary>
+        public int? CreatedCount { get; init; }
+
+        /// <summary>
+        /// Gets the number of records that were updated during an UpsertMultiple operation.
+        /// Only populated for upsert operations; null for create/update/delete.
+        /// </summary>
+        public int? UpdatedCount { get; init; }
     }
 
     /// <summary>

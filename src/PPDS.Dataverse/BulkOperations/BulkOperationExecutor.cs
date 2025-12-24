@@ -1026,22 +1026,44 @@ namespace PPDS.Dataverse.BulkOperations
             {
                 var response = (UpsertMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
 
-                _logger.LogDebug("UpsertMultiple batch completed. Entity: {Entity}, Success: {Success}",
-                    entityLogicalName, batch.Count);
+                // Count created vs updated from response results
+                var createdCount = 0;
+                var updatedCount = 0;
+
+                if (response.Results != null)
+                {
+                    foreach (var upsertResponse in response.Results)
+                    {
+                        if (upsertResponse.RecordCreated)
+                        {
+                            createdCount++;
+                        }
+                        else
+                        {
+                            updatedCount++;
+                        }
+                    }
+                }
+
+                _logger.LogDebug("UpsertMultiple batch completed. Entity: {Entity}, Created: {Created}, Updated: {Updated}",
+                    entityLogicalName, createdCount, updatedCount);
 
                 _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
                 return new BulkOperationResult
                 {
-                    SuccessCount = batch.Count,
+                    SuccessCount = createdCount + updatedCount,
                     FailureCount = 0,
                     Errors = Array.Empty<BulkOperationError>(),
-                    Duration = TimeSpan.Zero
+                    Duration = TimeSpan.Zero,
+                    CreatedCount = createdCount,
+                    UpdatedCount = updatedCount
                 };
             }
             catch (Exception ex) when (options.ElasticTable && TryExtractBulkApiErrors(ex, batch, out var errors, out var successCount))
             {
                 // Elastic tables support partial success - this is expected behavior, not an error
+                // Note: Cannot determine created/updated split for partial failures
                 return new BulkOperationResult
                 {
                     SuccessCount = successCount,
@@ -1362,6 +1384,9 @@ namespace PPDS.Dataverse.BulkOperations
             var allCreatedIds = new ConcurrentBag<Guid>();
             var successCount = 0;
             var failureCount = 0;
+            var createdCount = 0;
+            var updatedCount = 0;
+            var hasUpsertCounts = 0; // 0 = false, 1 = true (for thread-safe flag)
 
             await Parallel.ForEachAsync(
                 batches,
@@ -1391,6 +1416,18 @@ namespace PPDS.Dataverse.BulkOperations
                         }
                     }
 
+                    // Aggregate upsert created/updated counts
+                    if (batchResult.CreatedCount.HasValue)
+                    {
+                        Interlocked.Exchange(ref hasUpsertCounts, 1);
+                        Interlocked.Add(ref createdCount, batchResult.CreatedCount.Value);
+                    }
+                    if (batchResult.UpdatedCount.HasValue)
+                    {
+                        Interlocked.Exchange(ref hasUpsertCounts, 1);
+                        Interlocked.Add(ref updatedCount, batchResult.UpdatedCount.Value);
+                    }
+
                     // Report progress after each batch
                     tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
                     progress?.Report(tracker.GetSnapshot());
@@ -1402,7 +1439,9 @@ namespace PPDS.Dataverse.BulkOperations
                 FailureCount = failureCount,
                 Errors = allErrors.ToList(),
                 Duration = TimeSpan.Zero,
-                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds.ToList() : null
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds.ToList() : null,
+                CreatedCount = hasUpsertCounts == 1 ? createdCount : null,
+                UpdatedCount = hasUpsertCounts == 1 ? updatedCount : null
             };
         }
 
@@ -1528,6 +1567,8 @@ namespace PPDS.Dataverse.BulkOperations
             var allCreatedIds = new List<Guid>();
             var successCount = 0;
             var failureCount = 0;
+            int? createdCount = null;
+            int? updatedCount = null;
 
             foreach (var result in results)
             {
@@ -1541,6 +1582,16 @@ namespace PPDS.Dataverse.BulkOperations
                 {
                     allCreatedIds.AddRange(result.CreatedIds);
                 }
+
+                // Aggregate upsert created/updated counts
+                if (result.CreatedCount.HasValue)
+                {
+                    createdCount = (createdCount ?? 0) + result.CreatedCount.Value;
+                }
+                if (result.UpdatedCount.HasValue)
+                {
+                    updatedCount = (updatedCount ?? 0) + result.UpdatedCount.Value;
+                }
             }
 
             return new BulkOperationResult
@@ -1549,7 +1600,9 @@ namespace PPDS.Dataverse.BulkOperations
                 FailureCount = failureCount,
                 Errors = allErrors,
                 Duration = TimeSpan.Zero,
-                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null,
+                CreatedCount = createdCount,
+                UpdatedCount = updatedCount
             };
         }
 
@@ -1567,6 +1620,8 @@ namespace PPDS.Dataverse.BulkOperations
             var allErrors = new List<BulkOperationError>();
             var allCreatedIds = new List<Guid>();
             var successCount = 0;
+            int? createdCount = null;
+            int? updatedCount = null;
 
             foreach (var batch in batches)
             {
@@ -1580,6 +1635,16 @@ namespace PPDS.Dataverse.BulkOperations
                     allCreatedIds.AddRange(batchResult.CreatedIds);
                 }
 
+                // Aggregate upsert created/updated counts
+                if (batchResult.CreatedCount.HasValue)
+                {
+                    createdCount = (createdCount ?? 0) + batchResult.CreatedCount.Value;
+                }
+                if (batchResult.UpdatedCount.HasValue)
+                {
+                    updatedCount = (updatedCount ?? 0) + batchResult.UpdatedCount.Value;
+                }
+
                 tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
                 progress?.Report(tracker.GetSnapshot());
             }
@@ -1590,7 +1655,9 @@ namespace PPDS.Dataverse.BulkOperations
                 FailureCount = allErrors.Count,
                 Errors = allErrors,
                 Duration = TimeSpan.Zero,
-                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null,
+                CreatedCount = createdCount,
+                UpdatedCount = updatedCount
             };
         }
 
