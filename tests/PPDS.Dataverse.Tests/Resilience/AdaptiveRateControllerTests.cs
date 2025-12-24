@@ -590,9 +590,9 @@ public class AdaptiveRateControllerTests
         // Arrange & Act
         var options = new AdaptiveRateOptions { Preset = RateControlPreset.Conservative };
 
-        // Assert
-        options.ExecutionTimeCeilingFactor.Should().Be(180);
-        options.SlowBatchThresholdMs.Should().Be(8_000);
+        // Assert - Conservative uses lower factor (140) and threshold (6000) for headroom
+        options.ExecutionTimeCeilingFactor.Should().Be(140);
+        options.SlowBatchThresholdMs.Should().Be(6_000);
         options.DecreaseFactor.Should().Be(0.4);
         options.StabilizationBatches.Should().Be(5);
         options.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(8));
@@ -619,12 +619,12 @@ public class AdaptiveRateControllerTests
         var options = new AdaptiveRateOptions
         {
             Preset = RateControlPreset.Conservative,
-            ExecutionTimeCeilingFactor = 200 // Override preset's 180
+            ExecutionTimeCeilingFactor = 200 // Override preset's 140
         };
 
         // Assert - explicit value used, other preset values unchanged
         options.ExecutionTimeCeilingFactor.Should().Be(200); // Overridden
-        options.SlowBatchThresholdMs.Should().Be(8_000); // From Conservative
+        options.SlowBatchThresholdMs.Should().Be(6_000); // From Conservative
         options.DecreaseFactor.Should().Be(0.4); // From Conservative
     }
 

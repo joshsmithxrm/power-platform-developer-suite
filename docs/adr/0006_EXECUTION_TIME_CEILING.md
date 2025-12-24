@@ -56,9 +56,15 @@ To simplify configuration, three presets provide sensible defaults:
 
 | Preset | Factor | Threshold | Use Case |
 |--------|--------|-----------|----------|
-| **Conservative** | 180 | 7000ms | Production bulk jobs |
+| **Conservative** | 140 | 6000ms | Production bulk jobs, deletes |
 | **Balanced** | 200 | 8000ms | General purpose (default) |
 | **Aggressive** | 320 | 11000ms | Dev/test with monitoring |
+
+**Why Conservative uses Factor=140:**
+- Creates ~20% headroom below the throttle limit
+- At 8.5s batches: ceiling = 140/8.5 = **16** (vs 21 with Factor=180)
+- Prevents throttle cascades that occur when running at 100% of ceiling capacity
+- Lower threshold (6000ms) applies ceiling proactively for operations that slow down
 
 ### Configuration
 

@@ -21,9 +21,15 @@ Three presets provide sensible defaults for common scenarios:
 
 | Preset | Factor | Threshold | Use Case |
 |--------|--------|-----------|----------|
-| **Conservative** | 180 | 8000ms | Production bulk jobs, delete operations, overnight migrations |
+| **Conservative** | 140 | 6000ms | Production bulk jobs, delete operations, overnight migrations |
 | **Balanced** | 200 | 8000ms | General purpose, creates, updates |
 | **Aggressive** | 320 | 11000ms | Dev/test, time-critical with monitoring |
+
+**Why Conservative uses Factor=140 (not 180):**
+- Creates ~20% headroom below the throttle limit
+- At 8.5s batches: ceiling = 140/8.5 = **16** parallelism
+- Prevents throttle cascades when running at 100% of ceiling capacity
+- Lower threshold (6000ms) applies ceiling proactively
 
 ### Configuration Examples
 
@@ -86,9 +92,32 @@ Three presets provide sensible defaults for common scenarios:
 
 At 21 parallelism with 9s batches, execution time consumption exceeds 4s/s budget.
 
-**Recommendation:** Use **Conservative preset** (Factor=180) for delete operations:
-- At 9s batches: ceiling = 180/9 = **20** (prevents throttle)
-- At 10s batches: ceiling = 180/10 = **18** (safe margin)
+**Recommendation:** Use **Conservative preset** for delete operations.
+
+### Round 3: Conservative Preset Analysis (Factor=180, Threshold=8000) - FAILED
+
+Testing Conservative preset with 42,366 delete records revealed a critical flaw:
+
+| Phase | Progress | Parallelism | Ceiling | Throughput | Status |
+|-------|----------|-------------|---------|------------|--------|
+| Cruising | 0-67% | 20 | 20-23 | 173-175/s | ✅ Good |
+| **Throttle Wall** | 67% | 20 → 10 | 18 | - | ❌ CASCADE |
+| Recovery | 67-100% | 10 | 10-17 | 83-87/s | 50% loss |
+
+**Root Cause: Parallelism was AT the ceiling (20 of 20) - zero headroom!**
+
+```
+Conservative Factor=180, Batch time=8.6s
+Ceiling = 180 / 8.6 = 20.9 → 20
+Parallelism = 20 = 100% of ceiling ← NO HEADROOM
+```
+
+When server load spiked → instant throttle cascade with escalating Retry-After (37s → 45s → 67s → 81s).
+
+**Fix: Lower Conservative Factor to 140**
+- At 8.5s batches: ceiling = 140/8.5 = **16** (vs 21 with Factor=180)
+- Creates ~20% headroom below throttle limit
+- Lower threshold (6000ms) applies ceiling proactively
 
 ---
 

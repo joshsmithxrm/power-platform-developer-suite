@@ -25,8 +25,8 @@ namespace PPDS.Dataverse.Resilience
         internal static PresetDefaults GetPresetDefaults(RateControlPreset preset) => preset switch
         {
             RateControlPreset.Conservative => new PresetDefaults(
-                ExecutionTimeCeilingFactor: 180,
-                SlowBatchThresholdMs: 8_000,
+                ExecutionTimeCeilingFactor: 140,
+                SlowBatchThresholdMs: 6_000,
                 DecreaseFactor: 0.4,
                 StabilizationBatches: 5,
                 MinIncreaseIntervalSeconds: 8),
@@ -100,7 +100,7 @@ namespace PPDS.Dataverse.Resilience
         /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
         /// <remarks>
-        /// Preset defaults: Conservative=180, Balanced=200, Aggressive=320
+        /// Preset defaults: Conservative=140, Balanced=200, Aggressive=320
         /// </remarks>
         public int ExecutionTimeCeilingFactor
         {
@@ -118,7 +118,7 @@ namespace PPDS.Dataverse.Resilience
         /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
         /// <remarks>
-        /// Preset defaults: Conservative=8000, Balanced=8000, Aggressive=11000
+        /// Preset defaults: Conservative=6000, Balanced=8000, Aggressive=11000
         /// </remarks>
         public int SlowBatchThresholdMs
         {

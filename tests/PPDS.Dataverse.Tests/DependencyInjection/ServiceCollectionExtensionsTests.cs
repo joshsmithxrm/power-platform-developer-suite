@@ -637,10 +637,10 @@ public class ServiceCollectionExtensionsTests
         var options = provider.GetRequiredService<IOptions<DataverseOptions>>().Value;
 
         // Assert - should use Conservative preset values, not Balanced
-        // Conservative: Factor=180, DecreaseFactor=0.4, Stabilization=5, Interval=8s
-        // Balanced:     Factor=200, DecreaseFactor=0.5, Stabilization=3, Interval=5s
+        // Conservative: Factor=140, Threshold=6000, DecreaseFactor=0.4, Stabilization=5, Interval=8s
+        // Balanced:     Factor=200, Threshold=8000, DecreaseFactor=0.5, Stabilization=3, Interval=5s
         options.AdaptiveRate.Preset.Should().Be(RateControlPreset.Conservative);
-        options.AdaptiveRate.ExecutionTimeCeilingFactor.Should().Be(180, "Conservative preset should use 180");
+        options.AdaptiveRate.ExecutionTimeCeilingFactor.Should().Be(140, "Conservative preset should use 140");
         options.AdaptiveRate.DecreaseFactor.Should().Be(0.4, "Conservative preset should use 0.4");
         options.AdaptiveRate.StabilizationBatches.Should().Be(5, "Conservative preset should use 5");
         options.AdaptiveRate.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(8), "Conservative preset should use 8s");
@@ -664,7 +664,7 @@ public class ServiceCollectionExtensionsTests
         options.Preset = RateControlPreset.Conservative;
 
         // Assert - getter should now return Conservative default
-        options.ExecutionTimeCeilingFactor.Should().Be(180, "should switch to Conservative default");
+        options.ExecutionTimeCeilingFactor.Should().Be(140, "should switch to Conservative default");
     }
 
     /// <summary>
