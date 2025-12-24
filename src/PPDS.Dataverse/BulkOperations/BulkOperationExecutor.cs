@@ -43,6 +43,12 @@ namespace PPDS.Dataverse.BulkOperations
         private const int MaxDeadlockRetries = 3;
 
         /// <summary>
+        /// Maximum number of pre-flight throttle check attempts before proceeding anyway.
+        /// This prevents infinite loops when the pool keeps returning throttled connections.
+        /// </summary>
+        private const int MaxPreFlightAttempts = 10;
+
+        /// <summary>
         /// CRM error code for generic SQL error wrapper that may contain TVP race condition.
         /// </summary>
         private const int SqlErrorCode = unchecked((int)0x80044150);
@@ -53,6 +59,7 @@ namespace PPDS.Dataverse.BulkOperations
         private static readonly TimeSpan FallbackRetryAfter = TimeSpan.FromSeconds(30);
 
         private readonly IDataverseConnectionPool _connectionPool;
+        private readonly IThrottleTracker _throttleTracker;
         private readonly IAdaptiveRateController _adaptiveRateController;
         private readonly DataverseOptions _options;
         private readonly ILogger<BulkOperationExecutor> _logger;
@@ -61,7 +68,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
-        /// <param name="throttleTracker">The throttle tracker. No longer used - pool handles throttle recording via PooledClient callback.</param>
+        /// <param name="throttleTracker">The throttle tracker for pre-flight throttle checks.</param>
         /// <param name="adaptiveRateController">The adaptive rate controller for dynamic parallelism.</param>
         /// <param name="options">Configuration options.</param>
         /// <param name="logger">Logger instance.</param>
@@ -73,8 +80,7 @@ namespace PPDS.Dataverse.BulkOperations
             ILogger<BulkOperationExecutor> logger)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
-            // throttleTracker parameter kept - pool handles throttle recording via PooledClient callback
-            _ = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
+            _throttleTracker = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
             _adaptiveRateController = adaptiveRateController ?? throw new ArgumentNullException(nameof(adaptiveRateController));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -668,6 +674,38 @@ namespace PPDS.Dataverse.BulkOperations
                 {
                     client = await GetClientWithRetryAsync(cancellationToken);
                     connectionName = client.ConnectionName;
+
+                    // PRE-FLIGHT GUARD: Don't execute if connection is known to be throttled.
+                    // This prevents the "in-flight avalanche" where 80 requests hit a throttled
+                    // connection simultaneously because they were all dispatched before the first
+                    // throttle error returned. Each additional throttle error extends Retry-After.
+                    var preFlightAttempts = 0;
+                    while (_throttleTracker.IsThrottled(connectionName))
+                    {
+                        preFlightAttempts++;
+
+                        if (preFlightAttempts > MaxPreFlightAttempts)
+                        {
+                            // Safety valve: if we've tried many times and still getting throttled
+                            // connections, proceed anyway and let the throttle handler deal with it.
+                            _logger.LogWarning(
+                                "Pre-flight guard: Exceeded {MaxAttempts} attempts, proceeding with throttled connection {Connection}",
+                                MaxPreFlightAttempts, connectionName);
+                            break;
+                        }
+
+                        _logger.LogDebug(
+                            "Pre-flight guard: Connection {Connection} is throttled (attempt {Attempt}/{Max}). Returning to pool for different connection.",
+                            connectionName, preFlightAttempts, MaxPreFlightAttempts);
+
+                        // Dispose this client and get a different one.
+                        // The pool will prefer non-throttled connections, and will wait if all are throttled.
+                        await client.DisposeAsync();
+                        client = null;
+
+                        client = await GetClientWithRetryAsync(cancellationToken);
+                        connectionName = client.ConnectionName;
+                    }
 
                     return await executeBatch(client, batch, cancellationToken);
                 }
