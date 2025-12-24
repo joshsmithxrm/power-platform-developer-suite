@@ -5,7 +5,9 @@ All notable changes to PPDS.Migration and PPDS.Migration.Cli will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-12-23
+## [Unreleased]
+
+## [1.0.0] - Unreleased
 
 ### Added
 
@@ -22,9 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### PPDS.Migration.Cli (CLI Tool)
 
-- Commands: `export`, `import`, `analyze`, `migrate`
+- Commands: `export`, `import`, `analyze`, `migrate`, `schema generate`, `schema list`, `config list`
+- Unified configuration model using same `DataverseOptions` as PPDS.Dataverse SDK
+- Standard .NET configuration layering: appsettings.json → User Secrets → Environment variables
+- `--secrets-id` global option for cross-process User Secrets sharing
+- `--env` option to select named environment from configuration
 - JSON progress output for tool integration (`--json` flag)
-- Support for multiple Application Users and bypass options
+- Support for bypass options (plugins, flows) during import
 - Packaged as .NET global tool (`ppds-migrate`)
 - Comprehensive unit test suite
 - Targets: `net8.0`, `net10.0`

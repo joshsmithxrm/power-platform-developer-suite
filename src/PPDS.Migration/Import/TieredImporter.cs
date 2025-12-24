@@ -464,7 +464,8 @@ namespace PPDS.Migration.Import
             {
                 BatchSize = options.BatchSize,
                 ContinueOnError = options.ContinueOnError,
-                BypassCustomPluginExecution = options.BypassCustomPluginExecution
+                BypassCustomLogic = options.BypassCustomPluginExecution ? CustomLogicBypass.All : CustomLogicBypass.None,
+                BypassPowerAutomateFlows = options.BypassPowerAutomateFlows
             };
 
             if (options.UseBulkApis)

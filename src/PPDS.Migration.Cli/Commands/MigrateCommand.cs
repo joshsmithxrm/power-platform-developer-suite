@@ -50,13 +50,19 @@ public static class MigrateCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var sourceEnvOption = new Option<string?>(
+        var sourceEnvOption = new Option<string>(
             name: "--source-env",
-            description: "Source environment name from appsettings.json (e.g., Dev)");
+            description: "Source environment name from configuration (e.g., Dev)")
+        {
+            IsRequired = true
+        };
 
-        var targetEnvOption = new Option<string?>(
+        var targetEnvOption = new Option<string>(
             name: "--target-env",
-            description: "Target environment name from appsettings.json (e.g., Prod)");
+            description: "Target environment name from configuration (e.g., Prod)")
+        {
+            IsRequired = true
+        };
 
         var configOption = new Option<FileInfo?>(
             name: "--config",
@@ -64,7 +70,7 @@ public static class MigrateCommand
 
         var command = new Command("migrate",
             "Migrate data from source to target Dataverse environment. " +
-            ConnectionResolver.GetHybridSourceTargetHelpDescription())
+            ConfigurationHelper.GetConfigurationHelpDescription())
         {
             schemaOption,
             sourceEnvOption,
@@ -81,9 +87,10 @@ public static class MigrateCommand
         command.SetHandler(async (context) =>
         {
             var schema = context.ParseResult.GetValueForOption(schemaOption)!;
-            var sourceEnv = context.ParseResult.GetValueForOption(sourceEnvOption);
-            var targetEnv = context.ParseResult.GetValueForOption(targetEnvOption);
+            var sourceEnv = context.ParseResult.GetValueForOption(sourceEnvOption)!;
+            var targetEnv = context.ParseResult.GetValueForOption(targetEnvOption)!;
             var config = context.ParseResult.GetValueForOption(configOption);
+            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
             var tempDir = context.ParseResult.GetValueForOption(tempDirOption);
             var batchSize = context.ParseResult.GetValueForOption(batchSizeOption);
             var bypassPlugins = context.ParseResult.GetValueForOption(bypassPluginsOption);
@@ -91,13 +98,13 @@ public static class MigrateCommand
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            // Resolve source and target connections from config or environment variables
+            // Resolve source and target connections from configuration
             ConnectionResolver.ResolvedConnection sourceResolved;
             ConnectionResolver.ResolvedConnection targetResolved;
             try
             {
-                (sourceResolved, targetResolved) = ConnectionResolver.ResolveSourceTargetWithFallback(
-                    sourceEnv, targetEnv, config?.FullName);
+                (sourceResolved, targetResolved) = ConnectionResolver.ResolveSourceTarget(
+                    sourceEnv, targetEnv, config?.FullName, secretsId);
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {

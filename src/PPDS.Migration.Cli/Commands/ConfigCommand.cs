@@ -29,7 +29,7 @@ public static class ConfigCommand
             getDefaultValue: () => false,
             description: "Output as JSON");
 
-        var command = new Command("list", "List available environments from configuration file")
+        var command = new Command("list", "List available environments from configuration")
         {
             configOption,
             jsonOption
@@ -38,13 +38,16 @@ public static class ConfigCommand
         command.SetHandler((context) =>
         {
             var config = context.ParseResult.GetValueForOption(configOption);
+            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
 
             try
             {
                 var configPath = config?.FullName;
                 var resolvedPath = configPath ?? Path.Combine(Directory.GetCurrentDirectory(), ConfigurationHelper.DefaultConfigFileName);
-                var configuration = ConfigurationHelper.Build(configPath);
+
+                // Build configuration with User Secrets if provided
+                var configuration = ConfigurationHelper.Build(configPath, secretsId);
                 var environments = ConfigurationHelper.GetEnvironmentNames(configuration);
 
                 if (json)
@@ -52,6 +55,7 @@ public static class ConfigCommand
                     var output = JsonSerializer.Serialize(new
                     {
                         configFile = resolvedPath,
+                        secretsId = secretsId,
                         environments = environments
                     }, new JsonSerializerOptions { WriteIndented = true });
                     Console.WriteLine(output);
@@ -59,22 +63,30 @@ public static class ConfigCommand
                 else
                 {
                     Console.WriteLine($"Configuration file: {resolvedPath}");
+                    if (!string.IsNullOrEmpty(secretsId))
+                    {
+                        Console.WriteLine($"User Secrets ID: {secretsId}");
+                    }
                     Console.WriteLine();
 
                     if (environments.Count == 0)
                     {
                         Console.WriteLine("No environments found in Dataverse:Environments section.");
                         Console.WriteLine();
-                        Console.WriteLine("Expected structure:");
+                        Console.WriteLine("Expected structure in appsettings.json:");
                         Console.WriteLine("  {");
                         Console.WriteLine("    \"Dataverse\": {");
                         Console.WriteLine("      \"Environments\": {");
-                        Console.WriteLine("        \"Dev\": { ... },");
+                        Console.WriteLine("        \"Dev\": { \"Url\": \"...\", \"Connections\": [...] },");
                         Console.WriteLine("        \"QA\": { ... },");
                         Console.WriteLine("        \"Prod\": { ... }");
                         Console.WriteLine("      }");
                         Console.WriteLine("    }");
                         Console.WriteLine("  }");
+                        Console.WriteLine();
+                        Console.WriteLine("Secrets (ClientId, ClientSecret) should be stored in User Secrets:");
+                        Console.WriteLine("  dotnet user-secrets set \"Dataverse:Environments:Dev:Connections:0:ClientId\" \"<value>\"");
+                        Console.WriteLine("  dotnet user-secrets set \"Dataverse:Environments:Dev:Connections:0:ClientSecret\" \"<value>\"");
                     }
                     else
                     {
@@ -84,8 +96,12 @@ public static class ConfigCommand
                             Console.WriteLine($"  - {env}");
                         }
                         Console.WriteLine();
-                        Console.WriteLine($"Use --env <name> with export/import/schema commands.");
-                        Console.WriteLine($"Use --source-env <name> --target-env <name> with migrate command.");
+                        Console.WriteLine("Usage:");
+                        Console.WriteLine("  ppds-migrate export --env <name> --schema schema.xml --output data.zip");
+                        Console.WriteLine("  ppds-migrate migrate --source-env Dev --target-env Prod --schema schema.xml");
+                        Console.WriteLine();
+                        Console.WriteLine("Cross-process (e.g., from demo app):");
+                        Console.WriteLine("  ppds-migrate export --env Dev --secrets-id <your-project-secrets-id>");
                     }
                 }
 

@@ -84,15 +84,18 @@ public static class SchemaCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var envOption = new Option<string?>(
+        var envOption = new Option<string>(
             name: "--env",
-            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        {
+            IsRequired = true
+        };
 
         var configOption = new Option<FileInfo?>(
             name: "--config",
             description: "Path to configuration file (default: appsettings.json in current directory)");
 
-        var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConnectionResolver.GetHybridHelpDescription())
+        var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
             entitiesOption,
             outputOption,
@@ -112,8 +115,9 @@ public static class SchemaCommand
         {
             var entities = context.ParseResult.GetValueForOption(entitiesOption)!;
             var output = context.ParseResult.GetValueForOption(outputOption)!;
-            var env = context.ParseResult.GetValueForOption(envOption);
+            var env = context.ParseResult.GetValueForOption(envOption)!;
             var config = context.ParseResult.GetValueForOption(configOption);
+            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
             var includeSystemFields = context.ParseResult.GetValueForOption(includeSystemFieldsOption);
             var includeRelationships = context.ParseResult.GetValueForOption(includeRelationshipsOption);
             var disablePlugins = context.ParseResult.GetValueForOption(disablePluginsOption);
@@ -123,11 +127,11 @@ public static class SchemaCommand
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            // Resolve connection from config or environment variables
+            // Resolve connection from configuration
             ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
+                resolved = ConnectionResolver.Resolve(env, config?.FullName, secretsId, "connection");
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
@@ -181,15 +185,18 @@ public static class SchemaCommand
             getDefaultValue: () => false,
             description: "Output as JSON");
 
-        var envOption = new Option<string?>(
+        var envOption = new Option<string>(
             name: "--env",
-            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        {
+            IsRequired = true
+        };
 
         var configOption = new Option<FileInfo?>(
             name: "--config",
             description: "Path to configuration file (default: appsettings.json in current directory)");
 
-        var command = new Command("list", "List available entities in Dataverse. " + ConnectionResolver.GetHybridHelpDescription())
+        var command = new Command("list", "List available entities in Dataverse. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
             filterOption,
             envOption,
@@ -201,16 +208,17 @@ public static class SchemaCommand
         command.SetHandler(async (context) =>
         {
             var filter = context.ParseResult.GetValueForOption(filterOption);
-            var env = context.ParseResult.GetValueForOption(envOption);
+            var env = context.ParseResult.GetValueForOption(envOption)!;
             var config = context.ParseResult.GetValueForOption(configOption);
+            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
             var customOnly = context.ParseResult.GetValueForOption(customOnlyOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
 
-            // Resolve connection from config or environment variables
+            // Resolve connection from configuration
             ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
+                resolved = ConnectionResolver.Resolve(env, config?.FullName, secretsId, "connection");
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {

@@ -51,15 +51,18 @@ public static class ExportCommand
             getDefaultValue: () => false,
             description: "Verbose output");
 
-        var envOption = new Option<string?>(
+        var envOption = new Option<string>(
             name: "--env",
-            description: "Environment name from appsettings.json (e.g., Dev, QA, Prod)");
+            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        {
+            IsRequired = true
+        };
 
         var configOption = new Option<FileInfo?>(
             name: "--config",
             description: "Path to configuration file (default: appsettings.json in current directory)");
 
-        var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConnectionResolver.GetHybridHelpDescription())
+        var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
             schemaOption,
             outputOption,
@@ -76,19 +79,20 @@ public static class ExportCommand
         {
             var schema = context.ParseResult.GetValueForOption(schemaOption)!;
             var output = context.ParseResult.GetValueForOption(outputOption)!;
-            var env = context.ParseResult.GetValueForOption(envOption);
+            var env = context.ParseResult.GetValueForOption(envOption)!;
             var config = context.ParseResult.GetValueForOption(configOption);
+            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
             var parallel = context.ParseResult.GetValueForOption(parallelOption);
             var pageSize = context.ParseResult.GetValueForOption(pageSizeOption);
             var includeFiles = context.ParseResult.GetValueForOption(includeFilesOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            // Resolve connection from config or environment variables
+            // Resolve connection from configuration
             ConnectionResolver.ResolvedConnection resolved;
             try
             {
-                resolved = ConnectionResolver.ResolveWithFallback(env, config?.FullName, "connection");
+                resolved = ConnectionResolver.Resolve(env, config?.FullName, secretsId, "connection");
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
