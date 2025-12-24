@@ -21,21 +21,25 @@ Current configuration assumes a single Dataverse environment:
 ```
 
 This works for single-environment operations but doesn't support:
-- Multiple named environments (Dev, Test, Prod)
-- Data migration between environments
-- Environment-specific connection configurations
+
+-   Multiple named environments (Dev, Test, Prod)
+-   Data migration between environments
+-   Environment-specific connection configurations
 
 ---
 
 ## Solution Overview
 
 ### Phase 1: Multi-Environment Configuration
+
 Enable named environments in configuration, each with its own URL and connections.
 
 ### Phase 2: Live Migration - Simple Cases
+
 Direct source-to-target data transfer for single entities without transformations.
 
 ### Phase 3: Live Migration - Advanced
+
 Dependency ordering, transformations, data masking, and resume capability.
 
 ---
@@ -121,52 +125,52 @@ public class DataverseEnvironmentOptions
 
 ```json
 {
-  "Dataverse": {
-    "DefaultEnvironment": "Development",
-    "Environments": {
-      "Production": {
-        "Description": "Production environment - handle with care",
-        "Url": "https://prod-org.crm.dynamics.com",
-        "TenantId": "00000000-0000-0000-0000-000000000000",
-        "Connections": [
-          {
-            "Name": "Primary",
-            "ClientId": "prod-client-1",
-            "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/prod-primary"
-          },
-          {
-            "Name": "Secondary",
-            "ClientId": "prod-client-2",
-            "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/prod-secondary"
-          }
-        ]
-      },
-      "Development": {
-        "Description": "Development environment",
-        "Url": "https://dev-org.crm.dynamics.com",
-        "TenantId": "00000000-0000-0000-0000-000000000000",
-        "Connections": [
-          {
-            "Name": "Primary",
-            "ClientId": "dev-client",
-            "ClientSecretVariable": "DEV_DATAVERSE_SECRET"
-          }
-        ]
-      },
-      "UAT": {
-        "Description": "User acceptance testing",
-        "Url": "https://uat-org.crm.dynamics.com",
-        "TenantId": "00000000-0000-0000-0000-000000000000",
-        "Connections": [
-          {
-            "Name": "Primary",
-            "ClientId": "uat-client",
-            "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/uat-primary"
-          }
-        ]
-      }
+    "Dataverse": {
+        "DefaultEnvironment": "Development",
+        "Environments": {
+            "Production": {
+                "Description": "Production environment - handle with care",
+                "Url": "https://prod-org.crm.dynamics.com",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
+                "Connections": [
+                    {
+                        "Name": "Primary",
+                        "ClientId": "prod-client-1",
+                        "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/prod-primary"
+                    },
+                    {
+                        "Name": "Secondary",
+                        "ClientId": "prod-client-2",
+                        "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/prod-secondary"
+                    }
+                ]
+            },
+            "Development": {
+                "Description": "Development environment",
+                "Url": "https://dev-org.crm.dynamics.com",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
+                "Connections": [
+                    {
+                        "Name": "Primary",
+                        "ClientId": "dev-client",
+                        "ClientSecret": "DEV_DATAVERSE_SECRET"
+                    }
+                ]
+            },
+            "UAT": {
+                "Description": "User acceptance testing",
+                "Url": "https://uat-org.crm.dynamics.com",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
+                "Connections": [
+                    {
+                        "Name": "Primary",
+                        "ClientId": "uat-client",
+                        "ClientSecretKeyVaultUri": "https://vault.azure.net/secrets/uat-primary"
+                    }
+                ]
+            }
+        }
     }
-  }
 }
 ```
 
@@ -174,17 +178,17 @@ public class DataverseEnvironmentOptions
 
 ```json
 {
-  "Dataverse": {
-    "Url": "https://org.crm.dynamics.com",
-    "TenantId": "00000000-0000-0000-0000-000000000000",
-    "Connections": [
-      {
-        "Name": "Primary",
-        "ClientId": "...",
-        "ClientSecretVariable": "DATAVERSE_SECRET"
-      }
-    ]
-  }
+    "Dataverse": {
+        "Url": "https://org.crm.dynamics.com",
+        "TenantId": "00000000-0000-0000-0000-000000000000",
+        "Connections": [
+            {
+                "Name": "Primary",
+                "ClientId": "...",
+                "ClientSecret": "DATAVERSE_SECRET"
+            }
+        ]
+    }
 }
 ```
 
@@ -730,16 +734,16 @@ public class ExcludeFieldsTransformation : IRecordTransformation { }
 
 ```json
 {
-  "Transformations": [
-    {
-      "Type": "DataMasking",
-      "Rules": [
-        { "Field": "emailaddress1", "Method": "Email" },
-        { "Field": "telephone1", "Method": "Phone" },
-        { "Field": "address1_line1", "Method": "Redact" }
-      ]
-    }
-  ]
+    "Transformations": [
+        {
+            "Type": "DataMasking",
+            "Rules": [
+                { "Field": "emailaddress1", "Method": "Email" },
+                { "Field": "telephone1", "Method": "Phone" },
+                { "Field": "address1_line1", "Method": "Redact" }
+            ]
+        }
+    ]
 }
 ```
 
@@ -781,35 +785,35 @@ ppds-migrate live --source Prod --target Dev \
 
 ### Phase 1
 
-| File | Change |
-|------|--------|
-| `src/PPDS.Dataverse/DependencyInjection/DataverseOptions.cs` | Add Environments property |
-| `src/PPDS.Dataverse/DependencyInjection/DataverseEnvironmentOptions.cs` | New class |
-| `src/PPDS.Dataverse/Configuration/EnvironmentResolver.cs` | New class |
-| `src/PPDS.Migration.Cli/Commands/EnvironmentsCommand.cs` | New command |
+| File                                                                    | Change                    |
+| ----------------------------------------------------------------------- | ------------------------- |
+| `src/PPDS.Dataverse/DependencyInjection/DataverseOptions.cs`            | Add Environments property |
+| `src/PPDS.Dataverse/DependencyInjection/DataverseEnvironmentOptions.cs` | New class                 |
+| `src/PPDS.Dataverse/Configuration/EnvironmentResolver.cs`               | New class                 |
+| `src/PPDS.Migration.Cli/Commands/EnvironmentsCommand.cs`                | New command               |
 
 ### Phase 2
 
-| File | Change |
-|------|--------|
-| `src/PPDS.Migration/Live/ILiveMigrationService.cs` | New interface |
-| `src/PPDS.Migration/Live/LiveMigrationService.cs` | New implementation |
-| `src/PPDS.Migration/Live/LiveMigrationPipeline.cs` | New pipeline |
-| `src/PPDS.Migration/Live/LiveMigrationOptions.cs` | New options |
-| `src/PPDS.Migration.Cli/Commands/LiveCommand.cs` | New command |
+| File                                               | Change             |
+| -------------------------------------------------- | ------------------ |
+| `src/PPDS.Migration/Live/ILiveMigrationService.cs` | New interface      |
+| `src/PPDS.Migration/Live/LiveMigrationService.cs`  | New implementation |
+| `src/PPDS.Migration/Live/LiveMigrationPipeline.cs` | New pipeline       |
+| `src/PPDS.Migration/Live/LiveMigrationOptions.cs`  | New options        |
+| `src/PPDS.Migration.Cli/Commands/LiveCommand.cs`   | New command        |
 
 ### Phase 3
 
-| File | Change |
-|------|--------|
-| `src/PPDS.Migration/Transformations/` | New transformation classes |
-| `src/PPDS.Migration/Live/CheckpointManager.cs` | New checkpoint handling |
-| `src/PPDS.Migration/Analysis/DependencyAnalyzer.cs` | New dependency analysis |
+| File                                                | Change                     |
+| --------------------------------------------------- | -------------------------- |
+| `src/PPDS.Migration/Transformations/`               | New transformation classes |
+| `src/PPDS.Migration/Live/CheckpointManager.cs`      | New checkpoint handling    |
+| `src/PPDS.Migration/Analysis/DependencyAnalyzer.cs` | New dependency analysis    |
 
 ---
 
 ## References
 
-- [Dataverse Bulk Operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/bulk-operations)
-- [System.Threading.Channels](https://learn.microsoft.com/en-us/dotnet/core/extensions/channels)
-- [Producer-Consumer Patterns](https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/how-to-implement-a-producer-consumer-dataflow-pattern)
+-   [Dataverse Bulk Operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/bulk-operations)
+-   [System.Threading.Channels](https://learn.microsoft.com/en-us/dotnet/core/extensions/channels)
+-   [Producer-Consumer Patterns](https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/how-to-implement-a-producer-consumer-dataflow-pattern)

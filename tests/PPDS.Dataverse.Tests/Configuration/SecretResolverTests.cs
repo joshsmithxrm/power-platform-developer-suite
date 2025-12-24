@@ -10,92 +10,18 @@ namespace PPDS.Dataverse.Tests.Configuration;
 /// </summary>
 public class SecretResolverTests
 {
-    #region Environment Variable Tests
-
-    [Fact]
-    public void ResolveFromEnvironment_ReturnsValue_WhenSet()
-    {
-        // Arrange
-        var varName = $"PPDS_TEST_{Guid.NewGuid():N}";
-        var expected = "test-secret-value";
-        Environment.SetEnvironmentVariable(varName, expected);
-
-        try
-        {
-            // Act
-            var result = SecretResolver.ResolveFromEnvironment(varName);
-
-            // Assert
-            result.Should().Be(expected);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(varName, null);
-        }
-    }
-
-    [Fact]
-    public void ResolveFromEnvironment_ReturnsNull_WhenNotSet()
-    {
-        // Act
-        var result = SecretResolver.ResolveFromEnvironment("PPDS_NONEXISTENT_VAR_12345");
-
-        // Assert
-        result.Should().BeNull();
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("  ")]
-    public void ResolveFromEnvironment_ReturnsNull_WhenVarNameEmpty(string? varName)
-    {
-        // Act
-        var result = SecretResolver.ResolveFromEnvironment(varName!);
-
-        // Assert
-        result.Should().BeNull();
-    }
-
-    #endregion
-
     #region ResolveSync Tests
 
     [Fact]
-    public void ResolveSync_ReturnsDirectValue_WhenNoOtherSources()
+    public void ResolveSync_ReturnsDirectValue_WhenProvided()
     {
         // Act
         var result = SecretResolver.ResolveSync(
             keyVaultUri: null,
-            environmentVariable: null,
             directValue: "my-direct-secret");
 
         // Assert
         result.Should().Be("my-direct-secret");
-    }
-
-    [Fact]
-    public void ResolveSync_PrefersEnvironmentVariable_OverDirectValue()
-    {
-        // Arrange
-        var varName = $"PPDS_TEST_{Guid.NewGuid():N}";
-        Environment.SetEnvironmentVariable(varName, "env-secret");
-
-        try
-        {
-            // Act
-            var result = SecretResolver.ResolveSync(
-                keyVaultUri: null,
-                environmentVariable: varName,
-                directValue: "direct-secret");
-
-            // Assert
-            result.Should().Be("env-secret");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(varName, null);
-        }
     }
 
     [Fact]
@@ -104,7 +30,6 @@ public class SecretResolverTests
         // Act & Assert
         var act = () => SecretResolver.ResolveSync(
             keyVaultUri: "https://myvault.vault.azure.net/secrets/mysecret",
-            environmentVariable: null,
             directValue: null);
 
         act.Should().Throw<InvalidOperationException>()
@@ -117,7 +42,6 @@ public class SecretResolverTests
         // Act
         var result = SecretResolver.ResolveSync(
             keyVaultUri: null,
-            environmentVariable: null,
             directValue: null);
 
         // Assert
@@ -129,40 +53,15 @@ public class SecretResolverTests
     #region ResolveAsync Tests
 
     [Fact]
-    public async System.Threading.Tasks.Task ResolveAsync_ReturnsDirectValue_WhenNoOtherSources()
+    public async System.Threading.Tasks.Task ResolveAsync_ReturnsDirectValue_WhenProvided()
     {
         // Act
         var result = await SecretResolver.ResolveAsync(
             keyVaultUri: null,
-            environmentVariable: null,
             directValue: "my-direct-secret");
 
         // Assert
         result.Should().Be("my-direct-secret");
-    }
-
-    [Fact]
-    public async System.Threading.Tasks.Task ResolveAsync_PrefersEnvironmentVariable_OverDirectValue()
-    {
-        // Arrange
-        var varName = $"PPDS_TEST_{Guid.NewGuid():N}";
-        Environment.SetEnvironmentVariable(varName, "env-secret");
-
-        try
-        {
-            // Act
-            var result = await SecretResolver.ResolveAsync(
-                keyVaultUri: null,
-                environmentVariable: varName,
-                directValue: "direct-secret");
-
-            // Assert
-            result.Should().Be("env-secret");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(varName, null);
-        }
     }
 
     [Fact]
@@ -171,7 +70,6 @@ public class SecretResolverTests
         // Act
         var result = await SecretResolver.ResolveAsync(
             keyVaultUri: null,
-            environmentVariable: null,
             directValue: null);
 
         // Assert

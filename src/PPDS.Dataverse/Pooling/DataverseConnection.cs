@@ -50,13 +50,8 @@ namespace PPDS.Dataverse.Pooling
         public string? ClientSecretKeyVaultUri { get; set; }
 
         /// <summary>
-        /// Gets or sets the environment variable name containing the client secret.
-        /// </summary>
-        public string? ClientSecretVariable { get; set; }
-
-        /// <summary>
-        /// Gets or sets the client secret directly.
-        /// Not recommended - use ClientSecretVariable or ClientSecretKeyVaultUri instead.
+        /// Gets or sets the client secret.
+        /// Can be set directly, via environment variable binding, or use ClientSecretKeyVaultUri for Key Vault.
         /// </summary>
         [SensitiveData(Reason = "Contains client secret", DataType = "Secret")]
         public string? ClientSecret { get; set; }
@@ -105,6 +100,23 @@ namespace PPDS.Dataverse.Pooling
         /// Default: 10
         /// </summary>
         public int MaxPoolSize { get; set; } = 10;
+
+        #region Source Tracking (Internal)
+
+        /// <summary>
+        /// Gets or sets the environment name this connection was resolved from.
+        /// Null for root-level connections (no environment).
+        /// Used for error messages and diagnostics.
+        /// </summary>
+        internal string? SourceEnvironment { get; set; }
+
+        /// <summary>
+        /// Gets or sets the index of this connection in the source configuration array.
+        /// Used for error messages and diagnostics.
+        /// </summary>
+        internal int SourceIndex { get; set; }
+
+        #endregion
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DataverseConnection"/> class.

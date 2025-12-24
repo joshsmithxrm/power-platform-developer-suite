@@ -129,10 +129,10 @@ public class DataverseConnectionTests
         var connection = new DataverseConnection("KeyVault")
         {
             ClientSecretKeyVaultUri = "https://myvault.vault.azure.net/secrets/dataverse-secret",
-            ClientSecretVariable = "DATAVERSE_SECRET"
+            ClientSecret = "DATAVERSE_SECRET"
         };
 
         Assert.Equal("https://myvault.vault.azure.net/secrets/dataverse-secret", connection.ClientSecretKeyVaultUri);
-        Assert.Equal("DATAVERSE_SECRET", connection.ClientSecretVariable);
+        Assert.Equal("DATAVERSE_SECRET", connection.ClientSecret);
     }
 }

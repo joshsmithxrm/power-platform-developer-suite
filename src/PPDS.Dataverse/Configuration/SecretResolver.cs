@@ -6,21 +6,23 @@ namespace PPDS.Dataverse.Configuration
 {
     /// <summary>
     /// Resolves secrets from various sources.
-    /// Priority: Key Vault URI > Environment Variable > Direct Value
+    /// Priority: Key Vault URI > Direct Value
     /// </summary>
+    /// <remarks>
+    /// Environment variable binding is handled by the .NET configuration system.
+    /// Set environment variable using the config path (e.g., Dataverse__Connections__0__ClientSecret).
+    /// </remarks>
     public static class SecretResolver
     {
         /// <summary>
         /// Resolves a secret value from the configured sources.
         /// </summary>
         /// <param name="keyVaultUri">Azure Key Vault secret URI (highest priority).</param>
-        /// <param name="environmentVariable">Environment variable name.</param>
-        /// <param name="directValue">Direct value (lowest priority, not recommended).</param>
+        /// <param name="directValue">Direct value from configuration.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>The resolved secret value, or null if not configured.</returns>
         public static async Task<string?> ResolveAsync(
             string? keyVaultUri,
-            string? environmentVariable,
             string? directValue,
             CancellationToken cancellationToken = default)
         {
@@ -30,53 +32,27 @@ namespace PPDS.Dataverse.Configuration
                 return await ResolveFromKeyVaultAsync(keyVaultUri, cancellationToken);
             }
 
-            // Priority 2: Environment Variable
-            if (!string.IsNullOrWhiteSpace(environmentVariable))
-            {
-                return ResolveFromEnvironment(environmentVariable);
-            }
-
-            // Priority 3: Direct Value (not recommended)
+            // Priority 2: Direct Value (from config, which may be bound from env var)
             return directValue;
         }
 
         /// <summary>
         /// Resolves a secret value synchronously.
-        /// Only supports environment variables and direct values.
+        /// Only supports direct values (Key Vault requires async).
         /// </summary>
         public static string? ResolveSync(
             string? keyVaultUri,
-            string? environmentVariable,
             string? directValue)
         {
-            // Key Vault requires async - return null if that's the only source
+            // Key Vault requires async
             if (!string.IsNullOrWhiteSpace(keyVaultUri))
             {
                 throw new InvalidOperationException(
-                    "Key Vault secret resolution requires async. Use ResolveAsync or configure environment variables instead.");
+                    "Key Vault secret resolution requires async. Use ResolveAsync or set ClientSecret via environment variable binding.");
             }
 
-            // Priority 2: Environment Variable
-            if (!string.IsNullOrWhiteSpace(environmentVariable))
-            {
-                return ResolveFromEnvironment(environmentVariable);
-            }
-
-            // Priority 3: Direct Value
+            // Direct Value (from config, which may be bound from env var)
             return directValue;
-        }
-
-        /// <summary>
-        /// Resolves a secret from an environment variable.
-        /// </summary>
-        public static string? ResolveFromEnvironment(string variableName)
-        {
-            if (string.IsNullOrWhiteSpace(variableName))
-            {
-                return null;
-            }
-
-            return Environment.GetEnvironmentVariable(variableName);
         }
 
         /// <summary>

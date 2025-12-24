@@ -341,10 +341,9 @@ namespace PPDS.Dataverse.Pooling
             ServiceClient serviceClient;
             try
             {
-                // Resolve secret from configured sources (env var, direct value)
+                // Resolve secret from configured sources (Key Vault or direct value)
                 var resolvedSecret = SecretResolver.ResolveSync(
                     connectionConfig.ClientSecretKeyVaultUri,
-                    connectionConfig.ClientSecretVariable,
                     connectionConfig.ClientSecret);
 
                 // Build connection string from typed configuration
@@ -683,9 +682,12 @@ namespace PPDS.Dataverse.Pooling
 
         private void ValidateOptions()
         {
+            // Get environment name from first connection (all connections share same source environment)
+            var environmentName = _options.Connections?.FirstOrDefault()?.SourceEnvironment;
+
             if (_options.Connections == null || _options.Connections.Count == 0)
             {
-                throw new InvalidOperationException("At least one connection must be configured.");
+                throw ConfigurationException.NoConnectionsConfigured(environmentName);
             }
 
             // Calculate capacity for validation (before _totalPoolCapacity is set)
@@ -695,29 +697,48 @@ namespace PPDS.Dataverse.Pooling
 
             if (effectiveCapacity < _options.Pool.MinPoolSize)
             {
-                throw new InvalidOperationException("Effective pool capacity must be >= MinPoolSize.");
+                throw new ConfigurationException(
+                    "Effective pool capacity must be >= MinPoolSize. " +
+                    $"Capacity: {effectiveCapacity}, MinPoolSize: {_options.Pool.MinPoolSize}");
             }
 
             foreach (var connection in _options.Connections)
             {
-                if (string.IsNullOrWhiteSpace(connection.Name))
-                {
-                    throw new InvalidOperationException("Connection name cannot be empty.");
-                }
-
-                if (string.IsNullOrWhiteSpace(connection.Url))
-                {
-                    throw new InvalidOperationException($"Url for connection '{connection.Name}' cannot be empty.");
-                }
-
-                if (string.IsNullOrWhiteSpace(connection.ClientId))
-                {
-                    throw new InvalidOperationException($"ClientId for connection '{connection.Name}' cannot be empty.");
-                }
+                ValidateConnection(connection);
             }
 
             // Warn if multiple connections target different organizations
             WarnIfMultipleOrganizations();
+        }
+
+        private static void ValidateConnection(DataverseConnection connection)
+        {
+            if (string.IsNullOrWhiteSpace(connection.Name))
+            {
+                throw ConfigurationException.MissingRequiredWithHints(
+                    propertyName: "Name",
+                    connectionName: $"[index {connection.SourceIndex}]",
+                    connectionIndex: connection.SourceIndex,
+                    environmentName: connection.SourceEnvironment);
+            }
+
+            if (string.IsNullOrWhiteSpace(connection.Url))
+            {
+                throw ConfigurationException.MissingRequiredWithHints(
+                    propertyName: "Url",
+                    connectionName: connection.Name,
+                    connectionIndex: connection.SourceIndex,
+                    environmentName: connection.SourceEnvironment);
+            }
+
+            if (string.IsNullOrWhiteSpace(connection.ClientId))
+            {
+                throw ConfigurationException.MissingRequiredWithHints(
+                    propertyName: "ClientId",
+                    connectionName: connection.Name,
+                    connectionIndex: connection.SourceIndex,
+                    environmentName: connection.SourceEnvironment);
+            }
         }
 
         private void WarnIfMultipleOrganizations()
