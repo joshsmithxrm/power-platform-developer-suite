@@ -62,35 +62,19 @@ public class AdaptiveRateControllerTests
     }
 
     [Fact]
-    public void GetParallelism_RespectsMinParallelism()
-    {
-        // Arrange
-        var controller = CreateController(new AdaptiveRateOptions
-        {
-            MinParallelism = 5
-        });
-
-        // Act - recommendedParallelism=2, connectionCount=1
-        var parallelism = controller.GetParallelism("Primary", recommendedParallelism: 2, connectionCount: 1);
-
-        // Assert - 2 * 1 = 2, but min is 5
-        parallelism.Should().Be(5);
-    }
-
-    [Fact]
     public void GetParallelism_WhenDisabled_ReturnsScaledRecommended()
     {
         // Arrange
         var controller = CreateController(new AdaptiveRateOptions
         {
-            Enabled = false,
-            HardCeiling = 52
+            Enabled = false
         });
 
         // Act
         var parallelism = controller.GetParallelism("Primary", recommendedParallelism: 10, connectionCount: 2);
 
         // Assert - when disabled, returns min(recommended*connections, ceiling*connections)
+        // HardCeiling is fixed at 52
         parallelism.Should().Be(20); // min(10*2, 52*2) = min(20, 104) = 20
     }
 
@@ -114,13 +98,10 @@ public class AdaptiveRateControllerTests
     public void RecordThrottle_ReducesParallelism()
     {
         // Arrange - floor=10, ceiling=52, probe up then throttle
-        // IncreaseRate=2 so floor (10) is used as increment
         var controller = CreateController(new AdaptiveRateOptions
         {
             DecreaseFactor = 0.5,
-            MinParallelism = 1,
             StabilizationBatches = 1,
-            IncreaseRate = 2, // Floor (10) is used since it's higher
             MinIncreaseInterval = TimeSpan.Zero
         });
 
@@ -146,8 +127,7 @@ public class AdaptiveRateControllerTests
         // Arrange
         var controller = CreateController(new AdaptiveRateOptions
         {
-            DecreaseFactor = 0.5,
-            MinParallelism = 1
+            DecreaseFactor = 0.5
         });
 
         controller.GetParallelism("Primary", recommendedParallelism: 10, connectionCount: 1); // Init at 10
@@ -243,7 +223,6 @@ public class AdaptiveRateControllerTests
         var controller = CreateController(new AdaptiveRateOptions
         {
             StabilizationBatches = 3,
-            IncreaseRate = 2,
             MinIncreaseInterval = TimeSpan.Zero
         });
 
@@ -255,7 +234,7 @@ public class AdaptiveRateControllerTests
         controller.RecordSuccess("Primary");
         controller.RecordSuccess("Primary"); // 3rd success should trigger increase
 
-        // Assert - increment by floor (10), not IncreaseRate (2)
+        // Assert - increment by floor (10)
         var stats = controller.GetStatistics("Primary");
         stats!.CurrentParallelism.Should().Be(initialParallelism + 10);
     }
@@ -298,24 +277,25 @@ public class AdaptiveRateControllerTests
     [Fact]
     public void RecordSuccess_DoesNotExceedHardCeiling()
     {
-        // Arrange
+        // Arrange - HardCeiling is fixed at 52, use connectionCount=1 so ceiling is 52
         var controller = CreateController(new AdaptiveRateOptions
         {
-            HardCeiling = 30,
             StabilizationBatches = 1,
             MinIncreaseInterval = TimeSpan.Zero
         });
 
         controller.GetParallelism("Primary", recommendedParallelism: 10, connectionCount: 1);
 
-        // Act - try to increase beyond hard ceiling
-        controller.RecordSuccess("Primary"); // Would be 20
-        controller.RecordSuccess("Primary"); // Would be 30
-        controller.RecordSuccess("Primary"); // Would be 40, but capped at 30
+        // Act - probe up to ceiling (10 -> 20 -> 30 -> 40 -> 50 -> should cap at 52)
+        controller.RecordSuccess("Primary"); // 20
+        controller.RecordSuccess("Primary"); // 30
+        controller.RecordSuccess("Primary"); // 40
+        controller.RecordSuccess("Primary"); // 50
+        controller.RecordSuccess("Primary"); // Would be 60, but capped at 52
 
         // Assert
         var stats = controller.GetStatistics("Primary");
-        stats!.CurrentParallelism.Should().Be(30); // Capped at hard ceiling
+        stats!.CurrentParallelism.Should().Be(52); // Capped at hard ceiling
     }
 
     [Fact]
@@ -360,11 +340,8 @@ public class AdaptiveRateControllerTests
     [Fact]
     public void GetStatistics_ReturnsValidStats_ForKnownConnection()
     {
-        // Arrange
-        var controller = CreateController(new AdaptiveRateOptions
-        {
-            HardCeiling = 52
-        });
+        // Arrange - HardCeiling is fixed at 52
+        var controller = CreateController();
 
         controller.GetParallelism("Primary", recommendedParallelism: 10, connectionCount: 1);
 
@@ -386,10 +363,9 @@ public class AdaptiveRateControllerTests
     [Fact]
     public void Statistics_EffectiveCeiling_ReflectsActiveThrottleCeiling()
     {
-        // Arrange
+        // Arrange - HardCeiling is fixed at 52
         var controller = CreateController(new AdaptiveRateOptions
         {
-            HardCeiling = 52,
             DecreaseFactor = 0.5,
             StabilizationBatches = 1,
             MinIncreaseInterval = TimeSpan.Zero
@@ -555,10 +531,9 @@ public class AdaptiveRateControllerTests
     [Fact]
     public void GetParallelism_ScalesCeilingByConnectionCount()
     {
-        // Arrange
+        // Arrange - HardCeiling is fixed at 52
         var controller = CreateController(new AdaptiveRateOptions
         {
-            HardCeiling = 52,
             StabilizationBatches = 1,
             MinIncreaseInterval = TimeSpan.Zero
         });
@@ -595,17 +570,62 @@ public class AdaptiveRateControllerTests
         // Arrange & Act
         var options = new AdaptiveRateOptions();
 
-        // Assert
+        // Assert - public options with Balanced preset defaults
         options.Enabled.Should().BeTrue();
-        options.HardCeiling.Should().Be(52);
-        options.MinParallelism.Should().Be(1);
-        options.IncreaseRate.Should().Be(2);
-        options.DecreaseFactor.Should().Be(0.5); // Aggressive backoff (50% reduction)
+        options.ExecutionTimeCeilingEnabled.Should().BeTrue();
+        options.MaxRetryAfterTolerance.Should().BeNull();
+        options.Preset.Should().Be(RateControlPreset.Balanced);
+
+        // Preset-affected options (Balanced defaults)
+        options.ExecutionTimeCeilingFactor.Should().Be(200);
+        options.SlowBatchThresholdMs.Should().Be(8_000);
+        options.DecreaseFactor.Should().Be(0.5);
         options.StabilizationBatches.Should().Be(3);
         options.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(5));
-        options.RecoveryMultiplier.Should().Be(2.0);
-        options.LastKnownGoodTTL.Should().Be(TimeSpan.FromMinutes(5));
-        options.IdleResetPeriod.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public void AdaptiveRateOptions_ConservativePreset_AppliesCorrectDefaults()
+    {
+        // Arrange & Act
+        var options = new AdaptiveRateOptions { Preset = RateControlPreset.Conservative };
+
+        // Assert
+        options.ExecutionTimeCeilingFactor.Should().Be(180);
+        options.SlowBatchThresholdMs.Should().Be(8_000);
+        options.DecreaseFactor.Should().Be(0.4);
+        options.StabilizationBatches.Should().Be(5);
+        options.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(8));
+    }
+
+    [Fact]
+    public void AdaptiveRateOptions_AggressivePreset_AppliesCorrectDefaults()
+    {
+        // Arrange & Act
+        var options = new AdaptiveRateOptions { Preset = RateControlPreset.Aggressive };
+
+        // Assert
+        options.ExecutionTimeCeilingFactor.Should().Be(320);
+        options.SlowBatchThresholdMs.Should().Be(11_000);
+        options.DecreaseFactor.Should().Be(0.6);
+        options.StabilizationBatches.Should().Be(2);
+        options.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
+    public void AdaptiveRateOptions_ExplicitValue_OverridesPreset()
+    {
+        // Arrange & Act
+        var options = new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Conservative,
+            ExecutionTimeCeilingFactor = 200 // Override preset's 180
+        };
+
+        // Assert - explicit value used, other preset values unchanged
+        options.ExecutionTimeCeilingFactor.Should().Be(200); // Overridden
+        options.SlowBatchThresholdMs.Should().Be(8_000); // From Conservative
+        options.DecreaseFactor.Should().Be(0.4); // From Conservative
     }
 
     #endregion

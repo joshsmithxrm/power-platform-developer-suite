@@ -4,69 +4,65 @@ namespace PPDS.Dataverse.Resilience
 {
     /// <summary>
     /// Configuration options for adaptive rate control.
+    /// Use <see cref="Preset"/> for quick configuration, or set individual properties for fine-tuning.
     /// </summary>
     public class AdaptiveRateOptions
     {
+        #region Preset Support
+
+        /// <summary>
+        /// Gets or sets the rate control preset.
+        /// Presets provide sensible defaults for common scenarios.
+        /// Individual property settings override preset values.
+        /// Default: <see cref="RateControlPreset.Balanced"/>
+        /// </summary>
+        public RateControlPreset Preset { get; set; } = RateControlPreset.Balanced;
+
+        /// <summary>
+        /// Gets the default values for a given preset.
+        /// </summary>
+        internal static PresetDefaults GetPresetDefaults(RateControlPreset preset) => preset switch
+        {
+            RateControlPreset.Conservative => new PresetDefaults(
+                ExecutionTimeCeilingFactor: 180,
+                SlowBatchThresholdMs: 8_000,
+                DecreaseFactor: 0.4,
+                StabilizationBatches: 5,
+                MinIncreaseIntervalSeconds: 8),
+
+            RateControlPreset.Balanced => new PresetDefaults(
+                ExecutionTimeCeilingFactor: 200,
+                SlowBatchThresholdMs: 8_000,
+                DecreaseFactor: 0.5,
+                StabilizationBatches: 3,
+                MinIncreaseIntervalSeconds: 5),
+
+            RateControlPreset.Aggressive => new PresetDefaults(
+                ExecutionTimeCeilingFactor: 320,
+                SlowBatchThresholdMs: 11_000,
+                DecreaseFactor: 0.6,
+                StabilizationBatches: 2,
+                MinIncreaseIntervalSeconds: 3),
+
+            _ => GetPresetDefaults(RateControlPreset.Balanced)
+        };
+
+        internal readonly record struct PresetDefaults(
+            int ExecutionTimeCeilingFactor,
+            int SlowBatchThresholdMs,
+            double DecreaseFactor,
+            int StabilizationBatches,
+            int MinIncreaseIntervalSeconds);
+
+        #endregion
+
+        #region Public Options
+
         /// <summary>
         /// Gets or sets whether adaptive rate control is enabled.
         /// Default: true
         /// </summary>
         public bool Enabled { get; set; } = true;
-
-        /// <summary>
-        /// Gets or sets the hard ceiling for parallelism (Microsoft's per-user limit).
-        /// Default: 52
-        /// </summary>
-        public int HardCeiling { get; set; } = 52;
-
-        /// <summary>
-        /// Gets or sets the absolute minimum parallelism.
-        /// Fallback if server recommends less than this.
-        /// Default: 1
-        /// </summary>
-        public int MinParallelism { get; set; } = 1;
-
-        /// <summary>
-        /// Gets or sets the parallelism increase amount per stabilization period.
-        /// Default: 2
-        /// </summary>
-        public int IncreaseRate { get; set; } = 2;
-
-        /// <summary>
-        /// Gets or sets the multiplier applied on throttle (0.5-0.9).
-        /// Default: 0.5 (aggressive backoff, throttle ceiling handles future probing)
-        /// </summary>
-        public double DecreaseFactor { get; set; } = 0.5;
-
-        /// <summary>
-        /// Gets or sets the number of successful batches required before considering increase.
-        /// Default: 3
-        /// </summary>
-        public int StabilizationBatches { get; set; } = 3;
-
-        /// <summary>
-        /// Gets or sets the minimum time between parallelism increases.
-        /// Default: 5 seconds
-        /// </summary>
-        public TimeSpan MinIncreaseInterval { get; set; } = TimeSpan.FromSeconds(5);
-
-        /// <summary>
-        /// Gets or sets the multiplier for recovery phase increases.
-        /// Default: 2.0
-        /// </summary>
-        public double RecoveryMultiplier { get; set; } = 2.0;
-
-        /// <summary>
-        /// Gets or sets the TTL for lastKnownGood value.
-        /// Default: 5 minutes
-        /// </summary>
-        public TimeSpan LastKnownGoodTTL { get; set; } = TimeSpan.FromMinutes(5);
-
-        /// <summary>
-        /// Gets or sets the idle period after which state resets.
-        /// Default: 5 minutes
-        /// </summary>
-        public TimeSpan IdleResetPeriod { get; set; } = TimeSpan.FromMinutes(5);
 
         /// <summary>
         /// Gets or sets whether execution time-based ceiling is enabled.
@@ -77,41 +73,152 @@ namespace PPDS.Dataverse.Resilience
         public bool ExecutionTimeCeilingEnabled { get; set; } = true;
 
         /// <summary>
+        /// Gets or sets the maximum acceptable Retry-After duration before failing the operation.
+        /// If null (default), waits indefinitely for throttle recovery.
+        /// If set, throws <see cref="ServiceProtectionException"/> when Retry-After exceeds this value.
+        /// </summary>
+        /// <example>
+        /// // Fail fast for user-facing operations
+        /// options.MaxRetryAfterTolerance = TimeSpan.FromSeconds(30);
+        ///
+        /// // Wait indefinitely for background jobs
+        /// options.MaxRetryAfterTolerance = null;
+        /// </example>
+        public TimeSpan? MaxRetryAfterTolerance { get; set; } = null;
+
+        #endregion
+
+        #region Preset-Affected Options (with nullable backing fields)
+
+        private int? _executionTimeCeilingFactor;
+
+        /// <summary>
         /// Gets or sets the execution time ceiling factor.
         /// The ceiling is calculated as: Factor / AverageBatchTimeSeconds.
         /// Higher values allow more aggressive parallelism.
-        /// Default: 250 (e.g., 10s batches → ceiling of 25, 15s batches → ceiling of 16)
+        /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
         /// <remarks>
-        /// This factor accounts for Microsoft's execution time limit (1200s per 5-min window = 4s/s).
-        /// Server execution time is roughly 1/3 of wall-clock batch time.
-        /// Formula derivation: at parallelism P with batch time T, consumption ≈ (P/T) × (T/3) = P/3.
-        /// For P/3 ≤ 4 → P ≤ 12 per user. Factor 250 gives ceiling = 250/T, which is conservative.
+        /// Preset defaults: Conservative=180, Balanced=250, Aggressive=320
         /// </remarks>
-        public int ExecutionTimeCeilingFactor { get; set; } = 250;
+        public int ExecutionTimeCeilingFactor
+        {
+            get => _executionTimeCeilingFactor ?? GetPresetDefaults(Preset).ExecutionTimeCeilingFactor;
+            set => _executionTimeCeilingFactor = value;
+        }
 
-        /// <summary>
-        /// Gets or sets the minimum number of batch samples required before
-        /// applying the execution time ceiling. Until this threshold is reached,
-        /// the hard ceiling is used.
-        /// Default: 3 (ceiling kicks in quickly to prevent over-ramping)
-        /// </summary>
-        public int MinBatchSamplesForCeiling { get; set; } = 3;
+        private int? _slowBatchThresholdMs;
 
         /// <summary>
         /// Gets or sets the slow batch threshold in milliseconds.
         /// Execution time ceiling is only applied when average batch duration exceeds this threshold.
         /// This allows fast operations (like creates) to run at full parallelism while
         /// protecting slow operations (like updates/deletes) from execution time exhaustion.
-        /// Default: 10000 (10 seconds)
+        /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
-        public int SlowBatchThresholdMs { get; set; } = 10_000;
+        /// <remarks>
+        /// Preset defaults: Conservative=8000, Balanced=9000, Aggressive=11000
+        /// </remarks>
+        public int SlowBatchThresholdMs
+        {
+            get => _slowBatchThresholdMs ?? GetPresetDefaults(Preset).SlowBatchThresholdMs;
+            set => _slowBatchThresholdMs = value;
+        }
+
+        private double? _decreaseFactor;
 
         /// <summary>
-        /// Gets or sets the smoothing factor for the exponential moving average
-        /// of batch durations. Higher values weight recent batches more heavily.
-        /// Range: 0.0-1.0. Default: 0.3
+        /// Gets or sets the multiplier applied on throttle (0.4-0.7).
+        /// Lower values mean more aggressive backoff on throttle.
+        /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
-        public double BatchDurationSmoothingFactor { get; set; } = 0.3;
+        /// <remarks>
+        /// Preset defaults: Conservative=0.4, Balanced=0.5, Aggressive=0.6
+        /// </remarks>
+        public double DecreaseFactor
+        {
+            get => _decreaseFactor ?? GetPresetDefaults(Preset).DecreaseFactor;
+            set => _decreaseFactor = value;
+        }
+
+        private int? _stabilizationBatches;
+
+        /// <summary>
+        /// Gets or sets the number of successful batches required before considering increase.
+        /// Higher values are more cautious about ramping up.
+        /// If not set, uses the value from <see cref="Preset"/>.
+        /// </summary>
+        /// <remarks>
+        /// Preset defaults: Conservative=5, Balanced=3, Aggressive=2
+        /// </remarks>
+        public int StabilizationBatches
+        {
+            get => _stabilizationBatches ?? GetPresetDefaults(Preset).StabilizationBatches;
+            set => _stabilizationBatches = value;
+        }
+
+        private TimeSpan? _minIncreaseInterval;
+
+        /// <summary>
+        /// Gets or sets the minimum time between parallelism increases.
+        /// Longer intervals are more conservative.
+        /// If not set, uses the value from <see cref="Preset"/>.
+        /// </summary>
+        /// <remarks>
+        /// Preset defaults: Conservative=8s, Balanced=5s, Aggressive=3s
+        /// </remarks>
+        public TimeSpan MinIncreaseInterval
+        {
+            get => _minIncreaseInterval ?? TimeSpan.FromSeconds(GetPresetDefaults(Preset).MinIncreaseIntervalSeconds);
+            set => _minIncreaseInterval = value;
+        }
+
+        #endregion
+
+        #region Internal Options (implementation details)
+
+        /// <summary>
+        /// Hard ceiling for parallelism (Microsoft's per-user limit).
+        /// This is not configurable - it's a platform limit.
+        /// </summary>
+        internal int HardCeiling => 52;
+
+        /// <summary>
+        /// Absolute minimum parallelism. Fallback if server recommends less than this.
+        /// </summary>
+        internal int MinParallelism => 1;
+
+        /// <summary>
+        /// Parallelism increase amount per stabilization period.
+        /// Note: The actual increase uses Math.Max(floor, this value), so floor typically dominates.
+        /// </summary>
+        internal int IncreaseRate => 2;
+
+        /// <summary>
+        /// Multiplier for recovery phase increases.
+        /// </summary>
+        internal double RecoveryMultiplier => 2.0;
+
+        /// <summary>
+        /// TTL for lastKnownGood value.
+        /// </summary>
+        internal TimeSpan LastKnownGoodTTL => TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// Idle period after which state resets.
+        /// </summary>
+        internal TimeSpan IdleResetPeriod => TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// Minimum number of batch samples required before applying execution time ceiling.
+        /// </summary>
+        internal int MinBatchSamplesForCeiling => 3;
+
+        /// <summary>
+        /// Smoothing factor for exponential moving average of batch durations.
+        /// </summary>
+        internal double BatchDurationSmoothingFactor => 0.3;
+
+        #endregion
     }
 }
