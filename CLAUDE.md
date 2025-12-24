@@ -28,7 +28,7 @@
 |------|-----|
 | Strong name all assemblies | Required for Dataverse plugin sandbox |
 | XML documentation for public APIs | IntelliSense support for consumers |
-| Multi-target 4.6.2, 6.0, 8.0 | Dataverse compatibility across versions |
+| Multi-target appropriately | PPDS.Plugins: 4.6.2, 8.0, 10.0; PPDS.Dataverse: 8.0, 10.0 |
 | Run `dotnet test` before PR | Ensures no regressions |
 | Update `CHANGELOG.md` with changes | Release notes for consumers |
 | Follow SemVer versioning | Clear compatibility expectations |
@@ -43,7 +43,7 @@
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| .NET | 4.6.2, 6.0, 8.0 | Multi-targeting for Dataverse compatibility |
+| .NET | 4.6.2, 8.0, 10.0 | Multi-targeting (Plugins: 4.6.2+, Dataverse: 8.0+) |
 | C# | Latest (LangVersion) | Primary language |
 | NuGet | - | Package distribution |
 | Strong Naming | .snk file | Required for Dataverse plugin assemblies |

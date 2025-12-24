@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bulk operation wrappers: CreateMultiple, UpdateMultiple, UpsertMultiple, DeleteMultiple
 - `IProgress<ProgressSnapshot>` support for real-time progress reporting
 - Structured configuration with typed auth properties
-- Key Vault and environment variable secret resolution
+- Key Vault secret resolution (environment variables via .NET config binding)
 - Multi-environment configuration support for source/target scenarios
 - DI integration via `AddDataverseConnectionPool()` extension method
 - Affinity cookie disabled by default for improved throughput
