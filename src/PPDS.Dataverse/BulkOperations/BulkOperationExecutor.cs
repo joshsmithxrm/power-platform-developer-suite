@@ -1203,15 +1203,15 @@ namespace PPDS.Dataverse.BulkOperations
 
         private static void ApplyBypassOptions(OrganizationRequest request, BulkOperationOptions options)
         {
-            // Preferred: BypassBusinessLogicExecution (newer, more control)
-            if (!string.IsNullOrEmpty(options.BypassBusinessLogicExecution))
+            // Custom business logic bypass
+            if (options.BypassCustomLogic != CustomLogicBypass.None)
             {
-                request.Parameters["BypassBusinessLogicExecution"] = options.BypassBusinessLogicExecution;
-            }
-            // Fallback: BypassCustomPluginExecution (legacy)
-            else if (options.BypassCustomPluginExecution)
-            {
-                request.Parameters["BypassCustomPluginExecution"] = true;
+                var parts = new List<string>(2);
+                if (options.BypassCustomLogic.HasFlag(CustomLogicBypass.Synchronous))
+                    parts.Add("CustomSync");
+                if (options.BypassCustomLogic.HasFlag(CustomLogicBypass.Asynchronous))
+                    parts.Add("CustomAsync");
+                request.Parameters["BypassBusinessLogicExecution"] = string.Join(",", parts);
             }
 
             // Power Automate flows bypass
@@ -1224,6 +1224,12 @@ namespace PPDS.Dataverse.BulkOperations
             if (options.SuppressDuplicateDetection)
             {
                 request.Parameters["SuppressDuplicateDetection"] = true;
+            }
+
+            // Tag for plugin context
+            if (!string.IsNullOrEmpty(options.Tag))
+            {
+                request.Parameters["tag"] = options.Tag;
             }
         }
 
