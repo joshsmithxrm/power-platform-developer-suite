@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace PPDS.Dataverse.Resilience
 {
@@ -171,6 +172,47 @@ namespace PPDS.Dataverse.Resilience
         {
             get => _minIncreaseInterval ?? TimeSpan.FromSeconds(GetPresetDefaults(Preset).MinIncreaseIntervalSeconds);
             set => _minIncreaseInterval = value;
+        }
+
+        #endregion
+
+        #region Configuration Binding Fix
+
+        /// <summary>
+        /// Clears backing fields that were not explicitly configured.
+        /// Call this after Bind() to fix the issue where ConfigurationBinder
+        /// populates backing fields by reading getters and writing to setters.
+        /// </summary>
+        /// <param name="configuredKeys">
+        /// The set of configuration keys that were explicitly present.
+        /// Keys should be property names like "ExecutionTimeCeilingFactor".
+        /// </param>
+        internal void ClearNonConfiguredBackingFields(HashSet<string> configuredKeys)
+        {
+            if (!configuredKeys.Contains(nameof(ExecutionTimeCeilingFactor)))
+            {
+                _executionTimeCeilingFactor = null;
+            }
+
+            if (!configuredKeys.Contains(nameof(SlowBatchThresholdMs)))
+            {
+                _slowBatchThresholdMs = null;
+            }
+
+            if (!configuredKeys.Contains(nameof(DecreaseFactor)))
+            {
+                _decreaseFactor = null;
+            }
+
+            if (!configuredKeys.Contains(nameof(StabilizationBatches)))
+            {
+                _stabilizationBatches = null;
+            }
+
+            if (!configuredKeys.Contains(nameof(MinIncreaseInterval)))
+            {
+                _minIncreaseInterval = null;
+            }
         }
 
         #endregion

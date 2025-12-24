@@ -595,4 +595,152 @@ public class ServiceCollectionExtensionsTests
     }
 
     #endregion
+
+    #region AdaptiveRate Configuration Binding Tests
+
+    /// <summary>
+    /// Reproduces the bug where configuration binding populates backing fields with preset defaults,
+    /// then a subsequent Configure callback setting a different Preset doesn't take effect because
+    /// the backing fields are already populated.
+    /// </summary>
+    [Fact]
+    public void AddDataverseConnectionPool_PresetOverride_ShouldUseNewPresetDefaults()
+    {
+        // Arrange - JSON config with only Preset specified (no explicit property values)
+        var configData = new Dictionary<string, string?>
+        {
+            ["Dataverse:Url"] = "https://test.crm.dynamics.com",
+            ["Dataverse:Connections:0:Name"] = "Primary",
+            ["Dataverse:Connections:0:ClientId"] = "test-client-id",
+            ["Dataverse:Connections:0:ClientSecret"] = "test-secret",
+            ["Dataverse:AdaptiveRate:Preset"] = "Balanced" // Only Preset, no other AdaptiveRate props
+        };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configData)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // First Configure - from AddDataverseConnectionPool which calls Bind()
+        services.AddDataverseConnectionPool(configuration);
+
+        // Second Configure - override Preset to Conservative (like demo's CommandBase does)
+        services.Configure<DataverseOptions>(options =>
+        {
+            options.AdaptiveRate.Preset = RateControlPreset.Conservative;
+        });
+
+        // Act - resolve options
+        var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<DataverseOptions>>().Value;
+
+        // Assert - should use Conservative preset values, not Balanced
+        // Conservative: Factor=180, DecreaseFactor=0.4, Stabilization=5, Interval=8s
+        // Balanced:     Factor=200, DecreaseFactor=0.5, Stabilization=3, Interval=5s
+        options.AdaptiveRate.Preset.Should().Be(RateControlPreset.Conservative);
+        options.AdaptiveRate.ExecutionTimeCeilingFactor.Should().Be(180, "Conservative preset should use 180");
+        options.AdaptiveRate.DecreaseFactor.Should().Be(0.4, "Conservative preset should use 0.4");
+        options.AdaptiveRate.StabilizationBatches.Should().Be(5, "Conservative preset should use 5");
+        options.AdaptiveRate.MinIncreaseInterval.Should().Be(TimeSpan.FromSeconds(8), "Conservative preset should use 8s");
+    }
+
+    /// <summary>
+    /// Verifies that WITHOUT Bind(), changing Preset correctly changes getter values.
+    /// This is the expected behavior that Bind() breaks.
+    /// </summary>
+    [Fact]
+    public void WithoutBind_ChangingPreset_ShouldChangeGetterValues()
+    {
+        // Arrange
+        var options = new AdaptiveRateOptions();
+        options.Preset = RateControlPreset.Balanced;
+
+        // Assert initial values
+        options.ExecutionTimeCeilingFactor.Should().Be(200, "Balanced default");
+
+        // Act - change preset
+        options.Preset = RateControlPreset.Conservative;
+
+        // Assert - getter should now return Conservative default
+        options.ExecutionTimeCeilingFactor.Should().Be(180, "should switch to Conservative default");
+    }
+
+    /// <summary>
+    /// Documents that direct Bind() without the fix has the backing field issue.
+    /// This test documents the .NET ConfigurationBinder behavior that we work around
+    /// in AddDataverseConnectionPool.
+    /// </summary>
+    [Fact]
+    public void DirectBind_WithoutFix_HasBackingFieldIssue()
+    {
+        // Arrange - Config with ONLY Preset, no other AdaptiveRate properties
+        var configData = new Dictionary<string, string?>
+        {
+            ["AdaptiveRate:Preset"] = "Balanced"
+        };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configData)
+            .Build();
+
+        var options = new AdaptiveRateOptions();
+
+        // Act - bind directly (without the fix that AddDataverseConnectionPool applies)
+        configuration.GetSection("AdaptiveRate").Bind(options);
+
+        // Assert - Preset should be Balanced
+        options.Preset.Should().Be(RateControlPreset.Balanced);
+        options.ExecutionTimeCeilingFactor.Should().Be(200, "getter returns Balanced default");
+
+        // Act - change Preset
+        options.Preset = RateControlPreset.Conservative;
+
+        // Without the fix (ClearNonConfiguredBackingFields), the backing field was populated
+        // by Bind() reading the getter and writing to the setter, so it stays 200
+        // This documents WHY we need the fix in AddDataverseConnectionPool
+        options.ExecutionTimeCeilingFactor.Should().Be(200,
+            "without the fix, Bind() populated backing field, so changing Preset doesn't affect this property");
+    }
+
+    /// <summary>
+    /// Verifies that when individual properties ARE specified in config alongside Preset,
+    /// they should override the preset values (this is the expected behavior).
+    /// </summary>
+    [Fact]
+    public void AddDataverseConnectionPool_ExplicitPropertyValues_ShouldOverridePreset()
+    {
+        // Arrange - JSON config with Preset AND explicit property values
+        var configData = new Dictionary<string, string?>
+        {
+            ["Dataverse:Url"] = "https://test.crm.dynamics.com",
+            ["Dataverse:Connections:0:Name"] = "Primary",
+            ["Dataverse:Connections:0:ClientId"] = "test-client-id",
+            ["Dataverse:Connections:0:ClientSecret"] = "test-secret",
+            ["Dataverse:AdaptiveRate:Preset"] = "Conservative",
+            ["Dataverse:AdaptiveRate:ExecutionTimeCeilingFactor"] = "250" // Explicit override
+        };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configData)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDataverseConnectionPool(configuration);
+
+        // Act
+        var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<DataverseOptions>>().Value;
+
+        // Assert - explicit value should override preset
+        options.AdaptiveRate.Preset.Should().Be(RateControlPreset.Conservative);
+        options.AdaptiveRate.ExecutionTimeCeilingFactor.Should().Be(250, "explicit config value should override preset");
+
+        // Other values should still come from Conservative preset
+        options.AdaptiveRate.DecreaseFactor.Should().Be(0.4);
+    }
+
+    #endregion
 }
