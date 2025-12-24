@@ -61,10 +61,15 @@ dotnet add package PPDS.Dataverse
 ```
 
 ```csharp
-// Setup
+// Setup with typed configuration
 services.AddDataverseConnectionPool(options =>
 {
-    options.Connections.Add(new DataverseConnection("Primary", connectionString));
+    options.Connections.Add(new DataverseConnection("Primary")
+    {
+        Url = "https://org.crm.dynamics.com",
+        ClientId = "your-client-id",
+        ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET")
+    });
     options.Pool.DisableAffinityCookie = true; // 10x+ throughput improvement
 });
 
@@ -89,7 +94,12 @@ dotnet add package PPDS.Migration
 // Setup
 services.AddDataverseConnectionPool(options =>
 {
-    options.Connections.Add(new DataverseConnection("Target", connectionString));
+    options.Connections.Add(new DataverseConnection("Target")
+    {
+        Url = "https://org.crm.dynamics.com",
+        ClientId = "your-client-id",
+        ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET")
+    });
 });
 services.AddDataverseMigration();
 
@@ -122,8 +132,10 @@ dotnet tool install -g PPDS.Migration.Cli
 ```
 
 ```bash
-# Set connection via environment variable (recommended for security)
-export PPDS_CONNECTION="AuthType=ClientSecret;Url=https://org.crm.dynamics.com;..."
+# Set connection via environment variables
+export PPDS_URL="https://org.crm.dynamics.com"
+export PPDS_CLIENT_ID="your-client-id"
+export PPDS_CLIENT_SECRET="your-secret"
 
 # Analyze schema dependencies
 ppds-migrate analyze --schema schema.xml
@@ -134,9 +146,7 @@ ppds-migrate export --schema schema.xml --output data.zip
 # Import data
 ppds-migrate import --data data.zip --batch-size 1000
 
-# Full migration (export + import)
-export PPDS_SOURCE_CONNECTION="..."
-export PPDS_TARGET_CONNECTION="..."
+# Full migration (uses PPDS_SOURCE_* and PPDS_TARGET_* variables)
 ppds-migrate migrate --schema schema.xml
 ```
 
@@ -151,6 +161,8 @@ Key design decisions are documented as ADRs:
 - [ADR-0001: Disable Affinity Cookie by Default](docs/adr/0001_DISABLE_AFFINITY_COOKIE.md)
 - [ADR-0002: Multi-Connection Pooling](docs/adr/0002_MULTI_CONNECTION_POOLING.md)
 - [ADR-0003: Throttle-Aware Connection Selection](docs/adr/0003_THROTTLE_AWARE_SELECTION.md)
+- [ADR-0004: Throttle Recovery Strategy](docs/adr/0004_THROTTLE_RECOVERY_STRATEGY.md)
+- [ADR-0005: Pool Sizing Per Connection](docs/adr/0005_POOL_SIZING_PER_CONNECTION.md)
 
 ## Patterns
 

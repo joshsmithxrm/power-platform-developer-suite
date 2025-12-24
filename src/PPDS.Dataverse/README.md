@@ -11,12 +11,16 @@ dotnet add package PPDS.Dataverse
 ## Quick Start
 
 ```csharp
-// 1. Register services
+// 1. Register services with typed configuration
 services.AddDataverseConnectionPool(options =>
 {
-    options.Connections.Add(new DataverseConnection(
-        "Primary",
-        "AuthType=ClientSecret;Url=https://org.crm.dynamics.com;ClientId=xxx;ClientSecret=xxx"));
+    options.Connections.Add(new DataverseConnection("Primary")
+    {
+        Url = "https://org.crm.dynamics.com",
+        ClientId = "your-client-id",
+        ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET"),
+        TenantId = "your-tenant-id"
+    });
 });
 
 // 2. Inject and use
@@ -41,8 +45,8 @@ public class AccountService
 Reuse connections efficiently with automatic lifecycle management:
 
 ```csharp
-options.Pool.MaxPoolSize = 50;        // Total connections
-options.Pool.MinPoolSize = 5;         // Keep warm
+options.Pool.MaxConnectionsPerUser = 52;  // Per Application User (default)
+options.Pool.MinPoolSize = 5;              // Keep warm
 options.Pool.MaxIdleTime = TimeSpan.FromMinutes(5);
 options.Pool.MaxLifetime = TimeSpan.FromMinutes(30);
 ```
@@ -52,12 +56,20 @@ options.Pool.MaxLifetime = TimeSpan.FromMinutes(30);
 Distribute load across multiple Application Users to multiply your API quota:
 
 ```csharp
-options.Connections = new List<DataverseConnection>
+options.Connections.Add(new DataverseConnection("AppUser1")
 {
-    new("AppUser1", connectionString1),
-    new("AppUser2", connectionString2),
-    new("AppUser3", connectionString3),  // 3x the quota!
-};
+    Url = "https://org.crm.dynamics.com",
+    ClientId = "app-user-1-client-id",
+    ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET_1")
+});
+options.Connections.Add(new DataverseConnection("AppUser2")
+{
+    Url = "https://org.crm.dynamics.com",
+    ClientId = "app-user-2-client-id",
+    ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET_2")
+});
+// 2 users = 2x the quota!
+
 options.Pool.SelectionStrategy = ConnectionSelectionStrategy.ThrottleAware;
 ```
 
@@ -98,87 +110,75 @@ options.Pool.DisableAffinityCookie = true; // Default
 
 ## Configuration
 
-### Via Code
+### Typed Configuration (Recommended)
+
+Use typed properties with environment variable secret resolution:
 
 ```csharp
 services.AddDataverseConnectionPool(options =>
 {
-    options.Connections.Add(new DataverseConnection("Primary", connectionString));
-    options.Pool.MaxPoolSize = 50;
+    options.Connections.Add(new DataverseConnection("Primary")
+    {
+        Url = "https://org.crm.dynamics.com",
+        ClientId = "your-client-id",
+        ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET"),
+        TenantId = "your-tenant-id",
+        AuthType = DataverseAuthType.ClientSecret
+    });
+    options.Pool.MaxConnectionsPerUser = 52;
     options.Pool.DisableAffinityCookie = true;
     options.Pool.SelectionStrategy = ConnectionSelectionStrategy.ThrottleAware;
 });
 ```
 
-### Via appsettings.json
+### Secret Sources
 
-```json
-{
-  "Dataverse": {
-    "Connections": [
-      {
-        "Name": "Primary",
-        "ConnectionString": "AuthType=ClientSecret;..."
-      }
-    ],
-    "Pool": {
-      "MaxPoolSize": 50,
-      "DisableAffinityCookie": true,
-      "SelectionStrategy": "ThrottleAware"
-    }
-  }
-}
-```
+- **`ClientSecret`** - Set directly (read from env var, config, etc. at your discretion)
+- **`ClientSecretKeyVaultUri`** - Library fetches from Azure Key Vault automatically
+
+### Authentication Types
 
 ```csharp
-services.AddDataverseConnectionPool(configuration);
+// Client Secret (most common for server-to-server)
+new DataverseConnection("Primary")
+{
+    AuthType = DataverseAuthType.ClientSecret,
+    Url = "https://org.crm.dynamics.com",
+    ClientId = "your-client-id",
+    ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET")
+}
+
+// Certificate Authentication
+new DataverseConnection("Primary")
+{
+    AuthType = DataverseAuthType.Certificate,
+    Url = "https://org.crm.dynamics.com",
+    ClientId = "your-client-id",
+    CertificateThumbprint = "ABC123...",
+    CertificateStoreLocation = "CurrentUser"
+}
+
+// OAuth (Interactive)
+new DataverseConnection("Primary")
+{
+    AuthType = DataverseAuthType.OAuth,
+    Url = "https://org.crm.dynamics.com",
+    ClientId = "your-client-id",
+    RedirectUri = "http://localhost:8080",
+    LoginPrompt = OAuthLoginPrompt.Auto
+}
 ```
 
 ## Multi-Environment Scenarios
 
-When working with multiple environments (Dev, QA, Prod), **do not put them in the same connection pool**. The pool is designed for load-balancing within a single organization, not for cross-environment operations.
-
-### Wrong: Multiple Orgs in One Pool
-
-```json
-{
-  "Dataverse": {
-    "Connections": [
-      { "Name": "Dev", "ConnectionString": "Url=https://dev.crm.dynamics.com;..." },
-      { "Name": "QA", "ConnectionString": "Url=https://qa.crm.dynamics.com;..." }
-    ]
-  }
-}
-```
-
-This will load-balance requests randomly across Dev and QA, which is almost never intended. The SDK will log a warning if it detects this configuration.
+When working with multiple environments (Dev, QA, Prod), **do not put them in the same connection pool**. The pool is designed for load-balancing within a single organization.
 
 ### Correct: Separate Providers per Environment
 
-Structure your configuration with separate environment sections:
-
-```json
-{
-  "Environments": {
-    "Dev": {
-      "ConnectionString": "AuthType=OAuth;Url=https://dev.crm.dynamics.com;..."
-    },
-    "QA": {
-      "ConnectionString": "AuthType=OAuth;Url=https://qa.crm.dynamics.com;..."
-    },
-    "Prod": {
-      "ConnectionString": "AuthType=OAuth;Url=https://prod.crm.dynamics.com;..."
-    }
-  }
-}
-```
-
-Then create separate service providers for each environment:
-
 ```csharp
 // Create separate providers per environment
-await using var devProvider = CreateProvider(config["Environments:Dev:ConnectionString"]);
-await using var qaProvider = CreateProvider(config["Environments:QA:ConnectionString"]);
+await using var devProvider = CreateProvider("https://dev.crm.dynamics.com");
+await using var qaProvider = CreateProvider("https://qa.crm.dynamics.com");
 
 // Export from Dev
 var devExporter = devProvider.GetRequiredService<IExporter>();
@@ -188,36 +188,25 @@ await devExporter.ExportAsync(schema, "data.zip", options);
 var qaImporter = qaProvider.GetRequiredService<IImporter>();
 await qaImporter.ImportAsync("data.zip", importOptions);
 
-ServiceProvider CreateProvider(string connectionString)
+ServiceProvider CreateProvider(string url)
 {
     var services = new ServiceCollection();
     services.AddDataverseConnectionPool(options =>
     {
-        options.Connections.Add(new DataverseConnection("Primary", connectionString));
+        options.Connections.Add(new DataverseConnection("Primary")
+        {
+            Url = url,
+            ClientId = Environment.GetEnvironmentVariable("DATAVERSE_CLIENT_ID"),
+            ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_SECRET")
+        });
     });
-    // Add other services...
     return services.BuildServiceProvider();
 }
 ```
 
 ### When to Use Multiple Connections in One Pool
 
-Multiple connections in a single pool are appropriate when:
-
-1. **Same organization, multiple Application Users** - Multiply your API quota by using multiple registered applications:
-
-   ```json
-   {
-     "Dataverse": {
-       "Connections": [
-         { "Name": "AppUser1", "ConnectionString": "Url=https://org.crm.dynamics.com;ClientId=app1;..." },
-         { "Name": "AppUser2", "ConnectionString": "Url=https://org.crm.dynamics.com;ClientId=app2;..." }
-       ]
-     }
-   }
-   ```
-
-2. **High-availability within one org** - Multiple connections to the same org for resilience.
+Multiple connections are appropriate when using **same organization, multiple Application Users** to multiply your API quota.
 
 ## Impersonation
 
@@ -247,86 +236,20 @@ Console.WriteLine($"Requests: {stats.RequestsServed}");
 
 Connection strings contain sensitive credentials. This library provides built-in protection:
 
-**Automatic Redaction:** Connection strings are automatically redacted in logs and error messages:
-
-```csharp
-using PPDS.Dataverse.Security;
-
-// Redacts ClientSecret, Password, and other sensitive values
-var safe = ConnectionStringRedactor.Redact(connectionString);
-// "AuthType=ClientSecret;Url=https://org.crm.dynamics.com;ClientId=xxx;ClientSecret=***REDACTED***"
-```
-
-**Exception Safety:** Connection errors throw `DataverseConnectionException` with sanitized messages:
-
-```csharp
-try
-{
-    await using var client = await pool.GetClientAsync();
-}
-catch (DataverseConnectionException ex)
-{
-    // ex.Message is safe to log - credentials are redacted
-    logger.LogError(ex, "Connection failed for {Connection}", ex.ConnectionName);
-}
-```
+**Automatic Redaction:** Connection strings are automatically redacted in logs and error messages.
 
 **Safe ToString:** `DataverseConnection.ToString()` excludes credentials:
 
 ```csharp
-var connection = new DataverseConnection("Primary", connectionString);
-Console.WriteLine(connection); // "DataverseConnection { Name = Primary, MaxPoolSize = 10 }"
+var connection = new DataverseConnection("Primary") { ... };
+Console.WriteLine(connection); // "DataverseConnection { Name = Primary, Url = https://..., AuthType = ClientSecret }"
 ```
 
 ### Best Practices
 
-1. **Use Environment Variables** instead of hardcoding connection strings:
-
-   ```csharp
-   var connectionString = Environment.GetEnvironmentVariable("DATAVERSE_CONNECTION");
-   ```
-
-2. **Use Azure Key Vault** for production deployments:
-
-   ```csharp
-   builder.Configuration.AddAzureKeyVault(
-       new Uri("https://your-vault.vault.azure.net/"),
-       new DefaultAzureCredential());
-   ```
-
-3. **Use Managed Identity** when running in Azure:
-
-   ```
-   AuthType=OAuth;Url=https://org.crm.dynamics.com;
-   AppId=your-client-id;RedirectUri=http://localhost;
-   TokenCacheStorePath=token.cache;LoginPrompt=Never
-   ```
-
-4. **Never log connection strings directly:**
-
-   ```csharp
-   // DON'T
-   logger.LogInformation("Connecting with: {ConnectionString}", connectionString);
-
-   // DO
-   logger.LogInformation("Connecting to: {Name}", connection.Name);
-   // Or if you need the URL:
-   logger.LogInformation("Connecting with: {Redacted}", connection.GetRedactedConnectionString());
-   ```
-
-### Sensitive Data Attribute
-
-Properties containing sensitive data are marked with `[SensitiveData]` for documentation and static analysis:
-
-```csharp
-public class DataverseConnection
-{
-    public string Name { get; set; }
-
-    [SensitiveData(Reason = "Contains authentication credentials", DataType = "ConnectionString")]
-    public string ConnectionString { get; set; }
-}
-```
+1. **Use Environment Variables** - Read from env vars: `ClientSecret = Environment.GetEnvironmentVariable("...")`
+2. **Use Azure Key Vault** - For production, use `ClientSecretKeyVaultUri` to fetch automatically
+3. **Never log connection details directly**
 
 ## Target Frameworks
 

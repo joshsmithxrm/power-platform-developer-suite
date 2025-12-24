@@ -1,6 +1,6 @@
 # ADR-0005: Pool Sizing Per Connection
 
-**Status:** Approved for Implementation
+**Status:** Implemented (v1.0.0)
 **Applies to:** PPDS.Dataverse
 **Date:** 2025-12-23
 
@@ -11,23 +11,14 @@ Microsoft's service protection limits are **per Application User** (per connecti
 - Each Application User can handle 52 concurrent requests (`RecommendedDegreesOfParallelism`)
 - Multiple Application Users have **independent quotas**
 
-Current configuration uses a shared pool size:
-
-```csharp
-public class PoolOptions
-{
-    public int MaxPoolSize { get; set; } = 50; // Shared across all connections
-}
-```
-
-With 2 connections configured, this results in ~25 connections per user, leaving ~50% of available capacity unused.
+A shared pool size across connections underutilizes capacity. With 2 connections and a shared max of 50, each user only gets ~25 connections, leaving ~50% of available capacity unused.
 
 ## Decision
 
-Change the default from **shared pool size** to **per-connection pool size**:
+Use **per-connection pool sizing** as the default:
 
 ```csharp
-public class PoolOptions
+public class ConnectionPoolOptions
 {
     /// <summary>
     /// Maximum concurrent connections per Application User (connection configuration).
@@ -37,11 +28,10 @@ public class PoolOptions
     public int MaxConnectionsPerUser { get; set; } = 52;
 
     /// <summary>
-    /// Legacy: Maximum total pool size across all connections.
-    /// If set to non-zero, overrides MaxConnectionsPerUser calculation.
+    /// Fixed total pool size override. If set to non-zero, overrides
+    /// MaxConnectionsPerUser calculation.
     /// Default: 0 (use per-connection sizing).
     /// </summary>
-    [Obsolete("Use MaxConnectionsPerUser for optimal throughput")]
     public int MaxPoolSize { get; set; } = 0;
 }
 ```
@@ -53,28 +43,20 @@ public class PoolOptions
 | 1 connection, default | 1 × 52 | 52 total capacity |
 | 2 connections, default | 2 × 52 | 104 total capacity |
 | 4 connections, default | 4 × 52 | 208 total capacity |
-| Legacy MaxPoolSize = 50 | 50 (ignores per-connection) | 50 total capacity |
+| MaxPoolSize = 50 | 50 (fixed override) | 50 total capacity |
 
 ### Implementation
 
 ```csharp
 private int CalculateTotalPoolCapacity()
 {
-    // Legacy override takes precedence
-    #pragma warning disable CS0618
     if (_options.Pool.MaxPoolSize > 0)
     {
-        return _options.Pool.MaxPoolSize;
+        return _options.Pool.MaxPoolSize;  // Fixed override
     }
-    #pragma warning restore CS0618
 
-    // Per-connection sizing (recommended)
     return _options.Connections.Count * _options.Pool.MaxConnectionsPerUser;
 }
-
-// Semaphore initialization
-var totalCapacity = CalculateTotalPoolCapacity();
-_connectionSemaphore = new SemaphoreSlim(totalCapacity);
 ```
 
 ## Consequences
@@ -89,12 +71,6 @@ _connectionSemaphore = new SemaphoreSlim(totalCapacity);
 ### Negative
 
 - **Higher resource usage** - More connections = more memory
-- **Breaking change for some** - Users expecting shared sizing may be surprised
-- **Need migration path** - Document the change, keep legacy option
-
-### Migration
-
-Users who explicitly set `MaxPoolSize` keep their behavior. Users on defaults get improved throughput automatically.
 
 ## References
 
