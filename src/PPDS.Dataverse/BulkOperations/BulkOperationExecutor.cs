@@ -80,61 +80,6 @@ namespace PPDS.Dataverse.BulkOperations
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        /// <summary>
-        /// Resolves the parallelism to use for batch processing.
-        /// Uses adaptive rate control if enabled, otherwise uses RecommendedDegreesOfParallelism.
-        /// </summary>
-        private async Task<(int Parallelism, string ConnectionName)> ResolveParallelismAsync(int? maxParallelBatches, CancellationToken cancellationToken)
-        {
-            // Get RecommendedDegreesOfParallelism from a connection
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var connectionName = client.ConnectionName;
-            var recommended = client.RecommendedDegreesOfParallelism;
-
-            if (recommended <= 0)
-            {
-                _logger.LogWarning("RecommendedDegreesOfParallelism unavailable or zero, using sequential processing");
-                return (1, connectionName);
-            }
-
-            int parallelism;
-
-            if (maxParallelBatches.HasValue)
-            {
-                // Explicit override - use as-is
-                parallelism = maxParallelBatches.Value;
-            }
-            else if (_adaptiveRateController.IsEnabled)
-            {
-                // Use adaptive rate controller with connection count for proper scaling
-                var connectionCount = _options.Connections.Count;
-                parallelism = _adaptiveRateController.GetParallelism(connectionName, recommended, connectionCount);
-                _logger.LogDebug(
-                    "Using adaptive parallelism: {Parallelism} (recommended: {Recommended}, connections: {Connections}) for connection {Connection}",
-                    parallelism, recommended, connectionCount, connectionName);
-            }
-            else
-            {
-                // Use full recommended parallelism
-                parallelism = recommended;
-                _logger.LogDebug("Using RecommendedDegreesOfParallelism: {Parallelism}", parallelism);
-            }
-
-            // Cap parallelism to pool capacity - can't run more parallel operations than available connections
-            var poolCapacity = _options.Connections.Count * _options.Pool.MaxConnectionsPerUser;
-            if (parallelism > poolCapacity)
-            {
-                _logger.LogWarning(
-                    "MaxParallelBatches ({Parallelism}) exceeds pool capacity ({PoolCapacity}). " +
-                    "Capping parallelism to {PoolCapacity}. " +
-                    "Consider adding more Application Users for higher throughput.",
-                    parallelism, poolCapacity, poolCapacity);
-                parallelism = poolCapacity;
-            }
-
-            return (parallelism, connectionName);
-        }
-
         /// <inheritdoc />
         public async Task<BulkOperationResult> CreateMultipleAsync(
             string entityLogicalName,
@@ -145,19 +90,56 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation(
-                "CreateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
-                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
+            // Get connection info for parallelism baseline
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            var connectionName = client.ConnectionName;
+            var recommended = client.RecommendedDegreesOfParallelism;
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
+            // Determine execution strategy
+            var useFixedParallelism = options.MaxParallelBatches.HasValue;
+            var useDynamicParallelism = !useFixedParallelism && _adaptiveRateController.IsEnabled;
+
+            _logger.LogInformation(
+                "CreateMultiple starting. Entity: {Entity}, Count: {Count}, Batches: {Batches}, ElasticTable: {ElasticTable}, " +
+                "Strategy: {Strategy}, Recommended: {Recommended}",
+                entityLogicalName, entityList.Count, batches.Count, options.ElasticTable,
+                useDynamicParallelism ? "Dynamic" : (useFixedParallelism ? $"Fixed({options.MaxParallelBatches})" : $"Fixed({recommended})"),
+                recommended);
+
             BulkOperationResult result;
-            if (parallelism > 1 && batches.Count > 1)
+
+            if (batches.Count <= 1 || recommended <= 0)
             {
+                // Sequential execution for single batch or when parallelism unavailable
+                result = await ExecuteBatchesSequentiallyAsync(
+                    batches,
+                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else if (useDynamicParallelism)
+            {
+                // Dynamic parallelism - adapts in real-time based on controller
+                result = await ExecuteBatchesDynamicallyAsync(
+                    "CreateMultiple",
+                    connectionName,
+                    recommended,
+                    batches,
+                    (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                // Fixed parallelism - explicit override or adaptive disabled
+                var parallelism = options.MaxParallelBatches ?? (recommended * _options.Connections.Count);
                 result = await ExecuteBatchesParallelAsync(
                     batches,
                     (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -165,37 +147,6 @@ namespace PPDS.Dataverse.BulkOperations
                     tracker,
                     progress,
                     cancellationToken);
-            }
-            else
-            {
-                var allCreatedIds = new List<Guid>();
-                var allErrors = new List<BulkOperationError>();
-                var successCount = 0;
-
-                foreach (var batch in batches)
-                {
-                    var batchResult = await ExecuteCreateMultipleBatchAsync(
-                        entityLogicalName, batch, options, cancellationToken);
-
-                    successCount += batchResult.SuccessCount;
-                    allErrors.AddRange(batchResult.Errors);
-                    if (batchResult.CreatedIds != null)
-                    {
-                        allCreatedIds.AddRange(batchResult.CreatedIds);
-                    }
-
-                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
-                    progress?.Report(tracker.GetSnapshot());
-                }
-
-                result = new BulkOperationResult
-                {
-                    SuccessCount = successCount,
-                    FailureCount = allErrors.Count,
-                    Errors = allErrors,
-                    Duration = stopwatch.Elapsed,
-                    CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
-                };
             }
 
             stopwatch.Stop();
@@ -218,19 +169,56 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation(
-                "UpdateMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
-                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
+            // Get connection info for parallelism baseline
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            var connectionName = client.ConnectionName;
+            var recommended = client.RecommendedDegreesOfParallelism;
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
+            // Determine execution strategy
+            var useFixedParallelism = options.MaxParallelBatches.HasValue;
+            var useDynamicParallelism = !useFixedParallelism && _adaptiveRateController.IsEnabled;
+
+            _logger.LogInformation(
+                "UpdateMultiple starting. Entity: {Entity}, Count: {Count}, Batches: {Batches}, ElasticTable: {ElasticTable}, " +
+                "Strategy: {Strategy}, Recommended: {Recommended}",
+                entityLogicalName, entityList.Count, batches.Count, options.ElasticTable,
+                useDynamicParallelism ? "Dynamic" : (useFixedParallelism ? $"Fixed({options.MaxParallelBatches})" : $"Fixed({recommended})"),
+                recommended);
+
             BulkOperationResult result;
-            if (parallelism > 1 && batches.Count > 1)
+
+            if (batches.Count <= 1 || recommended <= 0)
             {
+                // Sequential execution for single batch or when parallelism unavailable
+                result = await ExecuteBatchesSequentiallyAsync(
+                    batches,
+                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else if (useDynamicParallelism)
+            {
+                // Dynamic parallelism - adapts in real-time based on controller
+                result = await ExecuteBatchesDynamicallyAsync(
+                    "UpdateMultiple",
+                    connectionName,
+                    recommended,
+                    batches,
+                    (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                // Fixed parallelism - explicit override or adaptive disabled
+                var parallelism = options.MaxParallelBatches ?? (recommended * _options.Connections.Count);
                 result = await ExecuteBatchesParallelAsync(
                     batches,
                     (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -238,31 +226,6 @@ namespace PPDS.Dataverse.BulkOperations
                     tracker,
                     progress,
                     cancellationToken);
-            }
-            else
-            {
-                var allErrors = new List<BulkOperationError>();
-                var successCount = 0;
-
-                foreach (var batch in batches)
-                {
-                    var batchResult = await ExecuteUpdateMultipleBatchAsync(
-                        entityLogicalName, batch, options, cancellationToken);
-
-                    successCount += batchResult.SuccessCount;
-                    allErrors.AddRange(batchResult.Errors);
-
-                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
-                    progress?.Report(tracker.GetSnapshot());
-                }
-
-                result = new BulkOperationResult
-                {
-                    SuccessCount = successCount,
-                    FailureCount = allErrors.Count,
-                    Errors = allErrors,
-                    Duration = stopwatch.Elapsed
-                };
             }
 
             stopwatch.Stop();
@@ -285,19 +248,56 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
-            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation(
-                "UpsertMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
-                entityLogicalName, entityList.Count, options.ElasticTable, parallelism);
+            // Get connection info for parallelism baseline
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            var connectionName = client.ConnectionName;
+            var recommended = client.RecommendedDegreesOfParallelism;
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
+            // Determine execution strategy
+            var useFixedParallelism = options.MaxParallelBatches.HasValue;
+            var useDynamicParallelism = !useFixedParallelism && _adaptiveRateController.IsEnabled;
+
+            _logger.LogInformation(
+                "UpsertMultiple starting. Entity: {Entity}, Count: {Count}, Batches: {Batches}, ElasticTable: {ElasticTable}, " +
+                "Strategy: {Strategy}, Recommended: {Recommended}",
+                entityLogicalName, entityList.Count, batches.Count, options.ElasticTable,
+                useDynamicParallelism ? "Dynamic" : (useFixedParallelism ? $"Fixed({options.MaxParallelBatches})" : $"Fixed({recommended})"),
+                recommended);
+
             BulkOperationResult result;
-            if (parallelism > 1 && batches.Count > 1)
+
+            if (batches.Count <= 1 || recommended <= 0)
             {
+                // Sequential execution for single batch or when parallelism unavailable
+                result = await ExecuteBatchesSequentiallyAsync(
+                    batches,
+                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else if (useDynamicParallelism)
+            {
+                // Dynamic parallelism - adapts in real-time based on controller
+                result = await ExecuteBatchesDynamicallyAsync(
+                    "UpsertMultiple",
+                    connectionName,
+                    recommended,
+                    batches,
+                    (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
+                    tracker,
+                    progress,
+                    cancellationToken);
+            }
+            else
+            {
+                // Fixed parallelism - explicit override or adaptive disabled
+                var parallelism = options.MaxParallelBatches ?? (recommended * _options.Connections.Count);
                 result = await ExecuteBatchesParallelAsync(
                     batches,
                     (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -305,31 +305,6 @@ namespace PPDS.Dataverse.BulkOperations
                     tracker,
                     progress,
                     cancellationToken);
-            }
-            else
-            {
-                var allErrors = new List<BulkOperationError>();
-                var successCount = 0;
-
-                foreach (var batch in batches)
-                {
-                    var batchResult = await ExecuteUpsertMultipleBatchAsync(
-                        entityLogicalName, batch, options, cancellationToken);
-
-                    successCount += batchResult.SuccessCount;
-                    allErrors.AddRange(batchResult.Errors);
-
-                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
-                    progress?.Report(tracker.GetSnapshot());
-                }
-
-                result = new BulkOperationResult
-                {
-                    SuccessCount = successCount,
-                    FailureCount = allErrors.Count,
-                    Errors = allErrors,
-                    Duration = stopwatch.Elapsed
-                };
             }
 
             stopwatch.Stop();
@@ -352,11 +327,11 @@ namespace PPDS.Dataverse.BulkOperations
         {
             options ??= _options.BulkOperations;
             var idList = ids.ToList();
-            var (parallelism, _) = await ResolveParallelismAsync(options.MaxParallelBatches, cancellationToken);
 
-            _logger.LogInformation(
-                "DeleteMultiple starting. Entity: {Entity}, Count: {Count}, ElasticTable: {ElasticTable}, Parallel: {Parallel}",
-                entityLogicalName, idList.Count, options.ElasticTable, parallelism);
+            // Get connection info for parallelism baseline
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+            var connectionName = client.ConnectionName;
+            var recommended = client.RecommendedDegreesOfParallelism;
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(idList, options.BatchSize).ToList();
@@ -367,33 +342,42 @@ namespace PPDS.Dataverse.BulkOperations
                 ? (batch, ct) => ExecuteElasticDeleteBatchAsync(entityLogicalName, batch, options, ct)
                 : (batch, ct) => ExecuteStandardDeleteBatchAsync(entityLogicalName, batch, options, ct);
 
+            // Determine execution strategy
+            var useFixedParallelism = options.MaxParallelBatches.HasValue;
+            var useDynamicParallelism = !useFixedParallelism && _adaptiveRateController.IsEnabled;
+
+            _logger.LogInformation(
+                "DeleteMultiple starting. Entity: {Entity}, Count: {Count}, Batches: {Batches}, ElasticTable: {ElasticTable}, " +
+                "Strategy: {Strategy}, Recommended: {Recommended}",
+                entityLogicalName, idList.Count, batches.Count, options.ElasticTable,
+                useDynamicParallelism ? "Dynamic" : (useFixedParallelism ? $"Fixed({options.MaxParallelBatches})" : $"Fixed({recommended})"),
+                recommended);
+
             BulkOperationResult result;
-            if (parallelism > 1 && batches.Count > 1)
+
+            if (batches.Count <= 1 || recommended <= 0)
             {
-                result = await ExecuteBatchesParallelAsync(batches, executeBatch, parallelism, tracker, progress, cancellationToken);
+                // Sequential execution for single batch or when parallelism unavailable
+                result = await ExecuteBatchesSequentiallyAsync(batches, executeBatch, tracker, progress, cancellationToken);
+            }
+            else if (useDynamicParallelism)
+            {
+                // Dynamic parallelism - adapts in real-time based on controller
+                result = await ExecuteBatchesDynamicallyAsync(
+                    "DeleteMultiple",
+                    connectionName,
+                    recommended,
+                    batches,
+                    executeBatch,
+                    tracker,
+                    progress,
+                    cancellationToken);
             }
             else
             {
-                var allErrors = new List<BulkOperationError>();
-                var successCount = 0;
-
-                foreach (var batch in batches)
-                {
-                    var batchResult = await executeBatch(batch, cancellationToken);
-                    successCount += batchResult.SuccessCount;
-                    allErrors.AddRange(batchResult.Errors);
-
-                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
-                    progress?.Report(tracker.GetSnapshot());
-                }
-
-                result = new BulkOperationResult
-                {
-                    SuccessCount = successCount,
-                    FailureCount = allErrors.Count,
-                    Errors = allErrors,
-                    Duration = stopwatch.Elapsed
-                };
+                // Fixed parallelism - explicit override or adaptive disabled
+                var parallelism = options.MaxParallelBatches ?? (recommended * _options.Connections.Count);
+                result = await ExecuteBatchesParallelAsync(batches, executeBatch, parallelism, tracker, progress, cancellationToken);
             }
 
             stopwatch.Stop();
@@ -1319,7 +1303,8 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
-        /// Executes batches in parallel with bounded concurrency.
+        /// Executes batches in parallel with fixed concurrency (legacy method).
+        /// Used when MaxParallelBatches is explicitly set.
         /// </summary>
         private static async Task<BulkOperationResult> ExecuteBatchesParallelAsync<T>(
             List<List<T>> batches,
@@ -1374,6 +1359,189 @@ namespace PPDS.Dataverse.BulkOperations
                 Errors = allErrors.ToList(),
                 Duration = TimeSpan.Zero,
                 CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds.ToList() : null
+            };
+        }
+
+        /// <summary>
+        /// Executes batches with dynamic parallelism that adapts based on the adaptive rate controller.
+        /// Queries GetParallelism() before starting each new batch, allowing parallelism to increase
+        /// as batches succeed (10 → 20 → 30 → ...) or decrease after throttling.
+        /// </summary>
+        /// <typeparam name="T">The batch item type (Entity or Guid).</typeparam>
+        /// <param name="operationName">Name of the operation for logging.</param>
+        /// <param name="connectionName">The connection name for the adaptive rate controller.</param>
+        /// <param name="recommendedParallelism">Server's recommended parallelism (x-ms-dop-hint).</param>
+        /// <param name="batches">The batches to execute.</param>
+        /// <param name="executeBatch">Function to execute a single batch.</param>
+        /// <param name="tracker">Progress tracker.</param>
+        /// <param name="progress">Optional progress reporter.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>Aggregated result of all batch executions.</returns>
+        private async Task<BulkOperationResult> ExecuteBatchesDynamicallyAsync<T>(
+            string operationName,
+            string connectionName,
+            int recommendedParallelism,
+            IReadOnlyList<List<T>> batches,
+            Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            ProgressTracker tracker,
+            IProgress<ProgressSnapshot>? progress,
+            CancellationToken cancellationToken)
+        {
+            var connectionCount = _options.Connections.Count;
+            var pending = new Queue<(int Index, List<T> Batch)>(
+                batches.Select((b, i) => (i, b)));
+            var inFlight = new Dictionary<Task<(int Index, BulkOperationResult Result)>, int>();
+            var results = new BulkOperationResult?[batches.Count];
+            var completedCount = 0;
+            var lastLoggedParallelism = 0;
+
+            _logger.LogDebug(
+                "{Operation}: Starting dynamic execution. Batches: {BatchCount}, Connections: {Connections}, Recommended: {Recommended}",
+                operationName, batches.Count, connectionCount, recommendedParallelism);
+
+            while (pending.Count > 0 || inFlight.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Query current allowed parallelism from adaptive controller
+                var currentParallelism = _adaptiveRateController.IsEnabled
+                    ? _adaptiveRateController.GetParallelism(connectionName, recommendedParallelism, connectionCount)
+                    : recommendedParallelism * connectionCount;
+
+                // Log when parallelism changes
+                if (currentParallelism != lastLoggedParallelism)
+                {
+                    _logger.LogDebug(
+                        "{Operation}: Parallelism changed {Old} → {New}. InFlight: {InFlight}, Pending: {Pending}",
+                        operationName, lastLoggedParallelism, currentParallelism, inFlight.Count, pending.Count);
+                    lastLoggedParallelism = currentParallelism;
+                }
+
+                // Start batches up to current allowed parallelism
+                while (pending.Count > 0 && inFlight.Count < currentParallelism)
+                {
+                    var (index, batch) = pending.Dequeue();
+                    var task = ExecuteSingleBatchWithIndexAsync(index, batch, executeBatch, cancellationToken);
+                    inFlight[task] = index;
+                }
+
+                if (inFlight.Count == 0)
+                    break;
+
+                // Wait for any batch to complete
+                var completedTask = await Task.WhenAny(inFlight.Keys).ConfigureAwait(false);
+                inFlight.Remove(completedTask);
+
+                // Get result (propagates exceptions if the task faulted)
+                var (completedIndex, result) = await completedTask.ConfigureAwait(false);
+                results[completedIndex] = result;
+                completedCount++;
+
+                // Report progress
+                tracker.RecordProgress(result.SuccessCount, result.FailureCount);
+                progress?.Report(tracker.GetSnapshot());
+
+                // Periodic logging
+                if (completedCount % 50 == 0 || pending.Count == 0)
+                {
+                    _logger.LogDebug(
+                        "{Operation}: {Completed}/{Total} batches complete. InFlight: {InFlight}, Parallelism: {Parallelism}",
+                        operationName, completedCount, batches.Count, inFlight.Count, currentParallelism);
+                }
+            }
+
+            _logger.LogDebug(
+                "{Operation}: Dynamic execution complete. Batches: {BatchCount}, Final parallelism: {Parallelism}",
+                operationName, batches.Count, lastLoggedParallelism);
+
+            return AggregateResults(results!);
+        }
+
+        /// <summary>
+        /// Executes a single batch and returns the result with its index for tracking.
+        /// </summary>
+        private static async Task<(int Index, BulkOperationResult Result)> ExecuteSingleBatchWithIndexAsync<T>(
+            int index,
+            List<T> batch,
+            Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            CancellationToken cancellationToken)
+        {
+            var result = await executeBatch(batch, cancellationToken).ConfigureAwait(false);
+            return (index, result);
+        }
+
+        /// <summary>
+        /// Aggregates results from multiple batch executions into a single result.
+        /// </summary>
+        private static BulkOperationResult AggregateResults(BulkOperationResult?[] results)
+        {
+            var allErrors = new List<BulkOperationError>();
+            var allCreatedIds = new List<Guid>();
+            var successCount = 0;
+            var failureCount = 0;
+
+            foreach (var result in results)
+            {
+                if (result == null) continue;
+
+                successCount += result.SuccessCount;
+                failureCount += result.FailureCount;
+                allErrors.AddRange(result.Errors);
+
+                if (result.CreatedIds != null)
+                {
+                    allCreatedIds.AddRange(result.CreatedIds);
+                }
+            }
+
+            return new BulkOperationResult
+            {
+                SuccessCount = successCount,
+                FailureCount = failureCount,
+                Errors = allErrors,
+                Duration = TimeSpan.Zero,
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
+            };
+        }
+
+        /// <summary>
+        /// Executes batches sequentially (one at a time).
+        /// Used for single batches or when parallelism is unavailable.
+        /// </summary>
+        private static async Task<BulkOperationResult> ExecuteBatchesSequentiallyAsync<T>(
+            IReadOnlyList<List<T>> batches,
+            Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
+            ProgressTracker tracker,
+            IProgress<ProgressSnapshot>? progress,
+            CancellationToken cancellationToken)
+        {
+            var allErrors = new List<BulkOperationError>();
+            var allCreatedIds = new List<Guid>();
+            var successCount = 0;
+
+            foreach (var batch in batches)
+            {
+                var batchResult = await executeBatch(batch, cancellationToken).ConfigureAwait(false);
+
+                successCount += batchResult.SuccessCount;
+                allErrors.AddRange(batchResult.Errors);
+
+                if (batchResult.CreatedIds != null)
+                {
+                    allCreatedIds.AddRange(batchResult.CreatedIds);
+                }
+
+                tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
+                progress?.Report(tracker.GetSnapshot());
+            }
+
+            return new BulkOperationResult
+            {
+                SuccessCount = successCount,
+                FailureCount = allErrors.Count,
+                Errors = allErrors,
+                Duration = TimeSpan.Zero,
+                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds : null
             };
         }
 
