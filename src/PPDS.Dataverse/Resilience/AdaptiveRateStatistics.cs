@@ -8,57 +8,81 @@ namespace PPDS.Dataverse.Resilience
     public sealed class AdaptiveRateStatistics
     {
         /// <summary>
-        /// Gets the connection name these statistics are for.
+        /// Gets the connection name.
         /// </summary>
         public required string ConnectionName { get; init; }
 
         /// <summary>
-        /// Gets the current allowed parallelism.
+        /// Gets the current parallelism.
         /// </summary>
         public required int CurrentParallelism { get; init; }
 
         /// <summary>
-        /// Gets the maximum parallelism ceiling.
+        /// Gets the floor (from x-ms-dop-hint).
         /// </summary>
-        public required int MaxParallelism { get; init; }
+        public required int FloorParallelism { get; init; }
 
         /// <summary>
-        /// Gets the last known good parallelism level (before throttle).
+        /// Gets the ceiling (hard limit).
+        /// </summary>
+        public required int CeilingParallelism { get; init; }
+
+        /// <summary>
+        /// Gets the throttle-derived ceiling (calculated from Retry-After duration).
+        /// Null if no throttle ceiling is active.
+        /// </summary>
+        public int? ThrottleCeiling { get; init; }
+
+        /// <summary>
+        /// Gets when the throttle ceiling expires.
+        /// Null if no throttle ceiling is active.
+        /// </summary>
+        public DateTime? ThrottleCeilingExpiry { get; init; }
+
+        /// <summary>
+        /// Gets the effective ceiling (minimum of hard ceiling and throttle ceiling if active).
+        /// </summary>
+        public int EffectiveCeiling => ThrottleCeilingExpiry.HasValue && ThrottleCeilingExpiry > DateTime.UtcNow && ThrottleCeiling.HasValue
+            ? Math.Min(CeilingParallelism, ThrottleCeiling.Value)
+            : CeilingParallelism;
+
+        /// <summary>
+        /// Gets the last known good parallelism level.
         /// </summary>
         public required int LastKnownGoodParallelism { get; init; }
 
         /// <summary>
-        /// Gets whether the last known good value is stale (older than TTL).
+        /// Gets whether last known good is stale.
         /// </summary>
         public required bool IsLastKnownGoodStale { get; init; }
 
         /// <summary>
-        /// Gets the number of successes since the last throttle.
+        /// Gets the number of successes since last throttle.
         /// </summary>
         public required int SuccessesSinceThrottle { get; init; }
 
         /// <summary>
-        /// Gets the total number of throttle events recorded.
+        /// Gets total throttle events.
         /// </summary>
         public required int TotalThrottleEvents { get; init; }
 
         /// <summary>
-        /// Gets the time of the last throttle event, if any.
+        /// Gets time of last throttle.
         /// </summary>
         public required DateTime? LastThrottleTime { get; init; }
 
         /// <summary>
-        /// Gets the time of the last parallelism increase, if any.
+        /// Gets time of last parallelism increase.
         /// </summary>
         public required DateTime? LastIncreaseTime { get; init; }
 
         /// <summary>
-        /// Gets the time of the last activity (any operation).
+        /// Gets time of last activity.
         /// </summary>
         public required DateTime LastActivityTime { get; init; }
 
         /// <summary>
-        /// Gets whether the controller is in recovery phase (below last known good).
+        /// Gets whether in recovery phase (below last known good).
         /// </summary>
         public bool IsInRecoveryPhase => CurrentParallelism < LastKnownGoodParallelism && !IsLastKnownGoodStale;
     }

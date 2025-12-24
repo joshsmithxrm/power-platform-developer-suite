@@ -106,11 +106,12 @@ namespace PPDS.Dataverse.BulkOperations
             }
             else if (_adaptiveRateController.IsEnabled)
             {
-                // Use adaptive rate controller
-                parallelism = _adaptiveRateController.GetParallelism(connectionName, recommended);
+                // Use adaptive rate controller with connection count for proper scaling
+                var connectionCount = _options.Connections.Count;
+                parallelism = _adaptiveRateController.GetParallelism(connectionName, recommended, connectionCount);
                 _logger.LogDebug(
-                    "Using adaptive parallelism: {Parallelism} (max: {Max}) for connection {Connection}",
-                    parallelism, recommended, connectionName);
+                    "Using adaptive parallelism: {Parallelism} (recommended: {Recommended}, connections: {Connections}) for connection {Connection}",
+                    parallelism, recommended, connectionCount, connectionName);
             }
             else
             {
@@ -883,6 +884,8 @@ namespace PPDS.Dataverse.BulkOperations
                 _logger.LogDebug("CreateMultiple batch completed. Entity: {Entity}, Created: {Created}",
                     entityLogicalName, response.Ids.Length);
 
+                _adaptiveRateController.RecordSuccess(client.ConnectionName);
+
                 return new BulkOperationResult
                 {
                     SuccessCount = response.Ids.Length,
@@ -943,6 +946,8 @@ namespace PPDS.Dataverse.BulkOperations
                 _logger.LogDebug("UpdateMultiple batch completed. Entity: {Entity}, Updated: {Updated}",
                     entityLogicalName, batch.Count);
 
+                _adaptiveRateController.RecordSuccess(client.ConnectionName);
+
                 return new BulkOperationResult
                 {
                     SuccessCount = batch.Count,
@@ -1001,6 +1006,8 @@ namespace PPDS.Dataverse.BulkOperations
 
                 _logger.LogDebug("UpsertMultiple batch completed. Entity: {Entity}, Success: {Success}",
                     entityLogicalName, batch.Count);
+
+                _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
                 return new BulkOperationResult
                 {
@@ -1063,6 +1070,8 @@ namespace PPDS.Dataverse.BulkOperations
             try
             {
                 await client.ExecuteAsync(request, cancellationToken);
+
+                _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
                 return new BulkOperationResult
                 {
@@ -1158,6 +1167,8 @@ namespace PPDS.Dataverse.BulkOperations
                     successCount++;
                 }
             }
+
+            _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
             return new BulkOperationResult
             {

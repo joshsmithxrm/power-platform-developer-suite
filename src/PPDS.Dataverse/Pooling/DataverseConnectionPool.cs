@@ -27,6 +27,7 @@ namespace PPDS.Dataverse.Pooling
         private readonly ILogger<DataverseConnectionPool> _logger;
         private readonly DataverseOptions _options;
         private readonly IThrottleTracker _throttleTracker;
+        private readonly IAdaptiveRateController _adaptiveRateController;
         private readonly IConnectionSelectionStrategy _selectionStrategy;
 
         private readonly ConcurrentDictionary<string, ConcurrentQueue<PooledClient>> _pools;
@@ -50,16 +51,15 @@ namespace PPDS.Dataverse.Pooling
         /// <summary>
         /// Initializes a new instance of the <see cref="DataverseConnectionPool"/> class.
         /// </summary>
-        /// <param name="options">Pool configuration options.</param>
-        /// <param name="throttleTracker">Throttle tracking service.</param>
-        /// <param name="logger">Logger instance.</param>
         public DataverseConnectionPool(
             IOptions<DataverseOptions> options,
             IThrottleTracker throttleTracker,
+            IAdaptiveRateController adaptiveRateController,
             ILogger<DataverseConnectionPool> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _throttleTracker = throttleTracker ?? throw new ArgumentNullException(nameof(throttleTracker));
+            _adaptiveRateController = adaptiveRateController ?? throw new ArgumentNullException(nameof(adaptiveRateController));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
             ValidateOptions();
@@ -403,6 +403,7 @@ namespace PPDS.Dataverse.Pooling
         private void OnThrottleDetected(string connectionName, TimeSpan retryAfter)
         {
             _throttleTracker.RecordThrottle(connectionName, retryAfter);
+            _adaptiveRateController.RecordThrottle(connectionName, retryAfter);
         }
 
         private PooledClient CreateDirectClient(DataverseClientOptions? options)

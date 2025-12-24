@@ -7,8 +7,7 @@ using PPDS.Dataverse.DependencyInjection;
 namespace PPDS.Dataverse.Resilience
 {
     /// <summary>
-    /// AIMD-based adaptive rate controller for throttle recovery.
-    /// Manages per-connection parallelism that adjusts based on throttle responses.
+    /// Adaptive rate controller for throttle recovery.
     /// </summary>
     public sealed class AdaptiveRateController : IAdaptiveRateController
     {
@@ -32,14 +31,23 @@ namespace PPDS.Dataverse.Resilience
         public bool IsEnabled => _options.Enabled;
 
         /// <inheritdoc />
-        public int GetParallelism(string connectionName, int maxParallelism)
+        public int GetParallelism(string connectionName, int recommendedParallelism, int connectionCount)
         {
+            // Ensure connectionCount is at least 1
+            connectionCount = Math.Max(1, connectionCount);
+
             if (!IsEnabled)
             {
-                return maxParallelism;
+                return Math.Min(recommendedParallelism * connectionCount, _options.HardCeiling * connectionCount);
             }
 
-            var state = GetOrCreateState(connectionName, maxParallelism);
+            // Scale floor and ceiling by connection count
+            // Floor: x-ms-dop-hint × connections (e.g., 5 × 2 = 10)
+            // Ceiling: HardCeiling × connections (e.g., 52 × 2 = 104)
+            var floor = Math.Max(recommendedParallelism * connectionCount, _options.MinParallelism);
+            var ceiling = _options.HardCeiling * connectionCount;
+
+            var state = GetOrCreateState(connectionName, floor, ceiling);
 
             lock (state.SyncRoot)
             {
@@ -48,9 +56,23 @@ namespace PPDS.Dataverse.Resilience
                 if (timeSinceActivity > _options.IdleResetPeriod)
                 {
                     _logger.LogDebug(
-                        "Connection {Connection} idle for {IdleTime}, resetting adaptive state",
+                        "Connection {Connection} idle for {IdleTime}, resetting",
                         connectionName, timeSinceActivity);
-                    ResetStateInternal(state, maxParallelism);
+                    ResetStateInternal(state, floor, ceiling);
+                }
+
+                // Floor can change dynamically - update it
+                state.FloorParallelism = floor;
+
+                // If server raised recommendation above our current, follow it
+                if (state.CurrentParallelism < floor)
+                {
+                    _logger.LogDebug(
+                        "Connection {Connection}: Floor raised to {Floor}, adjusting from {Current}",
+                        connectionName, floor, state.CurrentParallelism);
+                    state.CurrentParallelism = floor;
+                    state.LastKnownGoodParallelism = floor;
+                    state.LastKnownGoodTimestamp = DateTime.UtcNow;
                 }
 
                 state.LastActivityTime = DateTime.UtcNow;
@@ -61,12 +83,7 @@ namespace PPDS.Dataverse.Resilience
         /// <inheritdoc />
         public void RecordSuccess(string connectionName)
         {
-            if (!IsEnabled)
-            {
-                return;
-            }
-
-            if (!_states.TryGetValue(connectionName, out var state))
+            if (!IsEnabled || !_states.TryGetValue(connectionName, out var state))
             {
                 return;
             }
@@ -76,40 +93,47 @@ namespace PPDS.Dataverse.Resilience
                 state.LastActivityTime = DateTime.UtcNow;
                 state.SuccessesSinceThrottle++;
 
-                // Check if lastKnownGood is stale
+                // Expire stale lastKnownGood
                 var timeSinceLastKnownGood = DateTime.UtcNow - state.LastKnownGoodTimestamp;
                 if (timeSinceLastKnownGood > _options.LastKnownGoodTTL)
                 {
-                    // Treat current as baseline
                     state.LastKnownGoodParallelism = state.CurrentParallelism;
                     state.LastKnownGoodTimestamp = DateTime.UtcNow;
                 }
 
-                // Check if we can increase (batch count AND time elapsed)
+                // Calculate effective ceiling (respect throttle ceiling if not expired)
+                var effectiveCeiling = state.CeilingParallelism;
+                var throttleCeilingActive = false;
+                if (state.ThrottleCeilingExpiry.HasValue && state.ThrottleCeilingExpiry > DateTime.UtcNow && state.ThrottleCeiling.HasValue)
+                {
+                    effectiveCeiling = Math.Min(effectiveCeiling, state.ThrottleCeiling.Value);
+                    throttleCeilingActive = true;
+                }
+
                 var canIncrease = state.SuccessesSinceThrottle >= _options.StabilizationBatches
                     && (DateTime.UtcNow - state.LastIncreaseTime) >= _options.MinIncreaseInterval;
 
-                if (canIncrease && state.CurrentParallelism < state.MaxParallelism)
+                if (canIncrease && state.CurrentParallelism < effectiveCeiling)
                 {
-                    int increase;
-                    if (state.CurrentParallelism < state.LastKnownGoodParallelism)
-                    {
-                        // Fast recovery phase - get back to known-good quickly
-                        increase = (int)(_options.IncreaseRate * _options.RecoveryMultiplier);
-                        _logger.LogDebug(
-                            "Connection {Connection}: Recovery phase, increasing parallelism by {Increase} (current: {Current}, target: {Target})",
-                            connectionName, increase, state.CurrentParallelism, state.LastKnownGoodParallelism);
-                    }
-                    else
-                    {
-                        // Probing phase - cautiously explore above known-good
-                        increase = _options.IncreaseRate;
-                        _logger.LogDebug(
-                            "Connection {Connection}: Probing phase, increasing parallelism by {Increase} (current: {Current})",
-                            connectionName, increase, state.CurrentParallelism);
-                    }
+                    var oldParallelism = state.CurrentParallelism;
 
-                    state.CurrentParallelism = Math.Min(state.CurrentParallelism + increase, state.MaxParallelism);
+                    // Increment by floor (server's recommendation) for faster ramp
+                    // Recovery phase uses multiplier to get back to known-good faster
+                    var baseIncrease = Math.Max(state.FloorParallelism, _options.IncreaseRate);
+                    var increase = state.CurrentParallelism < state.LastKnownGoodParallelism
+                        ? (int)(baseIncrease * _options.RecoveryMultiplier)
+                        : baseIncrease;
+
+                    state.CurrentParallelism = Math.Min(
+                        state.CurrentParallelism + increase,
+                        effectiveCeiling);
+
+                    _logger.LogDebug(
+                        "Connection {Connection}: {Old} -> {New} (floor: {Floor}, ceiling: {Ceiling}{ThrottleCeilingNote})",
+                        connectionName, oldParallelism, state.CurrentParallelism,
+                        state.FloorParallelism, effectiveCeiling,
+                        throttleCeilingActive ? $", throttle ceiling active until {state.ThrottleCeilingExpiry:HH:mm:ss}" : "");
+
                     state.SuccessesSinceThrottle = 0;
                     state.LastIncreaseTime = DateTime.UtcNow;
                 }
@@ -119,12 +143,7 @@ namespace PPDS.Dataverse.Resilience
         /// <inheritdoc />
         public void RecordThrottle(string connectionName, TimeSpan retryAfter)
         {
-            if (!IsEnabled)
-            {
-                return;
-            }
-
-            if (!_states.TryGetValue(connectionName, out var state))
+            if (!IsEnabled || !_states.TryGetValue(connectionName, out var state))
             {
                 return;
             }
@@ -135,25 +154,40 @@ namespace PPDS.Dataverse.Resilience
                 state.TotalThrottleEvents++;
                 state.LastThrottleTime = DateTime.UtcNow;
 
-                // Remember current level as "almost good" (we were one step too high)
+                var oldParallelism = state.CurrentParallelism;
+
+                // Calculate throttle ceiling based on how badly we overshot
+                // overshootRatio: how much of the 5-min budget we consumed
+                // reductionFactor: how much to reduce ceiling (more overshoot = more reduction)
+                // 5 min Retry-After → 50% ceiling, 2.5 min → 75%, 30 sec → 95%
+                var overshootRatio = retryAfter.TotalMinutes / 5.0;
+                var reductionFactor = 1.0 - (overshootRatio / 2.0);
+                reductionFactor = Math.Max(0.5, Math.Min(1.0, reductionFactor)); // Clamp to [0.5, 1.0]
+
+                var throttleCeiling = (int)(oldParallelism * reductionFactor);
+                throttleCeiling = Math.Max(throttleCeiling, state.FloorParallelism);
+
+                state.ThrottleCeiling = throttleCeiling;
+                // Clamp duration = RetryAfter + 5 minutes (one full budget window to stabilize)
+                state.ThrottleCeilingExpiry = DateTime.UtcNow + retryAfter + TimeSpan.FromMinutes(5);
+
+                // Remember where we were (minus one step) as last known good
                 state.LastKnownGoodParallelism = Math.Max(
                     state.CurrentParallelism - _options.IncreaseRate,
-                    _options.MinParallelism);
+                    state.FloorParallelism);
                 state.LastKnownGoodTimestamp = DateTime.UtcNow;
 
-                // Multiplicative decrease
-                var newParallelism = (int)(state.CurrentParallelism * _options.DecreaseFactor);
-                state.CurrentParallelism = Math.Max(newParallelism, _options.MinParallelism);
+                // Multiplicative decrease, but never below floor
+                var calculatedNew = (int)(state.CurrentParallelism * _options.DecreaseFactor);
+                state.CurrentParallelism = Math.Max(calculatedNew, state.FloorParallelism);
                 state.SuccessesSinceThrottle = 0;
 
+                var atFloor = state.CurrentParallelism == state.FloorParallelism;
                 _logger.LogInformation(
-                    "Connection {Connection}: Throttle received (Retry-After: {RetryAfter}). " +
-                    "Reduced parallelism from {Old} to {New}. Last known good: {LastKnownGood}",
-                    connectionName,
-                    retryAfter,
-                    (int)(state.CurrentParallelism / _options.DecreaseFactor),
-                    state.CurrentParallelism,
-                    state.LastKnownGoodParallelism);
+                    "Connection {Connection}: Throttle (Retry-After: {RetryAfter}). {Old} -> {New} (throttle ceiling: {ThrottleCeiling}, expires: {Expiry:HH:mm:ss}){FloorNote}",
+                    connectionName, retryAfter, oldParallelism, state.CurrentParallelism,
+                    throttleCeiling, state.ThrottleCeilingExpiry.Value,
+                    atFloor ? " (at floor)" : "");
             }
         }
 
@@ -164,7 +198,7 @@ namespace PPDS.Dataverse.Resilience
             {
                 lock (state.SyncRoot)
                 {
-                    ResetStateInternal(state, state.MaxParallelism);
+                    ResetStateInternal(state, state.FloorParallelism, state.CeilingParallelism);
                 }
             }
         }
@@ -181,11 +215,19 @@ namespace PPDS.Dataverse.Resilience
             {
                 var isStale = (DateTime.UtcNow - state.LastKnownGoodTimestamp) > _options.LastKnownGoodTTL;
 
+                // Only include throttle ceiling if it's still active
+                var throttleCeilingActive = state.ThrottleCeilingExpiry.HasValue &&
+                                            state.ThrottleCeilingExpiry > DateTime.UtcNow &&
+                                            state.ThrottleCeiling.HasValue;
+
                 return new AdaptiveRateStatistics
                 {
                     ConnectionName = connectionName,
                     CurrentParallelism = state.CurrentParallelism,
-                    MaxParallelism = state.MaxParallelism,
+                    FloorParallelism = state.FloorParallelism,
+                    CeilingParallelism = state.CeilingParallelism,
+                    ThrottleCeiling = throttleCeilingActive ? state.ThrottleCeiling : null,
+                    ThrottleCeilingExpiry = throttleCeilingActive ? state.ThrottleCeilingExpiry : null,
                     LastKnownGoodParallelism = state.LastKnownGoodParallelism,
                     IsLastKnownGoodStale = isStale,
                     SuccessesSinceThrottle = state.SuccessesSinceThrottle,
@@ -197,24 +239,20 @@ namespace PPDS.Dataverse.Resilience
             }
         }
 
-        private ConnectionState GetOrCreateState(string connectionName, int maxParallelism)
+        private ConnectionState GetOrCreateState(string connectionName, int floor, int ceiling)
         {
             return _states.GetOrAdd(connectionName, _ =>
             {
-                var initialParallelism = Math.Max(
-                    (int)(maxParallelism * _options.InitialParallelismFactor),
-                    _options.MinParallelism);
-
-                _logger.LogDebug(
-                    "Initializing adaptive rate for connection {Connection}. " +
-                    "Max: {Max}, Initial: {Initial} ({Factor:P0})",
-                    connectionName, maxParallelism, initialParallelism, _options.InitialParallelismFactor);
+                _logger.LogInformation(
+                    "Adaptive rate initialized for {Connection}. Floor: {Floor}, Ceiling: {Ceiling}",
+                    connectionName, floor, ceiling);
 
                 return new ConnectionState
                 {
-                    MaxParallelism = maxParallelism,
-                    CurrentParallelism = initialParallelism,
-                    LastKnownGoodParallelism = initialParallelism,
+                    FloorParallelism = floor,
+                    CeilingParallelism = ceiling,
+                    CurrentParallelism = floor,
+                    LastKnownGoodParallelism = floor,
                     LastKnownGoodTimestamp = DateTime.UtcNow,
                     SuccessesSinceThrottle = 0,
                     LastIncreaseTime = DateTime.UtcNow,
@@ -225,29 +263,25 @@ namespace PPDS.Dataverse.Resilience
             });
         }
 
-        private void ResetStateInternal(ConnectionState state, int maxParallelism)
+        private void ResetStateInternal(ConnectionState state, int floor, int ceiling)
         {
-            var initialParallelism = Math.Max(
-                (int)(maxParallelism * _options.InitialParallelismFactor),
-                _options.MinParallelism);
-
-            state.MaxParallelism = maxParallelism;
-            state.CurrentParallelism = initialParallelism;
-            state.LastKnownGoodParallelism = initialParallelism;
+            state.FloorParallelism = floor;
+            state.CeilingParallelism = ceiling;
+            state.CurrentParallelism = floor;
+            state.LastKnownGoodParallelism = floor;
             state.LastKnownGoodTimestamp = DateTime.UtcNow;
             state.SuccessesSinceThrottle = 0;
             state.LastIncreaseTime = DateTime.UtcNow;
             state.LastActivityTime = DateTime.UtcNow;
-            // Note: TotalThrottleEvents is NOT reset - it's cumulative
+            state.ThrottleCeiling = null;
+            state.ThrottleCeilingExpiry = null;
         }
 
-        /// <summary>
-        /// Internal state for a single connection.
-        /// </summary>
         private sealed class ConnectionState
         {
             public readonly object SyncRoot = new();
-            public int MaxParallelism { get; set; }
+            public int FloorParallelism { get; set; }
+            public int CeilingParallelism { get; set; }
             public int CurrentParallelism { get; set; }
             public int LastKnownGoodParallelism { get; set; }
             public DateTime LastKnownGoodTimestamp { get; set; }
@@ -256,6 +290,18 @@ namespace PPDS.Dataverse.Resilience
             public DateTime LastActivityTime { get; set; }
             public int TotalThrottleEvents { get; set; }
             public DateTime? LastThrottleTime { get; set; }
+
+            /// <summary>
+            /// Throttle-derived ceiling calculated from Retry-After duration.
+            /// Used to prevent probing above a level that caused throttling.
+            /// </summary>
+            public int? ThrottleCeiling { get; set; }
+
+            /// <summary>
+            /// When the throttle ceiling expires (RetryAfter + 5 minutes).
+            /// After expiry, probing can resume up to the hard ceiling.
+            /// </summary>
+            public DateTime? ThrottleCeilingExpiry { get; set; }
         }
     }
 }
