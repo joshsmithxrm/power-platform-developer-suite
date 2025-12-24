@@ -2,16 +2,16 @@
 
 **Date:** 2025-12-24
 **Branch:** `feature/v2-alpha`
-**Status:** Preset System Implemented - Awaiting Validation
+**Status:** Validated - Balanced preset works for Creates/Updates, Conservative recommended for Deletes
 
 ---
 
 ## Executive Summary
 
 Implemented **execution time-aware rate control with configurable presets**:
-- **Creates:** Full speed preserved (~545/s, 0 throttles)
-- **Updates/Deletes:** Tuned via presets to balance throughput vs throttle avoidance
-- **Configuration:** Simple preset selection or fine-grained tuning via appsettings.json
+- **Creates:** 483/s, 0 throttles ✅ (target: >400/s)
+- **Updates:** 153/s, 0 throttles ✅ (target: >150/s)
+- **Deletes:** 83/s, 23 throttles ❌ (target: >90/s) - use Conservative preset
 
 ---
 
@@ -21,8 +21,8 @@ Three presets provide sensible defaults for common scenarios:
 
 | Preset | Factor | Threshold | Use Case |
 |--------|--------|-----------|----------|
-| **Conservative** | 180 | 7000ms | Production bulk jobs, overnight migrations |
-| **Balanced** | 200 | 8000ms | General purpose, mixed workloads |
+| **Conservative** | 180 | 8000ms | Production bulk jobs, delete operations, overnight migrations |
+| **Balanced** | 200 | 8000ms | General purpose, creates, updates |
 | **Aggressive** | 320 | 11000ms | Dev/test, time-critical with monitoring |
 
 ### Configuration Examples
@@ -64,24 +64,31 @@ Three presets provide sensible defaults for common scenarios:
 
 **Problem:** Delete batches at 9.1s were under the 10s threshold, allowing ramp to 30 parallelism before ceiling applied.
 
-### Round 2: Threshold = 9000, Factor = 250
+### Round 2: Threshold = 9000, Factor = 250 (Balanced Preset - FINAL)
 
-| Operation | Throughput | Throttles | Issue |
-|-----------|------------|-----------|-------|
-| Create | 545/s | 0 | ✅ Excellent |
-| Update | 100/s | 39 | ❌ Worse - ceiling still too high |
-| Delete | 67/s | 25 | ❌ Worse - batches at 6.6-8.5s escaped |
+| Operation | Duration | Throughput | Throttles | Max Parallelism | Status |
+|-----------|----------|------------|-----------|-----------------|--------|
+| **Create** | 87s | **483/s** | 0 | 104 | ✅ Ceiling not applied (batches <9s) |
+| **Update** | 277s | **153/s** | 0 | 19 | ✅ Ceiling=18-22 applied at 10s batches |
+| **Delete** | 513s | **83/s** | 23 | 21→10 | ❌ Ceiling=22 at 9s, still too high |
 
-**Problem:** Delete batches started at 6.6s, ramped to 30 before hitting 9s threshold. Factor of 250 gave ceiling of 25-27, still too aggressive.
+**Analysis:**
+- **Creates:** Batches under 9s threshold, no ceiling applied, runs at full 104 parallelism.
+- **Updates:** Batches at 10-12s trigger ceiling of 18-22, parallelism capped at 19, **zero throttles**.
+- **Deletes:** Batches at 9s trigger ceiling of 22, but even 21 parallelism causes throttle (47s Retry-After). Need lower factor.
 
-### Round 3: Threshold = 8000, Factor = 200 (Current)
+**Delete throttle root cause:**
+```
+13:02:44 Execution time ceiling = 22 (avg batch: 9.0s)   ← Ceiling applied ✓
+13:02:54 Parallelism 20 → 21 (capped at ceiling)         ← Correctly limited
+13:05:06 Throttle at 21, Retry-After 47s                 ← Still too high!
+```
 
-**Expected improvements:**
-- Delete at 8s: ceiling = 200/8 = **25** (catches before ramp to 30)
-- Update at 10s: ceiling = 200/10 = **20** (prevents throttle at 22)
-- Create: under 8s threshold, runs free at full parallelism
+At 21 parallelism with 9s batches, execution time consumption exceeds 4s/s budget.
 
-**Awaiting validation run.**
+**Recommendation:** Use **Conservative preset** (Factor=180) for delete operations:
+- At 9s batches: ceiling = 180/9 = **20** (prevents throttle)
+- At 10s batches: ceiling = 180/10 = **18** (safe margin)
 
 ---
 

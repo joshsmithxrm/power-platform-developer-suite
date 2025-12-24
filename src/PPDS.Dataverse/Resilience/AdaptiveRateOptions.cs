@@ -99,7 +99,7 @@ namespace PPDS.Dataverse.Resilience
         /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
         /// <remarks>
-        /// Preset defaults: Conservative=180, Balanced=250, Aggressive=320
+        /// Preset defaults: Conservative=180, Balanced=200, Aggressive=320
         /// </remarks>
         public int ExecutionTimeCeilingFactor
         {
@@ -117,7 +117,7 @@ namespace PPDS.Dataverse.Resilience
         /// If not set, uses the value from <see cref="Preset"/>.
         /// </summary>
         /// <remarks>
-        /// Preset defaults: Conservative=8000, Balanced=9000, Aggressive=11000
+        /// Preset defaults: Conservative=8000, Balanced=8000, Aggressive=11000
         /// </remarks>
         public int SlowBatchThresholdMs
         {
