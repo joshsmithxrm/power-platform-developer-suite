@@ -27,6 +27,7 @@ namespace PPDS.Dataverse.Configuration
                 DataverseAuthType.ClientSecret => BuildClientSecretConnectionString(connection, resolvedSecret),
                 DataverseAuthType.Certificate => BuildCertificateConnectionString(connection),
                 DataverseAuthType.OAuth => BuildOAuthConnectionString(connection),
+                DataverseAuthType.ManagedIdentity => BuildManagedIdentityConnectionString(connection),
                 _ => throw new ConfigurationException(
                     connection.Name,
                     nameof(connection.AuthType),
@@ -108,6 +109,24 @@ namespace PPDS.Dataverse.Configuration
             if (!string.IsNullOrWhiteSpace(connection.TenantId))
             {
                 sb.Append($"TenantId={connection.TenantId};");
+            }
+
+            return sb.ToString().TrimEnd(';');
+        }
+
+        private static string BuildManagedIdentityConnectionString(DataverseConnection connection)
+        {
+            ValidateRequired(connection, nameof(connection.Url), connection.Url);
+
+            var sb = new StringBuilder();
+            sb.Append("AuthType=ManagedIdentity;");
+            sb.Append($"Url={connection.Url};");
+
+            // Optional: ClientId for user-assigned managed identity
+            // System-assigned managed identity doesn't need ClientId
+            if (!string.IsNullOrWhiteSpace(connection.ClientId))
+            {
+                sb.Append($"ClientId={connection.ClientId};");
             }
 
             return sb.ToString().TrimEnd(';');

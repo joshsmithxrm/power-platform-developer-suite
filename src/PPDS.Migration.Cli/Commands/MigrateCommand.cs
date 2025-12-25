@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Completions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
@@ -19,7 +20,7 @@ public static class MigrateCommand
         {
             Description = "Path to schema.xml file",
             Required = true
-        };
+        }.AcceptExistingOnly();
 
         var tempDirOption = new Option<DirectoryInfo?>("--temp-dir")
         {
@@ -67,6 +68,24 @@ public static class MigrateCommand
             Description = "Target environment name from configuration (e.g., Prod)",
             Required = true
         };
+
+        // Add tab completion for environment names from configuration
+        foreach (var envOption in new[] { sourceEnvOption, targetEnvOption })
+        {
+            envOption.CompletionSources.Add(ctx =>
+            {
+                try
+                {
+                    var config = ConfigurationHelper.Build(null, null);
+                    return ConfigurationHelper.GetEnvironmentNames(config)
+                        .Select(name => new CompletionItem(name));
+                }
+                catch
+                {
+                    return [];
+                }
+            });
+        }
 
         var configOption = new Option<FileInfo?>("--config")
         {
@@ -149,12 +168,7 @@ public static class MigrateCommand
 
         try
         {
-            // Validate schema file exists
-            if (!schema.Exists)
-            {
-                progressReporter.Error(new FileNotFoundException("Schema file not found", schema.FullName), null);
-                return ExitCodes.InvalidArguments;
-            }
+            // File validation now handled by option validators (AcceptExistingOnly)
 
             // Determine temp directory
             var tempDirectory = tempDir?.FullName ?? Path.GetTempPath();

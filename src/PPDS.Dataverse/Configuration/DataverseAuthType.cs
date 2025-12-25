@@ -21,6 +21,13 @@ namespace PPDS.Dataverse.Configuration
         /// OAuth interactive authentication.
         /// For development and user-context scenarios.
         /// </summary>
-        OAuth
+        OAuth,
+
+        /// <summary>
+        /// Azure Managed Identity authentication.
+        /// For Azure-hosted workloads (VMs, App Service, AKS, etc.).
+        /// No credentials needed - identity is provided by Azure.
+        /// </summary>
+        ManagedIdentity
     }
 }

@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Completions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
@@ -36,7 +37,14 @@ public static class SchemaCommand
         {
             Description = "Output schema file path",
             Required = true
-        };
+        }.AcceptLegalFileNamesOnly();
+        // Validate output directory exists
+        outputOption.Validators.Add(result =>
+        {
+            var file = result.GetValue(outputOption);
+            if (file?.Directory is { Exists: false })
+                result.AddError($"Output directory does not exist: {file.Directory.FullName}");
+        });
 
         var includeSystemFieldsOption = new Option<bool>("--include-system-fields")
         {
@@ -97,6 +105,20 @@ public static class SchemaCommand
             Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
             Required = true
         };
+        // Add tab completion for environment names from configuration
+        envOption.CompletionSources.Add(ctx =>
+        {
+            try
+            {
+                var config = ConfigurationHelper.Build(null, null);
+                return ConfigurationHelper.GetEnvironmentNames(config)
+                    .Select(name => new CompletionItem(name));
+            }
+            catch
+            {
+                return [];
+            }
+        });
 
         var configOption = new Option<FileInfo?>("--config")
         {
@@ -203,6 +225,20 @@ public static class SchemaCommand
             Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
             Required = true
         };
+        // Add tab completion for environment names from configuration
+        envOption.CompletionSources.Add(ctx =>
+        {
+            try
+            {
+                var config = ConfigurationHelper.Build(null, null);
+                return ConfigurationHelper.GetEnvironmentNames(config)
+                    .Select(name => new CompletionItem(name));
+            }
+            catch
+            {
+                return [];
+            }
+        });
 
         var configOption = new Option<FileInfo?>("--config")
         {

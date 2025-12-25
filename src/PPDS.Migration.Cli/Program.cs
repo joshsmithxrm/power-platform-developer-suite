@@ -1,5 +1,6 @@
 using System.CommandLine;
 using PPDS.Migration.Cli.Commands;
+using PPDS.Migration.Cli.Infrastructure;
 
 namespace PPDS.Migration.Cli;
 
@@ -9,11 +10,21 @@ namespace PPDS.Migration.Cli;
 public static class Program
 {
     /// <summary>
+    /// Global option for authentication mode.
+    /// </summary>
+    public static readonly Option<AuthMode> AuthOption = new("--auth")
+    {
+        Description = "Authentication mode: auto (default), config, env, interactive, managed",
+        DefaultValueFactory = _ => AuthMode.Auto,
+        Recursive = true
+    };
+
+    /// <summary>
     /// Global option for User Secrets ID (cross-process secret sharing).
     /// </summary>
     public static readonly Option<string?> SecretsIdOption = new("--secrets-id")
     {
-        Description = "User Secrets ID for cross-process secret sharing (e.g., from calling application's UserSecretsId)",
+        Description = "User Secrets ID for cross-process secret sharing (used with --auth config)",
         Recursive = true
     };
 
@@ -22,6 +33,7 @@ public static class Program
         var rootCommand = new RootCommand("PPDS Migration CLI - High-performance Dataverse data migration tool");
 
         // Add global options (Recursive = true makes it available to all subcommands)
+        rootCommand.Options.Add(AuthOption);
         rootCommand.Options.Add(SecretsIdOption);
 
         // Add subcommands

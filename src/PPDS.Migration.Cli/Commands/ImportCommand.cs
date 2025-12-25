@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Completions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
@@ -20,7 +21,7 @@ public static class ImportCommand
         {
             Description = "Path to data.zip file",
             Required = true
-        };
+        }.AcceptExistingOnly();
 
         var bypassPluginsOption = new Option<bool>("--bypass-plugins")
         {
@@ -50,6 +51,13 @@ public static class ImportCommand
         {
             Description = "Path to user mapping XML file for remapping user references"
         };
+        // Validate user mapping file exists if provided
+        userMappingOption.Validators.Add(result =>
+        {
+            var file = result.GetValue(userMappingOption);
+            if (file is { Exists: false })
+                result.AddError($"User mapping file not found: {file.FullName}");
+        });
 
         var stripOwnerFieldsOption = new Option<bool>("--strip-owner-fields")
         {
@@ -80,6 +88,20 @@ public static class ImportCommand
             Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
             Required = true
         };
+        // Add tab completion for environment names from configuration
+        envOption.CompletionSources.Add(ctx =>
+        {
+            try
+            {
+                var config = ConfigurationHelper.Build(null, null);
+                return ConfigurationHelper.GetEnvironmentNames(config)
+                    .Select(name => new CompletionItem(name));
+            }
+            catch
+            {
+                return [];
+            }
+        });
 
         var configOption = new Option<FileInfo?>("--config")
         {
@@ -118,19 +140,7 @@ public static class ImportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Validate data file exists first (explicit argument)
-            if (!data.Exists)
-            {
-                ConsoleOutput.WriteError($"Data file not found: {data.FullName}", json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Validate user mapping file if specified
-            if (userMappingFile != null && !userMappingFile.Exists)
-            {
-                ConsoleOutput.WriteError($"User mapping file not found: {userMappingFile.FullName}", json);
-                return ExitCodes.InvalidArguments;
-            }
+            // File validation now handled by option validators (AcceptExistingOnly, custom validators)
 
             // Resolve connection from configuration (validates environment exists and has connections)
             ConnectionResolver.ResolvedConnection resolved;

@@ -19,7 +19,7 @@ public static class AnalyzeCommand
         {
             Description = "Path to schema.xml file",
             Required = true
-        };
+        }.AcceptExistingOnly();
 
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
         {
@@ -67,12 +67,7 @@ public static class AnalyzeCommand
     {
         try
         {
-            // Validate schema file exists
-            if (!schema.Exists)
-            {
-                Console.Error.WriteLine($"Error: Schema file not found: {schema.FullName}");
-                return ExitCodes.InvalidArguments;
-            }
+            // File validation now handled by option validators (AcceptExistingOnly)
 
             // Create service provider for analysis (no Dataverse connection needed)
             await using var serviceProvider = ServiceFactory.CreateAnalysisProvider();

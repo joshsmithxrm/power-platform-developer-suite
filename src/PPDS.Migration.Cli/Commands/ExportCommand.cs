@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Completions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
@@ -18,25 +19,46 @@ public static class ExportCommand
         {
             Description = "Path to schema.xml file",
             Required = true
-        };
+        }.AcceptExistingOnly();
 
         var outputOption = new Option<FileInfo>("--output", "-o")
         {
             Description = "Output ZIP file path",
             Required = true
-        };
+        }.AcceptLegalFileNamesOnly();
+
+        // Validate output directory exists
+        outputOption.Validators.Add(result =>
+        {
+            var file = result.GetValue(outputOption);
+            if (file?.Directory is { Exists: false })
+                result.AddError($"Output directory does not exist: {file.Directory.FullName}");
+        });
 
         var parallelOption = new Option<int>("--parallel")
         {
             Description = "Degree of parallelism for concurrent entity exports",
             DefaultValueFactory = _ => Environment.ProcessorCount * 2
         };
+        parallelOption.Validators.Add(result =>
+        {
+            if (result.GetValue(parallelOption) < 1)
+                result.AddError("--parallel must be at least 1");
+        });
 
         var pageSizeOption = new Option<int>("--page-size")
         {
             Description = "FetchXML page size for data retrieval",
             DefaultValueFactory = _ => 5000
         };
+        pageSizeOption.Validators.Add(result =>
+        {
+            var value = result.GetValue(pageSizeOption);
+            if (value < 1)
+                result.AddError("--page-size must be at least 1");
+            if (value > 5000)
+                result.AddError("--page-size cannot exceed 5000 (Dataverse limit)");
+        });
 
         var includeFilesOption = new Option<bool>("--include-files")
         {
@@ -67,6 +89,20 @@ public static class ExportCommand
             Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
             Required = true
         };
+        // Add tab completion for environment names from configuration
+        envOption.CompletionSources.Add(ctx =>
+        {
+            try
+            {
+                var config = ConfigurationHelper.Build(null, null);
+                return ConfigurationHelper.GetEnvironmentNames(config)
+                    .Select(name => new CompletionItem(name));
+            }
+            catch
+            {
+                return [];
+            }
+        });
 
         var configOption = new Option<FileInfo?>("--config")
         {
@@ -142,20 +178,7 @@ public static class ExportCommand
 
         try
         {
-            // Validate schema file exists
-            if (!schema.Exists)
-            {
-                progressReporter.Error(new FileNotFoundException("Schema file not found", schema.FullName), null);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Validate output directory exists
-            var outputDir = output.Directory;
-            if (outputDir != null && !outputDir.Exists)
-            {
-                progressReporter.Error(new DirectoryNotFoundException($"Output directory does not exist: {outputDir.FullName}"), null);
-                return ExitCodes.InvalidArguments;
-            }
+            // File and directory validation now handled by option validators (AcceptExistingOnly, custom validators)
 
             // Report connecting status
             progressReporter.Report(new ProgressEventArgs

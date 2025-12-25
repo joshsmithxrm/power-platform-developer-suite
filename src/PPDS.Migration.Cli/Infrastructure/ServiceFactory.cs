@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
@@ -188,6 +189,162 @@ public static class ServiceFactory
         services.AddTransient<IDependencyGraphBuilder, DependencyGraphBuilder>();
 
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Creates a service provider from environment variables (--auth env mode).
+    /// </summary>
+    /// <param name="authResult">The resolved auth configuration from AuthResolver.</param>
+    /// <param name="verbose">Enable verbose logging output.</param>
+    /// <param name="debug">Enable debug logging output.</param>
+    /// <returns>A configured service provider.</returns>
+    public static ServiceProvider CreateProviderFromEnvVars(
+        AuthResolver.AuthResult authResult,
+        bool verbose = false,
+        bool debug = false)
+    {
+        if (authResult.Mode != AuthMode.Env)
+            throw new ArgumentException("AuthResult must be from env mode", nameof(authResult));
+
+        return CreateProvider(
+            authResult.Url!,
+            authResult.ClientId!,
+            authResult.ClientSecret!,
+            authResult.TenantId,
+            "EnvVars",
+            verbose,
+            debug);
+    }
+
+    /// <summary>
+    /// Creates a service provider with interactive (device code) authentication.
+    /// </summary>
+    /// <param name="url">The Dataverse environment URL.</param>
+    /// <param name="verbose">Enable verbose logging output.</param>
+    /// <param name="debug">Enable debug logging output.</param>
+    /// <returns>A configured service provider.</returns>
+    public static ServiceProvider CreateProviderWithInteractiveAuth(
+        string url,
+        bool verbose = false,
+        bool debug = false)
+    {
+        var services = new ServiceCollection();
+
+        // Add logging
+        ConfigureLogging(services, verbose, debug);
+
+        // Add Dataverse connection pool with interactive auth
+        services.AddDataverseConnectionPool(options =>
+        {
+            options.Connections.Add(new DataverseConnection("Interactive")
+            {
+                Url = url,
+                AuthType = DataverseAuthType.OAuth
+            });
+            options.Pool.Enabled = true;
+            options.Pool.MinPoolSize = 0;
+            options.Pool.MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16);
+            options.Pool.DisableAffinityCookie = true;
+        });
+
+        // Add migration services
+        services.AddDataverseMigration();
+
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Creates a service provider with Azure Managed Identity authentication.
+    /// </summary>
+    /// <param name="url">The Dataverse environment URL.</param>
+    /// <param name="verbose">Enable verbose logging output.</param>
+    /// <param name="debug">Enable debug logging output.</param>
+    /// <returns>A configured service provider.</returns>
+    public static ServiceProvider CreateProviderWithManagedIdentity(
+        string url,
+        bool verbose = false,
+        bool debug = false)
+    {
+        var services = new ServiceCollection();
+
+        // Add logging
+        ConfigureLogging(services, verbose, debug);
+
+        // Add Dataverse connection pool with managed identity auth
+        services.AddDataverseConnectionPool(options =>
+        {
+            options.Connections.Add(new DataverseConnection("ManagedIdentity")
+            {
+                Url = url,
+                AuthType = DataverseAuthType.ManagedIdentity
+            });
+            options.Pool.Enabled = true;
+            options.Pool.MinPoolSize = 0;
+            options.Pool.MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16);
+            options.Pool.DisableAffinityCookie = true;
+        });
+
+        // Add migration services
+        services.AddDataverseMigration();
+
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Creates a service provider based on the auth mode.
+    /// </summary>
+    /// <param name="authMode">The authentication mode.</param>
+    /// <param name="authResult">The resolved auth configuration.</param>
+    /// <param name="configuration">Configuration for config mode.</param>
+    /// <param name="environmentName">Environment name for config mode.</param>
+    /// <param name="verbose">Enable verbose logging.</param>
+    /// <param name="debug">Enable debug logging.</param>
+    /// <returns>A configured service provider.</returns>
+    public static ServiceProvider CreateProviderForAuthMode(
+        AuthMode authMode,
+        AuthResolver.AuthResult authResult,
+        IConfiguration? configuration,
+        string? environmentName,
+        bool verbose = false,
+        bool debug = false)
+    {
+        return authMode switch
+        {
+            AuthMode.Env => CreateProviderFromEnvVars(authResult, verbose, debug),
+            AuthMode.Interactive => CreateProviderWithInteractiveAuth(authResult.Url!, verbose, debug),
+            AuthMode.Managed => CreateProviderWithManagedIdentity(authResult.Url!, verbose, debug),
+            AuthMode.Config or AuthMode.Auto when configuration != null && !string.IsNullOrEmpty(environmentName)
+                => CreateProviderFromConfig(configuration, environmentName, verbose, debug),
+            _ => throw new InvalidOperationException($"Cannot create provider for auth mode {authMode}")
+        };
+    }
+
+    /// <summary>
+    /// Configures logging for a service collection.
+    /// </summary>
+    private static void ConfigureLogging(IServiceCollection services, bool verbose, bool debug)
+    {
+        services.AddLogging(builder =>
+        {
+            if (debug)
+            {
+                builder.SetMinimumLevel(LogLevel.Debug);
+            }
+            else if (verbose)
+            {
+                builder.SetMinimumLevel(LogLevel.Information);
+            }
+            else
+            {
+                builder.SetMinimumLevel(LogLevel.Warning);
+            }
+
+            builder.AddSimpleConsole(options =>
+            {
+                options.SingleLine = true;
+                options.TimestampFormat = "[HH:mm:ss] ";
+            });
+        });
     }
 
     /// <summary>
