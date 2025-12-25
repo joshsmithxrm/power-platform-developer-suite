@@ -267,25 +267,28 @@ namespace PPDS.Migration.Analysis
                 }
             }
 
-            // Calculate in-degrees for condensed graph
-            var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            // Calculate dependency counts for condensed graph
+            // Edges are (from=dependent, to=dependency), meaning "from depends on to"
+            // We count how many dependencies each node has (edges FROM it)
+            // Nodes with zero dependencies (no edges FROM them) are processed first
+            var dependencyCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var node in condensedNodes)
             {
-                inDegree[node] = 0;
+                dependencyCount[node] = 0;
             }
-            foreach (var (_, to) in condensedEdges)
+            foreach (var (from, _) in condensedEdges)
             {
-                inDegree[to]++;
+                dependencyCount[from]++;
             }
 
-            // Kahn's algorithm for topological sort
+            // Kahn's algorithm for topological sort (processing dependencies before dependents)
             var tiers = new List<IReadOnlyList<string>>();
             var remaining = new HashSet<string>(condensedNodes, StringComparer.OrdinalIgnoreCase);
 
             while (remaining.Count > 0)
             {
-                // Find all nodes with zero in-degree
-                var tier = remaining.Where(n => inDegree[n] == 0).ToList();
+                // Find all nodes with zero dependencies (no unprocessed prerequisites)
+                var tier = remaining.Where(n => dependencyCount[n] == 0).ToList();
 
                 if (tier.Count == 0)
                 {
@@ -311,15 +314,16 @@ namespace PPDS.Migration.Analysis
 
                 tiers.Add(expandedTier);
 
-                // Update in-degrees
+                // Update dependency counts: when we process a dependency, its dependents have one less unmet dependency
                 foreach (var node in tier)
                 {
                     remaining.Remove(node);
                     foreach (var (from, to) in condensedEdges)
                     {
-                        if (from.Equals(node, StringComparison.OrdinalIgnoreCase))
+                        // When we process 'to' (the dependency), decrement count for 'from' (the dependent)
+                        if (to.Equals(node, StringComparison.OrdinalIgnoreCase))
                         {
-                            inDegree[to]--;
+                            dependencyCount[from]--;
                         }
                     }
                 }
