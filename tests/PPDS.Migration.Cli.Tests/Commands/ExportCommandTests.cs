@@ -81,13 +81,11 @@ public class ExportCommandTests
     }
 
     [Fact]
-    public void Create_HasOptionalVerboseOption()
+    public void Create_HasOptionalDebugOption()
     {
-        var option = _command.Options.FirstOrDefault(o => o.Name == "verbose");
+        var option = _command.Options.FirstOrDefault(o => o.Name == "debug");
         Assert.NotNull(option);
         Assert.False(option.IsRequired);
-        Assert.Contains("-v", option.Aliases);
-        Assert.Contains("--verbose", option.Aliases);
     }
 
     #endregion
@@ -97,70 +95,70 @@ public class ExportCommandTests
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse("--schema schema.xml --output data.zip");
+        var result = _command.Parse("--schema schema.xml --output data.zip --env Dev");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingSchema_HasError()
     {
-        var result = _command.Parse("--output data.zip");
+        var result = _command.Parse("--output data.zip --env Dev");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingOutput_HasError()
     {
-        var result = _command.Parse("--schema schema.xml");
+        var result = _command.Parse("--schema schema.xml --env Dev");
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_MissingEnv_HasError()
+    {
+        var result = _command.Parse("-s schema.xml -o data.zip");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalParallel_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip --parallel 4");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev --parallel 4");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalPageSize_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip --page-size 1000");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev --page-size 1000");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalIncludeFiles_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip --include-files");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev --include-files");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalJson_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip --json");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev --json");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
-    public void Parse_WithOptionalVerbose_Succeeds()
+    public void Parse_WithOptionalDebug_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml -o data.zip --verbose");
-        Assert.Empty(result.Errors);
-    }
-
-    [Fact]
-    public void Parse_WithShortVerbose_Succeeds()
-    {
-        var result = _command.Parse("-s schema.xml -o data.zip -v");
+        var result = _command.Parse("-s schema.xml -o data.zip --env Dev --debug");
         Assert.Empty(result.Errors);
     }
 

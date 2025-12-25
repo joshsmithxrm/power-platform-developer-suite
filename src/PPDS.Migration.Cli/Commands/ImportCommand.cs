@@ -51,6 +51,11 @@ public static class ImportCommand
             aliases: ["--user-mapping", "-u"],
             description: "Path to user mapping XML file for remapping user references");
 
+        var stripOwnerFieldsOption = new Option<bool>(
+            name: "--strip-owner-fields",
+            getDefaultValue: () => false,
+            description: "Strip ownership fields (ownerid, createdby, modifiedby) allowing Dataverse to assign current user. Use when importing to a different environment where source users don't exist.");
+
         var jsonOption = new Option<bool>(
             name: "--json",
             getDefaultValue: () => false,
@@ -83,6 +88,7 @@ public static class ImportCommand
             continueOnErrorOption,
             modeOption,
             userMappingOption,
+            stripOwnerFieldsOption,
             jsonOption,
             debugOption
         };
@@ -99,6 +105,7 @@ public static class ImportCommand
             var continueOnError = context.ParseResult.GetValueForOption(continueOnErrorOption);
             var mode = context.ParseResult.GetValueForOption(modeOption);
             var userMappingFile = context.ParseResult.GetValueForOption(userMappingOption);
+            var stripOwnerFields = context.ParseResult.GetValueForOption(stripOwnerFieldsOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
             var debug = context.ParseResult.GetValueForOption(debugOption);
 
@@ -133,7 +140,7 @@ public static class ImportCommand
 
             context.ExitCode = await ExecuteAsync(
                 resolved.Config, data, batchSize, bypassPlugins, bypassFlows,
-                continueOnError, mode, userMappingFile, json, debug, context.GetCancellationToken());
+                continueOnError, mode, userMappingFile, stripOwnerFields, json, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -148,6 +155,7 @@ public static class ImportCommand
         bool continueOnError,
         ImportMode mode,
         FileInfo? userMappingFile,
+        bool stripOwnerFields,
         bool json,
         bool debug,
         CancellationToken cancellationToken)
@@ -187,6 +195,16 @@ public static class ImportCommand
                 });
             }
 
+            // Report if stripping owner fields
+            if (stripOwnerFields)
+            {
+                progressReporter.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Analyzing,
+                    Message = "Owner fields will be stripped (ownerid, createdby, modifiedby, etc.)"
+                });
+            }
+
             // Configure import options
             var importOptions = new ImportOptions
             {
@@ -195,7 +213,8 @@ public static class ImportCommand
                 BypassPowerAutomateFlows = bypassFlows,
                 ContinueOnError = continueOnError,
                 Mode = MapImportMode(mode),
-                UserMappings = userMappings
+                UserMappings = userMappings,
+                StripOwnerFields = stripOwnerFields
             };
 
             // Execute import - progress reporter receives Complete() callback with results

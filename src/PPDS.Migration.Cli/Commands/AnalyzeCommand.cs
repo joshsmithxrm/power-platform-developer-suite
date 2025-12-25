@@ -27,25 +27,25 @@ public static class AnalyzeCommand
             getDefaultValue: () => OutputFormat.Text,
             description: "Output format: text or json");
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
+        var debugOption = new Option<bool>(
+            name: "--debug",
             getDefaultValue: () => false,
-            description: "Verbose output");
+            description: "Enable diagnostic logging output");
 
         var command = new Command("analyze", "Analyze schema and display dependency graph")
         {
             schemaOption,
             outputFormatOption,
-            verboseOption
+            debugOption
         };
 
         command.SetHandler(async (context) =>
         {
             var schema = context.ParseResult.GetValueForOption(schemaOption)!;
             var outputFormat = context.ParseResult.GetValueForOption(outputFormatOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
 
-            context.ExitCode = await ExecuteAsync(schema, outputFormat, verbose, context.GetCancellationToken());
+            context.ExitCode = await ExecuteAsync(schema, outputFormat, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -54,7 +54,7 @@ public static class AnalyzeCommand
     private static async Task<int> ExecuteAsync(
         FileInfo schema,
         OutputFormat outputFormat,
-        bool verbose,
+        bool debug,
         CancellationToken cancellationToken)
     {
         try
@@ -99,7 +99,7 @@ public static class AnalyzeCommand
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Analysis failed: {ex.Message}");
-            if (verbose)
+            if (debug)
             {
                 Console.Error.WriteLine(ex.StackTrace);
             }

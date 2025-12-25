@@ -49,13 +49,11 @@ public class AnalyzeCommandTests
     }
 
     [Fact]
-    public void Create_HasOptionalVerboseOption()
+    public void Create_HasOptionalDebugOption()
     {
-        var option = _command.Options.FirstOrDefault(o => o.Name == "verbose");
+        var option = _command.Options.FirstOrDefault(o => o.Name == "debug");
         Assert.NotNull(option);
         Assert.False(option.IsRequired);
-        Assert.Contains("-v", option.Aliases);
-        Assert.Contains("--verbose", option.Aliases);
     }
 
     #endregion
@@ -109,14 +107,7 @@ public class AnalyzeCommandTests
     [Fact]
     public void Parse_WithVerbose_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --verbose");
-        Assert.Empty(result.Errors);
-    }
-
-    [Fact]
-    public void Parse_WithShortVerbose_Succeeds()
-    {
-        var result = _command.Parse("-s schema.xml -v");
+        var result = _command.Parse("-s schema.xml --debug");
         Assert.Empty(result.Errors);
     }
 

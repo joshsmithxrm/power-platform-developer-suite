@@ -72,6 +72,16 @@ namespace PPDS.Migration.Import
         /// Default: true (respects schema setting)
         /// </summary>
         public bool RespectDisablePluginsSetting { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether to strip owner-related fields during import.
+        /// When true, removes ownerid, createdby, modifiedby, and related fields,
+        /// allowing Dataverse to assign the current user as owner.
+        /// Use this when importing data to a different environment where source
+        /// users don't exist.
+        /// Default: false
+        /// </summary>
+        public bool StripOwnerFields { get; set; } = false;
     }
 
     /// <summary>

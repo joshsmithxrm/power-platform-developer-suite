@@ -401,6 +401,12 @@ namespace PPDS.Migration.Import
                     continue;
                 }
 
+                // Skip owner fields if stripping is enabled
+                if (options.StripOwnerFields && IsOwnerField(attr.Key))
+                {
+                    continue;
+                }
+
                 // Remap entity references
                 if (attr.Value is EntityReference er)
                 {
@@ -418,6 +424,22 @@ namespace PPDS.Migration.Import
             }
 
             return prepared;
+        }
+
+        /// <summary>
+        /// Determines if a field is an owner-related field that should be stripped
+        /// when importing to a different environment.
+        /// </summary>
+        private static bool IsOwnerField(string fieldName)
+        {
+            return fieldName.Equals("ownerid", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("createdby", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("modifiedby", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("createdonbehalfby", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("modifiedonbehalfby", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("owninguser", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("owningteam", StringComparison.OrdinalIgnoreCase) ||
+                   fieldName.Equals("owningbusinessunit", StringComparison.OrdinalIgnoreCase);
         }
 
         private EntityReference? RemapEntityReference(

@@ -87,13 +87,19 @@ public class ImportCommandTests
     }
 
     [Fact]
-    public void Create_HasOptionalVerboseOption()
+    public void Create_HasOptionalDebugOption()
     {
-        var option = _command.Options.FirstOrDefault(o => o.Name == "verbose");
+        var option = _command.Options.FirstOrDefault(o => o.Name == "debug");
         Assert.NotNull(option);
         Assert.False(option.IsRequired);
-        Assert.Contains("-v", option.Aliases);
-        Assert.Contains("--verbose", option.Aliases);
+    }
+
+    [Fact]
+    public void Create_HasOptionalStripOwnerFieldsOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "strip-owner-fields");
+        Assert.NotNull(option);
+        Assert.False(option.IsRequired);
     }
 
     #endregion
@@ -103,49 +109,56 @@ public class ImportCommandTests
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse("--data data.zip");
+        var result = _command.Parse("--data data.zip --env Dev");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse("-d data.zip");
+        var result = _command.Parse("-d data.zip --env Dev");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingData_HasError()
     {
-        var result = _command.Parse("");
+        var result = _command.Parse("--env Dev");
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_MissingEnv_HasError()
+    {
+        var result = _command.Parse("-d data.zip");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBatchSize_Succeeds()
     {
-        var result = _command.Parse("-d data.zip --batch-size 500");
+        var result = _command.Parse("-d data.zip --env Dev --batch-size 500");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassPlugins_Succeeds()
     {
-        var result = _command.Parse("-d data.zip --bypass-plugins");
+        var result = _command.Parse("-d data.zip --env Dev --bypass-plugins");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassFlows_Succeeds()
     {
-        var result = _command.Parse("-d data.zip --bypass-flows");
+        var result = _command.Parse("-d data.zip --env Dev --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalContinueOnError_Succeeds()
     {
-        var result = _command.Parse("-d data.zip --continue-on-error");
+        var result = _command.Parse("-d data.zip --env Dev --continue-on-error");
         Assert.Empty(result.Errors);
     }
 
@@ -155,21 +168,21 @@ public class ImportCommandTests
     [InlineData("Upsert")]
     public void Parse_WithValidMode_Succeeds(string mode)
     {
-        var result = _command.Parse($"-d data.zip --mode {mode}");
+        var result = _command.Parse($"-d data.zip --env Dev --mode {mode}");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithInvalidMode_HasError()
     {
-        var result = _command.Parse("-d data.zip --mode Invalid");
+        var result = _command.Parse("-d data.zip --env Dev --mode Invalid");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithAllBypassOptions_Succeeds()
     {
-        var result = _command.Parse("-d data.zip --bypass-plugins --bypass-flows");
+        var result = _command.Parse("-d data.zip --env Dev --bypass-plugins --bypass-flows");
         Assert.Empty(result.Errors);
     }
 

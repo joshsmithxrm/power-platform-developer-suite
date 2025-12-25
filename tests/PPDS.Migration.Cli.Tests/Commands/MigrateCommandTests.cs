@@ -79,13 +79,11 @@ public class MigrateCommandTests
     }
 
     [Fact]
-    public void Create_HasOptionalVerboseOption()
+    public void Create_HasOptionalDebugOption()
     {
-        var option = _command.Options.FirstOrDefault(o => o.Name == "verbose");
+        var option = _command.Options.FirstOrDefault(o => o.Name == "debug");
         Assert.NotNull(option);
         Assert.False(option.IsRequired);
-        Assert.Contains("-v", option.Aliases);
-        Assert.Contains("--verbose", option.Aliases);
     }
 
     #endregion
@@ -95,70 +93,84 @@ public class MigrateCommandTests
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse("--schema schema.xml");
+        var result = _command.Parse("--schema schema.xml --source-env Dev --target-env QA");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingSchema_HasError()
     {
-        var result = _command.Parse("");
+        var result = _command.Parse("--source-env Dev --target-env QA");
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_MissingSourceEnv_HasError()
+    {
+        var result = _command.Parse("-s schema.xml --target-env QA");
+        Assert.NotEmpty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_MissingTargetEnv_HasError()
+    {
+        var result = _command.Parse("-s schema.xml --source-env Dev");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalTempDir_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --temp-dir /tmp");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --temp-dir /tmp");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBatchSize_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --batch-size 500");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --batch-size 500");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassPlugins_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --bypass-plugins");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --bypass-plugins");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassFlows_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --bypass-flows");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithAllBypassOptions_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --bypass-plugins --bypass-flows");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --bypass-plugins --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalJson_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --json");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --json");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
-    public void Parse_WithOptionalVerbose_Succeeds()
+    public void Parse_WithOptionalDebug_Succeeds()
     {
-        var result = _command.Parse("-s schema.xml --verbose");
+        var result = _command.Parse("-s schema.xml --source-env Dev --target-env QA --debug");
         Assert.Empty(result.Errors);
     }
 
