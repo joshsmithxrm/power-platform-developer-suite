@@ -2,6 +2,7 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
 using PPDS.Migration.Export;
+using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -46,10 +47,10 @@ public static class ExportCommand
             getDefaultValue: () => false,
             description: "Output progress as JSON (for tool integration)");
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
+        var debugOption = new Option<bool>(
+            name: "--debug",
             getDefaultValue: () => false,
-            description: "Verbose output");
+            description: "Enable diagnostic logging output");
 
         var envOption = new Option<string>(
             name: "--env",
@@ -72,7 +73,7 @@ public static class ExportCommand
             pageSizeOption,
             includeFilesOption,
             jsonOption,
-            verboseOption
+            debugOption
         };
 
         command.SetHandler(async (context) =>
@@ -86,7 +87,7 @@ public static class ExportCommand
             var pageSize = context.ParseResult.GetValueForOption(pageSizeOption);
             var includeFiles = context.ParseResult.GetValueForOption(includeFilesOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
 
             // Resolve connection from configuration
             ConnectionResolver.ResolvedConnection resolved;
@@ -103,7 +104,7 @@ public static class ExportCommand
 
             context.ExitCode = await ExecuteAsync(
                 resolved.Config, schema, output, parallel, pageSize,
-                includeFiles, json, verbose, context.GetCancellationToken());
+                includeFiles, json, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -117,15 +118,18 @@ public static class ExportCommand
         int pageSize,
         bool includeFiles,
         bool json,
-        bool verbose,
+        bool debug,
         CancellationToken cancellationToken)
     {
+        // Create progress reporter first - it handles all user-facing output
+        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+
         try
         {
             // Validate schema file exists
             if (!schema.Exists)
             {
-                ConsoleOutput.WriteError($"Schema file not found: {schema.FullName}", json);
+                progressReporter.Error(new FileNotFoundException("Schema file not found", schema.FullName), null);
                 return ExitCodes.InvalidArguments;
             }
 
@@ -133,18 +137,19 @@ public static class ExportCommand
             var outputDir = output.Directory;
             if (outputDir != null && !outputDir.Exists)
             {
-                ConsoleOutput.WriteError($"Output directory does not exist: {outputDir.FullName}", json);
+                progressReporter.Error(new DirectoryNotFoundException($"Output directory does not exist: {outputDir.FullName}"), null);
                 return ExitCodes.InvalidArguments;
             }
 
-            // Create service provider and get exporter
-            if (!json)
+            // Report connecting status
+            progressReporter.Report(new ProgressEventArgs
             {
-                Console.WriteLine($"Connecting to Dataverse ({connection.Url})...");
-            }
-            await using var serviceProvider = ServiceFactory.CreateProvider(connection, verbose: verbose);
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Connecting to Dataverse ({connection.Url})..."
+            });
+
+            await using var serviceProvider = ServiceFactory.CreateProvider(connection, debug: debug);
             var exporter = serviceProvider.GetRequiredService<IExporter>();
-            var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
             // Configure export options
             var exportOptions = new ExportOptions
@@ -154,7 +159,7 @@ public static class ExportCommand
                 ExportFiles = includeFiles
             };
 
-            // Execute export
+            // Execute export - progress reporter receives Complete() callback with results
             var result = await exporter.ExportAsync(
                 schema.FullName,
                 output.FullName,
@@ -162,33 +167,17 @@ public static class ExportCommand
                 progressReporter,
                 cancellationToken);
 
-            // Report completion
-            if (!result.Success)
-            {
-                ConsoleOutput.WriteError($"Export completed with {result.Errors.Count} error(s).", json);
-                return ExitCodes.Failure;
-            }
-
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Export completed successfully.");
-                Console.WriteLine($"Output: {output.FullName}");
-                Console.WriteLine($"Entities: {result.EntitiesExported}, Records: {result.RecordsExported:N0}");
-                Console.WriteLine($"Duration: {result.Duration:hh\\:mm\\:ss}, Rate: {result.RecordsPerSecond:F1} rec/s");
-            }
-
-            return ExitCodes.Success;
+            return result.Success ? ExitCodes.Success : ExitCodes.Failure;
         }
         catch (OperationCanceledException)
         {
-            ConsoleOutput.WriteError("Export cancelled by user.", json);
+            progressReporter.Error(new OperationCanceledException(), "Export cancelled by user.");
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            ConsoleOutput.WriteError($"Export failed: {ex.Message}", json);
-            if (verbose)
+            progressReporter.Error(ex, "Export failed");
+            if (debug)
             {
                 Console.Error.WriteLine(ex.StackTrace);
             }

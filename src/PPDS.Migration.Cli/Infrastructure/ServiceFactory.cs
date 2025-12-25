@@ -24,14 +24,14 @@ public static class ServiceFactory
     /// </summary>
     /// <param name="config">The connection configuration resolved from environment variables.</param>
     /// <param name="connectionName">Optional name for the connection. Default: "Primary"</param>
-    /// <param name="verbose">Enable verbose logging (Information level).</param>
+    /// <param name="debug">Enable debug logging output to console.</param>
     /// <returns>A configured service provider.</returns>
     public static ServiceProvider CreateProvider(
         ConnectionResolver.ConnectionConfig config,
         string connectionName = "Primary",
-        bool verbose = false)
+        bool debug = false)
     {
-        return CreateProvider(config.Url, config.ClientId, config.ClientSecret, config.TenantId, connectionName, verbose);
+        return CreateProvider(config.Url, config.ClientId, config.ClientSecret, config.TenantId, connectionName, debug);
     }
 
     /// <summary>
@@ -42,7 +42,7 @@ public static class ServiceFactory
     /// <param name="clientSecret">The client secret value.</param>
     /// <param name="tenantId">Optional Azure AD tenant ID.</param>
     /// <param name="connectionName">Optional name for the connection. Default: "Primary"</param>
-    /// <param name="verbose">Enable verbose logging (Information level).</param>
+    /// <param name="debug">Enable debug logging output to console.</param>
     /// <returns>A configured service provider.</returns>
     public static ServiceProvider CreateProvider(
         string url,
@@ -50,20 +50,28 @@ public static class ServiceFactory
         string clientSecret,
         string? tenantId = null,
         string connectionName = "Primary",
-        bool verbose = false)
+        bool debug = false)
     {
         var services = new ServiceCollection();
 
-        // Add logging with console output for CLI visibility
-        // Verbose mode shows Information level logs from PPDS components
+        // Add logging - console output only when debug mode is enabled
+        // This keeps CLI output clean; progress reporter handles user-facing output
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(verbose ? LogLevel.Information : LogLevel.Warning);
-            builder.AddSimpleConsole(options =>
+            if (debug)
             {
-                options.SingleLine = true;
-                options.TimestampFormat = "[HH:mm:ss] ";
-            });
+                builder.SetMinimumLevel(LogLevel.Debug);
+                builder.AddSimpleConsole(options =>
+                {
+                    options.SingleLine = true;
+                    options.TimestampFormat = "[HH:mm:ss] ";
+                });
+            }
+            else
+            {
+                // Suppress all console output - progress reporter handles user output
+                builder.SetMinimumLevel(LogLevel.None);
+            }
         });
 
         // Add Dataverse connection pool
@@ -95,25 +103,33 @@ public static class ServiceFactory
     /// </summary>
     /// <param name="configuration">The configuration root.</param>
     /// <param name="environmentName">The environment name to use.</param>
-    /// <param name="verbose">Enable verbose logging (Information level).</param>
+    /// <param name="debug">Enable debug logging output to console.</param>
     /// <returns>A configured service provider.</returns>
     public static ServiceProvider CreateProviderFromConfig(
         IConfiguration configuration,
         string environmentName,
-        bool verbose = false)
+        bool debug = false)
     {
         var services = new ServiceCollection();
 
-        // Add logging with console output for CLI visibility
-        // Verbose mode shows Information level logs from PPDS components
+        // Add logging - console output only when debug mode is enabled
+        // This keeps CLI output clean; progress reporter handles user-facing output
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(verbose ? LogLevel.Information : LogLevel.Warning);
-            builder.AddSimpleConsole(options =>
+            if (debug)
             {
-                options.SingleLine = true;
-                options.TimestampFormat = "[HH:mm:ss] ";
-            });
+                builder.SetMinimumLevel(LogLevel.Debug);
+                builder.AddSimpleConsole(options =>
+                {
+                    options.SingleLine = true;
+                    options.TimestampFormat = "[HH:mm:ss] ";
+                });
+            }
+            else
+            {
+                // Suppress all console output - progress reporter handles user output
+                builder.SetMinimumLevel(LogLevel.None);
+            }
         });
 
         // Use SDK's config-based overload with environment selection

@@ -45,10 +45,10 @@ public static class MigrateCommand
             getDefaultValue: () => false,
             description: "Output progress as JSON (for tool integration)");
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
+        var debugOption = new Option<bool>(
+            name: "--debug",
             getDefaultValue: () => false,
-            description: "Verbose output");
+            description: "Enable diagnostic logging output");
 
         var sourceEnvOption = new Option<string>(
             name: "--source-env",
@@ -81,7 +81,7 @@ public static class MigrateCommand
             bypassPluginsOption,
             bypassFlowsOption,
             jsonOption,
-            verboseOption
+            debugOption
         };
 
         command.SetHandler(async (context) =>
@@ -96,7 +96,7 @@ public static class MigrateCommand
             var bypassPlugins = context.ParseResult.GetValueForOption(bypassPluginsOption);
             var bypassFlows = context.ParseResult.GetValueForOption(bypassFlowsOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
 
             // Resolve source and target connections from configuration
             ConnectionResolver.ResolvedConnection sourceResolved;
@@ -115,7 +115,7 @@ public static class MigrateCommand
 
             context.ExitCode = await ExecuteAsync(
                 sourceResolved.Config, targetResolved.Config, schema, tempDir,
-                batchSize, bypassPlugins, bypassFlows, json, verbose, context.GetCancellationToken());
+                batchSize, bypassPlugins, bypassFlows, json, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -130,17 +130,20 @@ public static class MigrateCommand
         bool bypassPlugins,
         bool bypassFlows,
         bool json,
-        bool verbose,
+        bool debug,
         CancellationToken cancellationToken)
     {
         string? tempDataFile = null;
+
+        // Create progress reporter first - it handles all user-facing output
+        var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
         try
         {
             // Validate schema file exists
             if (!schema.Exists)
             {
-                ConsoleOutput.WriteError($"Schema file not found: {schema.FullName}", json);
+                progressReporter.Error(new FileNotFoundException("Schema file not found", schema.FullName), null);
                 return ExitCodes.InvalidArguments;
             }
 
@@ -148,29 +151,21 @@ public static class MigrateCommand
             var tempDirectory = tempDir?.FullName ?? Path.GetTempPath();
             if (!Directory.Exists(tempDirectory))
             {
-                ConsoleOutput.WriteError($"Temporary directory does not exist: {tempDirectory}", json);
+                progressReporter.Error(new DirectoryNotFoundException($"Temporary directory does not exist: {tempDirectory}"), null);
                 return ExitCodes.InvalidArguments;
             }
 
             // Create temp file path for intermediate data
             tempDataFile = Path.Combine(tempDirectory, $"ppds-migrate-{Guid.NewGuid():N}.zip");
 
-            // Create progress reporter
-            var progressReporter = ServiceFactory.CreateProgressReporter(json);
-
             // Phase 1: Export from source
-            if (!json)
-            {
-                Console.WriteLine("Phase 1: Exporting from source environment...");
-                Console.WriteLine($"Connecting to Dataverse ({sourceConnection.Url})...");
-            }
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = "Connecting to source environment..."
+                Message = $"Phase 1: Connecting to source ({sourceConnection.Url})..."
             });
 
-            await using var sourceProvider = ServiceFactory.CreateProvider(sourceConnection, "Source", verbose);
+            await using var sourceProvider = ServiceFactory.CreateProvider(sourceConnection, "Source", debug);
             var exporter = sourceProvider.GetRequiredService<IExporter>();
 
             var exportResult = await exporter.ExportAsync(
@@ -182,24 +177,17 @@ public static class MigrateCommand
 
             if (!exportResult.Success)
             {
-                ConsoleOutput.WriteError($"Export failed with {exportResult.Errors.Count} error(s).", json);
                 return ExitCodes.Failure;
             }
 
             // Phase 2: Import to target
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Phase 2: Importing to target environment...");
-                Console.WriteLine($"Connecting to Dataverse ({targetConnection.Url})...");
-            }
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = "Connecting to target environment..."
+                Message = $"Phase 2: Connecting to target ({targetConnection.Url})..."
             });
 
-            await using var targetProvider = ServiceFactory.CreateProvider(targetConnection, "Target", verbose);
+            await using var targetProvider = ServiceFactory.CreateProvider(targetConnection, "Target", debug);
             var importer = targetProvider.GetRequiredService<IImporter>();
 
             var importOptions = new ImportOptions
@@ -215,39 +203,17 @@ public static class MigrateCommand
                 progressReporter,
                 cancellationToken);
 
-            if (!importResult.Success)
-            {
-                ConsoleOutput.WriteError($"Import failed with {importResult.Errors.Count} error(s).", json);
-                return ExitCodes.Failure;
-            }
-
-            // Report completion
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Migration completed successfully.");
-                Console.WriteLine($"Exported: {exportResult.RecordsExported:N0} records");
-                Console.WriteLine($"Imported: {importResult.RecordsImported:N0} records");
-                Console.WriteLine($"Total duration: {exportResult.Duration + importResult.Duration:hh\\:mm\\:ss}");
-            }
-            else
-            {
-                var totalRecords = exportResult.RecordsExported;
-                var totalDuration = exportResult.Duration + importResult.Duration;
-                ConsoleOutput.WriteCompletion(totalDuration, totalRecords, 0, json);
-            }
-
-            return ExitCodes.Success;
+            return importResult.Success ? ExitCodes.Success : ExitCodes.Failure;
         }
         catch (OperationCanceledException)
         {
-            ConsoleOutput.WriteError("Migration cancelled by user.", json);
+            progressReporter.Error(new OperationCanceledException(), "Migration cancelled by user.");
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            ConsoleOutput.WriteError($"Migration failed: {ex.Message}", json);
-            if (verbose)
+            progressReporter.Error(ex, "Migration failed");
+            if (debug)
             {
                 Console.Error.WriteLine(ex.StackTrace);
             }
@@ -261,10 +227,11 @@ public static class MigrateCommand
                 try
                 {
                     File.Delete(tempDataFile);
-                    if (!json)
+                    progressReporter.Report(new ProgressEventArgs
                     {
-                        Console.WriteLine($"Cleaned up temporary file: {tempDataFile}");
-                    }
+                        Phase = MigrationPhase.Complete,
+                        Message = "Cleaned up temporary file."
+                    });
                 }
                 catch
                 {

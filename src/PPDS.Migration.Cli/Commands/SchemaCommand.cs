@@ -2,6 +2,7 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
 using PPDS.Migration.Formats;
+using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
 
 namespace PPDS.Migration.Cli.Commands;
@@ -79,10 +80,10 @@ public static class SchemaCommand
             getDefaultValue: () => false,
             description: "Output progress as JSON");
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
+        var debugOption = new Option<bool>(
+            name: "--debug",
             getDefaultValue: () => false,
-            description: "Verbose output");
+            description: "Enable diagnostic logging output");
 
         var envOption = new Option<string>(
             name: "--env",
@@ -108,7 +109,7 @@ public static class SchemaCommand
             excludeAttributesOption,
             excludePatternsOption,
             jsonOption,
-            verboseOption
+            debugOption
         };
 
         command.SetHandler(async (context) =>
@@ -125,7 +126,7 @@ public static class SchemaCommand
             var excludeAttributes = context.ParseResult.GetValueForOption(excludeAttributesOption);
             var excludePatterns = context.ParseResult.GetValueForOption(excludePatternsOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
 
             // Resolve connection from configuration
             ConnectionResolver.ResolvedConnection resolved;
@@ -163,7 +164,7 @@ public static class SchemaCommand
                 resolved.Config, entityList, output,
                 includeSystemFields, includeRelationships, disablePlugins,
                 includeAttrList, excludeAttrList, excludePatternList,
-                json, verbose, context.GetCancellationToken());
+                json, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -259,33 +260,36 @@ public static class SchemaCommand
         List<string>? excludeAttributes,
         List<string>? excludePatterns,
         bool json,
-        bool verbose,
+        bool debug,
         CancellationToken cancellationToken)
     {
+        // Create progress reporter first - it handles all user-facing output
+        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+
         try
         {
-            if (!json)
-            {
-                Console.WriteLine($"Generating schema for {entities.Count} entities...");
-                if (includeAttributes != null)
-                {
-                    Console.WriteLine($"  Including only: {string.Join(", ", includeAttributes)}");
-                }
-                if (excludeAttributes != null)
-                {
-                    Console.WriteLine($"  Excluding: {string.Join(", ", excludeAttributes)}");
-                }
-                if (excludePatterns != null)
-                {
-                    Console.WriteLine($"  Excluding patterns: {string.Join(", ", excludePatterns)}");
-                }
-                Console.WriteLine($"Connecting to Dataverse ({connection.Url})...");
-            }
+            // Report what we're doing
+            var optionsMsg = new List<string>();
+            if (includeAttributes != null) optionsMsg.Add($"include: {string.Join(",", includeAttributes)}");
+            if (excludeAttributes != null) optionsMsg.Add($"exclude: {string.Join(",", excludeAttributes)}");
+            if (excludePatterns != null) optionsMsg.Add($"patterns: {string.Join(",", excludePatterns)}");
 
-            await using var serviceProvider = ServiceFactory.CreateProvider(connection, verbose: verbose);
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Generating schema for {entities.Count} entities..." +
+                          (optionsMsg.Count > 0 ? $" ({string.Join(", ", optionsMsg)})" : "")
+            });
+
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Connecting to Dataverse ({connection.Url})..."
+            });
+
+            await using var serviceProvider = ServiceFactory.CreateProvider(connection, debug: debug);
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
             var schemaWriter = serviceProvider.GetRequiredService<ICmtSchemaWriter>();
-            var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
             var options = new SchemaGeneratorOptions
             {
@@ -302,29 +306,35 @@ public static class SchemaCommand
 
             await schemaWriter.WriteAsync(schema, output.FullName, cancellationToken);
 
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Schema generated successfully.");
-                Console.WriteLine($"Output: {output.FullName}");
-                Console.WriteLine($"Entities: {schema.Entities.Count}");
+            var totalFields = schema.Entities.Sum(e => e.Fields.Count);
+            var totalRelationships = schema.Entities.Sum(e => e.Relationships.Count);
 
-                var totalFields = schema.Entities.Sum(e => e.Fields.Count);
-                var totalRelationships = schema.Entities.Sum(e => e.Relationships.Count);
-                Console.WriteLine($"Fields: {totalFields}, Relationships: {totalRelationships}");
-            }
+            progressReporter.Complete(new MigrationResult
+            {
+                Success = true,
+                RecordsProcessed = schema.Entities.Count,
+                SuccessCount = schema.Entities.Count,
+                FailureCount = 0,
+                Duration = TimeSpan.Zero // Schema generation doesn't track duration currently
+            });
+
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Complete,
+                Message = $"Output: {output.FullName} ({schema.Entities.Count} entities, {totalFields} fields, {totalRelationships} relationships)"
+            });
 
             return ExitCodes.Success;
         }
         catch (OperationCanceledException)
         {
-            ConsoleOutput.WriteError("Schema generation cancelled by user.", json);
+            progressReporter.Error(new OperationCanceledException(), "Schema generation cancelled by user.");
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            ConsoleOutput.WriteError($"Schema generation failed: {ex.Message}", json);
-            if (verbose)
+            progressReporter.Error(ex, "Schema generation failed");
+            if (debug)
             {
                 Console.Error.WriteLine(ex.StackTrace);
             }

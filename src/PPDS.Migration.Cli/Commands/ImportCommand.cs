@@ -4,6 +4,7 @@ using PPDS.Migration.Cli.Infrastructure;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
 using PPDS.Migration.Models;
+using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -55,10 +56,10 @@ public static class ImportCommand
             getDefaultValue: () => false,
             description: "Output progress as JSON (for tool integration)");
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
+        var debugOption = new Option<bool>(
+            name: "--debug",
             getDefaultValue: () => false,
-            description: "Verbose output");
+            description: "Enable diagnostic logging output");
 
         var envOption = new Option<string>(
             name: "--env",
@@ -83,7 +84,7 @@ public static class ImportCommand
             modeOption,
             userMappingOption,
             jsonOption,
-            verboseOption
+            debugOption
         };
 
         command.SetHandler(async (context) =>
@@ -99,7 +100,7 @@ public static class ImportCommand
             var mode = context.ParseResult.GetValueForOption(modeOption);
             var userMappingFile = context.ParseResult.GetValueForOption(userMappingOption);
             var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
 
             // Validate data file exists first (explicit argument)
             if (!data.Exists)
@@ -132,7 +133,7 @@ public static class ImportCommand
 
             context.ExitCode = await ExecuteAsync(
                 resolved.Config, data, batchSize, bypassPlugins, bypassFlows,
-                continueOnError, mode, userMappingFile, json, verbose, context.GetCancellationToken());
+                continueOnError, mode, userMappingFile, json, debug, context.GetCancellationToken());
         });
 
         return command;
@@ -148,36 +149,42 @@ public static class ImportCommand
         ImportMode mode,
         FileInfo? userMappingFile,
         bool json,
-        bool verbose,
+        bool debug,
         CancellationToken cancellationToken)
     {
+        // Create progress reporter first - it handles all user-facing output
+        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+
         try
         {
-            // Create service provider and get importer
-            if (!json)
+            // Report connecting status
+            progressReporter.Report(new ProgressEventArgs
             {
-                Console.WriteLine($"Connecting to Dataverse ({connection.Url})...");
-            }
-            await using var serviceProvider = ServiceFactory.CreateProvider(connection, verbose: verbose);
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Connecting to Dataverse ({connection.Url})..."
+            });
+
+            await using var serviceProvider = ServiceFactory.CreateProvider(connection, debug: debug);
             var importer = serviceProvider.GetRequiredService<IImporter>();
-            var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
             // Load user mappings if provided
             UserMappingCollection? userMappings = null;
             if (userMappingFile != null)
             {
-                if (!json)
+                progressReporter.Report(new ProgressEventArgs
                 {
-                    Console.WriteLine($"Loading user mappings from {userMappingFile.FullName}...");
-                }
+                    Phase = MigrationPhase.Analyzing,
+                    Message = $"Loading user mappings from {userMappingFile.Name}..."
+                });
 
                 var mappingReader = new UserMappingReader();
                 userMappings = await mappingReader.ReadAsync(userMappingFile.FullName, cancellationToken);
 
-                if (!json)
+                progressReporter.Report(new ProgressEventArgs
                 {
-                    Console.WriteLine($"Loaded {userMappings.Mappings.Count} user mapping(s).");
-                }
+                    Phase = MigrationPhase.Analyzing,
+                    Message = $"Loaded {userMappings.Mappings.Count} user mapping(s)."
+                });
             }
 
             // Configure import options
@@ -191,39 +198,24 @@ public static class ImportCommand
                 UserMappings = userMappings
             };
 
-            // Execute import
+            // Execute import - progress reporter receives Complete() callback with results
             var result = await importer.ImportAsync(
                 data.FullName,
                 importOptions,
                 progressReporter,
                 cancellationToken);
 
-            // Report completion
-            if (!result.Success)
-            {
-                ConsoleOutput.WriteError($"Import completed with {result.Errors.Count} error(s).", json);
-                return ExitCodes.Failure;
-            }
-
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Import completed successfully.");
-                Console.WriteLine($"Tiers: {result.TiersProcessed}, Records: {result.RecordsImported:N0}");
-                Console.WriteLine($"Duration: {result.Duration:hh\\:mm\\:ss}, Rate: {result.RecordsPerSecond:F1} rec/s");
-            }
-
-            return ExitCodes.Success;
+            return result.Success ? ExitCodes.Success : ExitCodes.Failure;
         }
         catch (OperationCanceledException)
         {
-            ConsoleOutput.WriteError("Import cancelled by user.", json);
+            progressReporter.Error(new OperationCanceledException(), "Import cancelled by user.");
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            ConsoleOutput.WriteError($"Import failed: {ex.Message}", json);
-            if (verbose)
+            progressReporter.Error(ex, "Import failed");
+            if (debug)
             {
                 Console.Error.WriteLine(ex.StackTrace);
             }
