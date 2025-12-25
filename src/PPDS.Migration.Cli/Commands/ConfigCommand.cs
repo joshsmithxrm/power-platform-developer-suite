@@ -13,21 +13,23 @@ public static class ConfigCommand
     {
         var command = new Command("config", "Configuration management and diagnostics");
 
-        command.AddCommand(CreateListCommand());
+        command.Subcommands.Add(CreateListCommand());
 
         return command;
     }
 
     private static Command CreateListCommand()
     {
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output as JSON");
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Output as JSON",
+            DefaultValueFactory = _ => false
+        };
 
         var command = new Command("list", "List available environments from configuration")
         {
@@ -35,11 +37,11 @@ public static class ConfigCommand
             jsonOption
         };
 
-        command.SetHandler((context) =>
+        command.SetAction((parseResult) =>
         {
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var json = parseResult.GetValue(jsonOption);
 
             try
             {
@@ -105,12 +107,12 @@ public static class ConfigCommand
                     }
                 }
 
-                context.ExitCode = ExitCodes.Success;
+                return ExitCodes.Success;
             }
             catch (FileNotFoundException ex)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
+                return ExitCodes.InvalidArguments;
             }
         });
 

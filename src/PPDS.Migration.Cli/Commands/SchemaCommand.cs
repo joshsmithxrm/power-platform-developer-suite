@@ -17,90 +17,91 @@ public static class SchemaCommand
     {
         var command = new Command("schema", "Generate and manage migration schemas");
 
-        command.AddCommand(CreateGenerateCommand());
-        command.AddCommand(CreateListCommand());
+        command.Subcommands.Add(CreateGenerateCommand());
+        command.Subcommands.Add(CreateListCommand());
 
         return command;
     }
 
     private static Command CreateGenerateCommand()
     {
-        var entitiesOption = new Option<string[]>(
-            aliases: ["--entities", "-e"],
-            description: "Entity logical names to include (comma-separated or multiple -e flags)")
+        var entitiesOption = new Option<string[]>("--entities", "-e")
         {
-            IsRequired = true,
+            Description = "Entity logical names to include (comma-separated or multiple -e flags)",
+            Required = true,
             AllowMultipleArgumentsPerToken = true
         };
 
-        var outputOption = new Option<FileInfo>(
-            aliases: ["--output", "-o"],
-            description: "Output schema file path")
+        var outputOption = new Option<FileInfo>("--output", "-o")
         {
-            IsRequired = true
+            Description = "Output schema file path",
+            Required = true
         };
 
-        var includeSystemFieldsOption = new Option<bool>(
-            name: "--include-system-fields",
-            getDefaultValue: () => false,
-            description: "Include system fields (createdon, modifiedon, etc.)");
-
-        var includeRelationshipsOption = new Option<bool>(
-            name: "--include-relationships",
-            getDefaultValue: () => true,
-            description: "Include relationship definitions");
-
-        var disablePluginsOption = new Option<bool>(
-            name: "--disable-plugins",
-            getDefaultValue: () => false,
-            description: "Set disableplugins=true on all entities");
-
-        var includeAttributesOption = new Option<string[]?>(
-            aliases: ["--include-attributes", "-a"],
-            description: "Only include these attributes (whitelist, comma-separated or multiple flags)")
+        var includeSystemFieldsOption = new Option<bool>("--include-system-fields")
         {
+            Description = "Include system fields (createdon, modifiedon, etc.)",
+            DefaultValueFactory = _ => false
+        };
+
+        var includeRelationshipsOption = new Option<bool>("--include-relationships")
+        {
+            Description = "Include relationship definitions",
+            DefaultValueFactory = _ => true
+        };
+
+        var disablePluginsOption = new Option<bool>("--disable-plugins")
+        {
+            Description = "Set disableplugins=true on all entities",
+            DefaultValueFactory = _ => false
+        };
+
+        var includeAttributesOption = new Option<string[]?>("--include-attributes", "-a")
+        {
+            Description = "Only include these attributes (whitelist, comma-separated or multiple flags)",
             AllowMultipleArgumentsPerToken = true
         };
 
-        var excludeAttributesOption = new Option<string[]?>(
-            name: "--exclude-attributes",
-            description: "Exclude these attributes (blacklist, comma-separated)")
+        var excludeAttributesOption = new Option<string[]?>("--exclude-attributes")
         {
+            Description = "Exclude these attributes (blacklist, comma-separated)",
             AllowMultipleArgumentsPerToken = true
         };
 
-        var excludePatternsOption = new Option<string[]?>(
-            name: "--exclude-patterns",
-            description: "Exclude attributes matching patterns (e.g., 'new_*', '*_base')")
+        var excludePatternsOption = new Option<string[]?>("--exclude-patterns")
         {
+            Description = "Exclude attributes matching patterns (e.g., 'new_*', '*_base')",
             AllowMultipleArgumentsPerToken = true
         };
 
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output progress as JSON");
-
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
-            getDefaultValue: () => false,
-            description: "Enable verbose logging output");
-
-        var debugOption = new Option<bool>(
-            name: "--debug",
-            getDefaultValue: () => false,
-            description: "Enable diagnostic logging output");
-
-        var envOption = new Option<string>(
-            name: "--env",
-            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        var jsonOption = new Option<bool>("--json")
         {
-            IsRequired = true
+            Description = "Output progress as JSON",
+            DefaultValueFactory = _ => false
         };
 
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var verboseOption = new Option<bool>("--verbose", "-v")
+        {
+            Description = "Enable verbose logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var debugOption = new Option<bool>("--debug")
+        {
+            Description = "Enable diagnostic logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var envOption = new Option<string>("--env")
+        {
+            Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
+            Required = true
+        };
+
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
         var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
@@ -119,22 +120,22 @@ public static class SchemaCommand
             debugOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var entities = context.ParseResult.GetValueForOption(entitiesOption)!;
-            var output = context.ParseResult.GetValueForOption(outputOption)!;
-            var env = context.ParseResult.GetValueForOption(envOption)!;
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var includeSystemFields = context.ParseResult.GetValueForOption(includeSystemFieldsOption);
-            var includeRelationships = context.ParseResult.GetValueForOption(includeRelationshipsOption);
-            var disablePlugins = context.ParseResult.GetValueForOption(disablePluginsOption);
-            var includeAttributes = context.ParseResult.GetValueForOption(includeAttributesOption);
-            var excludeAttributes = context.ParseResult.GetValueForOption(excludeAttributesOption);
-            var excludePatterns = context.ParseResult.GetValueForOption(excludePatternsOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
-            var debug = context.ParseResult.GetValueForOption(debugOption);
+            var entities = parseResult.GetValue(entitiesOption)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var env = parseResult.GetValue(envOption)!;
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var includeSystemFields = parseResult.GetValue(includeSystemFieldsOption);
+            var includeRelationships = parseResult.GetValue(includeRelationshipsOption);
+            var disablePlugins = parseResult.GetValue(disablePluginsOption);
+            var includeAttributes = parseResult.GetValue(includeAttributesOption);
+            var excludeAttributes = parseResult.GetValue(excludeAttributesOption);
+            var excludePatterns = parseResult.GetValue(excludePatternsOption);
+            var json = parseResult.GetValue(jsonOption);
+            var verbose = parseResult.GetValue(verboseOption);
+            var debug = parseResult.GetValue(debugOption);
 
             // Resolve connection from configuration (validates environment exists and has connections)
             ConnectionResolver.ResolvedConnection resolved;
@@ -147,8 +148,7 @@ public static class SchemaCommand
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
             // Parse entities (handle comma-separated and multiple flags)
@@ -161,8 +161,7 @@ public static class SchemaCommand
             if (entityList.Count == 0)
             {
                 ConsoleOutput.WriteError("No entities specified.", json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
             // Parse attribute lists (handle comma-separated)
@@ -170,11 +169,11 @@ public static class SchemaCommand
             var excludeAttrList = ParseAttributeList(excludeAttributes);
             var excludePatternList = ParseAttributeList(excludePatterns);
 
-            context.ExitCode = await ExecuteGenerateAsync(
+            return await ExecuteGenerateAsync(
                 configuration, env, resolved.Config.Url, entityList, output,
                 includeSystemFields, includeRelationships, disablePlugins,
                 includeAttrList, excludeAttrList, excludePatternList,
-                json, verbose, debug, context.GetCancellationToken());
+                json, verbose, debug, cancellationToken);
         });
 
         return command;
@@ -182,30 +181,33 @@ public static class SchemaCommand
 
     private static Command CreateListCommand()
     {
-        var filterOption = new Option<string?>(
-            aliases: ["--filter", "-f"],
-            description: "Filter entities by name pattern (e.g., 'account*' or '*custom*')");
-
-        var customOnlyOption = new Option<bool>(
-            name: "--custom-only",
-            getDefaultValue: () => false,
-            description: "Show only custom entities");
-
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output as JSON");
-
-        var envOption = new Option<string>(
-            name: "--env",
-            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        var filterOption = new Option<string?>("--filter", "-f")
         {
-            IsRequired = true
+            Description = "Filter entities by name pattern (e.g., 'account*' or '*custom*')"
         };
 
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var customOnlyOption = new Option<bool>("--custom-only")
+        {
+            Description = "Show only custom entities",
+            DefaultValueFactory = _ => false
+        };
+
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Output as JSON",
+            DefaultValueFactory = _ => false
+        };
+
+        var envOption = new Option<string>("--env")
+        {
+            Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
+            Required = true
+        };
+
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
         var command = new Command("list", "List available entities in Dataverse. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
@@ -216,14 +218,14 @@ public static class SchemaCommand
             jsonOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var filter = context.ParseResult.GetValueForOption(filterOption);
-            var env = context.ParseResult.GetValueForOption(envOption)!;
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var customOnly = context.ParseResult.GetValueForOption(customOnlyOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
+            var filter = parseResult.GetValue(filterOption);
+            var env = parseResult.GetValue(envOption)!;
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var customOnly = parseResult.GetValue(customOnlyOption);
+            var json = parseResult.GetValue(jsonOption);
 
             // Resolve connection from configuration (validates environment exists and has connections)
             ConnectionResolver.ResolvedConnection resolved;
@@ -236,12 +238,11 @@ public static class SchemaCommand
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
-            context.ExitCode = await ExecuteListAsync(
-                configuration, env, resolved.Config.Url, filter, customOnly, json, context.GetCancellationToken());
+            return await ExecuteListAsync(
+                configuration, env, resolved.Config.Url, filter, customOnly, json, cancellationToken);
         });
 
         return command;

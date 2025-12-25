@@ -15,59 +15,63 @@ public static class MigrateCommand
 {
     public static Command Create()
     {
-        var schemaOption = new Option<FileInfo>(
-            aliases: ["--schema", "-s"],
-            description: "Path to schema.xml file")
+        var schemaOption = new Option<FileInfo>("--schema", "-s")
         {
-            IsRequired = true
+            Description = "Path to schema.xml file",
+            Required = true
         };
 
-        var tempDirOption = new Option<DirectoryInfo?>(
-            name: "--temp-dir",
-            description: "Temporary directory for intermediate data file (default: system temp)");
-
-        var bypassPluginsOption = new Option<bool>(
-            name: "--bypass-plugins",
-            getDefaultValue: () => false,
-            description: "Bypass custom plugin execution on target");
-
-        var bypassFlowsOption = new Option<bool>(
-            name: "--bypass-flows",
-            getDefaultValue: () => false,
-            description: "Bypass Power Automate flow triggers on target");
-
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output progress as JSON (for tool integration)");
-
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
-            getDefaultValue: () => false,
-            description: "Enable verbose logging output");
-
-        var debugOption = new Option<bool>(
-            name: "--debug",
-            getDefaultValue: () => false,
-            description: "Enable diagnostic logging output");
-
-        var sourceEnvOption = new Option<string>(
-            name: "--source-env",
-            description: "Source environment name from configuration (e.g., Dev)")
+        var tempDirOption = new Option<DirectoryInfo?>("--temp-dir")
         {
-            IsRequired = true
+            Description = "Temporary directory for intermediate data file (default: system temp)"
         };
 
-        var targetEnvOption = new Option<string>(
-            name: "--target-env",
-            description: "Target environment name from configuration (e.g., Prod)")
+        var bypassPluginsOption = new Option<bool>("--bypass-plugins")
         {
-            IsRequired = true
+            Description = "Bypass custom plugin execution on target",
+            DefaultValueFactory = _ => false
         };
 
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var bypassFlowsOption = new Option<bool>("--bypass-flows")
+        {
+            Description = "Bypass Power Automate flow triggers on target",
+            DefaultValueFactory = _ => false
+        };
+
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Output progress as JSON (for tool integration)",
+            DefaultValueFactory = _ => false
+        };
+
+        var verboseOption = new Option<bool>("--verbose", "-v")
+        {
+            Description = "Enable verbose logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var debugOption = new Option<bool>("--debug")
+        {
+            Description = "Enable diagnostic logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var sourceEnvOption = new Option<string>("--source-env")
+        {
+            Description = "Source environment name from configuration (e.g., Dev)",
+            Required = true
+        };
+
+        var targetEnvOption = new Option<string>("--target-env")
+        {
+            Description = "Target environment name from configuration (e.g., Prod)",
+            Required = true
+        };
+
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
         var command = new Command("migrate",
             "Migrate data from source to target Dataverse environment. " +
@@ -85,19 +89,19 @@ public static class MigrateCommand
             debugOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var schema = context.ParseResult.GetValueForOption(schemaOption)!;
-            var sourceEnv = context.ParseResult.GetValueForOption(sourceEnvOption)!;
-            var targetEnv = context.ParseResult.GetValueForOption(targetEnvOption)!;
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var tempDir = context.ParseResult.GetValueForOption(tempDirOption);
-            var bypassPlugins = context.ParseResult.GetValueForOption(bypassPluginsOption);
-            var bypassFlows = context.ParseResult.GetValueForOption(bypassFlowsOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
-            var debug = context.ParseResult.GetValueForOption(debugOption);
+            var schema = parseResult.GetValue(schemaOption)!;
+            var sourceEnv = parseResult.GetValue(sourceEnvOption)!;
+            var targetEnv = parseResult.GetValue(targetEnvOption)!;
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var tempDir = parseResult.GetValue(tempDirOption);
+            var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
+            var bypassFlows = parseResult.GetValue(bypassFlowsOption);
+            var json = parseResult.GetValue(jsonOption);
+            var verbose = parseResult.GetValue(verboseOption);
+            var debug = parseResult.GetValue(debugOption);
 
             // Resolve source and target connections from configuration (validates environments exist and have connections)
             ConnectionResolver.ResolvedConnection sourceResolved;
@@ -112,13 +116,12 @@ public static class MigrateCommand
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
-            context.ExitCode = await ExecuteAsync(
+            return await ExecuteAsync(
                 configuration, sourceEnv, targetEnv, sourceResolved.Config.Url, targetResolved.Config.Url,
-                schema, tempDir, bypassPlugins, bypassFlows, json, verbose, debug, context.GetCancellationToken());
+                schema, tempDir, bypassPlugins, bypassFlows, json, verbose, debug, cancellationToken);
         });
 
         return command;

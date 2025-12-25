@@ -14,60 +14,64 @@ public static class ExportCommand
 {
     public static Command Create()
     {
-        var schemaOption = new Option<FileInfo>(
-            aliases: ["--schema", "-s"],
-            description: "Path to schema.xml file")
+        var schemaOption = new Option<FileInfo>("--schema", "-s")
         {
-            IsRequired = true
+            Description = "Path to schema.xml file",
+            Required = true
         };
 
-        var outputOption = new Option<FileInfo>(
-            aliases: ["--output", "-o"],
-            description: "Output ZIP file path")
+        var outputOption = new Option<FileInfo>("--output", "-o")
         {
-            IsRequired = true
+            Description = "Output ZIP file path",
+            Required = true
         };
 
-        var parallelOption = new Option<int>(
-            name: "--parallel",
-            getDefaultValue: () => Environment.ProcessorCount * 2,
-            description: "Degree of parallelism for concurrent entity exports");
-
-        var pageSizeOption = new Option<int>(
-            name: "--page-size",
-            getDefaultValue: () => 5000,
-            description: "FetchXML page size for data retrieval");
-
-        var includeFilesOption = new Option<bool>(
-            name: "--include-files",
-            getDefaultValue: () => false,
-            description: "Export file attachments (notes, annotations)");
-
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output progress as JSON (for tool integration)");
-
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
-            getDefaultValue: () => false,
-            description: "Enable verbose logging output");
-
-        var debugOption = new Option<bool>(
-            name: "--debug",
-            getDefaultValue: () => false,
-            description: "Enable diagnostic logging output");
-
-        var envOption = new Option<string>(
-            name: "--env",
-            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        var parallelOption = new Option<int>("--parallel")
         {
-            IsRequired = true
+            Description = "Degree of parallelism for concurrent entity exports",
+            DefaultValueFactory = _ => Environment.ProcessorCount * 2
         };
 
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var pageSizeOption = new Option<int>("--page-size")
+        {
+            Description = "FetchXML page size for data retrieval",
+            DefaultValueFactory = _ => 5000
+        };
+
+        var includeFilesOption = new Option<bool>("--include-files")
+        {
+            Description = "Export file attachments (notes, annotations)",
+            DefaultValueFactory = _ => false
+        };
+
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Output progress as JSON (for tool integration)",
+            DefaultValueFactory = _ => false
+        };
+
+        var verboseOption = new Option<bool>("--verbose", "-v")
+        {
+            Description = "Enable verbose logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var debugOption = new Option<bool>("--debug")
+        {
+            Description = "Enable diagnostic logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var envOption = new Option<string>("--env")
+        {
+            Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
+            Required = true
+        };
+
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
         var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
@@ -83,19 +87,19 @@ public static class ExportCommand
             debugOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var schema = context.ParseResult.GetValueForOption(schemaOption)!;
-            var output = context.ParseResult.GetValueForOption(outputOption)!;
-            var env = context.ParseResult.GetValueForOption(envOption)!;
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var parallel = context.ParseResult.GetValueForOption(parallelOption);
-            var pageSize = context.ParseResult.GetValueForOption(pageSizeOption);
-            var includeFiles = context.ParseResult.GetValueForOption(includeFilesOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
-            var debug = context.ParseResult.GetValueForOption(debugOption);
+            var schema = parseResult.GetValue(schemaOption)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var env = parseResult.GetValue(envOption)!;
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var parallel = parseResult.GetValue(parallelOption);
+            var pageSize = parseResult.GetValue(pageSizeOption);
+            var includeFiles = parseResult.GetValue(includeFilesOption);
+            var json = parseResult.GetValue(jsonOption);
+            var verbose = parseResult.GetValue(verboseOption);
+            var debug = parseResult.GetValue(debugOption);
 
             // Resolve connection from configuration (validates environment exists and has connections)
             ConnectionResolver.ResolvedConnection resolved;
@@ -108,13 +112,12 @@ public static class ExportCommand
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
-            context.ExitCode = await ExecuteAsync(
+            return await ExecuteAsync(
                 configuration, env, resolved.Config.Url, schema, output, parallel, pageSize,
-                includeFiles, json, verbose, debug, context.GetCancellationToken());
+                includeFiles, json, verbose, debug, cancellationToken);
         });
 
         return command;

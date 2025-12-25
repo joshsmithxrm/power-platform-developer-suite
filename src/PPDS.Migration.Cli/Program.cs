@@ -11,27 +11,26 @@ public static class Program
     /// <summary>
     /// Global option for User Secrets ID (cross-process secret sharing).
     /// </summary>
-    public static readonly Option<string?> SecretsIdOption = new(
-        name: "--secrets-id",
-        description: "User Secrets ID for cross-process secret sharing (e.g., from calling application's UserSecretsId)");
+    public static readonly Option<string?> SecretsIdOption = new("--secrets-id")
+    {
+        Description = "User Secrets ID for cross-process secret sharing (e.g., from calling application's UserSecretsId)",
+        Recursive = true
+    };
 
     public static async Task<int> Main(string[] args)
     {
-        var rootCommand = new RootCommand("PPDS Migration CLI - High-performance Dataverse data migration tool")
-        {
-            Name = "ppds-migrate"
-        };
+        var rootCommand = new RootCommand("PPDS Migration CLI - High-performance Dataverse data migration tool");
 
-        // Add global options
-        rootCommand.AddGlobalOption(SecretsIdOption);
+        // Add global options (Recursive = true makes it available to all subcommands)
+        rootCommand.Options.Add(SecretsIdOption);
 
         // Add subcommands
-        rootCommand.AddCommand(ExportCommand.Create());
-        rootCommand.AddCommand(ImportCommand.Create());
-        rootCommand.AddCommand(AnalyzeCommand.Create());
-        rootCommand.AddCommand(MigrateCommand.Create());
-        rootCommand.AddCommand(SchemaCommand.Create());
-        rootCommand.AddCommand(ConfigCommand.Create());
+        rootCommand.Subcommands.Add(ExportCommand.Create());
+        rootCommand.Subcommands.Add(ImportCommand.Create());
+        rootCommand.Subcommands.Add(AnalyzeCommand.Create());
+        rootCommand.Subcommands.Add(MigrateCommand.Create());
+        rootCommand.Subcommands.Add(SchemaCommand.Create());
+        rootCommand.Subcommands.Add(ConfigCommand.Create());
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();
@@ -42,6 +41,7 @@ public static class Program
             Console.Error.WriteLine("\nCancellation requested. Waiting for current operation to complete...");
         };
 
-        return await rootCommand.InvokeAsync(args);
+        var parseResult = rootCommand.Parse(args);
+        return await parseResult.InvokeAsync();
     }
 }

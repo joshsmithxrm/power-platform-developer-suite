@@ -16,67 +16,75 @@ public static class ImportCommand
 {
     public static Command Create()
     {
-        var dataOption = new Option<FileInfo>(
-            aliases: ["--data", "-d"],
-            description: "Path to data.zip file")
+        var dataOption = new Option<FileInfo>("--data", "-d")
         {
-            IsRequired = true
+            Description = "Path to data.zip file",
+            Required = true
         };
 
-        var bypassPluginsOption = new Option<bool>(
-            name: "--bypass-plugins",
-            getDefaultValue: () => false,
-            description: "Bypass custom plugin execution during import");
-
-        var bypassFlowsOption = new Option<bool>(
-            name: "--bypass-flows",
-            getDefaultValue: () => false,
-            description: "Bypass Power Automate flow triggers during import");
-
-        var continueOnErrorOption = new Option<bool>(
-            name: "--continue-on-error",
-            getDefaultValue: () => false,
-            description: "Continue import on individual record failures");
-
-        var modeOption = new Option<ImportMode>(
-            name: "--mode",
-            getDefaultValue: () => ImportMode.Upsert,
-            description: "Import mode: Create, Update, or Upsert");
-
-        var userMappingOption = new Option<FileInfo?>(
-            aliases: ["--user-mapping", "-u"],
-            description: "Path to user mapping XML file for remapping user references");
-
-        var stripOwnerFieldsOption = new Option<bool>(
-            name: "--strip-owner-fields",
-            getDefaultValue: () => false,
-            description: "Strip ownership fields (ownerid, createdby, modifiedby) allowing Dataverse to assign current user. Use when importing to a different environment where source users don't exist.");
-
-        var jsonOption = new Option<bool>(
-            name: "--json",
-            getDefaultValue: () => false,
-            description: "Output progress as JSON (for tool integration)");
-
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
-            getDefaultValue: () => false,
-            description: "Enable verbose logging output");
-
-        var debugOption = new Option<bool>(
-            name: "--debug",
-            getDefaultValue: () => false,
-            description: "Enable diagnostic logging output");
-
-        var envOption = new Option<string>(
-            name: "--env",
-            description: "Environment name from configuration (e.g., Dev, QA, Prod)")
+        var bypassPluginsOption = new Option<bool>("--bypass-plugins")
         {
-            IsRequired = true
+            Description = "Bypass custom plugin execution during import",
+            DefaultValueFactory = _ => false
         };
 
-        var configOption = new Option<FileInfo?>(
-            name: "--config",
-            description: "Path to configuration file (default: appsettings.json in current directory)");
+        var bypassFlowsOption = new Option<bool>("--bypass-flows")
+        {
+            Description = "Bypass Power Automate flow triggers during import",
+            DefaultValueFactory = _ => false
+        };
+
+        var continueOnErrorOption = new Option<bool>("--continue-on-error")
+        {
+            Description = "Continue import on individual record failures",
+            DefaultValueFactory = _ => false
+        };
+
+        var modeOption = new Option<ImportMode>("--mode")
+        {
+            Description = "Import mode: Create, Update, or Upsert",
+            DefaultValueFactory = _ => ImportMode.Upsert
+        };
+
+        var userMappingOption = new Option<FileInfo?>("--user-mapping", "-u")
+        {
+            Description = "Path to user mapping XML file for remapping user references"
+        };
+
+        var stripOwnerFieldsOption = new Option<bool>("--strip-owner-fields")
+        {
+            Description = "Strip ownership fields (ownerid, createdby, modifiedby) allowing Dataverse to assign current user. Use when importing to a different environment where source users don't exist.",
+            DefaultValueFactory = _ => false
+        };
+
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Output progress as JSON (for tool integration)",
+            DefaultValueFactory = _ => false
+        };
+
+        var verboseOption = new Option<bool>("--verbose", "-v")
+        {
+            Description = "Enable verbose logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var debugOption = new Option<bool>("--debug")
+        {
+            Description = "Enable diagnostic logging output",
+            DefaultValueFactory = _ => false
+        };
+
+        var envOption = new Option<string>("--env")
+        {
+            Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
+            Required = true
+        };
+
+        var configOption = new Option<FileInfo?>("--config")
+        {
+            Description = "Path to configuration file (default: appsettings.json in current directory)"
+        };
 
         var command = new Command("import", "Import data from a ZIP file into Dataverse. " + ConfigurationHelper.GetConfigurationHelpDescription())
         {
@@ -94,36 +102,34 @@ public static class ImportCommand
             debugOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var data = context.ParseResult.GetValueForOption(dataOption)!;
-            var env = context.ParseResult.GetValueForOption(envOption)!;
-            var config = context.ParseResult.GetValueForOption(configOption);
-            var secretsId = context.ParseResult.GetValueForOption(Program.SecretsIdOption);
-            var bypassPlugins = context.ParseResult.GetValueForOption(bypassPluginsOption);
-            var bypassFlows = context.ParseResult.GetValueForOption(bypassFlowsOption);
-            var continueOnError = context.ParseResult.GetValueForOption(continueOnErrorOption);
-            var mode = context.ParseResult.GetValueForOption(modeOption);
-            var userMappingFile = context.ParseResult.GetValueForOption(userMappingOption);
-            var stripOwnerFields = context.ParseResult.GetValueForOption(stripOwnerFieldsOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
-            var debug = context.ParseResult.GetValueForOption(debugOption);
+            var data = parseResult.GetValue(dataOption)!;
+            var env = parseResult.GetValue(envOption)!;
+            var config = parseResult.GetValue(configOption);
+            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
+            var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
+            var bypassFlows = parseResult.GetValue(bypassFlowsOption);
+            var continueOnError = parseResult.GetValue(continueOnErrorOption);
+            var mode = parseResult.GetValue(modeOption);
+            var userMappingFile = parseResult.GetValue(userMappingOption);
+            var stripOwnerFields = parseResult.GetValue(stripOwnerFieldsOption);
+            var json = parseResult.GetValue(jsonOption);
+            var verbose = parseResult.GetValue(verboseOption);
+            var debug = parseResult.GetValue(debugOption);
 
             // Validate data file exists first (explicit argument)
             if (!data.Exists)
             {
                 ConsoleOutput.WriteError($"Data file not found: {data.FullName}", json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
             // Validate user mapping file if specified
             if (userMappingFile != null && !userMappingFile.Exists)
             {
                 ConsoleOutput.WriteError($"User mapping file not found: {userMappingFile.FullName}", json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
             // Resolve connection from configuration (validates environment exists and has connections)
@@ -137,13 +143,12 @@ public static class ImportCommand
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
-                context.ExitCode = ExitCodes.InvalidArguments;
-                return;
+                return ExitCodes.InvalidArguments;
             }
 
-            context.ExitCode = await ExecuteAsync(
+            return await ExecuteAsync(
                 configuration, env, resolved.Config.Url, data, bypassPlugins, bypassFlows,
-                continueOnError, mode, userMappingFile, stripOwnerFields, json, verbose, debug, context.GetCancellationToken());
+                continueOnError, mode, userMappingFile, stripOwnerFields, json, verbose, debug, cancellationToken);
         });
 
         return command;

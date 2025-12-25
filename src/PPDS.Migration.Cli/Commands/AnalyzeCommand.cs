@@ -15,27 +15,29 @@ public static class AnalyzeCommand
 {
     public static Command Create()
     {
-        var schemaOption = new Option<FileInfo>(
-            aliases: ["--schema", "-s"],
-            description: "Path to schema.xml file")
+        var schemaOption = new Option<FileInfo>("--schema", "-s")
         {
-            IsRequired = true
+            Description = "Path to schema.xml file",
+            Required = true
         };
 
-        var outputFormatOption = new Option<OutputFormat>(
-            aliases: ["--output-format", "-f"],
-            getDefaultValue: () => OutputFormat.Text,
-            description: "Output format: text or json");
+        var outputFormatOption = new Option<OutputFormat>("--output-format", "-f")
+        {
+            Description = "Output format: text or json",
+            DefaultValueFactory = _ => OutputFormat.Text
+        };
 
-        var verboseOption = new Option<bool>(
-            aliases: ["--verbose", "-v"],
-            getDefaultValue: () => false,
-            description: "Enable verbose logging output");
+        var verboseOption = new Option<bool>("--verbose", "-v")
+        {
+            Description = "Enable verbose logging output",
+            DefaultValueFactory = _ => false
+        };
 
-        var debugOption = new Option<bool>(
-            name: "--debug",
-            getDefaultValue: () => false,
-            description: "Enable diagnostic logging output");
+        var debugOption = new Option<bool>("--debug")
+        {
+            Description = "Enable diagnostic logging output",
+            DefaultValueFactory = _ => false
+        };
 
         var command = new Command("analyze", "Analyze schema and display dependency graph")
         {
@@ -45,13 +47,13 @@ public static class AnalyzeCommand
             debugOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var schema = context.ParseResult.GetValueForOption(schemaOption)!;
-            var outputFormat = context.ParseResult.GetValueForOption(outputFormatOption);
-            var debug = context.ParseResult.GetValueForOption(debugOption);
+            var schema = parseResult.GetValue(schemaOption)!;
+            var outputFormat = parseResult.GetValue(outputFormatOption);
+            var debug = parseResult.GetValue(debugOption);
 
-            context.ExitCode = await ExecuteAsync(schema, outputFormat, debug, context.GetCancellationToken());
+            return await ExecuteAsync(schema, outputFormat, debug, cancellationToken);
         });
 
         return command;
