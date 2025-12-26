@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Configuration;
-
 namespace PPDS.Migration.Cli.Infrastructure;
 
 /// <summary>
@@ -13,48 +11,35 @@ public static class AuthResolver
     public const string EnvVarPrefix = "DATAVERSE__";
 
     /// <summary>
-    /// Alternative prefix with PPDS namespace.
-    /// </summary>
-    public const string AltEnvVarPrefix = "PPDS__DATAVERSE__";
-
-    /// <summary>
     /// Result of authentication resolution.
     /// </summary>
     public record AuthResult(
         AuthMode Mode,
-        string? Url,
-        string? ClientId,
-        string? ClientSecret,
-        string? TenantId,
-        string? EnvironmentName);
+        string Url,
+        string? ClientId = null,
+        string? ClientSecret = null,
+        string? TenantId = null);
 
     /// <summary>
     /// Resolves authentication based on the specified mode.
     /// </summary>
     /// <param name="mode">The authentication mode to use.</param>
-    /// <param name="url">Direct URL from --url option (highest priority).</param>
-    /// <param name="environmentName">Environment name for config-based auth.</param>
-    /// <param name="configuration">Configuration (for Config mode).</param>
+    /// <param name="url">Direct URL from --url option.</param>
     /// <returns>The resolved auth configuration.</returns>
     /// <exception cref="InvalidOperationException">Thrown when auth cannot be resolved.</exception>
-    public static AuthResult Resolve(
-        AuthMode mode,
-        string? url,
-        string? environmentName,
-        IConfiguration? configuration)
+    public static AuthResult Resolve(AuthMode mode, string? url)
     {
         return mode switch
         {
-            AuthMode.Config => ResolveFromConfig(environmentName, configuration),
             AuthMode.Env => ResolveFromEnvironmentVariables(),
-            AuthMode.Interactive => ResolveForInteractive(url, environmentName, configuration),
-            AuthMode.Managed => ResolveForManagedIdentity(url, environmentName, configuration),
+            AuthMode.Interactive => ResolveForInteractive(url),
+            AuthMode.Managed => ResolveForManagedIdentity(url),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown auth mode")
         };
     }
 
     /// <summary>
-    /// Resolves auth from direct environment variables (not config-based).
+    /// Resolves auth from environment variables.
     /// </summary>
     private static AuthResult ResolveFromEnvironmentVariables()
     {
@@ -89,169 +74,47 @@ public static class AuthResolver
             url,
             clientId,
             clientSecret,
-            tenantId,
-            EnvironmentName: null);
-    }
-
-    /// <summary>
-    /// Resolves auth from configuration files (appsettings.json + User Secrets).
-    /// </summary>
-    private static AuthResult ResolveFromConfig(string? environmentName, IConfiguration? configuration)
-    {
-        if (string.IsNullOrEmpty(environmentName))
-        {
-            throw new InvalidOperationException(
-                "Environment name is required when using --auth config. " +
-                "Use --env <name> to specify which environment to use.");
-        }
-
-        if (configuration == null)
-        {
-            throw new InvalidOperationException(
-                "Configuration is required when using --auth config. " +
-                "Ensure appsettings.json exists or provide --config path.");
-        }
-
-        // Delegate to existing config-based resolution
-        // The actual resolution happens in ConnectionResolver.ResolveFromConfig
-        // We just return a marker result here indicating config mode
-        return new AuthResult(
-            AuthMode.Config,
-            Url: null, // Will be resolved by ConnectionResolver
-            ClientId: null,
-            ClientSecret: null,
-            TenantId: null,
-            EnvironmentName: environmentName);
+            tenantId);
     }
 
     /// <summary>
     /// Resolves configuration for interactive (device code) auth.
     /// Only URL is needed; auth happens interactively.
-    /// Priority: --url option > --env + config > DATAVERSE__URL env var.
     /// </summary>
-    private static AuthResult ResolveForInteractive(string? url, string? environmentName, IConfiguration? configuration)
+    private static AuthResult ResolveForInteractive(string? url)
     {
-        // 1. Try --url option first (highest priority)
-        if (!string.IsNullOrEmpty(url))
+        if (string.IsNullOrEmpty(url))
         {
-            return new AuthResult(
-                AuthMode.Interactive,
-                url,
-                ClientId: null,
-                ClientSecret: null,
-                TenantId: null,
-                EnvironmentName: null);
+            throw new InvalidOperationException(
+                "--url is required for interactive authentication. " +
+                "Example: --url https://myorg.crm.dynamics.com");
         }
 
-        // 2. Try --env + config
-        if (!string.IsNullOrEmpty(environmentName) && configuration != null)
-        {
-            var configUrl = configuration[$"Dataverse:Environments:{environmentName}:Url"]
-                            ?? configuration["Dataverse:Url"];
-            if (!string.IsNullOrEmpty(configUrl))
-            {
-                return new AuthResult(
-                    AuthMode.Interactive,
-                    configUrl,
-                    ClientId: null,
-                    ClientSecret: null,
-                    TenantId: null,
-                    EnvironmentName: environmentName);
-            }
-        }
-
-        // 3. Try DATAVERSE__URL env var
-        var envUrl = GetEnvVar("URL");
-        if (!string.IsNullOrEmpty(envUrl))
-        {
-            return new AuthResult(
-                AuthMode.Interactive,
-                envUrl,
-                ClientId: null,
-                ClientSecret: null,
-                TenantId: null,
-                EnvironmentName: null);
-        }
-
-        throw new InvalidOperationException(
-            "Dataverse URL required. Provide --url, --env with config, or set DATAVERSE__URL environment variable.");
+        return new AuthResult(AuthMode.Interactive, url);
     }
 
     /// <summary>
     /// Resolves configuration for managed identity auth.
     /// Only URL is needed; identity comes from Azure.
-    /// Priority: --url option > --env + config > DATAVERSE__URL env var.
     /// </summary>
-    private static AuthResult ResolveForManagedIdentity(string? url, string? environmentName, IConfiguration? configuration)
+    private static AuthResult ResolveForManagedIdentity(string? url)
     {
-        // 1. Try --url option first (highest priority)
-        if (!string.IsNullOrEmpty(url))
+        if (string.IsNullOrEmpty(url))
         {
-            return new AuthResult(
-                AuthMode.Managed,
-                url,
-                ClientId: null,
-                ClientSecret: null,
-                TenantId: null,
-                EnvironmentName: null);
+            throw new InvalidOperationException(
+                "--url is required for managed identity authentication. " +
+                "Example: --url https://myorg.crm.dynamics.com");
         }
 
-        // 2. Try --env + config
-        if (!string.IsNullOrEmpty(environmentName) && configuration != null)
-        {
-            var configUrl = configuration[$"Dataverse:Environments:{environmentName}:Url"]
-                            ?? configuration["Dataverse:Url"];
-            if (!string.IsNullOrEmpty(configUrl))
-            {
-                return new AuthResult(
-                    AuthMode.Managed,
-                    configUrl,
-                    ClientId: null,
-                    ClientSecret: null,
-                    TenantId: null,
-                    EnvironmentName: environmentName);
-            }
-        }
-
-        // 3. Try DATAVERSE__URL env var
-        var envUrl = GetEnvVar("URL");
-        if (!string.IsNullOrEmpty(envUrl))
-        {
-            return new AuthResult(
-                AuthMode.Managed,
-                envUrl,
-                ClientId: null,
-                ClientSecret: null,
-                TenantId: null,
-                EnvironmentName: null);
-        }
-
-        throw new InvalidOperationException(
-            "Dataverse URL required. Provide --url, --env with config, or set DATAVERSE__URL environment variable.");
+        return new AuthResult(AuthMode.Managed, url);
     }
 
     /// <summary>
-    /// Checks if direct environment variables are set (for --auth env mode).
-    /// </summary>
-    public static bool HasDirectEnvVars()
-    {
-        return !string.IsNullOrEmpty(GetEnvVar("URL"))
-               && !string.IsNullOrEmpty(GetEnvVar("CLIENTID"))
-               && !string.IsNullOrEmpty(GetEnvVar("CLIENTSECRET"));
-    }
-
-    /// <summary>
-    /// Gets an environment variable with either DATAVERSE__ or PPDS__DATAVERSE__ prefix.
+    /// Gets an environment variable with DATAVERSE__ prefix.
     /// </summary>
     private static string? GetEnvVar(string name)
     {
-        // Try primary prefix first
-        var value = Environment.GetEnvironmentVariable($"{EnvVarPrefix}{name}");
-        if (!string.IsNullOrEmpty(value))
-            return value;
-
-        // Try alternative prefix
-        return Environment.GetEnvironmentVariable($"{AltEnvVarPrefix}{name}");
+        return Environment.GetEnvironmentVariable($"{EnvVarPrefix}{name}");
     }
 
     /// <summary>
@@ -261,10 +124,9 @@ public static class AuthResolver
     {
         return mode switch
         {
-            AuthMode.Config => "Configure via appsettings.json + User Secrets (--secrets-id). Requires --env.",
-            AuthMode.Env => "Set DATAVERSE__URL, DATAVERSE__CLIENTID, and DATAVERSE__CLIENTSECRET environment variables.",
-            AuthMode.Interactive => "Opens browser for device code authentication. Provide --url, --env, or set DATAVERSE__URL.",
-            AuthMode.Managed => "Uses Azure Managed Identity. Provide --url, --env, or set DATAVERSE__URL. Works in Azure VMs, App Service, AKS.",
+            AuthMode.Env => "Uses DATAVERSE__URL, DATAVERSE__CLIENTID, and DATAVERSE__CLIENTSECRET environment variables.",
+            AuthMode.Interactive => "Opens browser for device code authentication. Requires --url.",
+            AuthMode.Managed => "Uses Azure Managed Identity. Works in Azure VMs, App Service, AKS. Requires --url.",
             _ => "Unknown auth mode."
         };
     }

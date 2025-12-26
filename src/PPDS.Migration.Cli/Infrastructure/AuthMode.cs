@@ -12,17 +12,14 @@ public enum AuthMode
     Interactive,
 
     /// <summary>
-    /// Use appsettings.json + User Secrets. Requires --env to specify environment.
-    /// </summary>
-    Config,
-
-    /// <summary>
-    /// Use environment variables only (DATAVERSE__* prefix).
+    /// Use environment variables (DATAVERSE__URL, DATAVERSE__CLIENTID, DATAVERSE__CLIENTSECRET).
+    /// Best for CI/CD pipelines.
     /// </summary>
     Env,
 
     /// <summary>
     /// Azure Managed Identity - for Azure-hosted workloads.
+    /// Works in Azure VMs, App Service, AKS, etc.
     /// </summary>
     Managed
 }

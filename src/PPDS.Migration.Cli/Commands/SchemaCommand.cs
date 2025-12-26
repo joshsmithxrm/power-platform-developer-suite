@@ -1,14 +1,9 @@
 using System.CommandLine;
-using System.CommandLine.Completions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
-
-// Aliases for clarity
-using AuthResult = PPDS.Migration.Cli.Infrastructure.AuthResolver.AuthResult;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -41,7 +36,6 @@ public static class SchemaCommand
             Description = "Output schema file path",
             Required = true
         }.AcceptLegalFileNamesOnly();
-        // Validate output directory exists
         outputOption.Validators.Add(result =>
         {
             var file = result.GetValue(outputOption);
@@ -103,36 +97,10 @@ public static class SchemaCommand
             DefaultValueFactory = _ => false
         };
 
-        var envOption = new Option<string?>("--env")
-        {
-            Description = "Environment name from configuration (e.g., Dev, QA, Prod)"
-        };
-        // Add tab completion for environment names from configuration
-        envOption.CompletionSources.Add(ctx =>
-        {
-            try
-            {
-                var config = ConfigurationHelper.Build(null, null);
-                return ConfigurationHelper.GetEnvironmentNames(config)
-                    .Select(name => new CompletionItem(name));
-            }
-            catch
-            {
-                return [];
-            }
-        });
-
-        var configOption = new Option<FileInfo?>("--config")
-        {
-            Description = "Path to configuration file (default: appsettings.json in current directory)"
-        };
-
-        var command = new Command("generate", "Generate a migration schema from Dataverse metadata. " + ConfigurationHelper.GetConfigurationHelpDescription())
+        var command = new Command("generate", "Generate a migration schema from Dataverse metadata")
         {
             entitiesOption,
             outputOption,
-            envOption,
-            configOption,
             includeSystemFieldsOption,
             includeRelationshipsOption,
             disablePluginsOption,
@@ -149,9 +117,6 @@ public static class SchemaCommand
             var entities = parseResult.GetValue(entitiesOption)!;
             var output = parseResult.GetValue(outputOption)!;
             var url = parseResult.GetValue(Program.UrlOption);
-            var env = parseResult.GetValue(envOption);
-            var config = parseResult.GetValue(configOption);
-            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
             var authMode = parseResult.GetValue(Program.AuthOption);
             var includeSystemFields = parseResult.GetValue(includeSystemFieldsOption);
             var includeRelationships = parseResult.GetValue(includeRelationshipsOption);
@@ -163,27 +128,13 @@ public static class SchemaCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Validate --auth config requires --env
-            if (authMode == AuthMode.Config && string.IsNullOrEmpty(env))
-            {
-                ConsoleOutput.WriteError("--env is required when using --auth config.", json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Resolve authentication based on mode
+            // Resolve authentication
             AuthResolver.AuthResult authResult;
-            IConfiguration? configuration = null;
             try
             {
-                // Build configuration if needed (for config mode or when using --env)
-                if (authMode == AuthMode.Config || !string.IsNullOrEmpty(env))
-                {
-                    configuration = ConfigurationHelper.Build(config?.FullName, secretsId);
-                }
-
-                authResult = AuthResolver.Resolve(authMode, url, env, configuration);
+                authResult = AuthResolver.Resolve(authMode, url);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
+            catch (InvalidOperationException ex)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 return ExitCodes.InvalidArguments;
@@ -208,7 +159,7 @@ public static class SchemaCommand
             var excludePatternList = ParseAttributeList(excludePatterns);
 
             return await ExecuteGenerateAsync(
-                authResult, configuration, env, entityList, output,
+                authResult, entityList, output,
                 includeSystemFields, includeRelationships, disablePlugins,
                 includeAttrList, excludeAttrList, excludePatternList,
                 json, verbose, debug, cancellationToken);
@@ -236,35 +187,9 @@ public static class SchemaCommand
             DefaultValueFactory = _ => false
         };
 
-        var envOption = new Option<string?>("--env")
-        {
-            Description = "Environment name from configuration (e.g., Dev, QA, Prod)"
-        };
-        // Add tab completion for environment names from configuration
-        envOption.CompletionSources.Add(ctx =>
-        {
-            try
-            {
-                var config = ConfigurationHelper.Build(null, null);
-                return ConfigurationHelper.GetEnvironmentNames(config)
-                    .Select(name => new CompletionItem(name));
-            }
-            catch
-            {
-                return [];
-            }
-        });
-
-        var configOption = new Option<FileInfo?>("--config")
-        {
-            Description = "Path to configuration file (default: appsettings.json in current directory)"
-        };
-
-        var command = new Command("list", "List available entities in Dataverse. " + ConfigurationHelper.GetConfigurationHelpDescription())
+        var command = new Command("list", "List available entities in Dataverse")
         {
             filterOption,
-            envOption,
-            configOption,
             customOnlyOption,
             jsonOption
         };
@@ -273,41 +198,23 @@ public static class SchemaCommand
         {
             var filter = parseResult.GetValue(filterOption);
             var url = parseResult.GetValue(Program.UrlOption);
-            var env = parseResult.GetValue(envOption);
-            var config = parseResult.GetValue(configOption);
-            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
             var authMode = parseResult.GetValue(Program.AuthOption);
             var customOnly = parseResult.GetValue(customOnlyOption);
             var json = parseResult.GetValue(jsonOption);
 
-            // Validate --auth config requires --env
-            if (authMode == AuthMode.Config && string.IsNullOrEmpty(env))
-            {
-                ConsoleOutput.WriteError("--env is required when using --auth config.", json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Resolve authentication based on mode
+            // Resolve authentication
             AuthResolver.AuthResult authResult;
-            IConfiguration? configuration = null;
             try
             {
-                // Build configuration if needed (for config mode or when using --env)
-                if (authMode == AuthMode.Config || !string.IsNullOrEmpty(env))
-                {
-                    configuration = ConfigurationHelper.Build(config?.FullName, secretsId);
-                }
-
-                authResult = AuthResolver.Resolve(authMode, url, env, configuration);
+                authResult = AuthResolver.Resolve(authMode, url);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
+            catch (InvalidOperationException ex)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 return ExitCodes.InvalidArguments;
             }
 
-            return await ExecuteListAsync(
-                authResult, configuration, env, filter, customOnly, json, cancellationToken);
+            return await ExecuteListAsync(authResult, filter, customOnly, json, cancellationToken);
         });
 
         return command;
@@ -316,9 +223,7 @@ public static class SchemaCommand
     private static List<string>? ParseAttributeList(string[]? input)
     {
         if (input == null || input.Length == 0)
-        {
             return null;
-        }
 
         return input
             .SelectMany(a => a.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -329,8 +234,6 @@ public static class SchemaCommand
 
     private static async Task<int> ExecuteGenerateAsync(
         AuthResolver.AuthResult authResult,
-        IConfiguration? configuration,
-        string? environmentName,
         List<string> entities,
         FileInfo output,
         bool includeSystemFields,
@@ -344,7 +247,6 @@ public static class SchemaCommand
         bool debug,
         CancellationToken cancellationToken)
     {
-        // Create progress reporter first - it handles all user-facing output
         var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
         try
@@ -362,9 +264,6 @@ public static class SchemaCommand
                           (optionsMsg.Count > 0 ? $" ({string.Join(", ", optionsMsg)})" : "")
             });
 
-            // Determine URL for status message
-            var displayUrl = authResult.Url ?? "(from config)";
-
             // Report connecting status with auth mode info
             var authModeInfo = authResult.Mode switch
             {
@@ -376,12 +275,11 @@ public static class SchemaCommand
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse ({displayUrl}){authModeInfo}..."
+                Message = $"Connecting to Dataverse ({authResult.Url}){authModeInfo}..."
             });
 
             // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(
-                authResult.Mode, authResult, configuration, environmentName, verbose, debug);
+            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult, verbose, debug);
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
             var schemaWriter = serviceProvider.GetRequiredService<ICmtSchemaWriter>();
 
@@ -409,7 +307,7 @@ public static class SchemaCommand
                 RecordsProcessed = schema.Entities.Count,
                 SuccessCount = schema.Entities.Count,
                 FailureCount = 0,
-                Duration = TimeSpan.Zero // Schema generation doesn't track duration currently
+                Duration = TimeSpan.Zero
             });
 
             progressReporter.Report(new ProgressEventArgs
@@ -438,8 +336,6 @@ public static class SchemaCommand
 
     private static async Task<int> ExecuteListAsync(
         AuthResolver.AuthResult authResult,
-        IConfiguration? configuration,
-        string? environmentName,
         string? filter,
         bool customOnly,
         bool json,
@@ -447,9 +343,6 @@ public static class SchemaCommand
     {
         try
         {
-            // Determine URL for status message
-            var displayUrl = authResult.Url ?? "(from config)";
-
             // Build auth mode info for status messages
             var authModeInfo = authResult.Mode switch
             {
@@ -461,13 +354,12 @@ public static class SchemaCommand
 
             if (!json)
             {
-                Console.WriteLine($"Connecting to Dataverse ({displayUrl}){authModeInfo}...");
+                Console.WriteLine($"Connecting to Dataverse ({authResult.Url}){authModeInfo}...");
                 Console.WriteLine("Retrieving available entities...");
             }
 
             // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(
-                authResult.Mode, authResult, configuration, environmentName);
+            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult);
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
 
             var entities = await generator.GetAvailableEntitiesAsync(cancellationToken);

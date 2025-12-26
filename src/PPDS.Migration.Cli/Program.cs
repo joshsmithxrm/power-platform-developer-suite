@@ -11,6 +11,7 @@ public static class Program
 {
     /// <summary>
     /// Global option for Dataverse environment URL.
+    /// Required for interactive and managed auth modes.
     /// </summary>
     public static readonly Option<string?> UrlOption = new("--url")
     {
@@ -23,17 +24,8 @@ public static class Program
     /// </summary>
     public static readonly Option<AuthMode> AuthOption = new("--auth")
     {
-        Description = "Authentication mode: interactive (default), config, env, managed",
+        Description = "Authentication mode: interactive (default), env, managed",
         DefaultValueFactory = _ => AuthMode.Interactive,
-        Recursive = true
-    };
-
-    /// <summary>
-    /// Global option for User Secrets ID (cross-process secret sharing).
-    /// </summary>
-    public static readonly Option<string?> SecretsIdOption = new("--secrets-id")
-    {
-        Description = "User Secrets ID for cross-process secret sharing (used with --auth config)",
         Recursive = true
     };
 
@@ -41,10 +33,9 @@ public static class Program
     {
         var rootCommand = new RootCommand("PPDS Migration CLI - High-performance Dataverse data migration tool");
 
-        // Add global options (Recursive = true makes it available to all subcommands)
+        // Add global options (Recursive = true makes them available to all subcommands)
         rootCommand.Options.Add(UrlOption);
         rootCommand.Options.Add(AuthOption);
-        rootCommand.Options.Add(SecretsIdOption);
 
         // Add subcommands
         rootCommand.Subcommands.Add(ExportCommand.Create());
@@ -52,7 +43,6 @@ public static class Program
         rootCommand.Subcommands.Add(AnalyzeCommand.Create());
         rootCommand.Subcommands.Add(MigrateCommand.Create());
         rootCommand.Subcommands.Add(SchemaCommand.Create());
-        rootCommand.Subcommands.Add(ConfigCommand.Create());
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();

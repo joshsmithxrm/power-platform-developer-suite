@@ -1,13 +1,8 @@
 using System.CommandLine;
-using System.CommandLine.Completions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Migration.Cli.Infrastructure;
 using PPDS.Migration.Export;
 using PPDS.Migration.Progress;
-
-// Aliases for clarity
-using AuthResult = PPDS.Migration.Cli.Infrastructure.AuthResolver.AuthResult;
 
 namespace PPDS.Migration.Cli.Commands;
 
@@ -87,36 +82,10 @@ public static class ExportCommand
             DefaultValueFactory = _ => false
         };
 
-        var envOption = new Option<string?>("--env")
-        {
-            Description = "Environment name from configuration (e.g., Dev, QA, Prod)"
-        };
-        // Add tab completion for environment names from configuration
-        envOption.CompletionSources.Add(ctx =>
-        {
-            try
-            {
-                var config = ConfigurationHelper.Build(null, null);
-                return ConfigurationHelper.GetEnvironmentNames(config)
-                    .Select(name => new CompletionItem(name));
-            }
-            catch
-            {
-                return [];
-            }
-        });
-
-        var configOption = new Option<FileInfo?>("--config")
-        {
-            Description = "Path to configuration file (default: appsettings.json in current directory)"
-        };
-
-        var command = new Command("export", "Export data from Dataverse to a ZIP file. " + ConfigurationHelper.GetConfigurationHelpDescription())
+        var command = new Command("export", "Export data from Dataverse to a ZIP file")
         {
             schemaOption,
             outputOption,
-            envOption,
-            configOption,
             parallelOption,
             pageSizeOption,
             includeFilesOption,
@@ -130,9 +99,6 @@ public static class ExportCommand
             var schema = parseResult.GetValue(schemaOption)!;
             var output = parseResult.GetValue(outputOption)!;
             var url = parseResult.GetValue(Program.UrlOption);
-            var env = parseResult.GetValue(envOption);
-            var config = parseResult.GetValue(configOption);
-            var secretsId = parseResult.GetValue(Program.SecretsIdOption);
             var authMode = parseResult.GetValue(Program.AuthOption);
             var parallel = parseResult.GetValue(parallelOption);
             var pageSize = parseResult.GetValue(pageSizeOption);
@@ -141,34 +107,20 @@ public static class ExportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Validate --auth config requires --env
-            if (authMode == AuthMode.Config && string.IsNullOrEmpty(env))
-            {
-                ConsoleOutput.WriteError("--env is required when using --auth config.", json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Resolve authentication based on mode
+            // Resolve authentication
             AuthResolver.AuthResult authResult;
-            IConfiguration? configuration = null;
             try
             {
-                // Build configuration if needed (for config mode or when using --env)
-                if (authMode == AuthMode.Config || !string.IsNullOrEmpty(env))
-                {
-                    configuration = ConfigurationHelper.Build(config?.FullName, secretsId);
-                }
-
-                authResult = AuthResolver.Resolve(authMode, url, env, configuration);
+                authResult = AuthResolver.Resolve(authMode, url);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
+            catch (InvalidOperationException ex)
             {
                 ConsoleOutput.WriteError(ex.Message, json);
                 return ExitCodes.InvalidArguments;
             }
 
             return await ExecuteAsync(
-                authResult, configuration, env, schema, output, parallel, pageSize,
+                authResult, schema, output, parallel, pageSize,
                 includeFiles, json, verbose, debug, cancellationToken);
         });
 
@@ -177,8 +129,6 @@ public static class ExportCommand
 
     private static async Task<int> ExecuteAsync(
         AuthResolver.AuthResult authResult,
-        IConfiguration? configuration,
-        string? environmentName,
         FileInfo schema,
         FileInfo output,
         int parallel,
@@ -189,16 +139,10 @@ public static class ExportCommand
         bool debug,
         CancellationToken cancellationToken)
     {
-        // Create progress reporter first - it handles all user-facing output
         var progressReporter = ServiceFactory.CreateProgressReporter(json);
 
         try
         {
-            // File and directory validation now handled by option validators (AcceptExistingOnly, custom validators)
-
-            // Determine URL for status message
-            var displayUrl = authResult.Url ?? "(from config)";
-
             // Report connecting status with auth mode info
             var authModeInfo = authResult.Mode switch
             {
@@ -210,12 +154,11 @@ public static class ExportCommand
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse ({displayUrl}){authModeInfo}..."
+                Message = $"Connecting to Dataverse ({authResult.Url}){authModeInfo}..."
             });
 
             // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(
-                authResult.Mode, authResult, configuration, environmentName, verbose, debug);
+            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult, verbose, debug);
             var exporter = serviceProvider.GetRequiredService<IExporter>();
 
             // Configure export options
@@ -226,7 +169,7 @@ public static class ExportCommand
                 ExportFiles = includeFiles
             };
 
-            // Execute export - progress reporter receives Complete() callback with results
+            // Execute export
             var result = await exporter.ExportAsync(
                 schema.FullName,
                 output.FullName,

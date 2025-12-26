@@ -116,71 +116,63 @@ public class ExportCommandTests : IDisposable
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --output \"{_tempOutputFile}\" --env Dev");
+        var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --output \"{_tempOutputFile}\"");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\"");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingSchema_HasError()
     {
-        var result = _command.Parse($"--output \"{_tempOutputFile}\" --env Dev");
+        var result = _command.Parse($"--output \"{_tempOutputFile}\"");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingOutput_HasError()
     {
-        var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --env Dev");
+        var result = _command.Parse($"--schema \"{_tempSchemaFile}\"");
         Assert.NotEmpty(result.Errors);
-    }
-
-    [Fact]
-    public void Parse_WithoutEnv_Succeeds()
-    {
-        // --env is now optional (interactive auth with --url is the default)
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\"");
-        Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalParallel_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev --parallel 4");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --parallel 4");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalPageSize_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev --page-size 1000");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --page-size 1000");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalIncludeFiles_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev --include-files");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --include-files");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalJson_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev --json");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --json");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalDebug_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --env Dev --debug");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" -o \"{_tempOutputFile}\" --debug");
         Assert.Empty(result.Errors);
     }
 

@@ -120,64 +120,56 @@ public class ImportCommandTests : IDisposable
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse($"--data \"{_tempDataFile}\" --env Dev");
+        var result = _command.Parse($"--data \"{_tempDataFile}\"");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev");
+        var result = _command.Parse($"-d \"{_tempDataFile}\"");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingData_HasError()
     {
-        var result = _command.Parse("--env Dev");
+        var result = _command.Parse("");
         Assert.NotEmpty(result.Errors);
-    }
-
-    [Fact]
-    public void Parse_WithoutEnv_Succeeds()
-    {
-        // --env is now optional (interactive auth with --url is the default)
-        var result = _command.Parse($"-d \"{_tempDataFile}\"");
-        Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalVerbose_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --verbose");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --verbose");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalVerboseShortAlias_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev -v");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" -v");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassPlugins_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --bypass-plugins");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --bypass-plugins");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassFlows_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --bypass-flows");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalContinueOnError_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --continue-on-error");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --continue-on-error");
         Assert.Empty(result.Errors);
     }
 
@@ -187,21 +179,21 @@ public class ImportCommandTests : IDisposable
     [InlineData("Upsert")]
     public void Parse_WithValidMode_Succeeds(string mode)
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --mode {mode}");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithInvalidMode_HasError()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --mode Invalid");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode Invalid");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithAllBypassOptions_Succeeds()
     {
-        var result = _command.Parse($"-d \"{_tempDataFile}\" --env Dev --bypass-plugins --bypass-flows");
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --bypass-plugins --bypass-flows");
         Assert.Empty(result.Errors);
     }
 

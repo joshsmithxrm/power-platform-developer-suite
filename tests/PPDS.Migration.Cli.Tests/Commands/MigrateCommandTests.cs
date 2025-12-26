@@ -49,6 +49,22 @@ public class MigrateCommandTests : IDisposable
     }
 
     [Fact]
+    public void Create_HasRequiredSourceUrlOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--source-url");
+        Assert.NotNull(option);
+        Assert.True(option.Required);
+    }
+
+    [Fact]
+    public void Create_HasRequiredTargetUrlOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--target-url");
+        Assert.NotNull(option);
+        Assert.True(option.Required);
+    }
+
+    [Fact]
     public void Create_HasOptionalTempDirOption()
     {
         var option = _command.Options.FirstOrDefault(o => o.Name == "--temp-dir");
@@ -104,91 +120,91 @@ public class MigrateCommandTests : IDisposable
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
-        var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --source-env Dev --target-env QA");
+        var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithShortAliases_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_MissingSchema_HasError()
     {
-        var result = _command.Parse("--source-env Dev --target-env QA");
+        var result = _command.Parse("--source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
-    public void Parse_MissingSourceEnv_HasError()
+    public void Parse_MissingSourceUrl_HasError()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --target-env QA");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --target-url https://qa.crm.dynamics.com");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
-    public void Parse_MissingTargetEnv_HasError()
+    public void Parse_MissingTargetUrl_HasError()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com");
         Assert.NotEmpty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalTempDir_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --temp-dir \"{Path.GetTempPath()}\"");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --temp-dir \"{Path.GetTempPath()}\"");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalVerbose_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --verbose");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --verbose");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalVerboseShortAlias_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA -v");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com -v");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassPlugins_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --bypass-plugins");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --bypass-plugins");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalBypassFlows_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --bypass-flows");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithAllBypassOptions_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --bypass-plugins --bypass-flows");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --bypass-plugins --bypass-flows");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalJson_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --json");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --json");
         Assert.Empty(result.Errors);
     }
 
     [Fact]
     public void Parse_WithOptionalDebug_Succeeds()
     {
-        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-env Dev --target-env QA --debug");
+        var result = _command.Parse($"-s \"{_tempSchemaFile}\" --source-url https://dev.crm.dynamics.com --target-url https://qa.crm.dynamics.com --debug");
         Assert.Empty(result.Errors);
     }
 
