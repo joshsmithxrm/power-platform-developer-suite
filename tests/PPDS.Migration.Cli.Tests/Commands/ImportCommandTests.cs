@@ -139,10 +139,11 @@ public class ImportCommandTests : IDisposable
     }
 
     [Fact]
-    public void Parse_MissingEnv_HasError()
+    public void Parse_WithoutEnv_Succeeds()
     {
+        // --env is now optional (interactive auth with --url is the default)
         var result = _command.Parse($"-d \"{_tempDataFile}\"");
-        Assert.NotEmpty(result.Errors);
+        Assert.Empty(result.Errors);
     }
 
     [Fact]

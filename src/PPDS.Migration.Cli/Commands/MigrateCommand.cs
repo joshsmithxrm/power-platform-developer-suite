@@ -157,10 +157,11 @@ public static class MigrateCommand
             AuthResolver.AuthResult targetAuthResult;
             try
             {
-                // For config/auto modes, AuthResolver returns a marker with Url=null
+                // For config mode, AuthResolver returns a marker with Url=null
                 // For interactive/managed modes, AuthResolver looks up URL from config
-                sourceAuthResult = AuthResolver.Resolve(authMode, sourceEnv, configuration);
-                targetAuthResult = AuthResolver.Resolve(authMode, targetEnv, configuration);
+                // Note: --url is not used for migrate since we need different URLs for source/target
+                sourceAuthResult = AuthResolver.Resolve(authMode, url: null, sourceEnv, configuration);
+                targetAuthResult = AuthResolver.Resolve(authMode, url: null, targetEnv, configuration);
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {

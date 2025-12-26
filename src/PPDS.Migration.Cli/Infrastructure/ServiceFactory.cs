@@ -329,7 +329,7 @@ public static class ServiceFactory
             AuthMode.Env => CreateProviderFromEnvVars(authResult, verbose, debug),
             AuthMode.Interactive => CreateProviderWithInteractiveAuth(authResult.Url!, verbose, debug),
             AuthMode.Managed => CreateProviderWithManagedIdentity(authResult.Url!, verbose, debug),
-            AuthMode.Config or AuthMode.Auto when configuration != null && !string.IsNullOrEmpty(environmentName)
+            AuthMode.Config when configuration != null && !string.IsNullOrEmpty(environmentName)
                 => CreateProviderFromConfig(configuration, environmentName, verbose, debug),
             _ => throw new InvalidOperationException($"Cannot create provider for auth mode {authMode}")
         };

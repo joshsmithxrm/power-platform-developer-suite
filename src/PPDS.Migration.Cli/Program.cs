@@ -10,12 +10,21 @@ namespace PPDS.Migration.Cli;
 public static class Program
 {
     /// <summary>
+    /// Global option for Dataverse environment URL.
+    /// </summary>
+    public static readonly Option<string?> UrlOption = new("--url")
+    {
+        Description = "Dataverse environment URL (e.g., https://org.crm.dynamics.com)",
+        Recursive = true
+    };
+
+    /// <summary>
     /// Global option for authentication mode.
     /// </summary>
     public static readonly Option<AuthMode> AuthOption = new("--auth")
     {
-        Description = "Authentication mode: auto (default), config, env, interactive, managed",
-        DefaultValueFactory = _ => AuthMode.Auto,
+        Description = "Authentication mode: interactive (default), config, env, managed",
+        DefaultValueFactory = _ => AuthMode.Interactive,
         Recursive = true
     };
 
@@ -33,6 +42,7 @@ public static class Program
         var rootCommand = new RootCommand("PPDS Migration CLI - High-performance Dataverse data migration tool");
 
         // Add global options (Recursive = true makes it available to all subcommands)
+        rootCommand.Options.Add(UrlOption);
         rootCommand.Options.Add(AuthOption);
         rootCommand.Options.Add(SecretsIdOption);
 

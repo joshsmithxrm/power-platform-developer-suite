@@ -86,10 +86,9 @@ public static class ImportCommand
             DefaultValueFactory = _ => false
         };
 
-        var envOption = new Option<string>("--env")
+        var envOption = new Option<string?>("--env")
         {
-            Description = "Environment name from configuration (e.g., Dev, QA, Prod)",
-            Required = true
+            Description = "Environment name from configuration (e.g., Dev, QA, Prod)"
         };
         // Add tab completion for environment names from configuration
         envOption.CompletionSources.Add(ctx =>
@@ -130,6 +129,7 @@ public static class ImportCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var data = parseResult.GetValue(dataOption)!;
+            var url = parseResult.GetValue(Program.UrlOption);
             var env = parseResult.GetValue(envOption);
             var config = parseResult.GetValue(configOption);
             var secretsId = parseResult.GetValue(Program.SecretsIdOption);
@@ -144,25 +144,25 @@ public static class ImportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
+            // Validate --auth config requires --env
+            if (authMode == AuthMode.Config && string.IsNullOrEmpty(env))
+            {
+                ConsoleOutput.WriteError("--env is required when using --auth config.", json);
+                return ExitCodes.InvalidArguments;
+            }
+
             // Resolve authentication based on mode
             AuthResolver.AuthResult authResult;
             IConfiguration? configuration = null;
             try
             {
-                // Build configuration if needed (for config mode or auto-detect)
-                if (authMode == AuthMode.Config || authMode == AuthMode.Auto)
+                // Build configuration if needed (for config mode or when using --env)
+                if (authMode == AuthMode.Config || !string.IsNullOrEmpty(env))
                 {
-                    try
-                    {
-                        configuration = ConfigurationHelper.Build(config?.FullName, secretsId);
-                    }
-                    catch (FileNotFoundException) when (authMode == AuthMode.Auto)
-                    {
-                        // In auto mode, missing config is OK if env vars are set
-                    }
+                    configuration = ConfigurationHelper.Build(config?.FullName, secretsId);
                 }
 
-                authResult = AuthResolver.Resolve(authMode, env, configuration);
+                authResult = AuthResolver.Resolve(authMode, url, env, configuration);
             }
             catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
             {

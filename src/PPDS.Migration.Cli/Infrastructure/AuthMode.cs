@@ -6,12 +6,13 @@ namespace PPDS.Migration.Cli.Infrastructure;
 public enum AuthMode
 {
     /// <summary>
-    /// Auto-detect: tries environment variables first, then configuration files.
+    /// Interactive device code flow - opens browser for authentication.
+    /// This is the default mode for development.
     /// </summary>
-    Auto,
+    Interactive,
 
     /// <summary>
-    /// Use appsettings.json + User Secrets (default for development).
+    /// Use appsettings.json + User Secrets. Requires --env to specify environment.
     /// </summary>
     Config,
 
@@ -19,11 +20,6 @@ public enum AuthMode
     /// Use environment variables only (DATAVERSE__* prefix).
     /// </summary>
     Env,
-
-    /// <summary>
-    /// Interactive device code flow - opens browser for authentication.
-    /// </summary>
-    Interactive,
 
     /// <summary>
     /// Azure Managed Identity - for Azure-hosted workloads.
