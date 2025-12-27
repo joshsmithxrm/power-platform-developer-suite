@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Resilience;
 using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Progress;
 
@@ -83,6 +85,12 @@ public static class ServiceFactory
         // Register the connection pool with device code authentication
         services.AddSingleton<IDataverseConnectionPool>(sp =>
             new DeviceCodeConnectionPool(new Uri(url), tokenProvider.GetTokenAsync));
+
+        // Register services that are normally registered by AddDataverseConnectionPool
+        // but we bypass that since we create the pool manually for interactive auth
+        services.AddSingleton<IThrottleTracker, ThrottleTracker>();
+        services.AddSingleton<IAdaptiveRateController, AdaptiveRateController>();
+        services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
 
         services.AddDataverseMigration();
         return services.BuildServiceProvider();

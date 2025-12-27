@@ -48,3 +48,6 @@ Thumbs.db
 # Claude Code settings (local)
 .claude/settings.local.json
 *.local.json
+
+# Temporary artifacts (testing, exports, logs)
+tmp/
