@@ -25,6 +25,7 @@ ppds-migrate --version
 | `migrate` | Migrate data from source to target environment |
 | `schema generate` | Generate schema from Dataverse metadata |
 | `schema list` | List available entities |
+| `users generate` | Generate user mapping file for cross-environment migration |
 | `config list` | List available environments from configuration |
 
 ## Configuration
@@ -213,6 +214,38 @@ Options:
 
 ```bash
 ppds-migrate schema list --env Dev --filter "account*"
+```
+
+### Generate User Mapping
+
+Generate a user mapping file for cross-environment migrations. Maps users by Azure AD Object ID (preferred) or domain name fallback.
+
+```bash
+# Interactive auth mode
+ppds-migrate users generate \
+  --source-url "https://dev.crm.dynamics.com" \
+  --target-url "https://qa.crm.dynamics.com" \
+  --output ./user-mapping.xml
+
+# Analyze mode (preview without generating file)
+ppds-migrate users generate \
+  --source-url "https://dev.crm.dynamics.com" \
+  --target-url "https://qa.crm.dynamics.com" \
+  --output ./user-mapping.xml \
+  --analyze
+```
+
+Options:
+- `--source-url` (required) - Source environment URL
+- `--target-url` (required) - Target environment URL
+- `--output`, `-o` (required) - Output user mapping XML file path
+- `--analyze` - Preview user differences without generating file
+- `--json` - Output as JSON
+- `--verbose`, `-v` - Verbose output
+
+Use the generated mapping file with import:
+```bash
+ppds-migrate import --data ./data.zip --user-mapping ./user-mapping.xml
 ```
 
 ### List Environments

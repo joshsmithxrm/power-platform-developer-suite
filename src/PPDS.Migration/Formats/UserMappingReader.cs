@@ -112,7 +112,7 @@ namespace PPDS.Migration.Formats
                     continue;
                 }
 
-                collection.Mappings[sourceId] = new UserMapping
+                collection.Mappings[sourceId] = new Models.UserMapping
                 {
                     SourceUserId = sourceId,
                     SourceUserName = mappingElement.Attribute("sourceName")?.Value,

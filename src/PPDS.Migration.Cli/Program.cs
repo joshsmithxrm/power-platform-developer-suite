@@ -43,6 +43,7 @@ public static class Program
         rootCommand.Subcommands.Add(AnalyzeCommand.Create());
         rootCommand.Subcommands.Add(MigrateCommand.Create());
         rootCommand.Subcommands.Add(SchemaCommand.Create());
+        rootCommand.Subcommands.Add(UsersCommand.Create());
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();
