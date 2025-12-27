@@ -1,6 +1,7 @@
 # ADR-0003: Throttle-Aware Connection Selection
 
 **Status:** Accepted
+**Date:** 2025-12-22
 **Applies to:** PPDS.Dataverse
 
 ## Context

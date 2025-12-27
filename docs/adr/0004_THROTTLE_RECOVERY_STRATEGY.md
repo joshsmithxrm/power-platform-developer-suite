@@ -1,6 +1,7 @@
 # ADR-0004: Throttle Recovery Strategy
 
-**Status:** Accepted (with known limitation)
+**Status:** Accepted
+**Date:** 2025-12-22
 **Applies to:** PPDS.Dataverse
 
 ## Context
@@ -42,40 +43,18 @@ return GetConnectionFromPoolCore(connectionName, options);
 
 This prevents `PoolExhaustedException` when many requests are waiting for throttle recovery.
 
-## Known Limitation
+## Subsequent Enhancement
 
-**The current implementation does not implement adaptive scaling after throttle recovery.**
+The limitation of immediate full-parallelism recovery was addressed in **ADR-0006: Execution Time Ceiling**.
 
-Resuming at full parallelism immediately after `Retry-After` can cause:
-- Immediate re-throttling
-- Progressively longer `Retry-After` durations
-- Suboptimal total throughput
+The adaptive rate controller now implements AIMD (Additive Increase, Multiplicative Decrease) with execution time-aware ceilings:
 
-### Optimal Behavior (Future Enhancement)
+- Tracks batch durations via exponential moving average
+- Calculates dynamic parallelism ceiling based on batch time
+- Halves parallelism on throttle, gradually increases on success
+- Configurable via presets: Conservative, Balanced, Aggressive
 
-Microsoft recommends TCP-like congestion control:
-
-```
-After throttle recovery:
-1. Resume at reduced parallelism (e.g., 50%)
-2. Gradually ramp up if successful
-3. Back off immediately if throttled again
-4. Find and maintain sustainable rate
-```
-
-## Planned Enhancement
-
-Adaptive rate control using AIMD (Additive Increase, Multiplicative Decrease) algorithm is designed and ready for implementation.
-
-**See:** [ADAPTIVE_RATE_CONTROL_SPEC.md](../architecture/ADAPTIVE_RATE_CONTROL_SPEC.md)
-
-Key features:
-- Start at 50% of `RecommendedDegreesOfParallelism`
-- Increase gradually after sustained success (batch count + time interval)
-- Halve parallelism on throttle
-- Fast recovery to last-known-good, then cautious probing
-- 5-minute TTL on historical state (matches Microsoft's rolling window)
-- Idle reset for long-running integrations
+**See:** [ADR-0006: Execution Time Ceiling](0006_EXECUTION_TIME_CEILING.md)
 
 ## Consequences
 
@@ -87,23 +66,9 @@ Key features:
 
 ### Negative
 
-- **Suboptimal recovery**: Full parallelism after recovery may cause re-throttling
-- **Extended penalties**: Aggressive resumption can extend `Retry-After` durations
-- **Consumer workaround needed**: For optimal throughput, consumers should manage parallelism externally
-
-### Consumer Workaround
-
-Until adaptive scaling is implemented, consumers can manage parallelism manually:
-
-```csharp
-// Start conservative, let the pool handle throttle waiting
-var options = new BulkOperationOptions
-{
-    MaxParallelBatches = 10 // Lower than RecommendedDegreesOfParallelism
-};
-
-await executor.UpsertMultipleAsync(entities, options);
-```
+- ~~**Suboptimal recovery**~~ - Addressed by ADR-0006 adaptive rate control
+- ~~**Extended penalties**~~ - Addressed by ADR-0006 execution time ceiling
+- ~~**Consumer workaround needed**~~ - No longer required; use presets
 
 ## References
 

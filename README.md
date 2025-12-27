@@ -132,22 +132,17 @@ dotnet tool install -g PPDS.Migration.Cli
 ```
 
 ```bash
-# Set connection via environment variables
-export PPDS_URL="https://org.crm.dynamics.com"
-export PPDS_CLIENT_ID="your-client-id"
-export PPDS_CLIENT_SECRET="your-secret"
+# Interactive auth (default) - opens browser for login
+ppds-migrate export --url https://org.crm.dynamics.com --schema schema.xml --output data.zip
 
-# Analyze schema dependencies
-ppds-migrate analyze --schema schema.xml
-
-# Export data
-ppds-migrate export --schema schema.xml --output data.zip
+# CI/CD with environment variables
+export DATAVERSE__URL="https://org.crm.dynamics.com"
+export DATAVERSE__CLIENTID="your-client-id"
+export DATAVERSE__CLIENTSECRET="your-secret"
+ppds-migrate export --auth env --schema schema.xml --output data.zip
 
 # Import data
-ppds-migrate import --data data.zip --batch-size 1000
-
-# Full migration (uses PPDS_SOURCE_* and PPDS_TARGET_* variables)
-ppds-migrate migrate --schema schema.xml
+ppds-migrate import --url https://org.crm.dynamics.com --data data.zip --mode Upsert
 ```
 
 See [PPDS.Migration.Cli documentation](src/PPDS.Migration.Cli/README.md) for details.
@@ -163,6 +158,8 @@ Key design decisions are documented as ADRs:
 - [ADR-0003: Throttle-Aware Connection Selection](docs/adr/0003_THROTTLE_AWARE_SELECTION.md)
 - [ADR-0004: Throttle Recovery Strategy](docs/adr/0004_THROTTLE_RECOVERY_STRATEGY.md)
 - [ADR-0005: Pool Sizing Per Connection](docs/adr/0005_POOL_SIZING_PER_CONNECTION.md)
+- [ADR-0006: Execution Time Ceiling](docs/adr/0006_EXECUTION_TIME_CEILING.md)
+- [ADR-0007: Connection Source Abstraction](docs/adr/0007_CONNECTION_SOURCE_ABSTRACTION.md)
 
 ## Patterns
 

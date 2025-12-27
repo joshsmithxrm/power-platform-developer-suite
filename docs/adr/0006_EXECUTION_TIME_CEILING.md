@@ -1,6 +1,7 @@
 # ADR-0006: Execution Time Ceiling for Adaptive Rate Control
 
 **Status:** Accepted
+**Date:** 2025-12-24
 **Applies to:** PPDS.Dataverse
 
 ## Context
@@ -106,11 +107,21 @@ This allows:
 
 ### Tuning History
 
+Empirical testing with 42,366 records determined optimal preset values:
+
 | Round | Factor | Threshold | Create | Update | Delete | Issue |
 |-------|--------|-----------|--------|--------|--------|-------|
-| 1 | 250 | 10000 | 542/s ✅ | 118/s ❌ | 78/s ❌ | Threshold too high |
-| 2 | 250 | 9000 | 545/s ✅ | 100/s ❌ | 67/s ❌ | Factor too high |
-| 3 | 200 | 8000 | TBD | TBD | TBD | Current settings |
+| 1 | 250 | 10000 | 542/s ✅ | 118/s ❌ 67 throttles | 78/s ❌ 103 throttles | Threshold too high; delete batches at 9.1s escaped ceiling |
+| 2 | 200 | 8000 | 483/s ✅ | 153/s ✅ 0 throttles | 83/s ❌ 23 throttles | Balanced preset validated for creates/updates |
+| 3 | 180 | 8000 | - | - | 175/s → 87/s ❌ cascade | Factor=180 gave zero headroom at ceiling |
+| 4 | 140 | 6000 | - | - | ✅ 0 throttles | Conservative preset: 20% headroom below limit |
+
+**Final validation:**
+- **Balanced** (Factor=200, Threshold=8000): Creates 483/s, Updates 153/s, zero throttles
+- **Conservative** (Factor=140, Threshold=6000): Recommended for deletes and production bulk jobs
+
+**Why Conservative uses Factor=140 (not 180):**
+At Factor=180 with 8.5s batches, ceiling = 180/8.5 = 21, and parallelism ran at 100% of ceiling (20 of 21). When server load spiked, immediate throttle cascade occurred (Retry-After escalating from 37s → 81s). Factor=140 creates ~20% headroom.
 
 ## Consequences
 
@@ -140,5 +151,4 @@ This allows:
 
 - [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits) - Execution time budget details
 - [Optimize performance for bulk operations](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optimize-performance-create-update) - Microsoft's throughput guidance
-- ADR-0004: Throttle Recovery Strategy - Base AIMD implementation
-- [ADAPTIVE_RATE_TUNING_STATUS.md](../ADAPTIVE_RATE_TUNING_STATUS.md) - Detailed tuning history
+- [ADR-0004: Throttle Recovery Strategy](0004_THROTTLE_RECOVERY_STRATEGY.md) - Base AIMD implementation

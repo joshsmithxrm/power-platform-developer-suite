@@ -168,13 +168,16 @@ _logger.LogInformation(
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `MaxPoolSize` | 50 | Maximum total connections |
+| `MaxConnectionsPerUser` | 52 | Connections per Application User |
+| `MaxPoolSize` | 0 | Fixed total (0 = use per-user sizing) |
 | `MinPoolSize` | 5 | Minimum idle connections |
 | `AcquireTimeout` | 30s | Max wait for a connection |
 | `MaxIdleTime` | 5m | Evict idle connections after |
-| `MaxLifetime` | 30m | Recycle connections after |
+| `MaxLifetime` | 60m | Recycle connections after |
 | `DisableAffinityCookie` | true | Distribute across backend nodes |
 | `SelectionStrategy` | ThrottleAware | How to pick connections |
+
+**Note:** By default, pool capacity = `MaxConnectionsPerUser` × number of connections. See [ADR-0005](../adr/0005_POOL_SIZING_PER_CONNECTION.md).
 
 ## Performance Settings Applied Automatically
 
