@@ -143,9 +143,9 @@ namespace PPDS.Migration.Analysis
             }
             foreach (var edge in edges)
             {
-                if (adjacency.ContainsKey(edge.FromEntity))
+                if (adjacency.TryGetValue(edge.FromEntity, out var edgeList))
                 {
-                    adjacency[edge.FromEntity].Add(edge);
+                    edgeList.Add(edge);
                 }
             }
 
@@ -168,14 +168,14 @@ namespace PPDS.Migration.Analysis
                 foreach (var edge in adjacency[v])
                 {
                     var w = edge.ToEntity;
-                    if (!indices.ContainsKey(w))
+                    if (!indices.TryGetValue(w, out var wIndex))
                     {
                         StrongConnect(w);
                         lowLinks[v] = Math.Min(lowLinks[v], lowLinks[w]);
                     }
                     else if (onStack.Contains(w))
                     {
-                        lowLinks[v] = Math.Min(lowLinks[v], indices[w]);
+                        lowLinks[v] = Math.Min(lowLinks[v], wIndex);
                     }
                 }
 
