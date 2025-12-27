@@ -33,9 +33,10 @@ namespace PPDS.Dataverse.BulkOperations
         private const int MaxPoolExhaustionRetries = 3;
 
         /// <summary>
-        /// Maximum number of retries for TVP race condition errors on new tables.
+        /// Maximum number of retries for bulk operation infrastructure race conditions.
+        /// This covers TVP race conditions (SQL 3732/2766) and stored procedure creation race (SQL 2812).
         /// </summary>
-        private const int MaxTvpRetries = 3;
+        private const int MaxBulkInfrastructureRetries = 3;
 
         /// <summary>
         /// Maximum number of retries for SQL deadlock errors.
@@ -575,15 +576,16 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
-        /// Checks if an exception is a TVP race condition error that occurs on newly created tables.
-        /// This happens when parallel bulk operations hit a table before Dataverse has created
-        /// the internal TVP types and stored procedures, or when schema changes occur during operations.
+        /// Checks if an exception is a bulk operation infrastructure race condition error.
+        /// This happens when parallel bulk operations hit a table before Dataverse has fully
+        /// created the internal TVP types and stored procedures, or when schema changes occur.
         /// SQL Error 3732: Cannot drop type because it is being referenced by another object.
         /// SQL Error 2766: The definition for user-defined data type has changed.
+        /// SQL Error 2812: Could not find stored procedure (bulk operation proc not yet created).
         /// </summary>
         /// <param name="exception">The exception to check.</param>
-        /// <returns>True if this is a TVP race condition error.</returns>
-        private static bool IsTvpRaceConditionError(Exception exception)
+        /// <returns>True if this is a bulk operation infrastructure race condition error.</returns>
+        private static bool IsBulkInfrastructureRaceConditionError(Exception exception)
         {
             if (exception is not FaultException<OrganizationServiceFault> faultEx)
             {
@@ -598,12 +600,14 @@ namespace PPDS.Dataverse.BulkOperations
                 return false;
             }
 
-            // Check the message for TVP-related SQL errors:
+            // Check the message for bulk operation infrastructure SQL errors:
             // - 3732: Cannot drop type (TVP in use by another operation)
             // - 2766: Type definition has changed (TVP modified during operation)
+            // - 2812: Could not find stored procedure (bulk proc not yet created)
             var message = fault.Message ?? string.Empty;
             return message.Contains("3732") || message.Contains("Cannot drop type") ||
-                   message.Contains("2766") || message.Contains("definition for user-defined data type");
+                   message.Contains("2766") || message.Contains("definition for user-defined data type") ||
+                   message.Contains("2812") || message.Contains("Could not find stored procedure");
         }
 
         /// <summary>
@@ -776,22 +780,22 @@ namespace PPDS.Dataverse.BulkOperations
 
                     // Continue to next iteration to retry with new connection
                 }
-                catch (Exception ex) when (IsTvpRaceConditionError(ex))
+                catch (Exception ex) when (IsBulkInfrastructureRaceConditionError(ex))
                 {
                     // Exponential backoff: 500ms, 1s, 2s
                     var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
 
                     _logger.LogWarning(
-                        "TVP race condition detected for {Entity}. " +
-                        "This is transient on new tables. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxTvpRetries}",
-                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxTvpRetries);
+                        "Bulk operation infrastructure race condition detected for {Entity}. " +
+                        "This is transient on new tables. Retrying in {Delay}ms. Attempt: {Attempt}/{MaxRetries}",
+                        entityLogicalName, delay.TotalMilliseconds, attempt, MaxBulkInfrastructureRetries);
 
-                    if (attempt >= MaxTvpRetries)
+                    if (attempt >= MaxBulkInfrastructureRetries)
                     {
                         _logger.LogError(
-                            "TVP race condition persisted after {MaxRetries} retries for {Entity}. " +
+                            "Bulk operation infrastructure error persisted after {MaxRetries} retries for {Entity}. " +
                             "This may indicate a schema issue or concurrent schema modification.",
-                            MaxTvpRetries, entityLogicalName);
+                            MaxBulkInfrastructureRetries, entityLogicalName);
                         throw;
                     }
 
