@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
@@ -314,13 +315,47 @@ public static class UsersCommand
         // Create device code token provider for interactive authentication
         var tokenProvider = new DeviceCodeTokenProvider(url);
 
-        // Register the connection pool with device code authentication
-        services.AddSingleton<IDataverseConnectionPool>(sp =>
-            new DeviceCodeConnectionPool(new Uri(url), tokenProvider.GetTokenAsync));
+        // Create ServiceClient with device code authentication
+        var serviceClient = new ServiceClient(
+            new Uri(url),
+            tokenProvider.GetTokenAsync,
+            useUniqueInstance: true);
+
+        if (!serviceClient.IsReady)
+        {
+            var error = serviceClient.LastError ?? "Unknown error";
+            serviceClient.Dispose();
+            throw new InvalidOperationException($"Failed to establish connection. Error: {error}");
+        }
+
+        // Wrap in ServiceClientSource for the connection pool
+        var source = new ServiceClientSource(
+            serviceClient,
+            "Interactive",
+            maxPoolSize: Math.Max(Environment.ProcessorCount * 4, 16));
+
+        // Create pool options
+        var poolOptions = new ConnectionPoolOptions
+        {
+            Enabled = true,
+            MinPoolSize = 0,
+            MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16),
+            DisableAffinityCookie = true
+        };
 
         // Register services that are normally registered by AddDataverseConnectionPool
         services.AddSingleton<IThrottleTracker, ThrottleTracker>();
         services.AddSingleton<IAdaptiveRateController, AdaptiveRateController>();
+
+        // Register the connection pool with the source
+        services.AddSingleton<IDataverseConnectionPool>(sp =>
+            new DataverseConnectionPool(
+                new[] { source },
+                sp.GetRequiredService<IThrottleTracker>(),
+                sp.GetRequiredService<IAdaptiveRateController>(),
+                poolOptions,
+                sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
+
         services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
 
         services.AddDataverseMigration();
