@@ -4,7 +4,6 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
-using static PPDS.Auth.Credentials.JwtClaimsParser;
 
 namespace PPDS.Cli.Commands.Auth;
 
@@ -268,14 +267,10 @@ public static class AuthCommandGroup
                     profile.TenantId = provider.TenantId;
                 }
 
-                // Extract JWT claims for additional user info
-                // Use ClaimsPrincipal (from ID token) first, then fall back to access token
-                var debugClaims = Environment.GetEnvironmentVariable("PPDS_DEBUG_CLAIMS") == "1";
-                var claims = JwtClaimsParser.Parse(provider.IdTokenClaims, provider.AccessToken, debug: debugClaims);
+                // Extract PUID from JWT claims
+                var claims = JwtClaimsParser.Parse(provider.IdTokenClaims, provider.AccessToken);
                 if (claims != null)
                 {
-                    profile.TenantCountry = claims.TenantCountry;
-                    profile.UserCountry = claims.UserCountry;
                     profile.Puid = claims.Puid;
                 }
 
@@ -319,29 +314,6 @@ public static class AuthCommandGroup
                             Type = resolved.EnvironmentType,
                             Region = resolved.Region
                         };
-
-                        // Re-authenticate to the actual environment to get country claims
-                        // (Global Discovery tokens don't include tenant_ctry/ctry claims)
-                        Console.WriteLine("Validating environment connection...");
-                        try
-                        {
-                            using var envClient = await provider.CreateServiceClientAsync(
-                                resolved.ApiUrl, cancellationToken, forceInteractive: false);
-
-                            // Extract claims from environment-specific token/ID token
-                            var envClaims = JwtClaimsParser.Parse(provider.IdTokenClaims, provider.AccessToken, debug: debugClaims);
-                            if (envClaims != null)
-                            {
-                                if (!string.IsNullOrEmpty(envClaims.TenantCountry))
-                                    profile.TenantCountry = envClaims.TenantCountry;
-                                if (!string.IsNullOrEmpty(envClaims.UserCountry))
-                                    profile.UserCountry = envClaims.UserCountry;
-                            }
-                        }
-                        catch
-                        {
-                            // Silently ignore - country claims are optional
-                        }
                     }
                     catch (Exception ex)
                     {
@@ -1148,11 +1120,9 @@ public static class AuthCommandGroup
                         type = cacheType.ToString(),
                         cloud = profile.Cloud.ToString(),
                         tenantId = profile.TenantId,
-                        tenantCountry = profile.TenantCountry,
                         user = profile.Username,
                         puid = profile.Puid,
                         objectId = profile.ObjectId,
-                        userCountry = profile.UserCountry,
                         applicationId = profile.ApplicationId,
                         authority = CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId),
                         tokenExpires = profile.TokenExpiresOn,
@@ -1200,11 +1170,6 @@ public static class AuthCommandGroup
                     Console.WriteLine($"Tenant Id:                   {profile.TenantId}");
                 }
 
-                if (!string.IsNullOrEmpty(profile.TenantCountry))
-                {
-                    Console.WriteLine($"Tenant Country:              {profile.TenantCountry}");
-                }
-
                 if (!string.IsNullOrEmpty(profile.Username))
                 {
                     Console.WriteLine($"User:                        {profile.Username}");
@@ -1218,11 +1183,6 @@ public static class AuthCommandGroup
                 if (!string.IsNullOrEmpty(profile.ObjectId))
                 {
                     Console.WriteLine($"Entra ID Object Id:          {profile.ObjectId}");
-                }
-
-                if (!string.IsNullOrEmpty(profile.UserCountry))
-                {
-                    Console.WriteLine($"User Country/Region:         {profile.UserCountry}");
                 }
 
                 if (!string.IsNullOrEmpty(profile.ApplicationId))

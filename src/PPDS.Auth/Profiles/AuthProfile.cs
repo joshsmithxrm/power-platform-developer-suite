@@ -160,22 +160,10 @@ public sealed class AuthProfile
     public DateTimeOffset? TokenExpiresOn { get; set; }
 
     /// <summary>
-    /// Gets or sets the tenant country code from the JWT 'tenant_ctry' claim.
-    /// </summary>
-    [JsonPropertyName("tenantCountry")]
-    public string? TenantCountry { get; set; }
-
-    /// <summary>
     /// Gets or sets the user's PUID from the JWT 'puid' claim.
     /// </summary>
     [JsonPropertyName("puid")]
     public string? Puid { get; set; }
-
-    /// <summary>
-    /// Gets or sets the user country/region code from the JWT 'ctry' claim.
-    /// </summary>
-    [JsonPropertyName("userCountry")]
-    public string? UserCountry { get; set; }
 
     #endregion
 
