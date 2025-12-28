@@ -124,7 +124,7 @@ public static class ImportCommand
     }
 
     private static async Task<int> ExecuteAsync(
-        string? profile,
+        string? profileName,
         string? environment,
         RateControlPreset ratePreset,
         FileInfo data,
@@ -143,8 +143,9 @@ public static class ImportCommand
 
         try
         {
+            // Factory handles environment resolution automatically
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile,
+                profileName,
                 environment,
                 verbose,
                 debug,

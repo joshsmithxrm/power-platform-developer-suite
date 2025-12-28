@@ -1,7 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Infrastructure;
 using PPDS.Dataverse.Pooling;
@@ -131,52 +130,21 @@ public static class UsersCommand
     {
         try
         {
-            // Load profiles
-            using var store = new ProfileStore();
-            var collection = await store.LoadAsync(cancellationToken);
-
-            var sourceProfile = string.IsNullOrWhiteSpace(sourceProfileName)
-                ? collection.ActiveProfile
-                    ?? throw new InvalidOperationException(
-                        "No active profile. Use 'ppds auth create' to create a profile, " +
-                        "or specify --source-profile.")
-                : collection.GetByName(sourceProfileName)
-                    ?? throw new InvalidOperationException($"Source profile '{sourceProfileName}' not found.");
-
-            var targetProfile = string.IsNullOrWhiteSpace(targetProfileName)
-                ? collection.ActiveProfile
-                    ?? throw new InvalidOperationException(
-                        "No active profile. Use 'ppds auth create' to create a profile, " +
-                        "or specify --target-profile.")
-                : collection.GetByName(targetProfileName)
-                    ?? throw new InvalidOperationException($"Target profile '{targetProfileName}' not found.");
-
-            // Resolve environments (with caching if same profile)
-            if (!json)
-            {
-                Console.WriteLine("Resolving environments...");
-            }
-
-            var (resolvedSource, resolvedTarget) = await EnvironmentResolverHelper.ResolveSourceTargetAsync(
-                sourceProfile, targetProfile, sourceEnv, targetEnv, cancellationToken);
-
-            // Create service providers with resolved URLs and display names
+            // Create service providers - factory handles environment resolution automatically
             await using var sourceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 sourceProfileName,
-                resolvedSource.Url,
+                sourceEnv,
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                environmentDisplayName: resolvedSource.DisplayName,
                 cancellationToken: cancellationToken);
 
             await using var targetProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 targetProfileName,
-                resolvedTarget.Url,
+                targetEnv,
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                environmentDisplayName: resolvedTarget.DisplayName,
                 cancellationToken: cancellationToken);
 
             if (!json)

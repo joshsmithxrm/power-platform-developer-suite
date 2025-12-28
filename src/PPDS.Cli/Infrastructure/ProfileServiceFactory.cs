@@ -43,12 +43,11 @@ public static class ProfileServiceFactory
     /// Creates a service provider using a single profile.
     /// </summary>
     /// <param name="profileName">Profile name (null for active profile).</param>
-    /// <param name="environmentOverride">Environment URL override.</param>
+    /// <param name="environmentOverride">Environment override - accepts URL, friendly name, unique name, or ID.</param>
     /// <param name="verbose">Enable verbose logging.</param>
     /// <param name="debug">Enable debug logging.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
     /// <param name="ratePreset">Rate control preset for throttle management.</param>
-    /// <param name="environmentDisplayName">Display name for the environment (if known from resolution).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured service provider.</returns>
     public static async Task<ServiceProvider> CreateFromProfileAsync(
@@ -58,7 +57,6 @@ public static class ProfileServiceFactory
         bool debug = false,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         RateControlPreset ratePreset = RateControlPreset.Balanced,
-        string? environmentDisplayName = null,
         CancellationToken cancellationToken = default)
     {
         var store = new ProfileStore();
@@ -78,15 +76,9 @@ public static class ProfileServiceFactory
                 ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
         }
 
-        var envUrl = environmentOverride ?? profile.Environment?.Url;
-        if (string.IsNullOrWhiteSpace(envUrl))
-        {
-            throw new InvalidOperationException(
-                $"Profile '{profile.DisplayIdentifier}' has no environment selected.\n\n" +
-                "To fix this, either:\n" +
-                "  1. Select an environment: ppds env select <name>\n" +
-                "  2. Specify on command: --environment <url>");
-        }
+        // Resolve environment - handles URL, name, ID, or uses profile's saved environment
+        var (envUrl, envDisplayName) = await ResolveEnvironmentAsync(
+            profile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
         var source = new ProfileConnectionSource(profile, envUrl, 52, deviceCodeCallback);
         var adapter = new ProfileConnectionSourceAdapter(source);
@@ -95,17 +87,53 @@ public static class ProfileServiceFactory
         {
             Profile = profile,
             EnvironmentUrl = envUrl,
-            EnvironmentDisplayName = environmentDisplayName ?? profile.Environment?.DisplayName
+            EnvironmentDisplayName = envDisplayName
         };
 
         return CreateProviderFromSources(new[] { adapter }, connectionInfo, verbose, debug, ratePreset);
     }
 
     /// <summary>
+    /// Resolves an environment identifier to a URL and display name.
+    /// </summary>
+    private static async Task<(string Url, string? DisplayName)> ResolveEnvironmentAsync(
+        AuthProfile profile,
+        string? environmentOverride,
+        CancellationToken cancellationToken)
+    {
+        // No override - use profile's saved environment
+        if (string.IsNullOrWhiteSpace(environmentOverride))
+        {
+            if (string.IsNullOrWhiteSpace(profile.Environment?.Url))
+            {
+                throw new InvalidOperationException(
+                    $"Profile '{profile.DisplayIdentifier}' has no environment selected.\n\n" +
+                    "To fix this, either:\n" +
+                    "  1. Select an environment: ppds env select <name>\n" +
+                    "  2. Specify on command: --environment <url>");
+            }
+            return (profile.Environment.Url, profile.Environment.DisplayName);
+        }
+
+        // Check if it's already a URL
+        if (Uri.TryCreate(environmentOverride, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == "https" || uri.Scheme == "http"))
+        {
+            return (environmentOverride.TrimEnd('/'), uri.Host);
+        }
+
+        // Resolve name/ID to URL using GlobalDiscoveryService
+        var resolved = await EnvironmentResolverHelper.ResolveAsync(
+            profile, environmentOverride, cancellationToken).ConfigureAwait(false);
+
+        return (resolved.Url, resolved.DisplayName);
+    }
+
+    /// <summary>
     /// Creates a service provider using multiple profiles for pooling.
     /// </summary>
     /// <param name="profileNames">Comma-separated profile names.</param>
-    /// <param name="environmentOverride">Environment URL override (required if profiles have different environments).</param>
+    /// <param name="environmentOverride">Environment override - accepts URL, friendly name, unique name, or ID.</param>
     /// <param name="verbose">Enable verbose logging.</param>
     /// <param name="debug">Enable debug logging.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
@@ -123,35 +151,38 @@ public static class ProfileServiceFactory
     {
         var names = ConnectionResolver.ParseProfileString(profileNames);
 
-        if (names.Count == 0)
+        // Single or no profile - delegate to single profile method (which handles resolution)
+        if (names.Count <= 1)
         {
             return await CreateFromProfileAsync(
-                null, environmentOverride, verbose, debug, deviceCodeCallback, ratePreset,
-                cancellationToken: cancellationToken)
+                names.Count == 0 ? null : names[0],
+                environmentOverride, verbose, debug, deviceCodeCallback, ratePreset,
+                cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        if (names.Count == 1)
-        {
-            return await CreateFromProfileAsync(
-                names[0], environmentOverride, verbose, debug, deviceCodeCallback, ratePreset,
-                cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-        }
+        // Multiple profiles - need to resolve environment first using the first profile
+        var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
 
+        var firstProfile = collection.GetByName(names[0])
+            ?? throw new InvalidOperationException($"Profile '{names[0]}' not found.");
+
+        var (envUrl, envDisplayName) = await ResolveEnvironmentAsync(
+            firstProfile, environmentOverride, cancellationToken).ConfigureAwait(false);
+
+        // Now resolve all profiles with the resolved URL
         using var resolver = new ConnectionResolver(deviceCodeCallback: deviceCodeCallback);
-        var sources = await resolver.ResolveMultipleAsync(names, environmentOverride, cancellationToken: cancellationToken)
+        var sources = await resolver.ResolveMultipleAsync(names, envUrl, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         var adapters = sources.Select(s => new ProfileConnectionSourceAdapter(s)).ToArray();
 
-        // For multi-profile, use the first profile's info for header display
-        var firstSource = sources[0];
         var connectionInfo = new ResolvedConnectionInfo
         {
-            Profile = firstSource.Profile,
-            EnvironmentUrl = firstSource.EnvironmentUrl,
-            EnvironmentDisplayName = firstSource.Profile.Environment?.DisplayName
+            Profile = firstProfile,
+            EnvironmentUrl = envUrl,
+            EnvironmentDisplayName = envDisplayName
         };
 
         return CreateProviderFromSources(adapters, connectionInfo, verbose, debug, ratePreset);
