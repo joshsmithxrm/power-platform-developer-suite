@@ -24,26 +24,35 @@ namespace PPDS.Dataverse.Resilience
         /// </summary>
         internal static PresetDefaults GetPresetDefaults(RateControlPreset preset) => preset switch
         {
+            // Conservative: 60% of request rate limit (12 of 20 req/sec)
+            // Prioritizes avoiding throttles over throughput
             RateControlPreset.Conservative => new PresetDefaults(
                 ExecutionTimeCeilingFactor: 140,
                 SlowBatchThresholdMs: 6_000,
                 DecreaseFactor: 0.4,
                 StabilizationBatches: 5,
-                MinIncreaseIntervalSeconds: 8),
+                MinIncreaseIntervalSeconds: 8,
+                RequestRateCeilingFactor: 12.0),
 
+            // Balanced: 80% of request rate limit (16 of 20 req/sec)
+            // Good throughput with reasonable safety margin
             RateControlPreset.Balanced => new PresetDefaults(
                 ExecutionTimeCeilingFactor: 200,
                 SlowBatchThresholdMs: 8_000,
                 DecreaseFactor: 0.5,
                 StabilizationBatches: 3,
-                MinIncreaseIntervalSeconds: 5),
+                MinIncreaseIntervalSeconds: 5,
+                RequestRateCeilingFactor: 16.0),
 
+            // Aggressive: 90% of request rate limit (18 of 20 req/sec)
+            // Maximum throughput, accepts occasional throttles
             RateControlPreset.Aggressive => new PresetDefaults(
                 ExecutionTimeCeilingFactor: 320,
                 SlowBatchThresholdMs: 11_000,
                 DecreaseFactor: 0.6,
                 StabilizationBatches: 2,
-                MinIncreaseIntervalSeconds: 3),
+                MinIncreaseIntervalSeconds: 3,
+                RequestRateCeilingFactor: 18.0),
 
             _ => GetPresetDefaults(RateControlPreset.Balanced)
         };
@@ -53,7 +62,8 @@ namespace PPDS.Dataverse.Resilience
             int SlowBatchThresholdMs,
             double DecreaseFactor,
             int StabilizationBatches,
-            int MinIncreaseIntervalSeconds);
+            int MinIncreaseIntervalSeconds,
+            double RequestRateCeilingFactor);
 
         #endregion
 
@@ -174,6 +184,33 @@ namespace PPDS.Dataverse.Resilience
             set => _minIncreaseInterval = value;
         }
 
+        private double? _requestRateCeilingFactor;
+
+        /// <summary>
+        /// Gets or sets the request rate ceiling factor (target requests per second).
+        /// The ceiling is calculated as: Factor × AverageBatchTimeSeconds.
+        /// This protects against hitting the 6,000 requests per 5-minute window limit
+        /// (which equals 20 requests/second sustained).
+        /// Lower values are more conservative.
+        /// If not set, uses the value from <see cref="Preset"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The request rate ceiling complements the execution time ceiling:
+        /// - Execution time ceiling protects slow operations (batches &gt; 8s)
+        /// - Request rate ceiling protects fast operations (batches &lt; 8s)
+        /// </para>
+        /// <para>
+        /// Preset defaults: Conservative=12, Balanced=16, Aggressive=18
+        /// (representing 60%, 80%, and 90% of the 20 req/sec limit)
+        /// </para>
+        /// </remarks>
+        public double RequestRateCeilingFactor
+        {
+            get => _requestRateCeilingFactor ?? GetPresetDefaults(Preset).RequestRateCeilingFactor;
+            set => _requestRateCeilingFactor = value;
+        }
+
         #endregion
 
         #region Configuration Binding Fix
@@ -213,6 +250,11 @@ namespace PPDS.Dataverse.Resilience
             {
                 _minIncreaseInterval = null;
             }
+
+            if (!configuredKeys.Contains(nameof(RequestRateCeilingFactor)))
+            {
+                _requestRateCeilingFactor = null;
+            }
         }
 
         #endregion
@@ -243,6 +285,11 @@ namespace PPDS.Dataverse.Resilience
         /// Returns true if MinIncreaseInterval was explicitly set (not from preset).
         /// </summary>
         internal bool IsMinIncreaseIntervalOverridden => _minIncreaseInterval.HasValue;
+
+        /// <summary>
+        /// Returns true if RequestRateCeilingFactor was explicitly set (not from preset).
+        /// </summary>
+        internal bool IsRequestRateCeilingFactorOverridden => _requestRateCeilingFactor.HasValue;
 
         /// <summary>
         /// Formats a value with an indicator of whether it's from preset or explicitly overridden.

@@ -40,10 +40,11 @@ namespace PPDS.Dataverse.Resilience
             // Log effective configuration with override indicators
             // This helps operators verify their config is applied correctly
             _logger.LogInformation(
-                "Adaptive rate control: Preset={Preset}, Factor={Factor}, Threshold={Threshold}ms, " +
-                "DecreaseFactor={DecreaseFactor}, Stabilization={Stabilization}, Interval={Interval}s",
+                "Adaptive rate control: Preset={Preset}, ExecTimeFactor={ExecTimeFactor}, RequestRateFactor={RequestRateFactor}, " +
+                "SlowThreshold={Threshold}ms, DecreaseFactor={DecreaseFactor}, Stabilization={Stabilization}, Interval={Interval}s",
                 _options.Preset,
                 AdaptiveRateOptions.FormatValue(_options.ExecutionTimeCeilingFactor, _options.IsExecutionTimeCeilingFactorOverridden),
+                AdaptiveRateOptions.FormatValue(_options.RequestRateCeilingFactor, _options.IsRequestRateCeilingFactorOverridden),
                 AdaptiveRateOptions.FormatValue(_options.SlowBatchThresholdMs, _options.IsSlowBatchThresholdMsOverridden),
                 AdaptiveRateOptions.FormatValue(_options.DecreaseFactor, _options.IsDecreaseFactorOverridden),
                 AdaptiveRateOptions.FormatValue(_options.StabilizationBatches, _options.IsStabilizationBatchesOverridden),
@@ -124,10 +125,11 @@ namespace PPDS.Dataverse.Resilience
                     state.LastKnownGoodTimestamp = DateTime.UtcNow;
                 }
 
-                // Calculate effective ceiling (minimum of hard ceiling, throttle ceiling, and execution time ceiling)
+                // Calculate effective ceiling (minimum of all applicable ceilings)
                 var effectiveCeiling = state.CeilingParallelism;
                 var throttleCeilingActive = false;
                 var execTimeCeilingActive = false;
+                var requestRateCeilingActive = false;
 
                 if (state.ThrottleCeilingExpiry.HasValue && state.ThrottleCeilingExpiry > DateTime.UtcNow && state.ThrottleCeiling.HasValue)
                 {
@@ -135,8 +137,16 @@ namespace PPDS.Dataverse.Resilience
                     throttleCeilingActive = true;
                 }
 
-                // Only apply execution time ceiling for slow batches (protects updates/deletes,
-                // allows fast creates to run at full parallelism)
+                // Request rate ceiling: Always applied when available
+                // Protects fast operations from hitting the 6,000 requests/5-min limit
+                if (state.RequestRateCeiling.HasValue)
+                {
+                    effectiveCeiling = Math.Min(effectiveCeiling, state.RequestRateCeiling.Value);
+                    requestRateCeilingActive = state.RequestRateCeiling.Value < state.CeilingParallelism;
+                }
+
+                // Execution time ceiling: Only apply for slow batches
+                // Protects slow operations from exhausting the 20-min execution time budget
                 if (state.ExecutionTimeCeiling.HasValue &&
                     state.BatchDurationEmaMs.HasValue &&
                     state.BatchDurationEmaMs.Value >= _options.SlowBatchThresholdMs)
@@ -167,6 +177,8 @@ namespace PPDS.Dataverse.Resilience
                     var ceilingNotes = new System.Collections.Generic.List<string>();
                     if (throttleCeilingActive)
                         ceilingNotes.Add($"throttle ceiling until {state.ThrottleCeilingExpiry:HH:mm:ss}");
+                    if (requestRateCeilingActive)
+                        ceilingNotes.Add($"request rate ceiling {state.RequestRateCeiling}");
                     if (execTimeCeilingActive)
                         ceilingNotes.Add($"exec time ceiling {state.ExecutionTimeCeiling}");
 
@@ -273,24 +285,40 @@ namespace PPDS.Dataverse.Resilience
 
                 state.BatchDurationSampleCount++;
 
-                // Calculate execution time ceiling once we have enough samples
+                // Calculate ceilings once we have enough samples
                 if (state.BatchDurationSampleCount >= _options.MinBatchSamplesForCeiling)
                 {
                     var avgBatchSeconds = state.BatchDurationEmaMs.Value / 1000.0;
-                    var calculatedCeiling = (int)(_options.ExecutionTimeCeilingFactor / avgBatchSeconds);
 
-                    // Clamp to [floor, hard ceiling]
-                    var newCeiling = Math.Max(state.FloorParallelism, Math.Min(calculatedCeiling, state.CeilingParallelism));
+                    // Execution time ceiling: Factor / batchDuration
+                    // Protects slow operations from exhausting the 20-minute execution time budget
+                    // Lower batch duration = higher ceiling (fast ops don't need this protection)
+                    var execTimeCeiling = (int)(_options.ExecutionTimeCeilingFactor / avgBatchSeconds);
+                    execTimeCeiling = Math.Max(state.FloorParallelism, Math.Min(execTimeCeiling, state.CeilingParallelism));
 
-                    // Only log when ceiling changes significantly
-                    if (!state.ExecutionTimeCeiling.HasValue || Math.Abs(newCeiling - state.ExecutionTimeCeiling.Value) >= 2)
+                    // Request rate ceiling: Factor × batchDuration
+                    // Protects fast operations from exhausting the 6,000 requests/5-min budget
+                    // Lower batch duration = lower ceiling (fast ops complete more requests/sec)
+                    var requestRateCeiling = (int)(_options.RequestRateCeilingFactor * avgBatchSeconds);
+                    requestRateCeiling = Math.Max(state.FloorParallelism, Math.Min(requestRateCeiling, state.CeilingParallelism));
+
+                    // Log when either ceiling changes significantly
+                    var execTimeChanged = !state.ExecutionTimeCeiling.HasValue ||
+                        Math.Abs(execTimeCeiling - state.ExecutionTimeCeiling.Value) >= 2;
+                    var requestRateChanged = !state.RequestRateCeiling.HasValue ||
+                        Math.Abs(requestRateCeiling - state.RequestRateCeiling.Value) >= 2;
+
+                    if (execTimeChanged || requestRateChanged)
                     {
                         _logger.LogDebug(
-                            "Connection {Connection}: Execution time ceiling updated to {Ceiling} (avg batch: {AvgBatch:F1}s, samples: {Samples})",
-                            connectionName, newCeiling, avgBatchSeconds, state.BatchDurationSampleCount);
+                            "Connection {Connection}: Ceilings updated (avg batch: {AvgBatch:F1}s, samples: {Samples}) - " +
+                            "exec time: {ExecCeiling}, request rate: {RateCeiling}",
+                            connectionName, avgBatchSeconds, state.BatchDurationSampleCount,
+                            execTimeCeiling, requestRateCeiling);
                     }
 
-                    state.ExecutionTimeCeiling = newCeiling;
+                    state.ExecutionTimeCeiling = execTimeCeiling;
+                    state.RequestRateCeiling = requestRateCeiling;
                 }
             }
         }
@@ -303,10 +331,11 @@ namespace PPDS.Dataverse.Resilience
                 lock (state.SyncRoot)
                 {
                     ResetStateInternal(state, state.FloorParallelism, state.CeilingParallelism);
-                    // Full reset also clears execution time tracking
+                    // Full reset also clears batch duration tracking and derived ceilings
                     state.BatchDurationEmaMs = null;
                     state.BatchDurationSampleCount = 0;
                     state.ExecutionTimeCeiling = null;
+                    state.RequestRateCeiling = null;
                 }
             }
         }
@@ -337,6 +366,7 @@ namespace PPDS.Dataverse.Resilience
                     ThrottleCeiling = throttleCeilingActive ? state.ThrottleCeiling : null,
                     ThrottleCeilingExpiry = throttleCeilingActive ? state.ThrottleCeilingExpiry : null,
                     ExecutionTimeCeiling = state.ExecutionTimeCeiling,
+                    RequestRateCeiling = state.RequestRateCeiling,
                     AverageBatchDuration = state.BatchDurationEmaMs.HasValue
                         ? TimeSpan.FromMilliseconds(state.BatchDurationEmaMs.Value)
                         : null,
@@ -433,8 +463,15 @@ namespace PPDS.Dataverse.Resilience
 
             /// <summary>
             /// Execution time-based ceiling calculated from batch durations.
+            /// Protects slow operations from exhausting execution time budget.
             /// </summary>
             public int? ExecutionTimeCeiling { get; set; }
+
+            /// <summary>
+            /// Request rate-based ceiling calculated from batch durations.
+            /// Protects fast operations from exhausting request count budget.
+            /// </summary>
+            public int? RequestRateCeiling { get; set; }
         }
     }
 }

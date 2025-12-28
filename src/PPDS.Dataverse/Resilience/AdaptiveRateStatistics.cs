@@ -41,12 +41,20 @@ namespace PPDS.Dataverse.Resilience
 
         /// <summary>
         /// Gets the execution time-based ceiling (calculated from batch durations).
+        /// Protects slow operations from exhausting the 20-minute execution time budget.
         /// Null if not enough samples have been collected yet.
         /// </summary>
         public int? ExecutionTimeCeiling { get; init; }
 
         /// <summary>
-        /// Gets the average batch duration used to calculate execution time ceiling.
+        /// Gets the request rate-based ceiling (calculated from batch durations).
+        /// Protects fast operations from exhausting the 6,000 requests/5-min budget.
+        /// Null if not enough samples have been collected yet.
+        /// </summary>
+        public int? RequestRateCeiling { get; init; }
+
+        /// <summary>
+        /// Gets the average batch duration used to calculate ceilings.
         /// Null if not enough samples have been collected yet.
         /// </summary>
         public TimeSpan? AverageBatchDuration { get; init; }
@@ -57,7 +65,7 @@ namespace PPDS.Dataverse.Resilience
         public int BatchDurationSampleCount { get; init; }
 
         /// <summary>
-        /// Gets the effective ceiling (minimum of hard ceiling, throttle ceiling, and execution time ceiling).
+        /// Gets the effective ceiling (minimum of all applicable ceilings).
         /// </summary>
         public int EffectiveCeiling
         {
@@ -68,6 +76,11 @@ namespace PPDS.Dataverse.Resilience
                 if (ThrottleCeilingExpiry.HasValue && ThrottleCeilingExpiry > DateTime.UtcNow && ThrottleCeiling.HasValue)
                 {
                     ceiling = Math.Min(ceiling, ThrottleCeiling.Value);
+                }
+
+                if (RequestRateCeiling.HasValue)
+                {
+                    ceiling = Math.Min(ceiling, RequestRateCeiling.Value);
                 }
 
                 if (ExecutionTimeCeiling.HasValue)

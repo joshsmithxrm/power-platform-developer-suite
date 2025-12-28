@@ -628,5 +628,227 @@ public class AdaptiveRateControllerTests
         options.DecreaseFactor.Should().Be(0.4); // From Conservative
     }
 
+    [Fact]
+    public void AdaptiveRateOptions_RequestRateCeilingFactor_HasCorrectPresetDefaults()
+    {
+        // Arrange & Act
+        var balanced = new AdaptiveRateOptions { Preset = RateControlPreset.Balanced };
+        var conservative = new AdaptiveRateOptions { Preset = RateControlPreset.Conservative };
+        var aggressive = new AdaptiveRateOptions { Preset = RateControlPreset.Aggressive };
+
+        // Assert - 60%, 80%, 90% of 20 req/sec limit
+        conservative.RequestRateCeilingFactor.Should().Be(12.0);
+        balanced.RequestRateCeilingFactor.Should().Be(16.0);
+        aggressive.RequestRateCeilingFactor.Should().Be(18.0);
+    }
+
+    #endregion
+
+    #region Request Rate Ceiling Tests
+
+    [Fact]
+    public void RecordBatchDuration_CalculatesRequestRateCeiling()
+    {
+        // Arrange - Balanced preset has RequestRateCeilingFactor = 16
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Act - Record 3 batches with 2-second duration
+        // RequestRateCeiling = 16 * 2 = 32
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+
+        // Assert
+        var stats = controller.GetStatistics("Primary");
+        stats!.RequestRateCeiling.Should().Be(32);
+    }
+
+    [Fact]
+    public void RecordBatchDuration_FastBatches_LowerRequestRateCeiling()
+    {
+        // Arrange - Balanced preset has RequestRateCeilingFactor = 16
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Act - Record 3 batches with 1-second duration
+        // RequestRateCeiling = 16 * 1 = 16
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+
+        // Assert - fast batches = lower ceiling (fewer concurrent to avoid request rate limit)
+        var stats = controller.GetStatistics("Primary");
+        stats!.RequestRateCeiling.Should().Be(16);
+    }
+
+    [Fact]
+    public void RecordBatchDuration_SlowBatches_HigherRequestRateCeiling()
+    {
+        // Arrange - Balanced preset has RequestRateCeilingFactor = 16
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Act - Record 3 batches with 10-second duration
+        // RequestRateCeiling = 16 * 10 = 160, but clamped to hard ceiling (52)
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+
+        // Assert - slow batches = higher ceiling (clamped to 52)
+        var stats = controller.GetStatistics("Primary");
+        stats!.RequestRateCeiling.Should().Be(52);
+    }
+
+    [Fact]
+    public void RecordSuccess_RespectsRequestRateCeiling()
+    {
+        // Arrange - set up with fast batches that create a low request rate ceiling
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced, // RequestRateCeilingFactor = 16
+            StabilizationBatches = 1,
+            MinIncreaseInterval = TimeSpan.Zero
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Record 2-second batches: RequestRateCeiling = 16 * 2 = 32
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+
+        var stats = controller.GetStatistics("Primary");
+        stats!.RequestRateCeiling.Should().Be(32);
+
+        // Act - try to increase past the request rate ceiling
+        // Starting at 4, increase by 4 each time: 8, 12, 16, 20, 24, 28, 32, cap
+        controller.RecordSuccess("Primary"); // 8
+        controller.RecordSuccess("Primary"); // 12
+        controller.RecordSuccess("Primary"); // 16
+        controller.RecordSuccess("Primary"); // 20
+        controller.RecordSuccess("Primary"); // 24
+        controller.RecordSuccess("Primary"); // 28
+        controller.RecordSuccess("Primary"); // 32
+        controller.RecordSuccess("Primary"); // Would be 36, but capped at 32
+
+        // Assert - capped at request rate ceiling
+        stats = controller.GetStatistics("Primary");
+        stats!.CurrentParallelism.Should().Be(32);
+    }
+
+    [Fact]
+    public void Statistics_EffectiveCeiling_IncludesRequestRateCeiling()
+    {
+        // Arrange
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced // RequestRateCeilingFactor = 16
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Record 2-second batches: RequestRateCeiling = 16 * 2 = 32
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+
+        // Assert
+        var stats = controller.GetStatistics("Primary");
+        stats!.CeilingParallelism.Should().Be(52); // Hard ceiling
+        stats.RequestRateCeiling.Should().Be(32);
+        stats.EffectiveCeiling.Should().Be(32); // min(52, 32) = 32
+    }
+
+    [Fact]
+    public void Reset_ClearsRequestRateCeiling()
+    {
+        // Arrange
+        var controller = CreateController();
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(2));
+
+        var beforeReset = controller.GetStatistics("Primary");
+        beforeReset!.RequestRateCeiling.Should().NotBeNull();
+
+        // Act
+        controller.Reset("Primary");
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Assert
+        var afterReset = controller.GetStatistics("Primary");
+        afterReset!.RequestRateCeiling.Should().BeNull();
+    }
+
+    [Fact]
+    public void RequestRateCeiling_ComplementsExecutionTimeCeiling()
+    {
+        // Arrange - with slow batches, exec time ceiling should be lower
+        // while request rate ceiling should be higher (or clamped to hard ceiling)
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced,
+            ExecutionTimeCeilingFactor = 200,
+            RequestRateCeilingFactor = 16.0
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Record 10-second batches
+        // ExecTimeCeiling = 200 / 10 = 20
+        // RequestRateCeiling = 16 * 10 = 160 (clamped to 52)
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(10));
+
+        // Assert - for slow batches, exec time ceiling is the constraint
+        var stats = controller.GetStatistics("Primary");
+        stats!.ExecutionTimeCeiling.Should().Be(20);
+        stats.RequestRateCeiling.Should().Be(52); // Clamped to hard ceiling
+    }
+
+    [Fact]
+    public void RequestRateCeiling_WithFastBatches_IsMoreRestrictive()
+    {
+        // Arrange - with fast batches, request rate ceiling should be lower
+        // while exec time ceiling should be higher (or clamped to hard ceiling)
+        var controller = CreateController(new AdaptiveRateOptions
+        {
+            Preset = RateControlPreset.Balanced,
+            ExecutionTimeCeilingFactor = 200,
+            RequestRateCeilingFactor = 16.0
+        });
+
+        controller.GetParallelism("Primary", recommendedParallelism: 4, connectionCount: 1);
+
+        // Record 1-second batches
+        // ExecTimeCeiling = 200 / 1 = 200 (clamped to 52)
+        // RequestRateCeiling = 16 * 1 = 16
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+        controller.RecordBatchDuration("Primary", TimeSpan.FromSeconds(1));
+
+        // Assert - for fast batches, request rate ceiling is the constraint
+        var stats = controller.GetStatistics("Primary");
+        stats!.ExecutionTimeCeiling.Should().Be(52); // Clamped to hard ceiling
+        stats.RequestRateCeiling.Should().Be(16);
+        stats.EffectiveCeiling.Should().Be(16); // Request rate ceiling is more restrictive
+    }
+
     #endregion
 }
