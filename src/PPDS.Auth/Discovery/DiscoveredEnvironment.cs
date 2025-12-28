@@ -89,14 +89,21 @@ public sealed class DiscoveredEnvironment
 
     /// <summary>
     /// Gets the environment type as a string.
+    /// Maps from Microsoft.Xrm.Sdk.Organization.OrganizationType enum values.
     /// </summary>
     public string EnvironmentType => OrganizationType switch
     {
-        0 => "Production",
-        1 => "Sandbox",
-        2 => "Developer",
-        3 => "Trial",
-        _ => "Unknown"
+        0 => "Production",       // Customer
+        5 => "Sandbox",          // CustomerTest
+        6 => "Sandbox",          // CustomerFreeTest
+        7 => "Preview",          // CustomerPreview
+        9 => "TestDrive",        // TestDrive
+        11 => "Trial",           // EmailTrial
+        12 => "Default",         // Default
+        13 => "Developer",       // Developer
+        14 => "Trial",           // Trial
+        15 => "Teams",           // Teams
+        _ => "Production"        // Other types (Monitoring, Support, Backend, etc.) treated as Production
     };
 
     /// <summary>
