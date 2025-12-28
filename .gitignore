@@ -51,3 +51,4 @@ Thumbs.db
 
 # Temporary artifacts (testing, exports, logs)
 tmp/
+nul
