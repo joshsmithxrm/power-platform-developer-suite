@@ -36,7 +36,7 @@ public static class ExportCommand
 
         var parallelOption = new Option<int>("--parallel")
         {
-            Description = "Degree of parallelism for concurrent entity exports",
+            Description = "Maximum concurrent entity exports (only applies when schema contains multiple entities)",
             DefaultValueFactory = _ => Environment.ProcessorCount * 2
         };
         parallelOption.Validators.Add(result =>
@@ -45,18 +45,18 @@ public static class ExportCommand
                 result.AddError("--parallel must be at least 1");
         });
 
-        var pageSizeOption = new Option<int>("--page-size")
+        var batchSizeOption = new Option<int>("--batch-size")
         {
-            Description = "FetchXML page size for data retrieval",
+            Description = "Records per API request (all records are exported; this controls request size)",
             DefaultValueFactory = _ => 5000
         };
-        pageSizeOption.Validators.Add(result =>
+        batchSizeOption.Validators.Add(result =>
         {
-            var value = result.GetValue(pageSizeOption);
+            var value = result.GetValue(batchSizeOption);
             if (value < 1)
-                result.AddError("--page-size must be at least 1");
+                result.AddError("--batch-size must be at least 1");
             if (value > 5000)
-                result.AddError("--page-size cannot exceed 5000 (Dataverse limit)");
+                result.AddError("--batch-size cannot exceed 5000 (Dataverse limit)");
         });
 
         var includeFilesOption = new Option<bool>("--include-files")
@@ -90,7 +90,7 @@ public static class ExportCommand
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
             parallelOption,
-            pageSizeOption,
+            batchSizeOption,
             includeFilesOption,
             jsonOption,
             verboseOption,
@@ -104,14 +104,14 @@ public static class ExportCommand
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var parallel = parseResult.GetValue(parallelOption);
-            var pageSize = parseResult.GetValue(pageSizeOption);
+            var batchSize = parseResult.GetValue(batchSizeOption);
             var includeFiles = parseResult.GetValue(includeFilesOption);
             var json = parseResult.GetValue(jsonOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteAsync(
-                profile, environment, schema, output, parallel, pageSize,
+                profile, environment, schema, output, parallel, batchSize,
                 includeFiles, json, verbose, debug, cancellationToken);
         });
 
@@ -124,14 +124,14 @@ public static class ExportCommand
         FileInfo schema,
         FileInfo output,
         int parallel,
-        int pageSize,
+        int batchSize,
         bool includeFiles,
         bool json,
         bool verbose,
         bool debug,
         CancellationToken cancellationToken)
     {
-        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+        var progressReporter = ServiceFactory.CreateProgressReporter(json, "Export");
 
         try
         {
@@ -158,7 +158,7 @@ public static class ExportCommand
             var exportOptions = new ExportOptions
             {
                 DegreeOfParallelism = parallel,
-                PageSize = pageSize,
+                PageSize = batchSize,
                 ExportFiles = includeFiles
             };
 

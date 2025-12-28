@@ -142,7 +142,7 @@ public static class CopyCommand
         CancellationToken cancellationToken)
     {
         string? tempDataFile = null;
-        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+        var progressReporter = ServiceFactory.CreateProgressReporter(json, "Copy");
 
         try
         {

@@ -1,6 +1,5 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
-using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
@@ -136,7 +135,7 @@ public static class ImportCommand
         bool debug,
         CancellationToken cancellationToken)
     {
-        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+        var progressReporter = ServiceFactory.CreateProgressReporter(json, "Import");
 
         try
         {
@@ -194,7 +193,7 @@ public static class ImportCommand
                 BypassCustomPluginExecution = bypassPlugins,
                 BypassPowerAutomateFlows = bypassFlows,
                 ContinueOnError = continueOnError,
-                Mode = MapImportMode(mode),
+                Mode = mode,
                 UserMappings = userMappings,
                 StripOwnerFields = stripOwnerFields
             };
@@ -223,12 +222,4 @@ public static class ImportCommand
             return ExitCodes.Failure;
         }
     }
-
-    private static PPDS.Migration.Import.ImportMode MapImportMode(ImportMode mode) => mode switch
-    {
-        ImportMode.Create => PPDS.Migration.Import.ImportMode.Create,
-        ImportMode.Update => PPDS.Migration.Import.ImportMode.Update,
-        ImportMode.Upsert => PPDS.Migration.Import.ImportMode.Upsert,
-        _ => PPDS.Migration.Import.ImportMode.Upsert
-    };
 }

@@ -229,7 +229,7 @@ public static class SchemaCommand
         bool debug,
         CancellationToken cancellationToken)
     {
-        var progressReporter = ServiceFactory.CreateProgressReporter(json);
+        var progressReporter = ServiceFactory.CreateProgressReporter(json, "Schema generation");
 
         try
         {

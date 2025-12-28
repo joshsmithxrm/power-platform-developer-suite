@@ -8,6 +8,11 @@ namespace PPDS.Migration.Progress
     public interface IProgressReporter
     {
         /// <summary>
+        /// Gets or sets the operation name for completion messages (e.g., "Export", "Import", "Copy").
+        /// </summary>
+        string OperationName { get; set; }
+
+        /// <summary>
         /// Reports a progress update.
         /// </summary>
         /// <param name="args">The progress event data.</param>

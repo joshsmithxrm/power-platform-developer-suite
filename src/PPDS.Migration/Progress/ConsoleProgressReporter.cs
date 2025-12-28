@@ -18,6 +18,9 @@ namespace PPDS.Migration.Progress
         private string? _lastEntity;
         private int _lastProgress;
 
+        /// <inheritdoc />
+        public string OperationName { get; set; } = "Operation";
+
         /// <summary>
         /// Initializes a new instance of the <see cref="ConsoleProgressReporter"/> class.
         /// </summary>
@@ -30,7 +33,7 @@ namespace PPDS.Migration.Progress
         public void Report(ProgressEventArgs args)
         {
             var elapsed = _stopwatch.Elapsed;
-            var prefix = $"[{elapsed:hh\\:mm\\:ss}]";
+            var prefix = $"[+{elapsed:hh\\:mm\\:ss\\.fff}]";
 
             switch (args.Phase)
             {
@@ -103,32 +106,34 @@ namespace PPDS.Migration.Progress
         {
             _stopwatch.Stop();
             Console.WriteLine();
-            Console.WriteLine(new string('=', 60));
 
+            // Header line: "Export succeeded." or "Export completed with errors."
             if (result.Success)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("Migration Completed Successfully");
+                Console.WriteLine($"{OperationName} succeeded.");
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Migration Completed with Errors");
+                Console.WriteLine($"{OperationName} completed with errors.");
             }
             Console.ResetColor();
 
-            Console.WriteLine(new string('=', 60));
-            Console.WriteLine($"Duration:    {result.Duration:hh\\:mm\\:ss}");
-            Console.WriteLine($"Succeeded:   {result.SuccessCount:N0}");
+            // Summary line: "    42,366 records in 00:00:08 (4,774.5 rec/s)"
+            Console.WriteLine($"    {result.SuccessCount:N0} record(s) in {result.Duration:hh\\:mm\\:ss} ({result.RecordsPerSecond:F1} rec/s)");
 
+            // Error count if any
             if (result.FailureCount > 0)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Failed:      {result.FailureCount:N0}");
+                Console.WriteLine($"    {result.FailureCount:N0} Error(s)");
                 Console.ResetColor();
             }
-
-            Console.WriteLine($"Throughput:  {result.RecordsPerSecond:F1} records/second");
+            else
+            {
+                Console.WriteLine($"    0 Error(s)");
+            }
 
             // Display error details if available
             if (result.Errors?.Count > 0)

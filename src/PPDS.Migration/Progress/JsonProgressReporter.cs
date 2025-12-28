@@ -16,6 +16,9 @@ namespace PPDS.Migration.Progress
         private int _lastReportedProgress;
         private string? _lastEntity;
 
+        /// <inheritdoc />
+        public string OperationName { get; set; } = "Operation";
+
         /// <summary>
         /// Gets or sets the minimum interval between progress reports (in records).
         /// Default is 100 to avoid flooding output.
@@ -71,6 +74,7 @@ namespace PPDS.Migration.Progress
             var output = new
             {
                 phase = "complete",
+                operation = OperationName,
                 duration = result.Duration.ToString(),
                 recordsProcessed = result.RecordsProcessed,
                 successCount = result.SuccessCount,

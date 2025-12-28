@@ -13,12 +13,16 @@ public static class ServiceFactory
     /// Creates a progress reporter based on the output mode.
     /// </summary>
     /// <param name="useJson">Whether to output JSON format.</param>
+    /// <param name="operationName">The operation name for completion messages (e.g., "Export", "Import").</param>
     /// <returns>An appropriate progress reporter.</returns>
-    public static IProgressReporter CreateProgressReporter(bool useJson)
+    public static IProgressReporter CreateProgressReporter(bool useJson, string operationName = "Operation")
     {
-        return useJson
+        IProgressReporter reporter = useJson
             ? new JsonProgressReporter(Console.Out)
             : new ConsoleProgressReporter();
+
+        reporter.OperationName = operationName;
+        return reporter;
     }
 
     /// <summary>
