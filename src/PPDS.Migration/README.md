@@ -95,10 +95,9 @@ data.zip → DependencyGraphBuilder → ExecutionPlanBuilder → TieredImporter
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| DegreeOfParallelism | CPU * 2 | Concurrent entity exports |
-| PageSize | 5000 | FetchXML page size |
+| DegreeOfParallelism | CPU * 2 | Maximum concurrent entity exports |
+| PageSize | 5000 | Records per API request |
 | ExportFiles | false | Include file attachments |
-| CompressOutput | true | Compress output ZIP |
 
 ### ImportOptions
 
