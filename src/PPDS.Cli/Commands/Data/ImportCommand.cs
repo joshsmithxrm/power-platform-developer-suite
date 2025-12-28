@@ -83,6 +83,8 @@ public static class ImportCommand
         var command = new Command("import", "Import data from a ZIP file into Dataverse")
         {
             dataOption,
+            DataCommandGroup.ProfileOption,
+            DataCommandGroup.EnvironmentOption,
             bypassPluginsOption,
             bypassFlowsOption,
             continueOnErrorOption,
@@ -97,8 +99,8 @@ public static class ImportCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var data = parseResult.GetValue(dataOption)!;
-            var url = parseResult.GetValue(Program.UrlOption);
-            var authMode = parseResult.GetValue(Program.AuthOption);
+            var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
@@ -109,20 +111,8 @@ public static class ImportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Resolve authentication
-            AuthResolver.AuthResult authResult;
-            try
-            {
-                authResult = AuthResolver.Resolve(authMode, url);
-            }
-            catch (InvalidOperationException ex)
-            {
-                ConsoleOutput.WriteError(ex.Message, json);
-                return ExitCodes.InvalidArguments;
-            }
-
             return await ExecuteAsync(
-                authResult, data, bypassPlugins, bypassFlows,
+                profile, environment, data, bypassPlugins, bypassFlows,
                 continueOnError, mode, userMappingFile, stripOwnerFields,
                 json, verbose, debug, cancellationToken);
         });
@@ -131,7 +121,8 @@ public static class ImportCommand
     }
 
     private static async Task<int> ExecuteAsync(
-        AuthResolver.AuthResult authResult,
+        string? profile,
+        string? environment,
         FileInfo data,
         bool bypassPlugins,
         bool bypassFlows,
@@ -148,22 +139,22 @@ public static class ImportCommand
 
         try
         {
-            // Report connecting status with auth mode info
-            var authModeInfo = authResult.Mode switch
-            {
-                AuthMode.Interactive => " (interactive login)",
-                AuthMode.Managed => " (managed identity)",
-                AuthMode.Env => " (environment variables)",
-                _ => ""
-            };
+            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse ({authResult.Url}){authModeInfo}..."
+                Message = $"Connecting to Dataverse using {profileInfo}..."
             });
 
-            // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult, verbose, debug);
+            // Create service provider from profile(s)
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                profile ?? string.Empty,
+                environment,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
             var importer = serviceProvider.GetRequiredService<IImporter>();
 
             // Load user mappings if provided

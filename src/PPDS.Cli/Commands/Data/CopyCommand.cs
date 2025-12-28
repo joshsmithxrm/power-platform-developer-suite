@@ -20,15 +20,32 @@ public static class CopyCommand
             Required = true
         }.AcceptExistingOnly();
 
-        var sourceUrlOption = new Option<string>("--source-url")
+        // Profile options
+        var profileOption = new Option<string?>("--profile", "-p")
         {
-            Description = "Source Dataverse environment URL",
+            Description = "Profile for both source and target environments"
+        };
+
+        var sourceProfileOption = new Option<string?>("--source-profile")
+        {
+            Description = "Profile for source environment (overrides --profile for source)"
+        };
+
+        var targetProfileOption = new Option<string?>("--target-profile")
+        {
+            Description = "Profile for target environment (overrides --profile for target)"
+        };
+
+        // Environment options
+        var sourceEnvOption = new Option<string>("--source-env")
+        {
+            Description = "Source environment (URL, name, or ID)",
             Required = true
         };
 
-        var targetUrlOption = new Option<string>("--target-url")
+        var targetEnvOption = new Option<string>("--target-env")
         {
-            Description = "Target Dataverse environment URL",
+            Description = "Target environment (URL, name, or ID)",
             Required = true
         };
 
@@ -70,8 +87,11 @@ public static class CopyCommand
         var command = new Command("copy", "Copy data from source to target Dataverse environment")
         {
             schemaOption,
-            sourceUrlOption,
-            targetUrlOption,
+            profileOption,
+            sourceProfileOption,
+            targetProfileOption,
+            sourceEnvOption,
+            targetEnvOption,
             tempDirOption,
             bypassPluginsOption,
             bypassFlowsOption,
@@ -83,9 +103,11 @@ public static class CopyCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var schema = parseResult.GetValue(schemaOption)!;
-            var sourceUrl = parseResult.GetValue(sourceUrlOption)!;
-            var targetUrl = parseResult.GetValue(targetUrlOption)!;
-            var authMode = parseResult.GetValue(Program.AuthOption);
+            var profile = parseResult.GetValue(profileOption);
+            var sourceProfile = parseResult.GetValue(sourceProfileOption);
+            var targetProfile = parseResult.GetValue(targetProfileOption);
+            var sourceEnv = parseResult.GetValue(sourceEnvOption)!;
+            var targetEnv = parseResult.GetValue(targetEnvOption)!;
             var tempDir = parseResult.GetValue(tempDirOption);
             var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
@@ -93,24 +115,10 @@ public static class CopyCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Copy only supports interactive and managed auth
-            // (env auth has only one set of credentials, can't work with two environments)
-            if (authMode == AuthMode.Env)
-            {
-                ConsoleOutput.WriteError(
-                    "--auth env is not supported for copy command because it uses a single credential. " +
-                    "Use --auth interactive (default) or --auth managed instead. " +
-                    "For service principal auth with two environments, use 'export' then 'import' separately.",
-                    json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            // Create auth results for both environments
-            var sourceAuth = new AuthResolver.AuthResult(authMode, sourceUrl);
-            var targetAuth = new AuthResolver.AuthResult(authMode, targetUrl);
-
             return await ExecuteAsync(
-                sourceAuth, targetAuth, schema, tempDir, bypassPlugins, bypassFlows,
+                profile, sourceProfile, targetProfile,
+                sourceEnv, targetEnv,
+                schema, tempDir, bypassPlugins, bypassFlows,
                 json, verbose, debug, cancellationToken);
         });
 
@@ -118,8 +126,11 @@ public static class CopyCommand
     }
 
     private static async Task<int> ExecuteAsync(
-        AuthResolver.AuthResult sourceAuth,
-        AuthResolver.AuthResult targetAuth,
+        string? profile,
+        string? sourceProfile,
+        string? targetProfile,
+        string sourceEnv,
+        string targetEnv,
         FileInfo schema,
         DirectoryInfo? tempDir,
         bool bypassPlugins,
@@ -145,22 +156,28 @@ public static class CopyCommand
             // Create temp file path for intermediate data
             tempDataFile = Path.Combine(tempDirectory, $"ppds-copy-{Guid.NewGuid():N}.zip");
 
-            // Build auth mode info for status messages
-            var authModeInfo = sourceAuth.Mode switch
-            {
-                AuthMode.Interactive => " (interactive login)",
-                AuthMode.Managed => " (managed identity)",
-                _ => ""
-            };
+            // Determine which profiles to use
+            var effectiveSourceProfile = sourceProfile ?? profile;
+            var effectiveTargetProfile = targetProfile ?? profile;
+
+            var sourceProfileInfo = string.IsNullOrEmpty(effectiveSourceProfile) ? "active profile" : $"profile '{effectiveSourceProfile}'";
+            var targetProfileInfo = string.IsNullOrEmpty(effectiveTargetProfile) ? "active profile" : $"profile '{effectiveTargetProfile}'";
 
             // Phase 1: Export from source
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Phase 1: Connecting to source ({sourceAuth.Url}){authModeInfo}..."
+                Message = $"Phase 1: Connecting to source using {sourceProfileInfo}..."
             });
 
-            await using var sourceProvider = ServiceFactory.CreateProviderForAuthMode(sourceAuth, verbose, debug);
+            await using var sourceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                effectiveSourceProfile,
+                sourceEnv,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
             var exporter = sourceProvider.GetRequiredService<IExporter>();
 
             var exportResult = await exporter.ExportAsync(
@@ -179,10 +196,17 @@ public static class CopyCommand
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Phase 2: Connecting to target ({targetAuth.Url}){authModeInfo}..."
+                Message = $"Phase 2: Connecting to target using {targetProfileInfo}..."
             });
 
-            await using var targetProvider = ServiceFactory.CreateProviderForAuthMode(targetAuth, verbose, debug);
+            await using var targetProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                effectiveTargetProfile,
+                targetEnv,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
             var importer = targetProvider.GetRequiredService<IImporter>();
 
             var importOptions = new ImportOptions

@@ -15,7 +15,7 @@
 | 2 | CLI Restructure + Auth Commands | **Complete** | Phase 1 |
 | 3 | Environment Discovery | **Complete** | Phase 1, 2 |
 | 4 | Additional Auth Methods | **Complete** | Phase 2 |
-| 5 | Data Command Integration | Not Started | Phase 2, 3 |
+| 5 | Data Command Integration | **Complete** | Phase 2, 3 |
 | 6 | Pooling Support | Not Started | Phase 5 |
 | 7 | Polish & Documentation | Not Started | All |
 
@@ -199,14 +199,62 @@
 
 ---
 
-## Phase 5: Data Command Integration - NOT STARTED
+## Phase 5: Data Command Integration - COMPLETE
 
 **Goal:** Wire up data commands to use new profile-based auth.
 
-- [ ] Create ConnectionResolver for profile → connection mapping
-- [ ] Update Export/Import/Copy commands with --profile flag
-- [ ] Support --environment override
-- [ ] Ensure pooling works with new auth
+### 5.1 Infrastructure - COMPLETE
+- [x] Create `ProfileConnectionSourceAdapter` in CLI (bridges PPDS.Auth → PPDS.Dataverse)
+- [x] Create `ProfileServiceFactory` for creating service providers from profiles
+- [x] Support single profile and multi-profile (pooling) scenarios
+
+### 5.2 Export Command Updates - COMPLETE
+- [x] Add `--profile` and `--environment` options
+- [x] Profile-based auth only (no legacy fallback - pre-v1)
+- [x] Use active profile when no `--profile` specified
+
+### 5.3 Import Command Updates - COMPLETE
+- [x] Add `--profile` and `--environment` options
+- [x] Profile-based auth only (no legacy fallback - pre-v1)
+- [x] Use active profile when no `--profile` specified
+
+### 5.4 Copy Command Updates - COMPLETE
+- [x] Add `--profile`, `--source-profile`, `--target-profile` options
+- [x] Add `--source-env`, `--target-env` options (required)
+- [x] Profile-based auth only (no legacy fallback - pre-v1)
+
+### 5.5 Schema & Users Commands - COMPLETE
+- [x] Update `SchemaCommand` to use profile-based auth
+- [x] Update `UsersCommand` to use profile-based auth
+- [x] Add `--profile`, `--environment`, `--source-env`, `--target-env` options
+
+### 5.6 Shared Options - COMPLETE
+- [x] Add `ProfileOption` and `EnvironmentOption` to `DataCommandGroup`
+- [x] Options shared across all commands
+
+### 5.7 Cleanup - COMPLETE
+- [x] Remove global `--url` and `--auth` options from Program.cs
+- [x] Delete legacy auth infrastructure (AuthMode, AuthResolver, DeviceCodeTokenProvider)
+- [x] Simplify ServiceFactory (keep only CreateProgressReporter, CreateAnalysisProvider)
+
+**Files Created:**
+- src/PPDS.Cli/Infrastructure/ProfileConnectionSourceAdapter.cs
+- src/PPDS.Cli/Infrastructure/ProfileServiceFactory.cs
+
+**Files Modified:**
+- src/PPDS.Cli/Program.cs
+- src/PPDS.Cli/Infrastructure/ServiceFactory.cs
+- src/PPDS.Cli/Commands/Data/DataCommandGroup.cs
+- src/PPDS.Cli/Commands/Data/ExportCommand.cs
+- src/PPDS.Cli/Commands/Data/ImportCommand.cs
+- src/PPDS.Cli/Commands/Data/CopyCommand.cs
+- src/PPDS.Cli/Commands/SchemaCommand.cs
+- src/PPDS.Cli/Commands/UsersCommand.cs
+
+**Files Deleted:**
+- src/PPDS.Cli/Infrastructure/AuthMode.cs
+- src/PPDS.Cli/Infrastructure/AuthResolver.cs
+- src/PPDS.Cli/Infrastructure/DeviceCodeTokenProvider.cs
 
 ---
 
@@ -246,6 +294,9 @@
 | 2025-01-27 | Environment not auto-selected | Explicit is safer, PAC parity |
 | 2025-12-27 | Combined CLI restructure and auth commands in Phase 2 | Reduced context switches |
 | 2025-12-27 | Use ServiceClient.DiscoverOnlineOrganizationsAsync | Built-in GDS support, no custom HTTP |
+| 2025-12-27 | Adapter pattern for ProfileConnectionSource | Avoids circular dep between Auth and Dataverse |
+| 2025-12-27 | No legacy --url/--auth options | Pre-v1, no backwards compat needed |
+| 2025-12-27 | Active profile used when no --profile specified | Seamless UX after `ppds auth create` |
 
 ---
 
@@ -265,11 +316,11 @@
 | 2 | CLI Restructure + Auth Commands | **Complete** |
 | 3 | Environment Discovery | **Complete** |
 | 4 | Additional Auth Methods | **Complete** |
-| 5 | Data Command Integration | Not Started |
+| 5 | Data Command Integration | **Complete** |
 | 6 | Pooling Support | Not Started |
 | 7 | Polish & Documentation | Not Started |
 
-**Overall Progress:** Phase 4 of 7 complete (~57%)
+**Overall Progress:** Phase 5 of 7 complete (~71%)
 
 ---
 

@@ -3,7 +3,6 @@ using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Auth;
 using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Commands.Env;
-using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli;
 
@@ -12,33 +11,9 @@ namespace PPDS.Cli;
 /// </summary>
 public static class Program
 {
-    /// <summary>
-    /// Global option for Dataverse environment URL.
-    /// Required for interactive and managed auth modes.
-    /// </summary>
-    public static readonly Option<string?> UrlOption = new("--url")
-    {
-        Description = "Dataverse environment URL (e.g., https://org.crm.dynamics.com)",
-        Recursive = true
-    };
-
-    /// <summary>
-    /// Global option for authentication mode.
-    /// </summary>
-    public static readonly Option<AuthMode> AuthOption = new("--auth")
-    {
-        Description = "Authentication mode: interactive (default), env, managed",
-        DefaultValueFactory = _ => AuthMode.Interactive,
-        Recursive = true
-    };
-
     public static async Task<int> Main(string[] args)
     {
         var rootCommand = new RootCommand("PPDS CLI - Unified Power Platform Developer Suite command-line tool");
-
-        // Add global options (Recursive = true makes them available to all subcommands)
-        rootCommand.Options.Add(UrlOption);
-        rootCommand.Options.Add(AuthOption);
 
         // Add command groups
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());

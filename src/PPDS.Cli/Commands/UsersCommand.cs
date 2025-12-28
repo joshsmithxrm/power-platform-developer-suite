@@ -1,12 +1,9 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.PowerPlatform.Dataverse.Client;
+using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Infrastructure;
-using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
-using PPDS.Dataverse.Resilience;
-using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.UserMapping;
 
 namespace PPDS.Cli.Commands;
@@ -27,15 +24,32 @@ public static class UsersCommand
 
     private static Command CreateGenerateCommand()
     {
-        var sourceUrlOption = new Option<string>("--source-url")
+        // Profile options
+        var profileOption = new Option<string?>("--profile", "-p")
         {
-            Description = "Source environment URL (e.g., https://dev.crm.dynamics.com)",
+            Description = "Profile for both source and target environments"
+        };
+
+        var sourceProfileOption = new Option<string?>("--source-profile")
+        {
+            Description = "Profile for source environment (overrides --profile for source)"
+        };
+
+        var targetProfileOption = new Option<string?>("--target-profile")
+        {
+            Description = "Profile for target environment (overrides --profile for target)"
+        };
+
+        // Environment options
+        var sourceEnvOption = new Option<string>("--source-env")
+        {
+            Description = "Source environment (URL, name, or ID)",
             Required = true
         };
 
-        var targetUrlOption = new Option<string>("--target-url")
+        var targetEnvOption = new Option<string>("--target-env")
         {
-            Description = "Target environment URL (e.g., https://qa.crm.dynamics.com)",
+            Description = "Target environment (URL, name, or ID)",
             Required = true
         };
 
@@ -77,8 +91,11 @@ public static class UsersCommand
 
         var command = new Command("generate", "Generate user mapping file from source to target environment")
         {
-            sourceUrlOption,
-            targetUrlOption,
+            profileOption,
+            sourceProfileOption,
+            targetProfileOption,
+            sourceEnvOption,
+            targetEnvOption,
             outputOption,
             analyzeOption,
             jsonOption,
@@ -88,8 +105,11 @@ public static class UsersCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var sourceUrl = parseResult.GetValue(sourceUrlOption)!;
-            var targetUrl = parseResult.GetValue(targetUrlOption)!;
+            var profile = parseResult.GetValue(profileOption);
+            var sourceProfile = parseResult.GetValue(sourceProfileOption);
+            var targetProfile = parseResult.GetValue(targetProfileOption);
+            var sourceEnv = parseResult.GetValue(sourceEnvOption)!;
+            var targetEnv = parseResult.GetValue(targetEnvOption)!;
             var output = parseResult.GetValue(outputOption)!;
             var analyze = parseResult.GetValue(analyzeOption);
             var json = parseResult.GetValue(jsonOption);
@@ -97,7 +117,8 @@ public static class UsersCommand
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteGenerateAsync(
-                sourceUrl, targetUrl, output, analyze,
+                profile, sourceProfile, targetProfile,
+                sourceEnv, targetEnv, output, analyze,
                 json, verbose, debug, cancellationToken);
         });
 
@@ -105,8 +126,11 @@ public static class UsersCommand
     }
 
     private static async Task<int> ExecuteGenerateAsync(
-        string sourceUrl,
-        string targetUrl,
+        string? profile,
+        string? sourceProfile,
+        string? targetProfile,
+        string sourceEnv,
+        string targetEnv,
         FileInfo output,
         bool analyzeOnly,
         bool json,
@@ -116,24 +140,40 @@ public static class UsersCommand
     {
         try
         {
+            // Determine which profiles to use
+            var effectiveSourceProfile = sourceProfile ?? profile;
+            var effectiveTargetProfile = targetProfile ?? profile;
+
+            var sourceProfileInfo = string.IsNullOrEmpty(effectiveSourceProfile) ? "active profile" : $"profile '{effectiveSourceProfile}'";
+            var targetProfileInfo = string.IsNullOrEmpty(effectiveTargetProfile) ? "active profile" : $"profile '{effectiveTargetProfile}'";
+
             if (!json)
             {
                 Console.WriteLine("Generate User Mapping");
                 Console.WriteLine(new string('=', 50));
                 Console.WriteLine();
-            }
-
-            // Create connection pools for both environments
-            if (!json)
-            {
-                Console.WriteLine($"  Source: {sourceUrl}");
-                Console.WriteLine($"  Target: {targetUrl}");
+                Console.WriteLine($"  Source: {sourceEnv} ({sourceProfileInfo})");
+                Console.WriteLine($"  Target: {targetEnv} ({targetProfileInfo})");
                 Console.WriteLine();
-                Console.WriteLine("  Connecting to environments (interactive auth)...");
+                Console.WriteLine("  Connecting to environments...");
             }
 
-            await using var sourceProvider = CreateProviderForUrl(sourceUrl, verbose, debug);
-            await using var targetProvider = CreateProviderForUrl(targetUrl, verbose, debug);
+            // Create providers for both environments
+            await using var sourceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                effectiveSourceProfile,
+                sourceEnv,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
+            await using var targetProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                effectiveTargetProfile,
+                targetEnv,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
 
             var sourcePool = sourceProvider.GetRequiredService<IDataverseConnectionPool>();
             var targetPool = targetProvider.GetRequiredService<IDataverseConnectionPool>();
@@ -170,7 +210,7 @@ public static class UsersCommand
                     Console.ResetColor();
                     Console.WriteLine();
                     Console.WriteLine("  Usage:");
-                    Console.WriteLine($"    ppds-migrate import --data <file> --user-mapping \"{output.FullName}\"");
+                    Console.WriteLine($"    ppds data import --data <file> --user-mapping \"{output.FullName}\"");
                 }
                 else
                 {
@@ -283,82 +323,5 @@ public static class UsersCommand
             WriteIndented = true
         });
         Console.WriteLine(jsonOutput);
-    }
-
-    private static ServiceProvider CreateProviderForUrl(string url, bool verbose, bool debug)
-    {
-        var services = new ServiceCollection();
-
-        // Configure logging
-        services.AddLogging(builder =>
-        {
-            if (debug)
-            {
-                builder.SetMinimumLevel(LogLevel.Debug);
-            }
-            else if (verbose)
-            {
-                builder.SetMinimumLevel(LogLevel.Information);
-            }
-            else
-            {
-                builder.SetMinimumLevel(LogLevel.Warning);
-            }
-
-            builder.AddSimpleConsole(options =>
-            {
-                options.SingleLine = true;
-                options.TimestampFormat = "[HH:mm:ss] ";
-            });
-        });
-
-        // Create device code token provider for interactive authentication
-        var tokenProvider = new DeviceCodeTokenProvider(url);
-
-        // Create ServiceClient with device code authentication
-        var serviceClient = new ServiceClient(
-            new Uri(url),
-            tokenProvider.GetTokenAsync,
-            useUniqueInstance: true);
-
-        if (!serviceClient.IsReady)
-        {
-            var error = serviceClient.LastError ?? "Unknown error";
-            serviceClient.Dispose();
-            throw new InvalidOperationException($"Failed to establish connection. Error: {error}");
-        }
-
-        // Wrap in ServiceClientSource for the connection pool
-        var source = new ServiceClientSource(
-            serviceClient,
-            "Interactive",
-            maxPoolSize: Math.Max(Environment.ProcessorCount * 4, 16));
-
-        // Create pool options
-        var poolOptions = new ConnectionPoolOptions
-        {
-            Enabled = true,
-            MinPoolSize = 0,
-            MaxConnectionsPerUser = Math.Max(Environment.ProcessorCount * 4, 16),
-            DisableAffinityCookie = true
-        };
-
-        // Register services that are normally registered by AddDataverseConnectionPool
-        services.AddSingleton<IThrottleTracker, ThrottleTracker>();
-        services.AddSingleton<IAdaptiveRateController, AdaptiveRateController>();
-
-        // Register the connection pool with the source
-        services.AddSingleton<IDataverseConnectionPool>(sp =>
-            new DataverseConnectionPool(
-                new[] { source },
-                sp.GetRequiredService<IThrottleTracker>(),
-                sp.GetRequiredService<IAdaptiveRateController>(),
-                poolOptions,
-                sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
-
-        services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
-
-        services.AddDataverseMigration();
-        return services.BuildServiceProvider();
     }
 }

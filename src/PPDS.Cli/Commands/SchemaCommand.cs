@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Infrastructure;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
@@ -101,6 +102,8 @@ public static class SchemaCommand
         {
             entitiesOption,
             outputOption,
+            DataCommandGroup.ProfileOption,
+            DataCommandGroup.EnvironmentOption,
             includeSystemFieldsOption,
             includeRelationshipsOption,
             disablePluginsOption,
@@ -116,8 +119,8 @@ public static class SchemaCommand
         {
             var entities = parseResult.GetValue(entitiesOption)!;
             var output = parseResult.GetValue(outputOption)!;
-            var url = parseResult.GetValue(Program.UrlOption);
-            var authMode = parseResult.GetValue(Program.AuthOption);
+            var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var includeSystemFields = parseResult.GetValue(includeSystemFieldsOption);
             var includeRelationships = parseResult.GetValue(includeRelationshipsOption);
             var disablePlugins = parseResult.GetValue(disablePluginsOption);
@@ -127,18 +130,6 @@ public static class SchemaCommand
             var json = parseResult.GetValue(jsonOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
-
-            // Resolve authentication
-            AuthResolver.AuthResult authResult;
-            try
-            {
-                authResult = AuthResolver.Resolve(authMode, url);
-            }
-            catch (InvalidOperationException ex)
-            {
-                ConsoleOutput.WriteError(ex.Message, json);
-                return ExitCodes.InvalidArguments;
-            }
 
             // Parse entities (handle comma-separated and multiple flags)
             var entityList = entities
@@ -159,7 +150,7 @@ public static class SchemaCommand
             var excludePatternList = ParseAttributeList(excludePatterns);
 
             return await ExecuteGenerateAsync(
-                authResult, entityList, output,
+                profile, environment, entityList, output,
                 includeSystemFields, includeRelationships, disablePlugins,
                 includeAttrList, excludeAttrList, excludePatternList,
                 json, verbose, debug, cancellationToken);
@@ -189,6 +180,8 @@ public static class SchemaCommand
 
         var command = new Command("list", "List available entities in Dataverse")
         {
+            DataCommandGroup.ProfileOption,
+            DataCommandGroup.EnvironmentOption,
             filterOption,
             customOnlyOption,
             jsonOption
@@ -196,25 +189,13 @@ public static class SchemaCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
+            var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var filter = parseResult.GetValue(filterOption);
-            var url = parseResult.GetValue(Program.UrlOption);
-            var authMode = parseResult.GetValue(Program.AuthOption);
             var customOnly = parseResult.GetValue(customOnlyOption);
             var json = parseResult.GetValue(jsonOption);
 
-            // Resolve authentication
-            AuthResolver.AuthResult authResult;
-            try
-            {
-                authResult = AuthResolver.Resolve(authMode, url);
-            }
-            catch (InvalidOperationException ex)
-            {
-                ConsoleOutput.WriteError(ex.Message, json);
-                return ExitCodes.InvalidArguments;
-            }
-
-            return await ExecuteListAsync(authResult, filter, customOnly, json, cancellationToken);
+            return await ExecuteListAsync(profile, environment, filter, customOnly, json, cancellationToken);
         });
 
         return command;
@@ -233,7 +214,8 @@ public static class SchemaCommand
     }
 
     private static async Task<int> ExecuteGenerateAsync(
-        AuthResolver.AuthResult authResult,
+        string? profile,
+        string? environment,
         List<string> entities,
         FileInfo output,
         bool includeSystemFields,
@@ -264,22 +246,22 @@ public static class SchemaCommand
                           (optionsMsg.Count > 0 ? $" ({string.Join(", ", optionsMsg)})" : "")
             });
 
-            // Report connecting status with auth mode info
-            var authModeInfo = authResult.Mode switch
-            {
-                AuthMode.Interactive => " (interactive login)",
-                AuthMode.Managed => " (managed identity)",
-                AuthMode.Env => " (environment variables)",
-                _ => ""
-            };
+            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse ({authResult.Url}){authModeInfo}..."
+                Message = $"Connecting to Dataverse using {profileInfo}..."
             });
 
-            // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult, verbose, debug);
+            // Create service provider from profile
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                profile,
+                environment,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
             var schemaWriter = serviceProvider.GetRequiredService<ICmtSchemaWriter>();
 
@@ -335,7 +317,8 @@ public static class SchemaCommand
     }
 
     private static async Task<int> ExecuteListAsync(
-        AuthResolver.AuthResult authResult,
+        string? profile,
+        string? environment,
         string? filter,
         bool customOnly,
         bool json,
@@ -343,23 +326,21 @@ public static class SchemaCommand
     {
         try
         {
-            // Build auth mode info for status messages
-            var authModeInfo = authResult.Mode switch
-            {
-                AuthMode.Interactive => " (interactive login)",
-                AuthMode.Managed => " (managed identity)",
-                AuthMode.Env => " (environment variables)",
-                _ => ""
-            };
+            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
 
             if (!json)
             {
-                Console.WriteLine($"Connecting to Dataverse ({authResult.Url}){authModeInfo}...");
+                Console.WriteLine($"Connecting to Dataverse using {profileInfo}...");
                 Console.WriteLine("Retrieving available entities...");
             }
 
-            // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult);
+            // Create service provider from profile
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                profile,
+                environment,
+                deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken: cancellationToken);
+
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
 
             var entities = await generator.GetAvailableEntitiesAsync(cancellationToken);

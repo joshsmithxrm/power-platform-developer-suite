@@ -8,6 +8,23 @@ namespace PPDS.Cli.Commands.Data;
 public static class DataCommandGroup
 {
     /// <summary>
+    /// Profile option for specifying which authentication profile(s) to use.
+    /// Supports comma-separated names for pooling: --profile app1,app2,app3
+    /// </summary>
+    public static readonly Option<string?> ProfileOption = new("--profile", "-p")
+    {
+        Description = "Authentication profile name(s). Use comma-separated names for pooling (e.g., app1,app2,app3). Uses active profile if not specified."
+    };
+
+    /// <summary>
+    /// Environment option for overriding the profile's bound environment.
+    /// </summary>
+    public static readonly Option<string?> EnvironmentOption = new("--environment", "-env")
+    {
+        Description = "Override the environment URL. Takes precedence over profile's bound environment."
+    };
+
+    /// <summary>
     /// Creates the 'data' command group with all subcommands.
     /// </summary>
     public static Command Create()

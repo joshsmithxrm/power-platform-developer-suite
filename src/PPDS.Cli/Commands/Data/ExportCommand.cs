@@ -86,6 +86,8 @@ public static class ExportCommand
         {
             schemaOption,
             outputOption,
+            DataCommandGroup.ProfileOption,
+            DataCommandGroup.EnvironmentOption,
             parallelOption,
             pageSizeOption,
             includeFilesOption,
@@ -98,8 +100,8 @@ public static class ExportCommand
         {
             var schema = parseResult.GetValue(schemaOption)!;
             var output = parseResult.GetValue(outputOption)!;
-            var url = parseResult.GetValue(Program.UrlOption);
-            var authMode = parseResult.GetValue(Program.AuthOption);
+            var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
+            var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var parallel = parseResult.GetValue(parallelOption);
             var pageSize = parseResult.GetValue(pageSizeOption);
             var includeFiles = parseResult.GetValue(includeFilesOption);
@@ -107,20 +109,8 @@ public static class ExportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            // Resolve authentication
-            AuthResolver.AuthResult authResult;
-            try
-            {
-                authResult = AuthResolver.Resolve(authMode, url);
-            }
-            catch (InvalidOperationException ex)
-            {
-                ConsoleOutput.WriteError(ex.Message, json);
-                return ExitCodes.InvalidArguments;
-            }
-
             return await ExecuteAsync(
-                authResult, schema, output, parallel, pageSize,
+                profile, environment, schema, output, parallel, pageSize,
                 includeFiles, json, verbose, debug, cancellationToken);
         });
 
@@ -128,7 +118,8 @@ public static class ExportCommand
     }
 
     private static async Task<int> ExecuteAsync(
-        AuthResolver.AuthResult authResult,
+        string? profile,
+        string? environment,
         FileInfo schema,
         FileInfo output,
         int parallel,
@@ -143,22 +134,22 @@ public static class ExportCommand
 
         try
         {
-            // Report connecting status with auth mode info
-            var authModeInfo = authResult.Mode switch
-            {
-                AuthMode.Interactive => " (interactive login)",
-                AuthMode.Managed => " (managed identity)",
-                AuthMode.Env => " (environment variables)",
-                _ => ""
-            };
+            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
             progressReporter.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse ({authResult.Url}){authModeInfo}..."
+                Message = $"Connecting to Dataverse using {profileInfo}..."
             });
 
-            // Create service provider based on auth mode
-            await using var serviceProvider = ServiceFactory.CreateProviderForAuthMode(authResult, verbose, debug);
+            // Create service provider from profile(s)
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                profile ?? string.Empty,
+                environment,
+                verbose,
+                debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken);
+
             var exporter = serviceProvider.GetRequiredService<IExporter>();
 
             // Configure export options
