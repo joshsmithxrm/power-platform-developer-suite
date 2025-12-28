@@ -239,20 +239,6 @@ public static class SchemaCommand
             if (excludeAttributes != null) optionsMsg.Add($"exclude: {string.Join(",", excludeAttributes)}");
             if (excludePatterns != null) optionsMsg.Add($"patterns: {string.Join(",", excludePatterns)}");
 
-            progressReporter.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.Analyzing,
-                Message = $"Generating schema for {entities.Count} entities..." +
-                          (optionsMsg.Count > 0 ? $" ({string.Join(", ", optionsMsg)})" : "")
-            });
-
-            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
-            progressReporter.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse using {profileInfo}..."
-            });
-
             // Create service provider from profile
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 profile,
@@ -261,6 +247,21 @@ public static class SchemaCommand
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
+
+            // Write connection header (non-JSON mode only)
+            if (!json)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+                Console.WriteLine();
+            }
+
+            progressReporter.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Generating schema for {entities.Count} entities..." +
+                          (optionsMsg.Count > 0 ? $" ({string.Join(", ", optionsMsg)})" : "")
+            });
 
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
             var schemaWriter = serviceProvider.GetRequiredService<ICmtSchemaWriter>();
@@ -326,20 +327,20 @@ public static class SchemaCommand
     {
         try
         {
-            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
-
-            if (!json)
-            {
-                Console.WriteLine($"Connecting to Dataverse using {profileInfo}...");
-                Console.WriteLine("Retrieving available entities...");
-            }
-
             // Create service provider from profile
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 profile,
                 environment,
                 deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken: cancellationToken);
+
+            if (!json)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+                Console.WriteLine();
+                Console.WriteLine("Retrieving available entities...");
+            }
 
             var generator = serviceProvider.GetRequiredService<ISchemaGenerator>();
 

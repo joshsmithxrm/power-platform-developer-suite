@@ -33,6 +33,16 @@ public sealed class ProfileConnectionSource : IDisposable
     public int MaxPoolSize => _maxPoolSize;
 
     /// <summary>
+    /// Gets the authentication profile.
+    /// </summary>
+    public AuthProfile Profile => _profile;
+
+    /// <summary>
+    /// Gets the environment URL.
+    /// </summary>
+    public string EnvironmentUrl => _environmentUrl;
+
+    /// <summary>
     /// Creates a new ProfileConnectionSource.
     /// </summary>
     /// <param name="profile">The authentication profile.</param>

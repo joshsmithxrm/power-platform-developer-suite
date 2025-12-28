@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Migration.Export;
 using PPDS.Migration.Progress;
@@ -134,13 +135,6 @@ public static class ExportCommand
 
         try
         {
-            var profileInfo = string.IsNullOrEmpty(profile) ? "active profile" : $"profile '{profile}'";
-            progressReporter.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.Analyzing,
-                Message = $"Connecting to Dataverse using {profileInfo}..."
-            });
-
             // Create service provider from profile(s)
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile ?? string.Empty,
@@ -149,6 +143,14 @@ public static class ExportCommand
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
+
+            // Write connection header (non-JSON mode only)
+            if (!json)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+                Console.WriteLine();
+            }
 
             var exporter = serviceProvider.GetRequiredService<IExporter>();
 

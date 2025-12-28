@@ -144,20 +144,6 @@ public static class UsersCommand
             var effectiveSourceProfile = sourceProfile ?? profile;
             var effectiveTargetProfile = targetProfile ?? profile;
 
-            var sourceProfileInfo = string.IsNullOrEmpty(effectiveSourceProfile) ? "active profile" : $"profile '{effectiveSourceProfile}'";
-            var targetProfileInfo = string.IsNullOrEmpty(effectiveTargetProfile) ? "active profile" : $"profile '{effectiveTargetProfile}'";
-
-            if (!json)
-            {
-                Console.WriteLine("Generate User Mapping");
-                Console.WriteLine(new string('=', 50));
-                Console.WriteLine();
-                Console.WriteLine($"  Source: {sourceEnv} ({sourceProfileInfo})");
-                Console.WriteLine($"  Target: {targetEnv} ({targetProfileInfo})");
-                Console.WriteLine();
-                Console.WriteLine("  Connecting to environments...");
-            }
-
             // Create providers for both environments
             await using var sourceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 effectiveSourceProfile,
@@ -174,6 +160,17 @@ public static class UsersCommand
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
+
+            // Write connection headers (non-JSON mode only)
+            if (!json)
+            {
+                var sourceConnectionInfo = sourceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                var targetConnectionInfo = targetProvider.GetRequiredService<ResolvedConnectionInfo>();
+
+                ConsoleHeader.WriteConnectedAsLabeled("Source", sourceConnectionInfo);
+                ConsoleHeader.WriteConnectedAsLabeled("Target", targetConnectionInfo);
+                Console.WriteLine();
+            }
 
             var sourcePool = sourceProvider.GetRequiredService<IDataverseConnectionPool>();
             var targetPool = targetProvider.GetRequiredService<IDataverseConnectionPool>();

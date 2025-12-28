@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Migration.Export;
 using PPDS.Migration.Import;
@@ -160,16 +161,7 @@ public static class CopyCommand
             var effectiveSourceProfile = sourceProfile ?? profile;
             var effectiveTargetProfile = targetProfile ?? profile;
 
-            var sourceProfileInfo = string.IsNullOrEmpty(effectiveSourceProfile) ? "active profile" : $"profile '{effectiveSourceProfile}'";
-            var targetProfileInfo = string.IsNullOrEmpty(effectiveTargetProfile) ? "active profile" : $"profile '{effectiveTargetProfile}'";
-
             // Phase 1: Export from source
-            progressReporter.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.Analyzing,
-                Message = $"Phase 1: Connecting to source using {sourceProfileInfo}..."
-            });
-
             await using var sourceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 effectiveSourceProfile,
                 sourceEnv,
@@ -177,6 +169,13 @@ public static class CopyCommand
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
+
+            // Write source connection header (non-JSON mode only)
+            if (!json)
+            {
+                var sourceConnectionInfo = sourceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAsLabeled("Source", sourceConnectionInfo);
+            }
 
             var exporter = sourceProvider.GetRequiredService<IExporter>();
 
@@ -193,12 +192,6 @@ public static class CopyCommand
             }
 
             // Phase 2: Import to target
-            progressReporter.Report(new ProgressEventArgs
-            {
-                Phase = MigrationPhase.Analyzing,
-                Message = $"Phase 2: Connecting to target using {targetProfileInfo}..."
-            });
-
             await using var targetProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 effectiveTargetProfile,
                 targetEnv,
@@ -206,6 +199,14 @@ public static class CopyCommand
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
+
+            // Write target connection header (non-JSON mode only)
+            if (!json)
+            {
+                var targetConnectionInfo = targetProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAsLabeled("Target", targetConnectionInfo);
+                Console.WriteLine();
+            }
 
             var importer = targetProvider.GetRequiredService<IImporter>();
 

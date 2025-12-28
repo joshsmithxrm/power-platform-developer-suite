@@ -12,6 +12,27 @@ using PPDS.Migration.DependencyInjection;
 namespace PPDS.Cli.Infrastructure;
 
 /// <summary>
+/// Information about the resolved connection used by commands to display connection headers.
+/// </summary>
+public sealed class ResolvedConnectionInfo
+{
+    /// <summary>
+    /// Gets the authenticated profile.
+    /// </summary>
+    public required AuthProfile Profile { get; init; }
+
+    /// <summary>
+    /// Gets the resolved environment URL.
+    /// </summary>
+    public required string EnvironmentUrl { get; init; }
+
+    /// <summary>
+    /// Gets the environment display name if available.
+    /// </summary>
+    public string? EnvironmentDisplayName { get; init; }
+}
+
+/// <summary>
 /// Factory for creating service providers from authentication profiles.
 /// </summary>
 public static class ProfileServiceFactory
@@ -67,7 +88,15 @@ public static class ProfileServiceFactory
         var source = new ProfileConnectionSource(profile, envUrl, 52, deviceCodeCallback);
         var adapter = new ProfileConnectionSourceAdapter(source);
 
-        return CreateProviderFromSources(new[] { adapter }, verbose, debug);
+        // Create connection info for header display
+        var connectionInfo = new ResolvedConnectionInfo
+        {
+            Profile = profile,
+            EnvironmentUrl = envUrl,
+            EnvironmentDisplayName = profile.Environment?.DisplayName
+        };
+
+        return CreateProviderFromSources(new[] { adapter }, connectionInfo, verbose, debug);
     }
 
     /// <summary>
@@ -107,7 +136,16 @@ public static class ProfileServiceFactory
         // Wrap in adapters
         var adapters = sources.Select(s => new ProfileConnectionSourceAdapter(s)).ToArray();
 
-        return CreateProviderFromSources(adapters, verbose, debug);
+        // For multi-profile, use the first profile's info for header display
+        var firstSource = sources[0];
+        var connectionInfo = new ResolvedConnectionInfo
+        {
+            Profile = firstSource.Profile,
+            EnvironmentUrl = firstSource.EnvironmentUrl,
+            EnvironmentDisplayName = firstSource.Profile.Environment?.DisplayName
+        };
+
+        return CreateProviderFromSources(adapters, connectionInfo, verbose, debug);
     }
 
     /// <summary>
@@ -163,11 +201,15 @@ public static class ProfileServiceFactory
     /// </summary>
     private static ServiceProvider CreateProviderFromSources(
         IConnectionSource[] sources,
+        ResolvedConnectionInfo connectionInfo,
         bool verbose,
         bool debug)
     {
         var services = new ServiceCollection();
         ConfigureLogging(services, verbose, debug);
+
+        // Register connection info for header display
+        services.AddSingleton(connectionInfo);
 
         // Pool options
         var poolOptions = new ConnectionPoolOptions
