@@ -51,6 +51,9 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => _cachedResult?.AccessToken;
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => _cachedResult?.ClaimsPrincipal;
+
     /// <summary>
     /// Creates a new device code credential provider.
     /// </summary>

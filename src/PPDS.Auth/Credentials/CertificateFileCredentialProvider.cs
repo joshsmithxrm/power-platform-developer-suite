@@ -42,6 +42,9 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => null; // Connection string auth doesn't expose the token
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => null;
+
     /// <summary>
     /// Creates a new certificate file credential provider.
     /// </summary>

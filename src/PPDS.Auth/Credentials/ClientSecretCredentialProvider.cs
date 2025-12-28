@@ -38,6 +38,9 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => null; // Connection string auth doesn't expose the token
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => null;
+
     /// <summary>
     /// Creates a new client secret credential provider.
     /// </summary>

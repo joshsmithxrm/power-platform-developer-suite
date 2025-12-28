@@ -46,6 +46,9 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => null; // Connection string auth doesn't expose the token
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => null;
+
     /// <summary>
     /// Creates a new certificate store credential provider.
     /// </summary>

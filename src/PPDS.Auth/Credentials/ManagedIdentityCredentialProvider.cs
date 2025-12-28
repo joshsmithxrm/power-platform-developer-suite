@@ -43,6 +43,9 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => _cachedToken?.Token;
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => null;
+
     /// <summary>
     /// Creates a new managed identity credential provider.
     /// </summary>

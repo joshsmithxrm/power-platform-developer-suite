@@ -52,6 +52,9 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => _cachedResult?.AccessToken;
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => _cachedResult?.ClaimsPrincipal;
+
     /// <summary>
     /// Creates a new interactive browser credential provider.
     /// </summary>

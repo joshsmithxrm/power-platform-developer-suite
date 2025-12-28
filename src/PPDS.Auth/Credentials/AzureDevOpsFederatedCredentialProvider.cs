@@ -41,6 +41,9 @@ public sealed class AzureDevOpsFederatedCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? AccessToken => _cachedToken?.Token;
 
+    /// <inheritdoc />
+    public System.Security.Claims.ClaimsPrincipal? IdTokenClaims => null;
+
     /// <summary>
     /// Creates a new Azure DevOps federated credential provider.
     /// </summary>

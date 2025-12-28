@@ -269,7 +269,9 @@ public static class AuthCommandGroup
                 }
 
                 // Extract JWT claims for additional user info
-                var claims = JwtClaimsParser.Parse(provider.AccessToken);
+                // Use ClaimsPrincipal (from ID token) first, then fall back to access token
+                var debugClaims = Environment.GetEnvironmentVariable("PPDS_DEBUG_CLAIMS") == "1";
+                var claims = JwtClaimsParser.Parse(provider.IdTokenClaims, provider.AccessToken, debug: debugClaims);
                 if (claims != null)
                 {
                     profile.TenantCountry = claims.TenantCountry;
@@ -317,6 +319,29 @@ public static class AuthCommandGroup
                             Type = resolved.EnvironmentType,
                             Region = resolved.Region
                         };
+
+                        // Re-authenticate to the actual environment to get country claims
+                        // (Global Discovery tokens don't include tenant_ctry/ctry claims)
+                        Console.WriteLine("Validating environment connection...");
+                        try
+                        {
+                            using var envClient = await provider.CreateServiceClientAsync(
+                                resolved.ApiUrl, cancellationToken, forceInteractive: false);
+
+                            // Extract claims from environment-specific token/ID token
+                            var envClaims = JwtClaimsParser.Parse(provider.IdTokenClaims, provider.AccessToken, debug: debugClaims);
+                            if (envClaims != null)
+                            {
+                                if (!string.IsNullOrEmpty(envClaims.TenantCountry))
+                                    profile.TenantCountry = envClaims.TenantCountry;
+                                if (!string.IsNullOrEmpty(envClaims.UserCountry))
+                                    profile.UserCountry = envClaims.UserCountry;
+                            }
+                        }
+                        catch
+                        {
+                            // Silently ignore - country claims are optional
+                        }
                     }
                     catch (Exception ex)
                     {

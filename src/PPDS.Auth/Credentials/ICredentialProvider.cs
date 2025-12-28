@@ -58,6 +58,12 @@ public interface ICredentialProvider : IDisposable
     /// Available after successful authentication. Used for extracting JWT claims.
     /// </summary>
     string? AccessToken { get; }
+
+    /// <summary>
+    /// Gets the ID token claims from the last authentication (if available).
+    /// The ID token typically contains user claims like country that aren't in the access token.
+    /// </summary>
+    System.Security.Claims.ClaimsPrincipal? IdTokenClaims { get; }
 }
 
 /// <summary>
