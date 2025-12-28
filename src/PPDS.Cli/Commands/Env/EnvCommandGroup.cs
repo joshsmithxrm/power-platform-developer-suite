@@ -349,42 +349,22 @@ public static class EnvCommandGroup
             var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
 
+            // WhoAmI verifies the connection and returns user/org IDs
             var whoAmIResponse = (WhoAmIResponse)await client.ExecuteAsync(
                 new WhoAmIRequest(), cancellationToken);
 
-            // Get user details
-            var user = await client.RetrieveAsync(
-                "systemuser",
-                whoAmIResponse.UserId,
-                new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname", "domainname", "internalemailaddress", "businessunitid"),
-                cancellationToken);
-
-            var fullName = user.GetAttributeValue<string>("fullname");
-            var domainName = user.GetAttributeValue<string>("domainname");
-            var email = user.GetAttributeValue<string>("internalemailaddress");
-            var businessUnit = user.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("businessunitid");
-
-            // Get org info
-            var org = await client.RetrieveAsync(
-                "organization",
-                whoAmIResponse.OrganizationId,
-                new Microsoft.Xrm.Sdk.Query.ColumnSet("name", "uniquename"),
-                cancellationToken);
-
-            var orgName = org.GetAttributeValue<string>("name");
-            var orgUniqueName = org.GetAttributeValue<string>("uniquename");
+            // Org info is available directly on the client - no extra query needed
+            var orgName = client.ConnectedOrgFriendlyName;
+            var orgUniqueName = client.ConnectedOrgUniqueName;
+            var orgId = client.ConnectedOrgId;
 
             if (json)
             {
                 var output = new
                 {
                     userId = whoAmIResponse.UserId,
-                    fullName,
-                    domainName,
-                    email,
                     businessUnitId = whoAmIResponse.BusinessUnitId,
-                    businessUnitName = businessUnit?.Name,
-                    organizationId = whoAmIResponse.OrganizationId,
+                    organizationId = orgId,
                     organizationName = orgName,
                     organizationUniqueName = orgUniqueName,
                     environmentUrl = env.Url,
@@ -405,23 +385,11 @@ public static class EnvCommandGroup
                 Console.WriteLine("Connected successfully!");
                 Console.ResetColor();
                 Console.WriteLine();
-                Console.WriteLine("User");
-                Console.WriteLine(new string('-', 40));
-                Console.WriteLine($"  Name:          {fullName}");
-                Console.WriteLine($"  Domain:        {domainName}");
-                if (!string.IsNullOrEmpty(email))
-                {
-                    Console.WriteLine($"  Email:         {email}");
-                }
-                Console.WriteLine($"  User ID:       {whoAmIResponse.UserId}");
-                Console.WriteLine($"  Business Unit: {businessUnit?.Name}");
-                Console.WriteLine();
-                Console.WriteLine("Environment");
-                Console.WriteLine(new string('-', 40));
-                Console.WriteLine($"  Name:          {orgName}");
+                Console.WriteLine($"  Org ID:        {orgId}");
                 Console.WriteLine($"  Unique Name:   {orgUniqueName}");
-                Console.WriteLine($"  Org ID:        {whoAmIResponse.OrganizationId}");
-                Console.WriteLine($"  URL:           {env.Url}");
+                Console.WriteLine($"  Friendly Name: {orgName}");
+                Console.WriteLine($"  Org URL:       {env.Url}");
+                Console.WriteLine($"  User ID:       {whoAmIResponse.UserId}");
             }
 
             return ExitCodes.Success;
