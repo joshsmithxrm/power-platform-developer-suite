@@ -27,6 +27,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
     private readonly CloudEnvironment _cloud;
     private readonly string? _tenantId;
+    private readonly string? _username;
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
@@ -42,17 +43,26 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public DateTimeOffset? TokenExpiresAt => _cachedResult?.ExpiresOn;
 
+    /// <inheritdoc />
+    public string? TenantId => _cachedResult?.TenantId;
+
+    /// <inheritdoc />
+    public string? ObjectId => _cachedResult?.UniqueId;
+
     /// <summary>
     /// Creates a new interactive browser credential provider.
     /// </summary>
     /// <param name="cloud">The cloud environment.</param>
     /// <param name="tenantId">Optional tenant ID (defaults to "organizations" for multi-tenant).</param>
+    /// <param name="username">Optional username for silent auth lookup.</param>
     public InteractiveBrowserCredentialProvider(
         CloudEnvironment cloud = CloudEnvironment.Public,
-        string? tenantId = null)
+        string? tenantId = null,
+        string? username = null)
     {
         _cloud = cloud;
         _tenantId = tenantId;
+        _username = username;
     }
 
     /// <summary>
@@ -64,7 +74,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     {
         return new InteractiveBrowserCredentialProvider(
             profile.Cloud,
-            profile.TenantId);
+            profile.TenantId,
+            profile.Username);
     }
 
     /// <summary>
@@ -109,7 +120,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public async Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool forceInteractive = false)
     {
         if (string.IsNullOrWhiteSpace(environmentUrl))
             throw new ArgumentNullException(nameof(environmentUrl));
@@ -121,7 +133,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
 
         // Get token
-        var token = await GetTokenAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+        var token = await GetTokenAsync(environmentUrl, forceInteractive, cancellationToken).ConfigureAwait(false);
 
         // Create ServiceClient with token provider
         var client = new ServiceClient(
@@ -142,33 +154,44 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <summary>
     /// Gets an access token for the specified Dataverse URL.
     /// </summary>
-    private async Task<string> GetTokenAsync(string environmentUrl, CancellationToken cancellationToken)
+    /// <param name="environmentUrl">The environment URL.</param>
+    /// <param name="forceInteractive">If true, skip silent auth and prompt user directly.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<string> GetTokenAsync(string environmentUrl, bool forceInteractive, CancellationToken cancellationToken)
     {
         var scopes = new[] { $"{environmentUrl}/.default" };
 
-        // Try to get token silently from cache first
-        if (_cachedResult != null && _cachedResult.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+        // For profile creation, skip silent auth and go straight to interactive
+        if (!forceInteractive)
         {
-            return _cachedResult.AccessToken;
-        }
-
-        // Try silent acquisition from MSAL cache
-        var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
-        var account = accounts.FirstOrDefault();
-
-        if (account != null)
-        {
-            try
+            // Try to get token silently from cache first
+            if (_cachedResult != null && _cachedResult.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
             {
-                _cachedResult = await _msalClient
-                    .AcquireTokenSilent(scopes, account)
-                    .ExecuteAsync(cancellationToken)
-                    .ConfigureAwait(false);
                 return _cachedResult.AccessToken;
             }
-            catch (MsalUiRequiredException)
+
+            // Try silent acquisition from MSAL cache
+            var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
+
+            // Look up by username if we have one, otherwise fall back to first account
+            var account = !string.IsNullOrEmpty(_username)
+                ? accounts.FirstOrDefault(a => string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase))
+                : accounts.FirstOrDefault();
+
+            if (account != null)
             {
-                // Silent acquisition failed, need interactive
+                try
+                {
+                    _cachedResult = await _msalClient
+                        .AcquireTokenSilent(scopes, account)
+                        .ExecuteAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return _cachedResult.AccessToken;
+                }
+                catch (MsalUiRequiredException)
+                {
+                    // Silent acquisition failed, need interactive
+                }
             }
         }
 
@@ -178,9 +201,10 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
         try
         {
-            _cachedResult = await _msalClient
+            _cachedResult = await _msalClient!
                 .AcquireTokenInteractive(scopes)
                 .WithUseEmbeddedWebView(false) // Use system browser
+                .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount) // Always show account picker
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
         }

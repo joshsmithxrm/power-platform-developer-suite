@@ -29,6 +29,12 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public DateTimeOffset? TokenExpiresAt => _tokenExpiresAt;
 
+    /// <inheritdoc />
+    public string? TenantId => _tenantId;
+
+    /// <inheritdoc />
+    public string? ObjectId => null; // Service principals don't have a user OID
+
     /// <summary>
     /// Creates a new client secret credential provider.
     /// </summary>
@@ -77,7 +83,8 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool forceInteractive = false) // Ignored for service principals
     {
         if (string.IsNullOrWhiteSpace(environmentUrl))
             throw new ArgumentNullException(nameof(environmentUrl));

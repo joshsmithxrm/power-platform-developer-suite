@@ -34,6 +34,12 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public DateTimeOffset? TokenExpiresAt => _cachedToken?.ExpiresOn;
 
+    /// <inheritdoc />
+    public string? TenantId => null; // Managed identity doesn't expose tenant
+
+    /// <inheritdoc />
+    public string? ObjectId => null; // Managed identity doesn't expose OID
+
     /// <summary>
     /// Creates a new managed identity credential provider.
     /// </summary>
@@ -66,7 +72,8 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public async Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool forceInteractive = false) // Ignored for managed identity
     {
         if (string.IsNullOrWhiteSpace(environmentUrl))
             throw new ArgumentNullException(nameof(environmentUrl));

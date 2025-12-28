@@ -21,11 +21,13 @@ public interface ICredentialProvider : IDisposable
     /// </summary>
     /// <param name="environmentUrl">The Dataverse environment URL.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="forceInteractive">If true, skip silent auth and prompt user directly. Use for profile creation.</param>
     /// <returns>An authenticated ServiceClient.</returns>
     /// <exception cref="AuthenticationException">If authentication fails.</exception>
     Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool forceInteractive = false);
 
     /// <summary>
     /// Gets the identity string for display (e.g., username or app ID).
@@ -38,6 +40,18 @@ public interface ICredentialProvider : IDisposable
     /// Available after successful authentication.
     /// </summary>
     DateTimeOffset? TokenExpiresAt { get; }
+
+    /// <summary>
+    /// Gets the tenant ID from the authentication result.
+    /// Available after successful authentication.
+    /// </summary>
+    string? TenantId { get; }
+
+    /// <summary>
+    /// Gets the Entra Object ID (OID) from the authentication result.
+    /// Available after successful authentication.
+    /// </summary>
+    string? ObjectId { get; }
 }
 
 /// <summary>

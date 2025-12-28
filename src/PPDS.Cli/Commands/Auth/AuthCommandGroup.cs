@@ -228,8 +228,14 @@ public static class AuthCommandGroup
 
             try
             {
-                var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken);
+                // forceInteractive=true ensures we always prompt, never reuse cached tokens
+                var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken, forceInteractive: true);
                 profile.Username = provider.Identity;
+                // Store tenant ID from auth result if not already set
+                if (string.IsNullOrEmpty(profile.TenantId) && !string.IsNullOrEmpty(provider.TenantId))
+                {
+                    profile.TenantId = provider.TenantId;
+                }
                 client.Dispose();
             }
             catch (AuthenticationException ex)
@@ -642,99 +648,69 @@ public static class AuthCommandGroup
 
     private static Command CreateUpdateCommand()
     {
-        var profileArg = new Argument<string?>("profile")
+        var profileArg = new Argument<string>("profile")
         {
-            Description = "Profile name or index (default: active profile)",
-            DefaultValueFactory = _ => null,
-            Arity = ArgumentArity.ZeroOrOne
+            Description = "Profile name or index to update"
         };
 
-        var forceOption = new Option<bool>("--force", "-f")
+        var nameOption = new Option<string?>("--name", "-n")
         {
-            Description = "Clear cached credentials and force re-authentication",
-            DefaultValueFactory = _ => false
+            Description = "New name for the profile (max 30 characters)"
         };
+        nameOption.Validators.Add(result =>
+        {
+            var name = result.GetValue(nameOption);
+            if (name?.Length > 30)
+                result.AddError("Profile name cannot exceed 30 characters");
+        });
 
-        var command = new Command("update", "Re-authenticate an existing profile")
+        var command = new Command("update", "Update profile metadata (name)")
         {
             profileArg,
-            forceOption
+            nameOption
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var profile = parseResult.GetValue(profileArg);
-            var force = parseResult.GetValue(forceOption);
-            return await ExecuteUpdateAsync(profile, force, cancellationToken);
+            var profile = parseResult.GetValue(profileArg)!;
+            var name = parseResult.GetValue(nameOption);
+            return await ExecuteUpdateAsync(profile, name, cancellationToken);
         });
 
         return command;
     }
 
-    private static async Task<int> ExecuteUpdateAsync(string? profileNameOrIndex, bool force, CancellationToken cancellationToken)
+    private static async Task<int> ExecuteUpdateAsync(string profileNameOrIndex, string? newName, CancellationToken cancellationToken)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(newName))
+            {
+                Console.Error.WriteLine("Error: At least one update option (--name) must be specified.");
+                return ExitCodes.Failure;
+            }
+
             using var store = new ProfileStore();
             var collection = await store.LoadAsync(cancellationToken);
 
-            AuthProfile profile;
-            if (string.IsNullOrWhiteSpace(profileNameOrIndex))
+            var profile = collection.GetByNameOrIndex(profileNameOrIndex);
+            if (profile == null)
             {
-                profile = collection.ActiveProfile
-                    ?? throw new InvalidOperationException("No active profile. Specify a profile or use 'ppds auth select' first.");
-            }
-            else
-            {
-                profile = collection.GetByNameOrIndex(profileNameOrIndex)
-                    ?? throw new InvalidOperationException($"Profile '{profileNameOrIndex}' not found.");
-            }
-
-            Console.WriteLine($"Re-authenticating profile: {profile.DisplayIdentifier}");
-            Console.WriteLine();
-
-            // Only device code profiles can be updated this way
-            if (profile.AuthMethod != AuthMethod.DeviceCode)
-            {
-                Console.Error.WriteLine($"Error: Cannot update {profile.AuthMethod} profiles interactively.");
-                Console.Error.WriteLine("For service principal profiles, delete and recreate with new credentials.");
+                Console.Error.WriteLine($"Error: Profile '{profileNameOrIndex}' not found.");
                 return ExitCodes.Failure;
             }
 
-            // If force, clear the token cache to ensure fresh authentication
-            if (force)
+            // Update name if provided
+            if (!string.IsNullOrWhiteSpace(newName))
             {
-                var tokenCachePath = ProfilePaths.TokenCacheFile;
-                if (File.Exists(tokenCachePath))
+                if (collection.IsNameInUse(newName, profile.Index))
                 {
-                    File.Delete(tokenCachePath);
-                    Console.WriteLine("Cleared cached credentials.");
-                    Console.WriteLine();
+                    Console.Error.WriteLine($"Error: Profile name '{newName}' is already in use.");
+                    return ExitCodes.Failure;
                 }
-            }
-
-            var targetUrl = profile.Environment?.Url ?? "https://globaldisco.crm.dynamics.com";
-
-            // Use interactive browser when available
-            ICredentialProvider provider = InteractiveBrowserCredentialProvider.IsAvailable()
-                ? new InteractiveBrowserCredentialProvider(profile.Cloud, profile.TenantId)
-                : new DeviceCodeCredentialProvider(profile.Cloud, profile.TenantId);
-
-            try
-            {
-                var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken);
-                profile.Username = provider.Identity;
-                profile.LastUsedAt = DateTimeOffset.UtcNow;
-                client.Dispose();
-            }
-            catch (AuthenticationException ex)
-            {
-                Console.Error.WriteLine($"Error: Authentication failed: {ex.Message}");
-                return ExitCodes.Failure;
-            }
-            finally
-            {
-                provider.Dispose();
+                var oldName = profile.DisplayIdentifier;
+                profile.Name = newName;
+                Console.WriteLine($"Name updated: {oldName} -> {profile.DisplayIdentifier}");
             }
 
             await store.SaveAsync(collection, cancellationToken);
@@ -743,7 +719,6 @@ public static class AuthCommandGroup
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"Profile updated: {profile.DisplayIdentifier}");
             Console.ResetColor();
-            Console.WriteLine($"  Identity: {profile.IdentityDisplay}");
 
             return ExitCodes.Success;
         }
