@@ -1,6 +1,7 @@
 using System.CommandLine;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
+using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
 
@@ -89,7 +90,7 @@ public static class AuthCommandGroup
             Description = "Optional: The certificate password to authenticate with"
         };
 
-        var certificateThumbprintOption = new Option<string?>("--certificateThumbprint")
+        var certificateThumbprintOption = new Option<string?>("--certificateThumbprint", "-ct")
         {
             Description = "Certificate thumbprint for Windows certificate store authentication"
         };
@@ -226,18 +227,8 @@ public static class AuthCommandGroup
                 CertificateThumbprint = options.CertificateThumbprint
             };
 
-            // Add environment if provided
-            if (!string.IsNullOrWhiteSpace(options.Environment))
-            {
-                profile.Environment = new EnvironmentInfo
-                {
-                    Url = options.Environment.TrimEnd('/'),
-                    DisplayName = ExtractEnvironmentName(options.Environment)
-                };
-            }
-
-            // Authenticate to verify credentials
-            var targetUrl = options.Environment ?? "https://globaldisco.crm.dynamics.com";
+            // Authenticate to verify credentials - use discovery URL first
+            var targetUrl = "https://globaldisco.crm.dynamics.com";
 
             Console.WriteLine($"Authenticating with {authMethod}...");
             Console.WriteLine();
@@ -273,6 +264,49 @@ public static class AuthCommandGroup
                     profile.TenantId = provider.TenantId;
                 }
                 client.Dispose();
+
+                // Resolve environment if specified (must happen before provider disposal)
+                if (!string.IsNullOrWhiteSpace(options.Environment))
+                {
+                    Console.WriteLine("Resolving environment...");
+                    try
+                    {
+                        using var gds = new GlobalDiscoveryService(options.Cloud, options.Tenant);
+                        var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
+
+                        DiscoveredEnvironment? resolved;
+                        try
+                        {
+                            resolved = EnvironmentResolver.Resolve(environments, options.Environment);
+                        }
+                        catch (AmbiguousMatchException ex)
+                        {
+                            Console.Error.WriteLine($"Error: {ex.Message}");
+                            return ExitCodes.Failure;
+                        }
+
+                        if (resolved == null)
+                        {
+                            Console.Error.WriteLine($"Error: Environment '{options.Environment}' not found.");
+                            Console.Error.WriteLine();
+                            Console.Error.WriteLine("Use 'ppds env list' to see available environments.");
+                            return ExitCodes.Failure;
+                        }
+
+                        profile.Environment = new EnvironmentInfo
+                        {
+                            Url = resolved.ApiUrl,
+                            DisplayName = resolved.FriendlyName,
+                            UniqueName = resolved.UniqueName,
+                            EnvironmentId = resolved.EnvironmentId
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Warning: Could not resolve environment: {ex.Message}");
+                        Console.Error.WriteLine("Use 'ppds env select' after profile creation to set the environment.");
+                    }
+                }
             }
             catch (AuthenticationException ex)
             {
@@ -298,6 +332,7 @@ public static class AuthCommandGroup
             if (profile.HasEnvironment)
             {
                 Console.WriteLine($"  Environment: {profile.Environment!.DisplayName}");
+                Console.WriteLine($"  Environment URL: {profile.Environment.Url}");
             }
             else
             {
