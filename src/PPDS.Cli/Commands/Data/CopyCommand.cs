@@ -55,6 +55,31 @@ public static class CopyCommand
             Description = "Temporary directory for intermediate data file (default: system temp)"
         };
 
+        var parallelOption = new Option<int>("--parallel")
+        {
+            Description = "Maximum concurrent entity exports (only applies when schema contains multiple entities)",
+            DefaultValueFactory = _ => Environment.ProcessorCount * 2
+        };
+        parallelOption.Validators.Add(result =>
+        {
+            if (result.GetValue(parallelOption) < 1)
+                result.AddError("--parallel must be at least 1");
+        });
+
+        var batchSizeOption = new Option<int>("--batch-size")
+        {
+            Description = "Records per API request (all records are exported; this controls request size)",
+            DefaultValueFactory = _ => 5000
+        };
+        batchSizeOption.Validators.Add(result =>
+        {
+            var value = result.GetValue(batchSizeOption);
+            if (value < 1)
+                result.AddError("--batch-size must be at least 1");
+            if (value > 5000)
+                result.AddError("--batch-size cannot exceed 5000 (Dataverse limit)");
+        });
+
         var bypassPluginsOption = new Option<bool>("--bypass-plugins")
         {
             Description = "Bypass custom plugin execution on target",
@@ -94,6 +119,8 @@ public static class CopyCommand
             sourceEnvOption,
             targetEnvOption,
             tempDirOption,
+            parallelOption,
+            batchSizeOption,
             bypassPluginsOption,
             bypassFlowsOption,
             jsonOption,
@@ -110,6 +137,8 @@ public static class CopyCommand
             var sourceEnv = parseResult.GetValue(sourceEnvOption)!;
             var targetEnv = parseResult.GetValue(targetEnvOption)!;
             var tempDir = parseResult.GetValue(tempDirOption);
+            var parallel = parseResult.GetValue(parallelOption);
+            var batchSize = parseResult.GetValue(batchSizeOption);
             var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var json = parseResult.GetValue(jsonOption);
@@ -119,7 +148,8 @@ public static class CopyCommand
             return await ExecuteAsync(
                 profile, sourceProfile, targetProfile,
                 sourceEnv, targetEnv,
-                schema, tempDir, bypassPlugins, bypassFlows,
+                schema, tempDir, parallel, batchSize,
+                bypassPlugins, bypassFlows,
                 json, verbose, debug, cancellationToken);
         });
 
@@ -134,6 +164,8 @@ public static class CopyCommand
         string targetEnv,
         FileInfo schema,
         DirectoryInfo? tempDir,
+        int parallel,
+        int batchSize,
         bool bypassPlugins,
         bool bypassFlows,
         bool json,
@@ -179,10 +211,16 @@ public static class CopyCommand
 
             var exporter = sourceProvider.GetRequiredService<IExporter>();
 
+            var exportOptions = new ExportOptions
+            {
+                DegreeOfParallelism = parallel,
+                PageSize = batchSize
+            };
+
             var exportResult = await exporter.ExportAsync(
                 schema.FullName,
                 tempDataFile,
-                new ExportOptions(),
+                exportOptions,
                 progressReporter,
                 cancellationToken);
 
