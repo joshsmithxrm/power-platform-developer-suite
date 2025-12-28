@@ -83,7 +83,21 @@ Total: 3 entities
 - Grep-parseability is important
 - Examples: `schema list`, user mapping results
 
-**Table underlines:** Use `-----` (dashes) for column header underlines. This is standard (az, Heroku style).
+**Table underlines:** Use `-----` (dashes) for column header underlines.
+
+---
+
+## Required Options
+
+Required options display `[Required]` at the start of their description:
+
+```
+Options:
+  -env, --environment <environment>  [Required] Default environment (ID, url, unique name, or partial name)
+  -?, -h, --help                     Show help and usage information
+```
+
+This keeps the required indicator inline with the description for consistent scannability regardless of terminal width.
 
 ---
 

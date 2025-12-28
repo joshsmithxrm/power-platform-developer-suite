@@ -3,6 +3,7 @@ using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Auth;
 using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Commands.Env;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli;
 
@@ -22,6 +23,9 @@ public static class Program
         rootCommand.Subcommands.Add(DataCommandGroup.Create());
         rootCommand.Subcommands.Add(SchemaCommand.Create());
         rootCommand.Subcommands.Add(UsersCommand.Create());
+
+        // Prepend [Required] to required option descriptions for scannability
+        HelpCustomization.ApplyRequiredOptionStyle(rootCommand);
 
         // Handle cancellation
         using var cts = new CancellationTokenSource();
