@@ -444,7 +444,7 @@ namespace PPDS.Dataverse.Pooling
             _logger.LogDebug(
                 "Created new connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}, IsReady: {IsReady}",
                 pooledClient.ConnectionId,
-                connectionName,
+                pooledClient.DisplayName,
                 pooledClient.IsReady);
 
             return pooledClient;
@@ -495,7 +495,7 @@ namespace PPDS.Dataverse.Pooling
                         "Connection marked invalid, disposing instead of returning. " +
                         "ConnectionId: {ConnectionId}, Name: {ConnectionName}, Reason: {Reason}",
                         client.ConnectionId,
-                        client.ConnectionName,
+                        client.DisplayName,
                         client.InvalidReason);
 
                     Interlocked.Increment(ref _invalidConnectionCount);
@@ -527,7 +527,7 @@ namespace PPDS.Dataverse.Pooling
                         _logger.LogDebug(
                             "Returned connection to pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
                             client.ConnectionId,
-                            client.ConnectionName);
+                            client.DisplayName);
                     }
                     else
                     {
@@ -535,7 +535,7 @@ namespace PPDS.Dataverse.Pooling
                         _logger.LogDebug(
                             "Pool full, disposed connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
                             client.ConnectionId,
-                            client.ConnectionName);
+                            client.DisplayName);
                     }
                 }
             }

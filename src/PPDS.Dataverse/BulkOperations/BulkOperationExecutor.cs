@@ -900,7 +900,7 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             _logger.LogDebug("Executing CreateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
-                entityLogicalName, batch.Count, client.ConnectionName);
+                entityLogicalName, batch.Count, client.DisplayName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new CreateMultipleRequest { Targets = targets };
@@ -962,7 +962,7 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             _logger.LogDebug("Executing UpdateMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
-                entityLogicalName, batch.Count, client.ConnectionName);
+                entityLogicalName, batch.Count, client.DisplayName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpdateMultipleRequest { Targets = targets };
@@ -1023,7 +1023,7 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             _logger.LogDebug("Executing UpsertMultiple batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
-                entityLogicalName, batch.Count, client.ConnectionName);
+                entityLogicalName, batch.Count, client.DisplayName);
 
             var targets = new EntityCollection(batch) { EntityName = entityLogicalName };
             var request = new UpsertMultipleRequest { Targets = targets };
@@ -1106,7 +1106,7 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             _logger.LogDebug("Executing DeleteMultiple (elastic) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
-                entityLogicalName, batch.Count, client.ConnectionName);
+                entityLogicalName, batch.Count, client.DisplayName);
 
             var entityReferences = batch
                 .Select(id => new EntityReference(entityLogicalName, id))
@@ -1170,7 +1170,7 @@ namespace PPDS.Dataverse.BulkOperations
             CancellationToken cancellationToken)
         {
             _logger.LogDebug("Executing DeleteMultiple (standard) batch. Entity: {Entity}, BatchSize: {BatchSize}, Connection: {Connection}",
-                entityLogicalName, batch.Count, client.ConnectionName);
+                entityLogicalName, batch.Count, client.DisplayName);
 
             var executeMultiple = new ExecuteMultipleRequest
             {

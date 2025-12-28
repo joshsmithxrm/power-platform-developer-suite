@@ -59,6 +59,9 @@ namespace PPDS.Dataverse.Pooling
         public string ConnectionName { get; }
 
         /// <inheritdoc />
+        public string DisplayName => $"{ConnectionName}@{ConnectedOrgFriendlyName}";
+
+        /// <inheritdoc />
         public DateTime CreatedAt { get; }
 
         /// <inheritdoc />

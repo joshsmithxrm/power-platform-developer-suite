@@ -64,8 +64,9 @@ public sealed class ProfileConnectionSource : IDisposable
         _maxPoolSize = maxPoolSize;
         _deviceCodeCallback = deviceCodeCallback;
 
-        // Create a unique name for this source
-        Name = $"{profile.DisplayIdentifier}@{ExtractOrgName(_environmentUrl)}";
+        // Use identity display (username or app:id) as the connection name
+        // The full display name with org friendly name is constructed by PooledClient
+        Name = profile.IdentityDisplay;
     }
 
     /// <summary>
@@ -167,20 +168,6 @@ public sealed class ProfileConnectionSource : IDisposable
             _provider = null;
             throw new InvalidOperationException(
                 $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
-        }
-    }
-
-    private static string ExtractOrgName(string url)
-    {
-        try
-        {
-            var uri = new Uri(url);
-            var parts = uri.Host.Split('.');
-            return parts.Length > 0 ? parts[0] : url;
-        }
-        catch
-        {
-            return url;
         }
     }
 
