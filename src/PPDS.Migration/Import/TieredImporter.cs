@@ -124,8 +124,8 @@ namespace PPDS.Migration.Import
             if (options.RespectDisablePluginsSetting && _pluginStepManager != null)
             {
                 var entitiesToDisablePlugins = data.Schema.Entities
-                    .Where(e => e.DisablePlugins)
-                    .Select(e => e.LogicalName)
+                    .Where(e => e.DisablePlugins && e.ObjectTypeCode.HasValue)
+                    .Select(e => e.ObjectTypeCode!.Value)
                     .ToList();
 
                 if (entitiesToDisablePlugins.Count > 0)
