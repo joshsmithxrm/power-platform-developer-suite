@@ -13,7 +13,7 @@ public static class DataCommandGroup
     /// </summary>
     public static readonly Option<string?> ProfileOption = new("--profile", "-p")
     {
-        Description = "Authentication profile name(s). Use comma-separated names for pooling (e.g., app1,app2,app3). Uses active profile if not specified."
+        Description = "Profile name(s). For high-throughput pooling, specify multiple Application User profiles comma-separated (e.g., app1,app2,app3) - each profile multiplies API quota."
     };
 
     /// <summary>
