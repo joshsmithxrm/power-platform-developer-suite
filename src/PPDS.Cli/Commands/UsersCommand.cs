@@ -151,7 +151,7 @@ public static class UsersCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             await using var targetProvider = await ProfileServiceFactory.CreateFromProfileAsync(
                 effectiveTargetProfile,
@@ -159,7 +159,7 @@ public static class UsersCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             // Write connection headers (non-JSON mode only)
             if (!json)

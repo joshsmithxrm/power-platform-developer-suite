@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.Resilience;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
 using PPDS.Migration.Models;
@@ -85,6 +86,7 @@ public static class ImportCommand
             dataOption,
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
+            DataCommandGroup.RatePresetOption,
             bypassPluginsOption,
             bypassFlowsOption,
             continueOnErrorOption,
@@ -101,6 +103,7 @@ public static class ImportCommand
             var data = parseResult.GetValue(dataOption)!;
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
+            var ratePreset = parseResult.GetValue(DataCommandGroup.RatePresetOption);
             var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
@@ -112,7 +115,7 @@ public static class ImportCommand
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteAsync(
-                profile, environment, data, bypassPlugins, bypassFlows,
+                profile, environment, ratePreset, data, bypassPlugins, bypassFlows,
                 continueOnError, mode, userMappingFile, stripOwnerFields,
                 json, verbose, debug, cancellationToken);
         });
@@ -123,6 +126,7 @@ public static class ImportCommand
     private static async Task<int> ExecuteAsync(
         string? profile,
         string? environment,
+        RateControlPreset ratePreset,
         FileInfo data,
         bool bypassPlugins,
         bool bypassFlows,
@@ -146,6 +150,7 @@ public static class ImportCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
+                ratePreset,
                 cancellationToken);
 
             // Write connection header (non-JSON mode only)

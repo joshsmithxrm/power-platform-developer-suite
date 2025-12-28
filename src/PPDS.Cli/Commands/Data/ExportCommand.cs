@@ -2,6 +2,7 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.Resilience;
 using PPDS.Migration.Export;
 using PPDS.Migration.Progress;
 
@@ -89,6 +90,7 @@ public static class ExportCommand
             outputOption,
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
+            DataCommandGroup.RatePresetOption,
             parallelOption,
             batchSizeOption,
             includeFilesOption,
@@ -103,6 +105,7 @@ public static class ExportCommand
             var output = parseResult.GetValue(outputOption)!;
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
+            var ratePreset = parseResult.GetValue(DataCommandGroup.RatePresetOption);
             var parallel = parseResult.GetValue(parallelOption);
             var batchSize = parseResult.GetValue(batchSizeOption);
             var includeFiles = parseResult.GetValue(includeFilesOption);
@@ -111,7 +114,7 @@ public static class ExportCommand
             var debug = parseResult.GetValue(debugOption);
 
             return await ExecuteAsync(
-                profile, environment, schema, output, parallel, batchSize,
+                profile, environment, ratePreset, schema, output, parallel, batchSize,
                 includeFiles, json, verbose, debug, cancellationToken);
         });
 
@@ -121,6 +124,7 @@ public static class ExportCommand
     private static async Task<int> ExecuteAsync(
         string? profile,
         string? environment,
+        RateControlPreset ratePreset,
         FileInfo schema,
         FileInfo output,
         int parallel,
@@ -142,6 +146,7 @@ public static class ExportCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
+                ratePreset,
                 cancellationToken);
 
             // Write connection header (non-JSON mode only)

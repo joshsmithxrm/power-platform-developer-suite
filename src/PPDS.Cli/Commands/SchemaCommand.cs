@@ -246,7 +246,7 @@ public static class SchemaCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             // Write connection header (non-JSON mode only)
             if (!json)

@@ -6,12 +6,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
+using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
@@ -28,6 +30,7 @@ namespace PPDS.Migration.Import
         private readonly ICmtDataReader _dataReader;
         private readonly IDependencyGraphBuilder _graphBuilder;
         private readonly IExecutionPlanBuilder _planBuilder;
+        private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
 
@@ -46,6 +49,7 @@ namespace PPDS.Migration.Import
             _dataReader = dataReader ?? throw new ArgumentNullException(nameof(dataReader));
             _graphBuilder = graphBuilder ?? throw new ArgumentNullException(nameof(graphBuilder));
             _planBuilder = planBuilder ?? throw new ArgumentNullException(nameof(planBuilder));
+            _defaultOptions = new ImportOptions();
         }
 
         /// <summary>
@@ -57,10 +61,12 @@ namespace PPDS.Migration.Import
             ICmtDataReader dataReader,
             IDependencyGraphBuilder graphBuilder,
             IExecutionPlanBuilder planBuilder,
+            IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
             : this(connectionPool, bulkExecutor, dataReader, graphBuilder, planBuilder)
         {
+            _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
             _logger = logger;
         }
@@ -103,7 +109,7 @@ namespace PPDS.Migration.Import
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
-            options ??= new ImportOptions();
+            options ??= _defaultOptions;
             var stopwatch = Stopwatch.StartNew();
             var idMappings = new IdMappingCollection();
             var entityResults = new ConcurrentBag<EntityImportResult>();

@@ -7,10 +7,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
+using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
@@ -25,6 +27,7 @@ namespace PPDS.Migration.Export
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly ICmtSchemaReader _schemaReader;
         private readonly ICmtDataWriter _dataWriter;
+        private readonly ExportOptions _defaultOptions;
         private readonly ILogger<ParallelExporter>? _logger;
 
         /// <summary>
@@ -41,6 +44,7 @@ namespace PPDS.Migration.Export
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
             _schemaReader = schemaReader ?? throw new ArgumentNullException(nameof(schemaReader));
             _dataWriter = dataWriter ?? throw new ArgumentNullException(nameof(dataWriter));
+            _defaultOptions = new ExportOptions();
         }
 
         /// <summary>
@@ -49,14 +53,17 @@ namespace PPDS.Migration.Export
         /// <param name="connectionPool">The connection pool.</param>
         /// <param name="schemaReader">The schema reader.</param>
         /// <param name="dataWriter">The data writer.</param>
+        /// <param name="migrationOptions">Migration options from DI.</param>
         /// <param name="logger">The logger.</param>
         public ParallelExporter(
             IDataverseConnectionPool connectionPool,
             ICmtSchemaReader schemaReader,
             ICmtDataWriter dataWriter,
-            ILogger<ParallelExporter> logger)
+            IOptions<MigrationOptions>? migrationOptions = null,
+            ILogger<ParallelExporter>? logger = null)
             : this(connectionPool, schemaReader, dataWriter)
         {
+            _defaultOptions = migrationOptions?.Value.Export ?? new ExportOptions();
             _logger = logger;
         }
 
@@ -90,7 +97,7 @@ namespace PPDS.Migration.Export
             if (schema == null) throw new ArgumentNullException(nameof(schema));
             if (string.IsNullOrEmpty(outputPath)) throw new ArgumentNullException(nameof(outputPath));
 
-            options ??= new ExportOptions();
+            options ??= _defaultOptions;
             var stopwatch = Stopwatch.StartNew();
             var entityResults = new ConcurrentBag<EntityExportResult>();
             var entityData = new ConcurrentDictionary<string, IReadOnlyList<Entity>>(StringComparer.OrdinalIgnoreCase);

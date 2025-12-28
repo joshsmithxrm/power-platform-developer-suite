@@ -1,10 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
+using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
 using PPDS.Migration.DependencyInjection;
@@ -45,6 +47,7 @@ public static class ProfileServiceFactory
     /// <param name="verbose">Enable verbose logging.</param>
     /// <param name="debug">Enable debug logging.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
+    /// <param name="ratePreset">Rate control preset for throttle management.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured service provider.</returns>
     public static async Task<ServiceProvider> CreateFromProfileAsync(
@@ -53,6 +56,7 @@ public static class ProfileServiceFactory
         bool verbose = false,
         bool debug = false,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        RateControlPreset ratePreset = RateControlPreset.Balanced,
         CancellationToken cancellationToken = default)
     {
         var store = new ProfileStore();
@@ -96,7 +100,7 @@ public static class ProfileServiceFactory
             EnvironmentDisplayName = profile.Environment?.DisplayName
         };
 
-        return CreateProviderFromSources(new[] { adapter }, connectionInfo, verbose, debug);
+        return CreateProviderFromSources(new[] { adapter }, connectionInfo, verbose, debug, ratePreset);
     }
 
     /// <summary>
@@ -107,6 +111,7 @@ public static class ProfileServiceFactory
     /// <param name="verbose">Enable verbose logging.</param>
     /// <param name="debug">Enable debug logging.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
+    /// <param name="ratePreset">Rate control preset for throttle management.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured service provider.</returns>
     public static async Task<ServiceProvider> CreateFromProfilesAsync(
@@ -115,6 +120,7 @@ public static class ProfileServiceFactory
         bool verbose = false,
         bool debug = false,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        RateControlPreset ratePreset = RateControlPreset.Balanced,
         CancellationToken cancellationToken = default)
     {
         var names = ConnectionResolver.ParseProfileString(profileNames);
@@ -123,7 +129,7 @@ public static class ProfileServiceFactory
         if (names.Count == 0)
         {
             return await CreateFromProfileAsync(
-                null, environmentOverride, verbose, debug, deviceCodeCallback, cancellationToken)
+                null, environmentOverride, verbose, debug, deviceCodeCallback, ratePreset, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -131,7 +137,7 @@ public static class ProfileServiceFactory
         if (names.Count == 1)
         {
             return await CreateFromProfileAsync(
-                names[0], environmentOverride, verbose, debug, deviceCodeCallback, cancellationToken)
+                names[0], environmentOverride, verbose, debug, deviceCodeCallback, ratePreset, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -152,7 +158,7 @@ public static class ProfileServiceFactory
             EnvironmentDisplayName = firstSource.Profile.Environment?.DisplayName
         };
 
-        return CreateProviderFromSources(adapters, connectionInfo, verbose, debug);
+        return CreateProviderFromSources(adapters, connectionInfo, verbose, debug, ratePreset);
     }
 
     /// <summary>
@@ -185,13 +191,15 @@ public static class ProfileServiceFactory
 
         // Create providers for each environment
         var sourceProvider = await CreateFromProfileAsync(
-            sourceProfileName, sourceEnv, verbose, debug, deviceCodeCallback, cancellationToken)
+            sourceProfileName, sourceEnv, verbose, debug, deviceCodeCallback,
+            cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         try
         {
             var targetProvider = await CreateFromProfileAsync(
-                targetProfileName, targetEnv, verbose, debug, deviceCodeCallback, cancellationToken)
+                targetProfileName, targetEnv, verbose, debug, deviceCodeCallback,
+                cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             return (sourceProvider, targetProvider);
@@ -210,13 +218,21 @@ public static class ProfileServiceFactory
         IConnectionSource[] sources,
         ResolvedConnectionInfo connectionInfo,
         bool verbose,
-        bool debug)
+        bool debug,
+        RateControlPreset ratePreset = RateControlPreset.Balanced)
     {
         var services = new ServiceCollection();
         ConfigureLogging(services, verbose, debug);
 
         // Register connection info for header display
         services.AddSingleton(connectionInfo);
+
+        // Configure DataverseOptions with the rate preset
+        var dataverseOptions = new DataverseOptions
+        {
+            AdaptiveRate = { Preset = ratePreset }
+        };
+        services.AddSingleton<IOptions<DataverseOptions>>(new OptionsWrapper<DataverseOptions>(dataverseOptions));
 
         // Pool options
         var poolOptions = new ConnectionPoolOptions
