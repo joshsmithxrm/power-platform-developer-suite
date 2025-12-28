@@ -65,11 +65,20 @@ public static class ConsoleHeader
     /// <returns>The identity display string.</returns>
     public static string GetIdentityDisplay(AuthProfile profile)
     {
+        // User auth - show username/email
         if (!string.IsNullOrEmpty(profile.Username))
             return profile.Username;
 
+        // Service principal - show profile name with client ID
         if (!string.IsNullOrEmpty(profile.ApplicationId))
+        {
+            // If profile has a name, show "Name (ClientId)"
+            if (!string.IsNullOrEmpty(profile.Name))
+                return $"{profile.Name} ({profile.ApplicationId})";
+
+            // No name, just show truncated app ID
             return $"app:{profile.ApplicationId[..Math.Min(8, profile.ApplicationId.Length)]}...";
+        }
 
         return "(unknown)";
     }
