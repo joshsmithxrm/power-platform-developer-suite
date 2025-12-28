@@ -40,14 +40,13 @@ public static class CredentialProviderFactory
 
     /// <summary>
     /// Creates the appropriate interactive provider based on environment.
-    /// Uses browser authentication by default (like PAC CLI), falls back to device code for headless environments.
+    /// Uses browser authentication by default, falls back to device code for headless environments.
     /// </summary>
     private static ICredentialProvider CreateInteractiveProvider(
         AuthProfile profile,
         Action<DeviceCodeInfo>? deviceCodeCallback)
     {
-        // Use browser auth when available (default, like PAC CLI)
-        // Fall back to device code for headless environments (SSH, CI, containers)
+        // Browser auth when display available, device code for headless (SSH, CI, containers)
         if (InteractiveBrowserCredentialProvider.IsAvailable())
         {
             return InteractiveBrowserCredentialProvider.FromProfile(profile);

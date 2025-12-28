@@ -15,7 +15,7 @@ namespace PPDS.Auth.Credentials;
 
 /// <summary>
 /// Provides authentication using interactive browser flow.
-/// Opens the system browser for authentication (like PAC CLI).
+/// Automatically opens the system browser for user sign-in.
 /// </summary>
 public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 {

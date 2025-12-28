@@ -12,7 +12,8 @@ using PPDS.Auth.Profiles;
 namespace PPDS.Auth.Credentials;
 
 /// <summary>
-/// Provides authentication using device code flow (interactive browser login).
+/// Provides authentication using device code flow.
+/// User visits a URL and enters a code to authenticate.
 /// </summary>
 public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 {

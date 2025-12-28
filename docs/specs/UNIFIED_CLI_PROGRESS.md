@@ -259,7 +259,7 @@
 ### 5.8 Interactive Browser Auth - COMPLETE
 - [x] Create `InteractiveBrowserCredentialProvider` using MSAL's `AcquireTokenInteractive`
 - [x] Auto-detect headless environments (SSH, CI, containers, no display)
-- [x] Browser auth by default (like PAC CLI), device code fallback for headless
+- [x] Browser auth by default, device code fallback for headless
 - [x] Update `CredentialProviderFactory` to select appropriate provider
 
 **Files Created:**
@@ -332,16 +332,16 @@ ppds data import --data large-data.zip --profile app1,app2,app3
 |------|----------|-----------|
 | 2025-01-27 | Profile flag accepts names only, not indexes | Stability for pooling; indexes can shift |
 | 2025-01-27 | Rename PPDS.Migration.Cli in place | Preserve git history |
-| 2025-01-27 | Use `ppds env` not `ppds environment` | Match PAC, shorter |
+| 2025-01-27 | Use `ppds env` not `ppds environment` | Shorter, cleaner command |
 | 2025-01-27 | `data copy` instead of `data migrate` | Avoid `ppds migrate migrate` confusion |
-| 2025-01-27 | No confirmation for `auth clear` | CI-friendly, PAC parity |
-| 2025-01-27 | Environment not auto-selected | Explicit is safer, PAC parity |
+| 2025-01-27 | No confirmation for `auth clear` | CI-friendly, scriptable |
+| 2025-01-27 | Environment not auto-selected | Explicit is safer for production |
 | 2025-12-27 | Combined CLI restructure and auth commands in Phase 2 | Reduced context switches |
 | 2025-12-27 | Use ServiceClient.DiscoverOnlineOrganizationsAsync | Built-in GDS support, no custom HTTP |
 | 2025-12-27 | Adapter pattern for ProfileConnectionSource | Avoids circular dep between Auth and Dataverse |
 | 2025-12-27 | No legacy --url/--auth options | Pre-v1, no backwards compat needed |
 | 2025-12-27 | Active profile used when no --profile specified | Seamless UX after `ppds auth create` |
-| 2025-12-27 | Browser auth default, device code fallback | PAC CLI parity; better UX for desktop users |
+| 2025-12-27 | Browser auth default, device code fallback | Better UX for desktop; headless fallback for CI/SSH |
 
 ---
 
