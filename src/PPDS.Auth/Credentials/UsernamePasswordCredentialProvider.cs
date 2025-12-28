@@ -44,6 +44,9 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? ObjectId => _cachedResult?.UniqueId;
 
+    /// <inheritdoc />
+    public string? AccessToken => _cachedResult?.AccessToken;
+
     /// <summary>
     /// Creates a new username/password credential provider.
     /// </summary>

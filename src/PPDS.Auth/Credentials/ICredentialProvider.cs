@@ -52,6 +52,12 @@ public interface ICredentialProvider : IDisposable
     /// Available after successful authentication.
     /// </summary>
     string? ObjectId { get; }
+
+    /// <summary>
+    /// Gets the access token from the last authentication.
+    /// Available after successful authentication. Used for extracting JWT claims.
+    /// </summary>
+    string? AccessToken { get; }
 }
 
 /// <summary>

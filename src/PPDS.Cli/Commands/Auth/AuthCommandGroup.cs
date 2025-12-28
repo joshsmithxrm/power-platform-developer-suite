@@ -4,6 +4,7 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
+using static PPDS.Auth.Credentials.JwtClaimsParser;
 
 namespace PPDS.Cli.Commands.Auth;
 
@@ -259,11 +260,23 @@ public static class AuthCommandGroup
                 var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken, forceInteractive: true);
                 profile.Username = provider.Identity;
                 profile.ObjectId = provider.ObjectId;
+                profile.TokenExpiresOn = provider.TokenExpiresAt;
+
                 // Store tenant ID from auth result if not already set
                 if (string.IsNullOrEmpty(profile.TenantId) && !string.IsNullOrEmpty(provider.TenantId))
                 {
                     profile.TenantId = provider.TenantId;
                 }
+
+                // Extract JWT claims for additional user info
+                var claims = JwtClaimsParser.Parse(provider.AccessToken);
+                if (claims != null)
+                {
+                    profile.TenantCountry = claims.TenantCountry;
+                    profile.UserCountry = claims.UserCountry;
+                    profile.Puid = claims.Puid;
+                }
+
                 client.Dispose();
 
                 // Resolve environment if specified (must happen before provider disposal)
@@ -1110,10 +1123,14 @@ public static class AuthCommandGroup
                         type = cacheType.ToString(),
                         cloud = profile.Cloud.ToString(),
                         tenantId = profile.TenantId,
+                        tenantCountry = profile.TenantCountry,
                         user = profile.Username,
+                        puid = profile.Puid,
                         objectId = profile.ObjectId,
+                        userCountry = profile.UserCountry,
                         applicationId = profile.ApplicationId,
                         authority = CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId),
+                        tokenExpiresOn = profile.TokenExpiresOn,
                         environment = profile.Environment != null ? new
                         {
                             url = profile.Environment.Url,
@@ -1158,14 +1175,29 @@ public static class AuthCommandGroup
                     Console.WriteLine($"Tenant Id:                   {profile.TenantId}");
                 }
 
+                if (!string.IsNullOrEmpty(profile.TenantCountry))
+                {
+                    Console.WriteLine($"Tenant Country:              {profile.TenantCountry}");
+                }
+
                 if (!string.IsNullOrEmpty(profile.Username))
                 {
                     Console.WriteLine($"User:                        {profile.Username}");
                 }
 
+                if (!string.IsNullOrEmpty(profile.Puid))
+                {
+                    Console.WriteLine($"PUID:                        {profile.Puid}");
+                }
+
                 if (!string.IsNullOrEmpty(profile.ObjectId))
                 {
                     Console.WriteLine($"Entra ID Object Id:          {profile.ObjectId}");
+                }
+
+                if (!string.IsNullOrEmpty(profile.UserCountry))
+                {
+                    Console.WriteLine($"User Country/Region:         {profile.UserCountry}");
                 }
 
                 if (!string.IsNullOrEmpty(profile.ApplicationId))
@@ -1176,6 +1208,11 @@ public static class AuthCommandGroup
                 // Show authority based on cloud
                 var authority = CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId);
                 Console.WriteLine($"Authority:                   {authority}");
+
+                if (profile.TokenExpiresOn.HasValue)
+                {
+                    Console.WriteLine($"Token Expires On:            {profile.TokenExpiresOn.Value:yyyy-MM-dd HH:mm:ss zzz}");
+                }
 
                 // Environment section
                 if (profile.HasEnvironment)

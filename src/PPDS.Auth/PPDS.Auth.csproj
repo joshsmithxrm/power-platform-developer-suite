@@ -54,6 +54,9 @@
     <!-- JSON serialization -->
     <PackageReference Include="System.Text.Json" Version="9.0.*" />
 
+    <!-- JWT token parsing for extracting claims -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.*" />
+
     <!-- Source Link -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
     <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />

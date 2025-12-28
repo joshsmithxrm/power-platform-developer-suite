@@ -35,6 +35,9 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? ObjectId => null; // Service principals don't have a user OID
 
+    /// <inheritdoc />
+    public string? AccessToken => null; // Connection string auth doesn't expose the token
+
     /// <summary>
     /// Creates a new client secret credential provider.
     /// </summary>

@@ -40,6 +40,9 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? ObjectId => null; // Managed identity doesn't expose OID
 
+    /// <inheritdoc />
+    public string? AccessToken => _cachedToken?.Token;
+
     /// <summary>
     /// Creates a new managed identity credential provider.
     /// </summary>

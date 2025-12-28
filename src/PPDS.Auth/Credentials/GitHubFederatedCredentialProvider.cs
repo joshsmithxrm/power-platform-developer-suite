@@ -38,6 +38,9 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
     /// <inheritdoc />
     public string? ObjectId => null; // Not available for federated auth without additional calls
 
+    /// <inheritdoc />
+    public string? AccessToken => _cachedToken?.Token;
+
     /// <summary>
     /// Creates a new GitHub federated credential provider.
     /// </summary>
