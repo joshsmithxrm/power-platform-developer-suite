@@ -3,8 +3,20 @@ using System;
 namespace PPDS.Dataverse.Resilience
 {
     /// <summary>
-    /// Controls adaptive parallelism based on throttle responses.
+    /// Controls adaptive parallelism for bulk operations at the pool level.
+    /// Determines how many concurrent batches can run across all connections.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This controller operates at the pool level, not per-connection. While Dataverse
+    /// enforces limits per-user (per app registration), the controller tracks aggregate
+    /// throughput and adjusts total parallelism accordingly.
+    /// </para>
+    /// <para>
+    /// Per-connection quota tracking is handled separately by the pool's selection
+    /// strategy, which routes work away from throttled connections.
+    /// </para>
+    /// </remarks>
     public interface IAdaptiveRateController
     {
         /// <summary>
@@ -13,45 +25,45 @@ namespace PPDS.Dataverse.Resilience
         bool IsEnabled { get; }
 
         /// <summary>
-        /// Gets the current parallelism for a connection.
+        /// Gets the current total parallelism for the pool.
         /// </summary>
-        /// <param name="connectionName">The connection identifier.</param>
-        /// <param name="recommendedParallelism">Server's recommended parallelism (x-ms-dop-hint).</param>
-        /// <param name="connectionCount">Number of configured connections (scales floor/ceiling).</param>
-        /// <returns>Current parallelism to use.</returns>
-        int GetParallelism(string connectionName, int recommendedParallelism, int connectionCount);
+        /// <param name="recommendedPerConnection">Server's recommended parallelism per connection (x-ms-dop-hint).</param>
+        /// <param name="connectionCount">Number of configured connections (app registrations).</param>
+        /// <returns>Total parallelism to use across all connections.</returns>
+        /// <remarks>
+        /// The returned value represents the total number of concurrent batches that should
+        /// be in-flight across all connections. The ceiling is scaled by connectionCount
+        /// (e.g., 2 connections = 2× the single-user ceiling).
+        /// </remarks>
+        int GetParallelism(int recommendedPerConnection, int connectionCount);
 
         /// <summary>
-        /// Records successful batch completion.
+        /// Records a batch completion with its duration.
+        /// Used for throughput calculation and execution time ceiling.
         /// </summary>
-        /// <param name="connectionName">The connection that succeeded.</param>
-        void RecordSuccess(string connectionName);
-
-        /// <summary>
-        /// Records batch execution duration for execution time ceiling calculation.
-        /// </summary>
-        /// <param name="connectionName">The connection that executed the batch.</param>
         /// <param name="duration">The wall-clock duration of the batch execution.</param>
-        void RecordBatchDuration(string connectionName, TimeSpan duration);
+        void RecordBatchCompletion(TimeSpan duration);
 
         /// <summary>
-        /// Records throttle event.
+        /// Records a throttle event from any connection.
+        /// Triggers parallelism reduction for the entire pool.
         /// </summary>
-        /// <param name="connectionName">The connection that was throttled.</param>
         /// <param name="retryAfter">The Retry-After duration from server.</param>
-        void RecordThrottle(string connectionName, TimeSpan retryAfter);
+        /// <remarks>
+        /// A throttle on any connection indicates the pool is pushing too hard overall.
+        /// This triggers AIMD-style reduction of total parallelism.
+        /// </remarks>
+        void RecordThrottle(TimeSpan retryAfter);
 
         /// <summary>
-        /// Resets state for a connection.
+        /// Resets the controller to initial state.
         /// </summary>
-        /// <param name="connectionName">The connection to reset.</param>
-        void Reset(string connectionName);
+        void Reset();
 
         /// <summary>
-        /// Gets current statistics for a connection.
+        /// Gets current statistics for the rate controller.
         /// </summary>
-        /// <param name="connectionName">The connection to get stats for.</param>
-        /// <returns>Current statistics, or null if no state exists.</returns>
-        AdaptiveRateStatistics? GetStatistics(string connectionName);
+        /// <returns>Current statistics.</returns>
+        AdaptiveRateStatistics GetStatistics();
     }
 }

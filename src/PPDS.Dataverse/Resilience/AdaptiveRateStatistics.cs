@@ -3,32 +3,33 @@ using System;
 namespace PPDS.Dataverse.Resilience
 {
     /// <summary>
-    /// Current statistics from the adaptive rate controller.
+    /// Statistics from the adaptive rate controller.
+    /// These represent pool-level metrics across all connections.
     /// </summary>
     public sealed class AdaptiveRateStatistics
     {
         /// <summary>
-        /// Gets the connection name.
-        /// </summary>
-        public required string ConnectionName { get; init; }
-
-        /// <summary>
-        /// Gets the current parallelism.
+        /// Gets the current parallelism level.
         /// </summary>
         public required int CurrentParallelism { get; init; }
 
         /// <summary>
-        /// Gets the floor (from x-ms-dop-hint).
+        /// Gets the floor parallelism (minimum allowed).
         /// </summary>
         public required int FloorParallelism { get; init; }
 
         /// <summary>
-        /// Gets the ceiling (hard limit).
+        /// Gets the ceiling parallelism (maximum allowed, scaled by connection count).
         /// </summary>
         public required int CeilingParallelism { get; init; }
 
         /// <summary>
-        /// Gets the throttle-derived ceiling (calculated from Retry-After duration).
+        /// Gets the number of configured connections (app registrations).
+        /// </summary>
+        public required int ConnectionCount { get; init; }
+
+        /// <summary>
+        /// Gets the throttle-derived ceiling (reduced after throttle events).
         /// Null if no throttle ceiling is active.
         /// </summary>
         public int? ThrottleCeiling { get; init; }
@@ -93,19 +94,20 @@ namespace PPDS.Dataverse.Resilience
         }
 
         /// <summary>
-        /// Gets the last known good parallelism level.
+        /// Gets the last known good parallelism level (successful before throttle).
         /// </summary>
         public required int LastKnownGoodParallelism { get; init; }
 
         /// <summary>
-        /// Gets whether last known good is stale.
+        /// Gets whether last known good parallelism is stale
+        /// (from a previous session or too old to be reliable).
         /// </summary>
         public required bool IsLastKnownGoodStale { get; init; }
 
         /// <summary>
-        /// Gets the number of successes since last throttle.
+        /// Gets the number of successful batches since last throttle.
         /// </summary>
-        public required int SuccessesSinceThrottle { get; init; }
+        public required int BatchesSinceThrottle { get; init; }
 
         /// <summary>
         /// Gets total throttle events.
@@ -123,12 +125,12 @@ namespace PPDS.Dataverse.Resilience
         public required DateTime? LastIncreaseTime { get; init; }
 
         /// <summary>
-        /// Gets time of last activity.
+        /// Gets time of last activity (batch completion).
         /// </summary>
-        public required DateTime LastActivityTime { get; init; }
+        public required DateTime? LastActivityTime { get; init; }
 
         /// <summary>
-        /// Gets whether in recovery phase (below last known good).
+        /// Gets whether in recovery phase (ramping back up after throttle).
         /// </summary>
         public bool IsInRecoveryPhase => CurrentParallelism < LastKnownGoodParallelism && !IsLastKnownGoodStale;
     }

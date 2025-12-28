@@ -136,7 +136,6 @@ namespace PPDS.Dataverse.BulkOperations
                 // Dynamic parallelism - adapts in real-time based on controller
                 result = await ExecuteBatchesDynamicallyAsync(
                     "CreateMultiple",
-                    connectionName,
                     recommended,
                     batches,
                     (batch, ct) => ExecuteCreateMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -215,7 +214,6 @@ namespace PPDS.Dataverse.BulkOperations
                 // Dynamic parallelism - adapts in real-time based on controller
                 result = await ExecuteBatchesDynamicallyAsync(
                     "UpdateMultiple",
-                    connectionName,
                     recommended,
                     batches,
                     (batch, ct) => ExecuteUpdateMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -294,7 +292,6 @@ namespace PPDS.Dataverse.BulkOperations
                 // Dynamic parallelism - adapts in real-time based on controller
                 result = await ExecuteBatchesDynamicallyAsync(
                     "UpsertMultiple",
-                    connectionName,
                     recommended,
                     batches,
                     (batch, ct) => ExecuteUpsertMultipleBatchAsync(entityLogicalName, batch, options, ct),
@@ -373,7 +370,6 @@ namespace PPDS.Dataverse.BulkOperations
                 // Dynamic parallelism - adapts in real-time based on controller
                 result = await ExecuteBatchesDynamicallyAsync(
                     "DeleteMultiple",
-                    connectionName,
                     recommended,
                     batches,
                     executeBatch,
@@ -985,8 +981,6 @@ namespace PPDS.Dataverse.BulkOperations
                 _logger.LogDebug("CreateMultiple batch completed. Entity: {Entity}, Created: {Created}",
                     entityLogicalName, response.Ids.Length);
 
-                _adaptiveRateController.RecordSuccess(client.ConnectionName);
-
                 return new BulkOperationResult
                 {
                     SuccessCount = response.Ids.Length,
@@ -1046,8 +1040,6 @@ namespace PPDS.Dataverse.BulkOperations
 
                 _logger.LogDebug("UpdateMultiple batch completed. Entity: {Entity}, Updated: {Updated}",
                     entityLogicalName, batch.Count);
-
-                _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
                 return new BulkOperationResult
                 {
@@ -1127,8 +1119,6 @@ namespace PPDS.Dataverse.BulkOperations
                 _logger.LogDebug("UpsertMultiple batch completed. Entity: {Entity}, Created: {Created}, Updated: {Updated}",
                     entityLogicalName, createdCount, updatedCount);
 
-                _adaptiveRateController.RecordSuccess(client.ConnectionName);
-
                 return new BulkOperationResult
                 {
                     SuccessCount = createdCount + updatedCount,
@@ -1193,8 +1183,6 @@ namespace PPDS.Dataverse.BulkOperations
             try
             {
                 await client.ExecuteAsync(request, cancellationToken);
-
-                _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
                 return new BulkOperationResult
                 {
@@ -1290,8 +1278,6 @@ namespace PPDS.Dataverse.BulkOperations
                     successCount++;
                 }
             }
-
-            _adaptiveRateController.RecordSuccess(client.ConnectionName);
 
             return new BulkOperationResult
             {
@@ -1531,8 +1517,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// </summary>
         /// <typeparam name="T">The batch item type (Entity or Guid).</typeparam>
         /// <param name="operationName">Name of the operation for logging.</param>
-        /// <param name="connectionName">The connection name for the adaptive rate controller.</param>
-        /// <param name="recommendedParallelism">Server's recommended parallelism (x-ms-dop-hint).</param>
+        /// <param name="recommendedParallelism">Server's recommended parallelism per connection (x-ms-dop-hint).</param>
         /// <param name="batches">The batches to execute.</param>
         /// <param name="executeBatch">Function to execute a single batch.</param>
         /// <param name="tracker">Progress tracker.</param>
@@ -1541,7 +1526,6 @@ namespace PPDS.Dataverse.BulkOperations
         /// <returns>Aggregated result of all batch executions.</returns>
         private async Task<BulkOperationResult> ExecuteBatchesDynamicallyAsync<T>(
             string operationName,
-            string connectionName,
             int recommendedParallelism,
             IReadOnlyList<List<T>> batches,
             Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
@@ -1565,9 +1549,9 @@ namespace PPDS.Dataverse.BulkOperations
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Query current allowed parallelism from adaptive controller
+                // Query current allowed parallelism from adaptive controller (pool-level)
                 var currentParallelism = _adaptiveRateController.IsEnabled
-                    ? _adaptiveRateController.GetParallelism(connectionName, recommendedParallelism, connectionCount)
+                    ? _adaptiveRateController.GetParallelism(recommendedParallelism, connectionCount)
                     : recommendedParallelism * connectionCount;
 
                 // Log when parallelism changes
@@ -1599,8 +1583,8 @@ namespace PPDS.Dataverse.BulkOperations
                 results[completedIndex] = result;
                 completedCount++;
 
-                // Record batch duration for execution time ceiling calculation
-                _adaptiveRateController.RecordBatchDuration(connectionName, duration);
+                // Record batch completion for rate control decisions
+                _adaptiveRateController.RecordBatchCompletion(duration);
 
                 // Report progress
                 tracker.RecordProgress(result.SuccessCount, result.FailureCount);

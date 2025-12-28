@@ -455,8 +455,11 @@ namespace PPDS.Dataverse.Pooling
         /// </summary>
         private void OnThrottleDetected(string connectionName, TimeSpan retryAfter)
         {
+            // Record throttle per-connection for routing decisions (avoid throttled connections)
             _throttleTracker.RecordThrottle(connectionName, retryAfter);
-            _adaptiveRateController.RecordThrottle(connectionName, retryAfter);
+
+            // Record throttle at pool level for parallelism decisions
+            _adaptiveRateController.RecordThrottle(retryAfter);
         }
 
         private PooledClient CreateDirectClient(DataverseClientOptions? options)
