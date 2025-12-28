@@ -926,13 +926,17 @@ public static class AuthCommandGroup
                     {
                         index = profile.Index,
                         name = profile.Name,
-                        identity = profile.IdentityDisplay,
                         authMethod = profile.AuthMethod.ToString(),
                         cloud = profile.Cloud.ToString(),
+                        tenantId = profile.TenantId,
+                        user = profile.Username,
+                        applicationId = profile.ApplicationId,
                         environment = profile.Environment != null ? new
                         {
                             url = profile.Environment.Url,
-                            displayName = profile.Environment.DisplayName
+                            displayName = profile.Environment.DisplayName,
+                            uniqueName = profile.Environment.UniqueName,
+                            environmentId = profile.Environment.EnvironmentId
                         } : null,
                         createdAt = profile.CreatedAt,
                         lastUsedAt = profile.LastUsedAt
@@ -948,26 +952,44 @@ public static class AuthCommandGroup
             }
             else
             {
-                Console.WriteLine("Active Profile");
-                Console.WriteLine(new string('=', 40));
                 Console.WriteLine();
-                Console.WriteLine($"  Profile: {profile.DisplayIdentifier}");
-                Console.WriteLine($"  Identity: {profile.IdentityDisplay}");
-                Console.WriteLine($"  Method: {profile.AuthMethod}");
-                Console.WriteLine($"  Cloud: {profile.Cloud}");
+                Console.WriteLine($"Type:        {profile.AuthMethod}");
+                Console.WriteLine($"Cloud:       {profile.Cloud}");
+                if (!string.IsNullOrEmpty(profile.TenantId))
+                {
+                    Console.WriteLine($"Tenant ID:   {profile.TenantId}");
+                }
+                if (!string.IsNullOrEmpty(profile.Username))
+                {
+                    Console.WriteLine($"User:        {profile.Username}");
+                }
+                if (!string.IsNullOrEmpty(profile.ApplicationId))
+                {
+                    Console.WriteLine($"App ID:      {profile.ApplicationId}");
+                }
 
                 if (profile.HasEnvironment)
                 {
-                    Console.WriteLine($"  Environment: {profile.Environment!.DisplayName}");
-                    Console.WriteLine($"  URL: {profile.Environment.Url}");
+                    Console.WriteLine();
+                    Console.WriteLine($"Environment:   {profile.Environment!.DisplayName}");
+                    Console.WriteLine($"Environment URL: {profile.Environment.Url}");
+                    if (!string.IsNullOrEmpty(profile.Environment.UniqueName))
+                    {
+                        Console.WriteLine($"Unique Name:   {profile.Environment.UniqueName}");
+                    }
+                    if (!string.IsNullOrEmpty(profile.Environment.EnvironmentId))
+                    {
+                        Console.WriteLine($"Environment ID: {profile.Environment.EnvironmentId}");
+                    }
                 }
                 else
                 {
+                    Console.WriteLine();
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"  Environment: (none)");
+                    Console.WriteLine("No environment selected.");
                     Console.ResetColor();
                     Console.WriteLine();
-                    Console.WriteLine("Tip: Use 'ppds env select' to set an environment.");
+                    Console.WriteLine("Use 'ppds env select' to set an environment.");
                 }
             }
 

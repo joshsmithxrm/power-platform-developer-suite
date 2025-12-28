@@ -1,8 +1,12 @@
 using System.CommandLine;
+using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
+using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Commands.Env;
 
@@ -273,7 +277,7 @@ public static class EnvCommandGroup
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("who", "Show the currently selected environment")
+        var command = new Command("who", "Verify connection and show current user info from Dataverse")
         {
             jsonOption
         };
@@ -299,7 +303,7 @@ public static class EnvCommandGroup
             {
                 if (json)
                 {
-                    Console.WriteLine("{\"profile\": null, \"environment\": null}");
+                    Console.WriteLine("{\"error\": \"No active profile\"}");
                 }
                 else
                 {
@@ -307,7 +311,7 @@ public static class EnvCommandGroup
                     Console.WriteLine();
                     Console.WriteLine("Use 'ppds auth create' to create a profile.");
                 }
-                return ExitCodes.Success;
+                return ExitCodes.Failure;
             }
 
             var env = profile.Environment;
@@ -315,16 +319,7 @@ public static class EnvCommandGroup
             {
                 if (json)
                 {
-                    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        profile = new
-                        {
-                            index = profile.Index,
-                            name = profile.Name,
-                            identity = profile.IdentityDisplay
-                        },
-                        environment = (object?)null
-                    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    Console.WriteLine("{\"error\": \"No environment selected\"}");
                 }
                 else
                 {
@@ -336,26 +331,64 @@ public static class EnvCommandGroup
                     Console.WriteLine();
                     Console.WriteLine("Use 'ppds env select <environment>' to select one.");
                 }
-                return ExitCodes.Success;
+                return ExitCodes.Failure;
             }
+
+            if (!json)
+            {
+                Console.WriteLine($"Connecting to {env.DisplayName}...");
+            }
+
+            // Create connection and execute WhoAmI
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+                null, // Use active profile
+                null, // Use profile's environment
+                deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+                cancellationToken: cancellationToken);
+
+            var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+            await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
+
+            var whoAmIResponse = (WhoAmIResponse)await client.ExecuteAsync(
+                new WhoAmIRequest(), cancellationToken);
+
+            // Get user details
+            var user = await client.RetrieveAsync(
+                "systemuser",
+                whoAmIResponse.UserId,
+                new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname", "domainname", "internalemailaddress", "businessunitid"),
+                cancellationToken);
+
+            var fullName = user.GetAttributeValue<string>("fullname");
+            var domainName = user.GetAttributeValue<string>("domainname");
+            var email = user.GetAttributeValue<string>("internalemailaddress");
+            var businessUnit = user.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("businessunitid");
+
+            // Get org info
+            var org = await client.RetrieveAsync(
+                "organization",
+                whoAmIResponse.OrganizationId,
+                new Microsoft.Xrm.Sdk.Query.ColumnSet("name", "uniquename"),
+                cancellationToken);
+
+            var orgName = org.GetAttributeValue<string>("name");
+            var orgUniqueName = org.GetAttributeValue<string>("uniquename");
 
             if (json)
             {
                 var output = new
                 {
-                    profile = new
-                    {
-                        index = profile.Index,
-                        name = profile.Name,
-                        identity = profile.IdentityDisplay
-                    },
-                    environment = new
-                    {
-                        url = env.Url,
-                        displayName = env.DisplayName,
-                        uniqueName = env.UniqueName,
-                        environmentId = env.EnvironmentId
-                    }
+                    userId = whoAmIResponse.UserId,
+                    fullName,
+                    domainName,
+                    email,
+                    businessUnitId = whoAmIResponse.BusinessUnitId,
+                    businessUnitName = businessUnit?.Name,
+                    organizationId = whoAmIResponse.OrganizationId,
+                    organizationName = orgName,
+                    organizationUniqueName = orgUniqueName,
+                    environmentUrl = env.Url,
+                    environmentName = env.DisplayName
                 };
 
                 var jsonOutput = System.Text.Json.JsonSerializer.Serialize(output, new System.Text.Json.JsonSerializerOptions
@@ -367,25 +400,42 @@ public static class EnvCommandGroup
             }
             else
             {
-                Console.WriteLine("Current Environment");
-                Console.WriteLine(new string('=', 40));
                 Console.WriteLine();
-                Console.WriteLine($"  Profile: {profile.DisplayIdentifier}");
-                Console.WriteLine($"  Identity: {profile.IdentityDisplay}");
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Connected successfully!");
+                Console.ResetColor();
                 Console.WriteLine();
-                Console.WriteLine($"  Environment: {env.DisplayName}");
-                Console.WriteLine($"  URL: {env.Url}");
-                if (!string.IsNullOrEmpty(env.UniqueName))
+                Console.WriteLine("User");
+                Console.WriteLine(new string('-', 40));
+                Console.WriteLine($"  Name:          {fullName}");
+                Console.WriteLine($"  Domain:        {domainName}");
+                if (!string.IsNullOrEmpty(email))
                 {
-                    Console.WriteLine($"  Unique Name: {env.UniqueName}");
+                    Console.WriteLine($"  Email:         {email}");
                 }
+                Console.WriteLine($"  User ID:       {whoAmIResponse.UserId}");
+                Console.WriteLine($"  Business Unit: {businessUnit?.Name}");
+                Console.WriteLine();
+                Console.WriteLine("Environment");
+                Console.WriteLine(new string('-', 40));
+                Console.WriteLine($"  Name:          {orgName}");
+                Console.WriteLine($"  Unique Name:   {orgUniqueName}");
+                Console.WriteLine($"  Org ID:        {whoAmIResponse.OrganizationId}");
+                Console.WriteLine($"  URL:           {env.Url}");
             }
 
             return ExitCodes.Success;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
+            if (json)
+            {
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message }));
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
             return ExitCodes.Failure;
         }
     }
