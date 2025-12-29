@@ -53,7 +53,7 @@
     <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.*" />
     <!-- Override vulnerable transitive dependency from Dataverse.Client (GHSA-555c-2p6r-68mm) -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.*" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.1" />
   </ItemGroup>
 
 </Project>
