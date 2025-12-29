@@ -88,6 +88,16 @@ namespace PPDS.Migration.Import
         public int FailureCount { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of records created (for upsert operations).
+        /// </summary>
+        public int? CreatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records updated (for upsert operations).
+        /// </summary>
+        public int? UpdatedCount { get; set; }
+
+        /// <summary>
         /// Gets or sets the import duration for this entity.
         /// </summary>
         public TimeSpan Duration { get; set; }

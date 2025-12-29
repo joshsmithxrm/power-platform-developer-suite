@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace PPDS.Migration.Schema
 {
@@ -16,14 +15,9 @@ namespace PPDS.Migration.Schema
         public bool IncludeAllFields { get; set; } = true;
 
         /// <summary>
-        /// Gets or sets whether to include system fields (createdon, modifiedon, etc.). Default: false.
+        /// Gets or sets whether to include audit fields (createdon, createdby, modifiedon, modifiedby, etc.). Default: false.
         /// </summary>
-        public bool IncludeSystemFields { get; set; } = false;
-
-        /// <summary>
-        /// Gets or sets whether to include relationships. Default: true.
-        /// </summary>
-        public bool IncludeRelationships { get; set; } = true;
+        public bool IncludeAuditFields { get; set; } = false;
 
         /// <summary>
         /// Gets or sets whether to include only custom fields. Default: false.
@@ -46,12 +40,6 @@ namespace PPDS.Migration.Schema
         /// Ignored if IncludeAttributes is set.
         /// </summary>
         public IReadOnlyList<string>? ExcludeAttributes { get; set; }
-
-        /// <summary>
-        /// Gets or sets attribute name patterns to exclude (e.g., "new_*", "*_base").
-        /// Uses glob-style wildcards (* matches any characters).
-        /// </summary>
-        public IReadOnlyList<string>? ExcludeAttributePatterns { get; set; }
 
         /// <summary>
         /// Determines if an attribute should be included based on the filtering options.
@@ -79,20 +67,7 @@ namespace PPDS.Migration.Schema
                 return false;
             }
 
-            // Pattern exclusion
-            if (ExcludeAttributePatterns?.Any(pattern => MatchesPattern(attributeName, pattern)) == true)
-            {
-                return false;
-            }
-
             return true;
-        }
-
-        private static bool MatchesPattern(string value, string pattern)
-        {
-            // Convert glob pattern to regex
-            var regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$";
-            return Regex.IsMatch(value, regexPattern, RegexOptions.IgnoreCase);
         }
     }
 }

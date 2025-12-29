@@ -45,10 +45,9 @@ public class AccountService
 Reuse connections efficiently with automatic lifecycle management:
 
 ```csharp
-options.Pool.MaxConnectionsPerUser = 52;  // Per Application User (default)
-options.Pool.MinPoolSize = 5;              // Keep warm
 options.Pool.MaxIdleTime = TimeSpan.FromMinutes(5);
 options.Pool.MaxLifetime = TimeSpan.FromMinutes(30);
+// Pool size is automatically determined by DOP (server-recommended parallelism)
 ```
 
 ### Multi-Connection Load Distribution
@@ -100,48 +99,23 @@ var result = await executor.UpsertMultipleAsync("account", entities,
 Console.WriteLine($"Success: {result.SuccessCount}, Failed: {result.FailureCount}");
 ```
 
-### Adaptive Rate Control
+### DOP-Based Parallelism
 
-Automatically adjusts parallelism to maximize throughput while avoiding service protection throttles. Enabled by default with sensible settings.
+The pool uses the server's `RecommendedDegreesOfParallelism` (from the `x-ms-dop-hint` header) to determine optimal parallelism. This provides:
 
-| Preset | Best For | Behavior |
-|--------|----------|----------|
-| **Conservative** | Production bulk jobs, overnight migrations | Lower parallelism, avoids throttles |
-| **Balanced** | General purpose (default) | Balanced throughput vs safety |
-| **Aggressive** | Dev/test, time-critical with monitoring | Higher parallelism, accepts some throttles |
+- **Automatic tuning**: Parallelism matches what the server recommends
+- **Environment-aware**: Trial environments get lower DOP (~4), production gets higher (~50)
+- **Safe by default**: No risk of guessing wrong parallelism values
 
-**Simple configuration:**
+To scale throughput, add more Application Users - each multiplies your API quota:
 
-```json
-{
-  "Dataverse": {
-    "AdaptiveRate": {
-      "Preset": "Conservative"
-    }
-  }
-}
+```
+1 Application User  @ DOP=4  →  4 parallel requests
+2 Application Users @ DOP=4  →  8 parallel requests
+4 Application Users @ DOP=4  → 16 parallel requests
 ```
 
-**Fine-tuning** - override individual settings while using a preset base:
-
-```json
-{
-  "Dataverse": {
-    "AdaptiveRate": {
-      "Preset": "Balanced",
-      "ExecutionTimeCeilingFactor": 180
-    }
-  }
-}
-```
-
-**Fail-fast** - for time-sensitive operations that shouldn't wait on throttles:
-
-```csharp
-options.AdaptiveRate.MaxRetryAfterTolerance = TimeSpan.FromSeconds(30);
-```
-
-See [ADR-0006](docs/adr/0006_EXECUTION_TIME_CEILING.md) for algorithm details.
+See [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md) for details.
 
 ### Affinity Cookie Disabled by Default
 

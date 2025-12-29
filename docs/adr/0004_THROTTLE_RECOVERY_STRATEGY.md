@@ -6,24 +6,20 @@
 
 ## Context
 
-When all connections are throttled, the pool must wait for the `Retry-After` period before resuming operations. Microsoft recommends a gradual ramp-up strategy after throttle recovery to minimize extended penalties:
-
-> "If the application continues to send such demanding requests, the duration is extended to minimize the impact on shared resources. This causes the individual retry-after duration period to be longer."
->
-> "When possible, we recommend trying to achieve a consistent rate by starting with a lower number of requests and gradually increasing until you start hitting the service protection API limits."
+When all connections are throttled, the pool must wait for the `Retry-After` period before resuming operations. The question was how to handle this wait and subsequent recovery.
 
 ## Decision
 
-### Current Implementation (v1)
+### Implementation
 
-The pool implements **transparent throttle waiting** with immediate full-parallelism recovery:
+The pool implements **transparent throttle waiting** with DOP-based parallelism:
 
 1. **Throttle detection**: PooledClient automatically records throttle via callback
 2. **Wait phase**: `GetClientAsync` waits for throttle to clear **without holding semaphore slots**
-3. **Recovery**: Resume at full configured parallelism immediately
+3. **Recovery**: Resume at DOP-based parallelism (see ADR-0005)
 
 ```
-Throttle detected → Wait for Retry-After → Resume at 100% parallelism
+Throttle detected → Wait for Retry-After → Resume at DOP × connections
 ```
 
 ### Key Design: Semaphore Not Held During Wait
@@ -43,18 +39,18 @@ return GetConnectionFromPoolCore(connectionName, options);
 
 This prevents `PoolExhaustedException` when many requests are waiting for throttle recovery.
 
-## Subsequent Enhancement
+### Tolerance Option
 
-The limitation of immediate full-parallelism recovery was addressed in **ADR-0006: Execution Time Ceiling**.
+The pool supports `MaxRetryAfterTolerance` for fail-fast scenarios:
 
-The adaptive rate controller now implements AIMD (Additive Increase, Multiplicative Decrease) with execution time-aware ceilings:
+```csharp
+var poolOptions = new ConnectionPoolOptions
+{
+    MaxRetryAfterTolerance = TimeSpan.FromSeconds(30)  // Fail if wait exceeds this
+};
+```
 
-- Tracks batch durations via exponential moving average
-- Calculates dynamic parallelism ceiling based on batch time
-- Halves parallelism on throttle, gradually increases on success
-- Configurable via presets: Conservative, Balanced, Aggressive
-
-**See:** [ADR-0006: Execution Time Ceiling](0006_EXECUTION_TIME_CEILING.md)
+When all connections are throttled and the shortest wait exceeds tolerance, `ServiceProtectionException` is thrown instead of waiting.
 
 ## Consequences
 
@@ -63,15 +59,14 @@ The adaptive rate controller now implements AIMD (Additive Increase, Multiplicat
 - **No blocking**: Requests don't hold semaphore slots while waiting
 - **Transparent**: Consumer doesn't need to handle service protection errors
 - **Simple**: Easy to understand and debug
+- **Configurable**: `MaxRetryAfterTolerance` allows fail-fast when needed
 
 ### Negative
 
-- ~~**Suboptimal recovery**~~ - Addressed by ADR-0006 adaptive rate control
-- ~~**Extended penalties**~~ - Addressed by ADR-0006 execution time ceiling
-- ~~**Consumer workaround needed**~~ - No longer required; use presets
+- **All-or-nothing**: Either wait for full Retry-After or fail immediately
 
 ## References
 
 - [Service protection API limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits) - Retry-After behavior
-- [Maximize API throughput](https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/data-entities/service-protection-maximizing-api-throughput) - Microsoft's ramp-up recommendation
-- ADR-0003: Throttle-Aware Connection Selection - Related throttle handling decision
+- [ADR-0003: Throttle-Aware Connection Selection](0003_THROTTLE_AWARE_SELECTION.md) - Related throttle handling decision
+- [ADR-0005: DOP-Based Parallelism](0005_DOP_BASED_PARALLELISM.md) - Parallelism model used after recovery

@@ -51,3 +51,7 @@ Thumbs.db
 
 # Temporary artifacts (testing, exports, logs)
 tmp/
+nul
+data.zip
+data/
+schema.xml

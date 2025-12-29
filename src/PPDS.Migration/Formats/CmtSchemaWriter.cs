@@ -139,6 +139,17 @@ namespace PPDS.Migration.Formats
                 await writer.WriteAttributeStringAsync(null, "lookupType", null, field.LookupEntity).ConfigureAwait(false);
             }
 
+            // Write validity flags (only when false to minimize file size; true is the default)
+            if (!field.IsValidForCreate)
+            {
+                await writer.WriteAttributeStringAsync(null, "isValidForCreate", null, "false").ConfigureAwait(false);
+            }
+
+            if (!field.IsValidForUpdate)
+            {
+                await writer.WriteAttributeStringAsync(null, "isValidForUpdate", null, "false").ConfigureAwait(false);
+            }
+
             await writer.WriteEndElementAsync().ConfigureAwait(false); // field
         }
 

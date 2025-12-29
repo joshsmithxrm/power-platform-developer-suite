@@ -168,16 +168,15 @@ _logger.LogInformation(
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `MaxConnectionsPerUser` | 52 | Connections per Application User |
-| `MaxPoolSize` | 0 | Fixed total (0 = use per-user sizing) |
-| `MinPoolSize` | 5 | Minimum idle connections |
+| `MaxPoolSize` | 52 × users | Max connections (auto-sized from DOP) |
 | `AcquireTimeout` | 30s | Max wait for a connection |
 | `MaxIdleTime` | 5m | Evict idle connections after |
 | `MaxLifetime` | 60m | Recycle connections after |
 | `DisableAffinityCookie` | true | Distribute across backend nodes |
 | `SelectionStrategy` | ThrottleAware | How to pick connections |
+| `MaxRetryAfterTolerance` | null | Fail fast if throttle exceeds this duration |
 
-**Note:** By default, pool capacity = `MaxConnectionsPerUser` × number of connections. See [ADR-0005](../adr/0005_POOL_SIZING_PER_CONNECTION.md).
+**Note:** Pool sizing is automatic based on server-recommended DOP (via `x-ms-dop-hint`). Each Application User contributes up to 52 connections (Microsoft's hard limit). See [ADR-0005](../adr/0005_DOP_BASED_PARALLELISM.md).
 
 ## Performance Settings Applied Automatically
 

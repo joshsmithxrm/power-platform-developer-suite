@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>PPDS.Cli</RootNamespace>
+    <AssemblyName>ppds</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Suppress known vulnerability in transitive dependency until upstream fix -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+
+    <!-- MinVer Configuration -->
+    <MinVerTagPrefix>Cli-v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+
+    <!-- .NET Tool Configuration -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>ppds</ToolCommandName>
+    <PackageId>PPDS.Cli</PackageId>
+    <Authors>Josh Smith</Authors>
+    <Company>Power Platform Developer Suite</Company>
+    <Description>CLI for Power Platform development. Manage authentication profiles,
+      export/import data between Dataverse environments, and perform high-throughput migrations
+      with connection pooling.</Description>
+    <PackageTags>dataverse;dynamics365;powerplatform;migration;cmt;cli;data-migration;ppds</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/joshsmithxrm/ppds-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshsmithxrm/ppds-sdk</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
+    <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
+    <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+    <PackageReference Include="MinVer" Version="6.1.0" PrivateAssets="all" />
+    <PackageReference Include="System.CommandLine" Version="2.0.1" />
+  </ItemGroup>
+</Project>

@@ -12,16 +12,18 @@ NuGet packages for Microsoft Dataverse development. Part of the [Power Platform 
 | **PPDS.Plugins** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Plugins.svg)](https://www.nuget.org/packages/PPDS.Plugins/) | Declarative plugin registration attributes |
 | **PPDS.Dataverse** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Dataverse.svg)](https://www.nuget.org/packages/PPDS.Dataverse/) | High-performance connection pooling and bulk operations |
 | **PPDS.Migration** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Migration.svg)](https://www.nuget.org/packages/PPDS.Migration/) | High-performance data migration engine |
-| **PPDS.Migration.Cli** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Migration.Cli.svg)](https://www.nuget.org/packages/PPDS.Migration.Cli/) | CLI tool for data migration (.NET tool) |
+| **PPDS.Auth** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Auth.svg)](https://www.nuget.org/packages/PPDS.Auth/) | Authentication profiles and credential management |
+| **PPDS.Cli** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Cli.svg)](https://www.nuget.org/packages/PPDS.Cli/) | Unified CLI tool (.NET tool) |
 
 ## Compatibility
 
 | Package | Target Frameworks |
 |---------|-------------------|
-| PPDS.Plugins | net462, net8.0, net10.0 |
-| PPDS.Dataverse | net8.0, net10.0 |
-| PPDS.Migration | net8.0, net10.0 |
-| PPDS.Migration.Cli | net8.0, net10.0 |
+| PPDS.Plugins | net462 |
+| PPDS.Dataverse | net8.0, net9.0, net10.0 |
+| PPDS.Migration | net8.0, net9.0, net10.0 |
+| PPDS.Auth | net8.0, net9.0, net10.0 |
+| PPDS.Cli | net8.0, net9.0, net10.0 |
 
 ---
 
@@ -123,29 +125,36 @@ See [PPDS.Migration documentation](src/PPDS.Migration/README.md) for details.
 
 ---
 
-## PPDS.Migration.Cli
+## PPDS.Cli
 
-CLI tool for data migration operations. Install as a .NET global tool:
+Unified CLI tool for Dataverse operations. Install as a .NET global tool:
 
 ```bash
-dotnet tool install -g PPDS.Migration.Cli
+dotnet tool install -g PPDS.Cli
 ```
 
 ```bash
-# Interactive auth (default) - opens browser for login
-ppds-migrate export --url https://org.crm.dynamics.com --schema schema.xml --output data.zip
+# Create an auth profile (opens browser for login)
+ppds auth create --name dev
 
-# CI/CD with environment variables
-export DATAVERSE__URL="https://org.crm.dynamics.com"
-export DATAVERSE__CLIENTID="your-client-id"
-export DATAVERSE__CLIENTSECRET="your-secret"
-ppds-migrate export --auth env --schema schema.xml --output data.zip
+# Select your environment
+ppds env select --environment "My Environment"
+
+# Export data
+ppds data export --schema schema.xml --output data.zip
 
 # Import data
-ppds-migrate import --url https://org.crm.dynamics.com --data data.zip --mode Upsert
+ppds data import --data data.zip --mode Upsert
 ```
 
-See [PPDS.Migration.Cli documentation](src/PPDS.Migration.Cli/README.md) for details.
+**Commands:**
+- `ppds auth` - Manage authentication profiles (create, list, select, delete, who)
+- `ppds env` - Environment discovery and selection (list, select, who)
+- `ppds data` - Data operations (export, import, copy, analyze)
+- `ppds schema` - Schema generation (generate, list)
+- `ppds users` - User mapping for cross-environment migrations
+
+See [PPDS.Cli documentation](src/PPDS.Cli/README.md) for details.
 
 ---
 
@@ -157,9 +166,9 @@ Key design decisions are documented as ADRs:
 - [ADR-0002: Multi-Connection Pooling](docs/adr/0002_MULTI_CONNECTION_POOLING.md)
 - [ADR-0003: Throttle-Aware Connection Selection](docs/adr/0003_THROTTLE_AWARE_SELECTION.md)
 - [ADR-0004: Throttle Recovery Strategy](docs/adr/0004_THROTTLE_RECOVERY_STRATEGY.md)
-- [ADR-0005: Pool Sizing Per Connection](docs/adr/0005_POOL_SIZING_PER_CONNECTION.md)
-- [ADR-0006: Execution Time Ceiling](docs/adr/0006_EXECUTION_TIME_CEILING.md)
-- [ADR-0007: Connection Source Abstraction](docs/adr/0007_CONNECTION_SOURCE_ABSTRACTION.md)
+- [ADR-0005: DOP-Based Parallelism](docs/adr/0005_DOP_BASED_PARALLELISM.md)
+- [ADR-0006: Connection Source Abstraction](docs/adr/0006_CONNECTION_SOURCE_ABSTRACTION.md)
+- [ADR-0007: Unified CLI and Shared Authentication](docs/adr/0007_UNIFIED_CLI_AND_AUTH.md)
 
 ## Patterns
 

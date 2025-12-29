@@ -128,7 +128,7 @@ new BulkOperationOptions { BatchSize = 1000 }
 
 ## Upsert Pattern
 
-Use alternate keys for upsert operations:
+Use alternate keys for upsert operations when integrating external data:
 
 ```csharp
 var accounts = externalData.Select(d => new Entity("account")
@@ -147,6 +147,22 @@ var accounts = externalData.Select(d => new Entity("account")
 
 await _bulk.UpsertMultipleAsync("account", accounts);
 ```
+
+### Alternate Key vs Primary Key Performance
+
+**Important:** Alternate keys are ~2.4x slower than primary keys (GUIDs) due to additional index lookups.
+
+| Key Type | Use Case | Performance |
+|----------|----------|-------------|
+| Primary Key (GUID) | Migration between environments | **~400 rec/s** (optimal) |
+| Alternate Key | External system sync | **~160 rec/s** (2.4x overhead) |
+
+This is expected SQL behavior (non-clustered index seek + key lookup), not a bug. Microsoft states: *"There's a performance penalty in using Upsert versus using Create."*
+
+**When to use each:**
+- **GUID available:** Set `Entity.Id` and the primary key attribute - fastest path
+- **External data:** Use `KeyAttributes` with alternate key - necessary overhead
+- **New records only:** Use `CreateMultiple` - skips upsert lookup entirely
 
 ## UpsertMultiple Pitfalls
 

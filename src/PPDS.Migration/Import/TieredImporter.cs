@@ -3,15 +3,19 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Analysis;
+using PPDS.Migration.DependencyInjection;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
@@ -28,6 +32,7 @@ namespace PPDS.Migration.Import
         private readonly ICmtDataReader _dataReader;
         private readonly IDependencyGraphBuilder _graphBuilder;
         private readonly IExecutionPlanBuilder _planBuilder;
+        private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
 
@@ -46,6 +51,7 @@ namespace PPDS.Migration.Import
             _dataReader = dataReader ?? throw new ArgumentNullException(nameof(dataReader));
             _graphBuilder = graphBuilder ?? throw new ArgumentNullException(nameof(graphBuilder));
             _planBuilder = planBuilder ?? throw new ArgumentNullException(nameof(planBuilder));
+            _defaultOptions = new ImportOptions();
         }
 
         /// <summary>
@@ -57,10 +63,12 @@ namespace PPDS.Migration.Import
             ICmtDataReader dataReader,
             IDependencyGraphBuilder graphBuilder,
             IExecutionPlanBuilder planBuilder,
+            IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
             : this(connectionPool, bulkExecutor, dataReader, graphBuilder, planBuilder)
         {
+            _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
             _logger = logger;
         }
@@ -103,7 +111,7 @@ namespace PPDS.Migration.Import
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
-            options ??= new ImportOptions();
+            options ??= _defaultOptions;
             var stopwatch = Stopwatch.StartNew();
             var idMappings = new IdMappingCollection();
             var entityResults = new ConcurrentBag<EntityImportResult>();
@@ -113,13 +121,69 @@ namespace PPDS.Migration.Import
             _logger?.LogInformation("Starting tiered import: {Tiers} tiers, {Records} records",
                 plan.TierCount, data.TotalRecordCount);
 
+            // Load target environment field metadata for validity checking
+            var entityNames = data.Schema.Entities.Select(e => e.LogicalName).ToList();
+            var targetFieldMetadata = await LoadTargetFieldMetadataAsync(entityNames, progress, cancellationToken).ConfigureAwait(false);
+
+            // Pre-flight check: detect columns that exist in export but not in target
+            var missingColumns = DetectMissingColumns(data, targetFieldMetadata);
+            if (missingColumns.Count > 0)
+            {
+                var totalMissing = missingColumns.Values.Sum(v => v.Count);
+
+                if (!options.SkipMissingColumns)
+                {
+                    // Build detailed error message
+                    var details = new System.Text.StringBuilder();
+                    details.AppendLine($"Schema mismatch: {totalMissing} column(s) in exported data do not exist in target environment.");
+                    details.AppendLine();
+
+                    foreach (var (entity, columns) in missingColumns.OrderBy(x => x.Key))
+                    {
+                        details.AppendLine($"  {entity}:");
+                        foreach (var col in columns)
+                        {
+                            details.AppendLine($"    - {col}");
+                        }
+                    }
+
+                    details.AppendLine();
+                    details.Append("Use --skip-missing-columns to import anyway (these columns will be skipped).");
+
+                    _logger?.LogError("Schema mismatch detected: {Count} columns missing in target", totalMissing);
+
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Analyzing,
+                        Message = $"Schema mismatch: {totalMissing} column(s) not found in target"
+                    });
+
+                    throw new SchemaMismatchException(details.ToString(), missingColumns);
+                }
+
+                // SkipMissingColumns is true - log warnings and continue
+                _logger?.LogWarning("Skipping {Count} columns not found in target environment", totalMissing);
+
+                foreach (var (entity, columns) in missingColumns)
+                {
+                    _logger?.LogWarning("Entity {Entity}: skipping columns [{Columns}]",
+                        entity, string.Join(", ", columns));
+                }
+
+                progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Analyzing,
+                    Message = $"Warning: Skipping {totalMissing} column(s) not found in target"
+                });
+            }
+
             // Disable plugins on entities with disableplugins=true
             IReadOnlyList<Guid> disabledPluginSteps = Array.Empty<Guid>();
             if (options.RespectDisablePluginsSetting && _pluginStepManager != null)
             {
                 var entitiesToDisablePlugins = data.Schema.Entities
-                    .Where(e => e.DisablePlugins)
-                    .Select(e => e.LogicalName)
+                    .Where(e => e.DisablePlugins && e.ObjectTypeCode.HasValue)
+                    .Select(e => e.ObjectTypeCode!.Value)
                     .ToList();
 
                 if (entitiesToDisablePlugins.Count > 0)
@@ -173,11 +237,15 @@ namespace PPDS.Migration.Import
                             // Get deferred fields for this entity
                             plan.DeferredFields.TryGetValue(entityName, out var deferredFields);
 
+                            // Get field metadata for this entity
+                            targetFieldMetadata.TryGetValue(entityName, out var entityFieldMetadata);
+
                             var result = await ImportEntityAsync(
                                 entityName,
                                 records,
                                 tier.TierNumber,
                                 deferredFields,
+                                entityFieldMetadata,
                                 idMappings,
                                 options,
                                 progress,
@@ -232,12 +300,22 @@ namespace PPDS.Migration.Import
                 // Calculate record-level failure count from entity results
                 var recordFailureCount = entityResults.Sum(r => r.FailureCount);
 
+                // Aggregate created/updated counts from entity results (only populated for upsert mode)
+                var totalCreated = entityResults.Any(r => r.CreatedCount.HasValue)
+                    ? entityResults.Sum(r => r.CreatedCount ?? 0)
+                    : (int?)null;
+                var totalUpdated = entityResults.Any(r => r.UpdatedCount.HasValue)
+                    ? entityResults.Sum(r => r.UpdatedCount ?? 0)
+                    : (int?)null;
+
                 progress?.Complete(new MigrationResult
                 {
                     Success = result.Success,
                     RecordsProcessed = result.RecordsImported + result.RecordsUpdated + recordFailureCount,
                     SuccessCount = result.RecordsImported + result.RecordsUpdated,
                     FailureCount = recordFailureCount,
+                    CreatedCount = totalCreated,
+                    UpdatedCount = totalUpdated,
                     Duration = result.Duration,
                     Errors = errors.ToArray()
                 });
@@ -300,6 +378,7 @@ namespace PPDS.Migration.Import
             IReadOnlyList<Entity> records,
             int tierNumber,
             IReadOnlyList<string>? deferredFields,
+            Dictionary<string, (bool IsValidForCreate, bool IsValidForUpdate)>? fieldMetadata,
             IdMappingCollection idMappings,
             ImportOptions options,
             IProgressReporter? progress,
@@ -312,11 +391,11 @@ namespace PPDS.Migration.Import
 
             _logger?.LogDebug("Importing {Count} records for {Entity}", records.Count, entityName);
 
-            // Prepare records: remap lookups and null deferred fields
+            // Prepare records: remap lookups, null deferred fields, and filter based on operation validity
             var preparedRecords = new List<Entity>();
             foreach (var record in records)
             {
-                var prepared = PrepareRecordForImport(record, deferredSet, idMappings, options);
+                var prepared = PrepareRecordForImport(record, deferredSet, fieldMetadata, idMappings, options);
                 preparedRecords.Add(prepared);
             }
 
@@ -333,7 +412,8 @@ namespace PPDS.Migration.Import
                         Total = (int)snapshot.Total,
                         SuccessCount = (int)snapshot.Succeeded,
                         FailureCount = (int)snapshot.Failed,
-                        RecordsPerSecond = snapshot.RatePerSecond
+                        RecordsPerSecond = snapshot.RatePerSecond,
+                        EstimatedRemaining = snapshot.EstimatedRemaining
                     });
                 })
                 : null;
@@ -342,7 +422,7 @@ namespace PPDS.Migration.Import
             var bulkOptions = new BulkOperationOptions
             {
                 ContinueOnError = options.ContinueOnError,
-                BypassCustomLogic = options.BypassCustomPluginExecution ? CustomLogicBypass.All : CustomLogicBypass.None,
+                BypassCustomLogic = options.BypassCustomPlugins,
                 BypassPowerAutomateFlows = options.BypassPowerAutomateFlows
             };
 
@@ -388,6 +468,8 @@ namespace PPDS.Migration.Import
                 RecordCount = records.Count,
                 SuccessCount = bulkResult.SuccessCount,
                 FailureCount = bulkResult.FailureCount,
+                CreatedCount = bulkResult.CreatedCount,
+                UpdatedCount = bulkResult.UpdatedCount,
                 Duration = entityStopwatch.Elapsed,
                 Success = bulkResult.FailureCount == 0,
                 Errors = allErrors
@@ -462,6 +544,7 @@ namespace PPDS.Migration.Import
         private Entity PrepareRecordForImport(
             Entity record,
             HashSet<string> deferredFields,
+            Dictionary<string, (bool IsValidForCreate, bool IsValidForUpdate)>? fieldMetadata,
             IdMappingCollection idMappings,
             ImportOptions options)
         {
@@ -486,6 +569,12 @@ namespace PPDS.Migration.Import
 
                 // Skip owner fields if stripping is enabled
                 if (options.StripOwnerFields && IsOwnerField(attr.Key))
+                {
+                    continue;
+                }
+
+                // Skip fields that are not valid for the current operation based on target metadata
+                if (!ShouldIncludeField(attr.Key, options.Mode, fieldMetadata, out _))
                 {
                     continue;
                 }
@@ -822,6 +911,159 @@ namespace PPDS.Migration.Import
             // We need to find it by name, but we don't have the source name here
             // For now, return null - proper solution requires exporting role names
             return null;
+        }
+
+        /// <summary>
+        /// Loads field validity metadata from the target environment for all entities.
+        /// This is used to determine which fields are valid for create/update operations.
+        /// </summary>
+        private async Task<Dictionary<string, Dictionary<string, (bool IsValidForCreate, bool IsValidForUpdate)>>> LoadTargetFieldMetadataAsync(
+            IEnumerable<string> entityNames,
+            IProgressReporter? progress,
+            CancellationToken cancellationToken)
+        {
+            var result = new Dictionary<string, Dictionary<string, (bool, bool)>>(StringComparer.OrdinalIgnoreCase);
+
+            progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = "Loading target environment field metadata..."
+            });
+
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            foreach (var entityName in entityNames)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var request = new RetrieveEntityRequest
+                    {
+                        LogicalName = entityName,
+                        EntityFilters = EntityFilters.Attributes
+                    };
+
+                    var response = (RetrieveEntityResponse)await client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+
+                    var attrValidity = new Dictionary<string, (bool, bool)>(StringComparer.OrdinalIgnoreCase);
+                    if (response.EntityMetadata.Attributes != null)
+                    {
+                        foreach (var attr in response.EntityMetadata.Attributes)
+                        {
+                            attrValidity[attr.LogicalName] = (
+                                attr.IsValidForCreate ?? false,
+                                attr.IsValidForUpdate ?? false
+                            );
+                        }
+                    }
+
+                    result[entityName] = attrValidity;
+                    _logger?.LogDebug("Loaded metadata for {Entity}: {Count} attributes", entityName, attrValidity.Count);
+                }
+                catch (FaultException ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to load metadata for entity {Entity}, using schema defaults", entityName);
+                    // Entity might not exist in target - use empty metadata (will use schema defaults)
+                    result[entityName] = new Dictionary<string, (bool, bool)>(StringComparer.OrdinalIgnoreCase);
+                }
+            }
+
+            _logger?.LogInformation("Loaded field metadata for {Count} entities", result.Count);
+            return result;
+        }
+
+        /// <summary>
+        /// Determines if a field should be included in the import based on operation mode and metadata.
+        /// </summary>
+        /// <param name="fieldName">The field name to check.</param>
+        /// <param name="mode">The import mode.</param>
+        /// <param name="fieldMetadata">Target environment field metadata.</param>
+        /// <param name="reason">Output: reason field was excluded, if any.</param>
+        /// <returns>True if field should be included, false otherwise.</returns>
+        private static bool ShouldIncludeField(
+            string fieldName,
+            ImportMode mode,
+            Dictionary<string, (bool IsValidForCreate, bool IsValidForUpdate)>? fieldMetadata,
+            out string? reason)
+        {
+            reason = null;
+
+            // If no metadata available for this entity, skip unknown fields to prevent Dataverse errors
+            if (fieldMetadata == null || !fieldMetadata.TryGetValue(fieldName, out var validity))
+            {
+                reason = "not found in target";
+                return false;
+            }
+
+            var (isValidForCreate, isValidForUpdate) = validity;
+
+            // Never include fields that are not valid for any write operation
+            if (!isValidForCreate && !isValidForUpdate)
+            {
+                reason = "not valid for create or update";
+                return false;
+            }
+
+            // For Update mode, skip fields not valid for update
+            if (mode == ImportMode.Update && !isValidForUpdate)
+            {
+                reason = "not valid for update";
+                return false;
+            }
+
+            // For Create mode, skip fields not valid for create
+            if (mode == ImportMode.Create && !isValidForCreate)
+            {
+                reason = "not valid for create";
+                return false;
+            }
+
+            // For Upsert mode, include fields valid for either operation
+            // (the actual operation will determine validity per-record)
+            return true;
+        }
+
+        /// <summary>
+        /// Detects columns in exported data that don't exist in target environment.
+        /// </summary>
+        /// <returns>Dictionary of entity name to list of missing column names.</returns>
+        private static Dictionary<string, List<string>> DetectMissingColumns(
+            MigrationData data,
+            Dictionary<string, Dictionary<string, (bool IsValidForCreate, bool IsValidForUpdate)>> targetFieldMetadata)
+        {
+            var missingColumns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (entityName, records) in data.EntityData)
+            {
+                if (records.Count == 0)
+                    continue;
+
+                // Get all unique field names from exported records
+                var exportedFields = records
+                    .SelectMany(r => r.Attributes.Keys)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                // Get target metadata for this entity
+                targetFieldMetadata.TryGetValue(entityName, out var targetFields);
+                targetFields ??= new Dictionary<string, (bool, bool)>(StringComparer.OrdinalIgnoreCase);
+
+                // Find fields that exist in export but not in target
+                var missing = exportedFields
+                    .Where(f => !targetFields.ContainsKey(f))
+                    .Where(f => !f.EndsWith("id", StringComparison.OrdinalIgnoreCase) ||
+                                !f.Equals($"{entityName}id", StringComparison.OrdinalIgnoreCase)) // Skip primary key
+                    .OrderBy(f => f)
+                    .ToList();
+
+                if (missing.Count > 0)
+                {
+                    missingColumns[entityName] = missing;
+                }
+            }
+
+            return missingColumns;
         }
     }
 }

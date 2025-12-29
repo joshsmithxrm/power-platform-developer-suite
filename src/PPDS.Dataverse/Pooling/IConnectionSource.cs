@@ -45,4 +45,19 @@ public interface IConnectionSource : IDisposable
     /// Implementations may create the client lazily on first call.
     /// </remarks>
     ServiceClient GetSeedClient();
+
+    /// <summary>
+    /// Invalidates the cached seed client, forcing fresh authentication on next use.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Call this when a token failure is detected. The next call to <see cref="GetSeedClient"/>
+    /// will create a new client with fresh authentication instead of returning the cached one.
+    /// </para>
+    /// <para>
+    /// Implementations should dispose the old client if it exists and clear any internal cache.
+    /// This method should be thread-safe and idempotent.
+    /// </para>
+    /// </remarks>
+    void InvalidateSeed();
 }

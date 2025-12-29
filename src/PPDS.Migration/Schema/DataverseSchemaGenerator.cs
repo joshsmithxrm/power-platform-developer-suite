@@ -170,10 +170,8 @@ namespace PPDS.Migration.Schema
             // Generate fields
             var fields = GenerateFields(metadata, options);
 
-            // Generate relationships
-            var relationships = options.IncludeRelationships
-                ? GenerateRelationships(metadata, includedEntities)
-                : Array.Empty<RelationshipSchema>();
+            // Generate relationships (always included for dependency analysis and M2M support)
+            var relationships = GenerateRelationships(metadata, includedEntities);
 
             return new EntitySchema
             {
@@ -203,6 +201,18 @@ namespace PPDS.Migration.Schema
                     continue;
                 }
 
+                var isValidForCreate = attr.IsValidForCreate ?? false;
+                var isValidForUpdate = attr.IsValidForUpdate ?? false;
+
+                // Always skip fields that are never writable (not valid for create AND not valid for update)
+                // These fields (like versionnumber) can never be imported, so no point exporting them
+                if (!isValidForCreate && !isValidForUpdate)
+                {
+                    _logger?.LogDebug("Skipping never-writable field {Field} on entity {Entity}",
+                        attr.LogicalName, metadata.LogicalName);
+                    continue;
+                }
+
                 var isPrimaryKey = attr.LogicalName == metadata.PrimaryIdAttribute;
 
                 // Apply attribute filtering (primary key is always included)
@@ -211,15 +221,17 @@ namespace PPDS.Migration.Schema
                     continue;
                 }
 
-                // Skip system fields unless requested
-                if (!options.IncludeSystemFields && IsSystemField(attr.LogicalName))
+                // Skip non-custom fields if only custom requested
+                if (options.CustomFieldsOnly && attr.IsCustomAttribute != true)
                 {
                     continue;
                 }
 
-                // Skip non-custom fields if only custom requested
-                if (options.CustomFieldsOnly && attr.IsCustomAttribute != true)
+                // Determine if field should be included based on metadata-driven filtering
+                if (!ShouldIncludeField(attr, isPrimaryKey, options.IncludeAuditFields))
                 {
+                    _logger?.LogDebug("Skipping non-customizable field {Field} on entity {Entity}",
+                        attr.LogicalName, metadata.LogicalName);
                     continue;
                 }
 
@@ -235,7 +247,9 @@ namespace PPDS.Migration.Schema
                     IsCustomField = attr.IsCustomAttribute ?? false,
                     IsRequired = attr.RequiredLevel?.Value == AttributeRequiredLevel.ApplicationRequired ||
                                  attr.RequiredLevel?.Value == AttributeRequiredLevel.SystemRequired,
-                    IsPrimaryKey = isPrimaryKey
+                    IsPrimaryKey = isPrimaryKey,
+                    IsValidForCreate = isValidForCreate,
+                    IsValidForUpdate = isValidForUpdate
                 };
             }
         }
@@ -367,27 +381,94 @@ namespace PPDS.Migration.Schema
             }
         }
 
-        private static bool IsSystemField(string fieldName)
+        /// <summary>
+        /// Determines if a field should be included based on metadata-driven filtering.
+        /// Uses IsCustomAttribute and IsCustomizable as primary filters, with exceptions for
+        /// known useful non-customizable fields (BPF, images) and audit fields.
+        /// </summary>
+        private static bool ShouldIncludeField(AttributeMetadata attr, bool isPrimaryKey, bool includeAuditFields)
         {
-            // Common system fields that are usually not migrated
-            return fieldName switch
+            // Primary key is always included
+            if (isPrimaryKey)
             {
-                "createdon" => true,
-                "createdby" => true,
-                "createdonbehalfby" => true,
-                "modifiedon" => true,
-                "modifiedby" => true,
-                "modifiedonbehalfby" => true,
-                "versionnumber" => true,
-                "timezoneruleversionnumber" => true,
-                "utcconversiontimezonecode" => true,
-                "overriddencreatedon" => true,
-                "importsequencenumber" => true,
-                "owningbusinessunit" => true,
-                "owningteam" => true,
-                "owninguser" => true,
-                _ => false
-            };
+                return true;
+            }
+
+            // Custom fields are always included
+            if (attr.IsCustomAttribute == true)
+            {
+                return true;
+            }
+
+            // Handle Virtual attributes specially - only include Image and MultiSelectPicklist
+            if (attr.AttributeType == AttributeTypeCode.Virtual)
+            {
+                return attr is ImageAttributeMetadata or MultiSelectPicklistAttributeMetadata;
+            }
+
+            // Exclude system bookkeeping fields (customizable but not migration-relevant)
+            if (IsNonMigratableSystemField(attr.LogicalName))
+            {
+                return false;
+            }
+
+            // Customizable system fields are included (statecode, statuscode, most lookups, etc.)
+            if (attr.IsCustomizable?.Value == true)
+            {
+                return true;
+            }
+
+            // Audit fields are included only if explicitly requested
+            if (IsAuditField(attr.LogicalName))
+            {
+                return includeAuditFields;
+            }
+
+            // BPF and image reference fields are non-customizable but useful
+            if (IsBpfOrImageField(attr.LogicalName))
+            {
+                return true;
+            }
+
+            // All other non-customizable system fields are excluded
+            // (owningbusinessunit, owningteam, owninguser, etc.)
+            return false;
+        }
+
+        /// <summary>
+        /// System bookkeeping fields that are marked IsCustomizable=true but serve no purpose in data migration.
+        /// These exist on every entity and contain system-managed values, not business data.
+        /// </summary>
+        private static bool IsNonMigratableSystemField(string fieldName)
+        {
+            return fieldName is
+                "timezoneruleversionnumber" or
+                "utcconversiontimezonecode" or
+                "importsequencenumber";
+        }
+
+        /// <summary>
+        /// Audit fields track who created/modified records and when.
+        /// These are excluded by default but can be included with --include-audit-fields.
+        /// </summary>
+        private static bool IsAuditField(string fieldName)
+        {
+            return fieldName is
+                "createdon" or
+                "createdby" or
+                "createdonbehalfby" or
+                "modifiedon" or
+                "modifiedby" or
+                "modifiedonbehalfby" or
+                "overriddencreatedon";
+        }
+
+        /// <summary>
+        /// BPF (Business Process Flow) and image reference fields are non-customizable but commonly needed.
+        /// </summary>
+        private static bool IsBpfOrImageField(string fieldName)
+        {
+            return fieldName is "processid" or "stageid" or "entityimageid";
         }
     }
 }

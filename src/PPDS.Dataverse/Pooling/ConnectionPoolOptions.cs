@@ -8,36 +8,43 @@ namespace PPDS.Dataverse.Pooling
     public class ConnectionPoolOptions
     {
         /// <summary>
+        /// Microsoft's hard limit for concurrent requests per Application User.
+        /// This is an enforced platform limit that cannot be exceeded.
+        /// </summary>
+        internal const int MicrosoftHardLimitPerUser = 52;
+
+        /// <summary>
         /// Gets or sets a value indicating whether connection pooling is enabled.
         /// Default: true
         /// </summary>
         public bool Enabled { get; set; } = true;
 
         /// <summary>
-        /// Gets or sets the maximum concurrent connections per Application User (connection configuration).
-        /// Default: 52 (matches Microsoft's RecommendedDegreesOfParallelism).
-        /// Total pool capacity = this × number of configured connections.
+        /// Gets or sets a fixed total pool size override.
+        /// When 0 (default), uses 52 × connection count (Microsoft's per-user limit).
+        /// Set to a positive value to enforce a specific total pool size.
+        /// Default: 0 (use per-connection sizing at 52 per user).
         /// </summary>
         /// <remarks>
-        /// Microsoft's service protection limits are per Application User, not per environment.
-        /// Each Application User can handle 52 concurrent requests (from x-ms-dop-hint header).
-        /// Per-connection sizing ensures each user's quota is fully utilized.
+        /// The pool semaphore is sized at 52 × connections to respect Microsoft's hard limit.
+        /// Actual parallelism is controlled by RecommendedDegreesOfParallelism from the server.
         /// </remarks>
-        public int MaxConnectionsPerUser { get; set; } = 52;
-
-        /// <summary>
-        /// Gets or sets a fixed total pool size, overriding per-connection calculation.
-        /// When 0 (default), uses MaxConnectionsPerUser × connection count.
-        /// Set to a positive value to enforce a specific total pool size.
-        /// Default: 0 (use per-connection sizing).
-        /// </summary>
         public int MaxPoolSize { get; set; } = 0;
 
         /// <summary>
-        /// Gets or sets the minimum idle connections to maintain.
-        /// Default: 5
+        /// Gets or sets the maximum acceptable Retry-After duration before failing.
+        /// Default: null (wait indefinitely for throttle to clear).
+        /// If set, throws <see cref="Resilience.ServiceProtectionException"/> when all connections
+        /// are throttled and the shortest wait exceeds this value.
         /// </summary>
-        public int MinPoolSize { get; set; } = 5;
+        /// <remarks>
+        /// Throttle waits are typically 30 seconds to 5 minutes. Most bulk operations should
+        /// wait indefinitely (the default) since throttles are temporary and will clear.
+        /// Only set a tolerance for interactive scenarios where responsiveness matters more
+        /// than completion.
+        /// </remarks>
+        public TimeSpan? MaxRetryAfterTolerance { get; set; } = null;
+
 
         /// <summary>
         /// Gets or sets the maximum time to wait for a connection.

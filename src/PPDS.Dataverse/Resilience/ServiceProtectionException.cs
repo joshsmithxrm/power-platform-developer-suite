@@ -38,6 +38,19 @@ namespace PPDS.Dataverse.Resilience
         public int ErrorCode { get; }
 
         /// <summary>
+        /// Initializes a new instance of the <see cref="ServiceProtectionException"/> class
+        /// with a custom message (used when all connections are throttled and tolerance is exceeded).
+        /// </summary>
+        /// <param name="message">The exception message.</param>
+        public ServiceProtectionException(string message)
+            : base(message)
+        {
+            ConnectionName = string.Empty;
+            RetryAfter = TimeSpan.Zero;
+            ErrorCode = 0;
+        }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="ServiceProtectionException"/> class.
         /// </summary>
         /// <param name="connectionName">The connection that was throttled.</param>

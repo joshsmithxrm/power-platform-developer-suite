@@ -87,6 +87,18 @@ public sealed class ConnectionStringSource : IConnectionSource
         }
     }
 
+    /// <inheritdoc />
+    public void InvalidateSeed()
+    {
+        lock (_lock)
+        {
+            if (_client == null) return;
+
+            _client.Dispose();
+            _client = null;
+        }
+    }
+
     /// <summary>
     /// Disposes the underlying ServiceClient if it was created.
     /// </summary>

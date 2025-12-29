@@ -37,25 +37,23 @@ namespace PPDS.Migration.Import
 
         /// <inheritdoc />
         public async Task<IReadOnlyList<Guid>> GetActivePluginStepsAsync(
-            IEnumerable<string> entityLogicalNames,
+            IEnumerable<int> objectTypeCodes,
             CancellationToken cancellationToken = default)
         {
-            var entityList = entityLogicalNames.ToList();
-            if (entityList.Count == 0)
+            var otcList = objectTypeCodes.ToList();
+            if (otcList.Count == 0)
             {
                 return Array.Empty<Guid>();
             }
 
-            _logger?.LogInformation("Querying active plugin steps for {Count} entities", entityList.Count);
+            _logger?.LogInformation("Querying active plugin steps for {Count} entities", otcList.Count);
 
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             var activeStepIds = new List<Guid>();
 
-            // Query sdkmessageprocessingstep for each entity
-            // We need to join through sdkmessagefilter to find steps by entity
-            var fetchXml = BuildPluginStepQuery(entityList);
+            var fetchXml = BuildPluginStepQuery(otcList);
 
             var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml))
                 .ConfigureAwait(false);
@@ -144,11 +142,11 @@ namespace PPDS.Migration.Import
             }
         }
 
-        private static string BuildPluginStepQuery(List<string> entityLogicalNames)
+        private static string BuildPluginStepQuery(List<int> objectTypeCodes)
         {
-            // Build filter condition for multiple entities
+            // Build filter condition for multiple entities using Object Type Codes
             var entityConditions = string.Join("\n",
-                entityLogicalNames.Select(e => $"<condition attribute='primaryobjecttypecode' operator='eq' value='{e}' />"));
+                objectTypeCodes.Select(otc => $"<condition attribute='primaryobjecttypecode' operator='eq' value='{otc}' />"));
 
             return $@"<fetch>
                 <entity name='sdkmessageprocessingstep'>
@@ -177,8 +175,10 @@ namespace PPDS.Migration.Import
         /// <summary>
         /// Gets the IDs of active plugin steps for the specified entities.
         /// </summary>
+        /// <param name="objectTypeCodes">The Object Type Codes of entities to find plugin steps for.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
         Task<IReadOnlyList<Guid>> GetActivePluginStepsAsync(
-            IEnumerable<string> entityLogicalNames,
+            IEnumerable<int> objectTypeCodes,
             CancellationToken cancellationToken = default);
 
         /// <summary>

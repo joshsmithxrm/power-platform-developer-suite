@@ -210,7 +210,7 @@ public class ConfigurationExceptionTests
     #region Message Formatting Tests
 
     [Fact]
-    public void Message_ContainsVisualSeparator()
+    public void Message_ContainsHeaderFollowedByBlankLine()
     {
         // Act
         var exception = ConfigurationException.MissingRequiredWithHints(
@@ -219,8 +219,8 @@ public class ConfigurationExceptionTests
             connectionIndex: 0,
             environmentName: "Dev");
 
-        // Assert
-        exception.Message.Should().Contain("=============================");
+        // Assert - Header should be followed by blank line (no ====== separator)
+        exception.Message.Should().Contain("Dataverse Configuration Error" + Environment.NewLine + Environment.NewLine);
     }
 
     [Fact]

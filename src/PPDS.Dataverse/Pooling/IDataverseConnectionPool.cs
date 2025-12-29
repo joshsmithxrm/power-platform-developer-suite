@@ -46,6 +46,12 @@ namespace PPDS.Dataverse.Pooling
         bool IsEnabled { get; }
 
         /// <summary>
+        /// Gets the number of connection sources configured in the pool.
+        /// This represents the number of Application Users/app registrations available.
+        /// </summary>
+        int SourceCount { get; }
+
+        /// <summary>
         /// Records an authentication failure for statistics.
         /// </summary>
         void RecordAuthFailure();
@@ -54,6 +60,25 @@ namespace PPDS.Dataverse.Pooling
         /// Records a connection failure for statistics.
         /// </summary>
         void RecordConnectionFailure();
+
+        /// <summary>
+        /// Invalidates the seed client for a connection, forcing fresh authentication on next use.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Call this when a token failure is detected (e.g., <c>MessageSecurityException</c> with "Anonymous").
+        /// This removes the cached seed client so the next connection request will create a fresh seed
+        /// with a new authentication token.
+        /// </para>
+        /// <para>
+        /// This is different from marking individual pooled connections as invalid. When a token expires,
+        /// all clones of the seed share the same broken authentication context. Simply disposing
+        /// pool members doesn't help - new clones from the same seed will also fail.
+        /// Invalidating the seed forces a complete re-authentication.
+        /// </para>
+        /// </remarks>
+        /// <param name="connectionName">The name of the connection source to invalidate.</param>
+        void InvalidateSeed(string connectionName);
 
         /// <summary>
         /// Executes a request with automatic retry on service protection errors.
@@ -72,5 +97,45 @@ namespace PPDS.Dataverse.Pooling
         /// Service protection errors never escape this method - it retries until success or cancellation.
         /// </remarks>
         Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets the total recommended parallelism across all connection sources.
+        /// This is the sum of live RecommendedDegreesOfParallelism for each source.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The value comes from the x-ms-dop-hint response header, exposed via
+        /// <c>ServiceClient.RecommendedDegreesOfParallelism</c>. This is Microsoft's recommended
+        /// concurrent request limit per Application User.
+        /// </para>
+        /// <para>
+        /// This reads live values from seed clients, not cached values, so it reflects
+        /// the server's current recommendation which may change based on load.
+        /// </para>
+        /// </remarks>
+        /// <returns>The total recommended parallelism across all sources.</returns>
+        int GetTotalRecommendedParallelism();
+
+        /// <summary>
+        /// Gets the live DOP (degrees of parallelism) for a specific connection source.
+        /// </summary>
+        /// <param name="sourceName">The name of the connection source.</param>
+        /// <returns>The current recommended parallelism for this source (1-52).</returns>
+        int GetLiveSourceDop(string sourceName);
+
+        /// <summary>
+        /// Gets the current number of active (checked-out) connections for a source.
+        /// </summary>
+        /// <param name="sourceName">The name of the connection source.</param>
+        /// <returns>The number of currently active connections.</returns>
+        int GetActiveConnectionCount(string sourceName);
+
+        /// <summary>
+        /// Tries to get a client from a source that has available DOP capacity.
+        /// Returns null if all sources are at capacity or throttled.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>A pooled client if capacity is available, null otherwise.</returns>
+        Task<IPooledClient?> TryGetClientWithCapacityAsync(CancellationToken cancellationToken = default);
     }
 }

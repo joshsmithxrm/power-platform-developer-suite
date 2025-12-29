@@ -135,21 +135,6 @@ namespace PPDS.Dataverse.DependencyInjection
                 // Bind configuration first
                 section.Bind(options);
 
-                // Fix for ConfigurationBinder populating backing fields with getter values.
-                // The binder calls setters for ALL properties, even those not in config,
-                // which breaks our nullable-backing-field override detection pattern.
-                // We need to clear backing fields for properties that weren't explicitly configured.
-                var adaptiveRateSection = section.GetSection("AdaptiveRate");
-                if (adaptiveRateSection.Exists())
-                {
-                    var configuredKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var child in adaptiveRateSection.GetChildren())
-                    {
-                        configuredKeys.Add(child.Key);
-                    }
-                    options.AdaptiveRate.ClearNonConfiguredBackingFields(configuredKeys);
-                }
-
                 // Resolve which connections to use
                 if (!string.IsNullOrEmpty(environment))
                 {
@@ -227,10 +212,7 @@ namespace PPDS.Dataverse.DependencyInjection
             // Throttle tracker (singleton - shared state)
             services.AddSingleton<IThrottleTracker, ThrottleTracker>();
 
-            // Adaptive rate controller (singleton - maintains per-connection state)
-            services.AddSingleton<IAdaptiveRateController, AdaptiveRateController>();
-
-            // Connection pool (singleton - long-lived)
+            // Connection pool (singleton - long-lived, manages DOP tracking)
             services.AddSingleton<IDataverseConnectionPool, DataverseConnectionPool>();
 
             // Bulk operation executor (transient - stateless)

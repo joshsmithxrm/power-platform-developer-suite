@@ -228,7 +228,7 @@ namespace PPDS.Dataverse.Configuration
 
             sb.AppendLine();
             sb.AppendLine("Dataverse Configuration Error");
-            sb.AppendLine("=============================");
+            sb.AppendLine();
             sb.AppendLine(errorDescription);
             sb.AppendLine();
 

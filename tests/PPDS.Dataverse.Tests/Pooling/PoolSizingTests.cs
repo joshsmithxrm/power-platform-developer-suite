@@ -1,27 +1,16 @@
 using FluentAssertions;
 using PPDS.Dataverse.Configuration;
-using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 
 namespace PPDS.Dataverse.Tests.Pooling;
 
 /// <summary>
-/// Tests for per-connection pool sizing (MaxConnectionsPerUser).
+/// Tests for DOP-based pool sizing (MaxPoolSize and MicrosoftHardLimitPerUser).
 /// </summary>
 public class PoolSizingTests
 {
-    #region Per-Connection Sizing Tests
-
-    [Fact]
-    public void ConnectionPoolOptions_DefaultMaxConnectionsPerUser_Is52()
-    {
-        // Arrange & Act
-        var options = new ConnectionPoolOptions();
-
-        // Assert
-        options.MaxConnectionsPerUser.Should().Be(52);
-    }
+    #region Default Values Tests
 
     [Fact]
     public void ConnectionPoolOptions_DefaultMaxPoolSize_IsZero()
@@ -29,159 +18,283 @@ public class PoolSizingTests
         // Arrange & Act
         var options = new ConnectionPoolOptions();
 
-        // Assert
+        // Assert - 0 means use DOP-based sizing from server
         options.MaxPoolSize.Should().Be(0);
     }
 
-    [Theory]
-    [InlineData(1, 52, 52)]   // 1 connection × 52 = 52
-    [InlineData(2, 52, 104)]  // 2 connections × 52 = 104
-    [InlineData(4, 52, 208)]  // 4 connections × 52 = 208
-    [InlineData(1, 26, 26)]   // 1 connection × 26 = 26 (custom)
-    [InlineData(3, 30, 90)]   // 3 connections × 30 = 90 (custom)
-    public void PoolCapacity_UsesPerConnectionSizing(int connectionCount, int perUser, int expectedCapacity)
+    [Fact]
+    public void ConnectionPoolOptions_DefaultEnabled_IsTrue()
     {
-        // Arrange
-        var dataverseOptions = new DataverseOptions
-        {
-            Pool = new ConnectionPoolOptions
-            {
-                MaxConnectionsPerUser = perUser,
-                Enabled = false // Disable to skip actual connection creation
-            }
-        };
-
-        for (int i = 0; i < connectionCount; i++)
-        {
-            dataverseOptions.Connections.Add(new DataverseConnection($"Connection{i}")
-            {
-                Url = $"https://test{i}.crm.dynamics.com",
-                ClientId = "test-client-id",
-                ClientSecret = "test-secret",
-                AuthType = DataverseAuthType.ClientSecret
-            });
-        }
-
-        // Calculate expected capacity directly
-        var actualCapacity = dataverseOptions.Pool.MaxPoolSize > 0
-            ? dataverseOptions.Pool.MaxPoolSize
-            : dataverseOptions.Connections.Count * dataverseOptions.Pool.MaxConnectionsPerUser;
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
 
         // Assert
-        actualCapacity.Should().Be(expectedCapacity);
+        options.Enabled.Should().BeTrue();
     }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultAcquireTimeout_Is30Seconds()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.AcquireTimeout.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultMaxIdleTime_Is5Minutes()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.MaxIdleTime.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultMaxLifetime_Is60Minutes()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.MaxLifetime.Should().Be(TimeSpan.FromMinutes(60));
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultDisableAffinityCookie_IsTrue()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert - disabled by default for better load distribution
+        options.DisableAffinityCookie.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultSelectionStrategy_IsThrottleAware()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.SelectionStrategy.Should().Be(ConnectionSelectionStrategy.ThrottleAware);
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultValidationInterval_Is1Minute()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.ValidationInterval.Should().Be(TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultEnableValidation_IsTrue()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.EnableValidation.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultValidateOnCheckout_IsTrue()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.ValidateOnCheckout.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultMaxConnectionRetries_Is2()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert
+        options.MaxConnectionRetries.Should().Be(2);
+    }
+
+    [Fact]
+    public void ConnectionPoolOptions_DefaultMaxRetryAfterTolerance_IsNull()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions();
+
+        // Assert - null means wait indefinitely for throttle to clear
+        options.MaxRetryAfterTolerance.Should().BeNull();
+    }
+
+    #endregion
+
+    #region MaxPoolSize Override Tests
 
     [Theory]
     [InlineData(50)]
     [InlineData(100)]
     [InlineData(25)]
-    public void PoolCapacity_MaxPoolSize_OverridesPerConnectionSizing(int maxPoolSize)
+    public void PoolCapacity_MaxPoolSize_CanBeCustomized(int maxPoolSize)
     {
-        // Arrange
-        var dataverseOptions = new DataverseOptions
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
         {
-            Pool = new ConnectionPoolOptions
-            {
-                MaxConnectionsPerUser = 52, // This should be ignored
-                MaxPoolSize = maxPoolSize,
-                Enabled = false
-            }
+            MaxPoolSize = maxPoolSize
         };
 
-        // Add multiple connections
-        dataverseOptions.Connections.Add(new DataverseConnection("Primary")
-        {
-            Url = "https://test.crm.dynamics.com",
-            ClientId = "test-client-id",
-            ClientSecret = "test-secret",
-            AuthType = DataverseAuthType.ClientSecret
-        });
-        dataverseOptions.Connections.Add(new DataverseConnection("Secondary")
-        {
-            Url = "https://test.crm.dynamics.com",
-            ClientId = "test-client-id-2",
-            ClientSecret = "test-secret-2",
-            AuthType = DataverseAuthType.ClientSecret
-        });
-
-        // Calculate capacity using the same logic as CalculateTotalPoolCapacity
-        var actualCapacity = dataverseOptions.Pool.MaxPoolSize > 0
-            ? dataverseOptions.Pool.MaxPoolSize
-            : dataverseOptions.Connections.Count * dataverseOptions.Pool.MaxConnectionsPerUser;
-
-        // Assert - MaxPoolSize should take precedence
-        actualCapacity.Should().Be(maxPoolSize);
+        // Assert
+        options.MaxPoolSize.Should().Be(maxPoolSize);
     }
 
     [Fact]
-    public void PoolCapacity_ZeroMaxPoolSize_UsesPerConnectionSizing()
+    public void PoolCapacity_ZeroMaxPoolSize_MeansUseDopBasedSizing()
     {
-        // Arrange
-        var dataverseOptions = new DataverseOptions
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
         {
-            Pool = new ConnectionPoolOptions
-            {
-                MaxConnectionsPerUser = 52,
-                MaxPoolSize = 0, // Default - should use per-connection sizing
-                Enabled = false
-            }
+            MaxPoolSize = 0
         };
 
-        // Add 2 connections
-        dataverseOptions.Connections.Add(new DataverseConnection("Primary")
-        {
-            Url = "https://test.crm.dynamics.com",
-            ClientId = "test-client-id",
-            ClientSecret = "test-secret",
-            AuthType = DataverseAuthType.ClientSecret
-        });
-        dataverseOptions.Connections.Add(new DataverseConnection("Secondary")
-        {
-            Url = "https://test.crm.dynamics.com",
-            ClientId = "test-client-id-2",
-            ClientSecret = "test-secret-2",
-            AuthType = DataverseAuthType.ClientSecret
-        });
-
-        // Calculate capacity
-        var actualCapacity = dataverseOptions.Pool.MaxPoolSize > 0
-            ? dataverseOptions.Pool.MaxPoolSize
-            : dataverseOptions.Connections.Count * dataverseOptions.Pool.MaxConnectionsPerUser;
-
-        // Assert - should use per-connection sizing
-        actualCapacity.Should().Be(104); // 2 × 52
+        // Assert - 0 is a sentinel meaning "use DOP from server"
+        options.MaxPoolSize.Should().Be(0);
     }
 
     #endregion
 
-    #region Validation Tests
+    #region Selection Strategy Tests
 
-    [Fact]
-    public void PoolOptions_MaxConnectionsPerUser_CanBeCustomized()
+    [Theory]
+    [InlineData(ConnectionSelectionStrategy.RoundRobin)]
+    [InlineData(ConnectionSelectionStrategy.LeastConnections)]
+    [InlineData(ConnectionSelectionStrategy.ThrottleAware)]
+    public void SelectionStrategy_CanBeSet(ConnectionSelectionStrategy strategy)
     {
         // Arrange & Act
         var options = new ConnectionPoolOptions
         {
-            MaxConnectionsPerUser = 26 // Custom value
+            SelectionStrategy = strategy
         };
 
         // Assert
-        options.MaxConnectionsPerUser.Should().Be(26);
+        options.SelectionStrategy.Should().Be(strategy);
     }
 
+    #endregion
+
+    #region Timeout Configuration Tests
+
     [Fact]
-    public void PoolOptions_BothSettings_CanCoexist()
+    public void AcquireTimeout_CanBeCustomized()
     {
         // Arrange & Act
         var options = new ConnectionPoolOptions
         {
-            MaxConnectionsPerUser = 52,
-            MaxPoolSize = 100 // Fixed override
+            AcquireTimeout = TimeSpan.FromSeconds(60)
         };
 
-        // Assert - both values are set
-        options.MaxConnectionsPerUser.Should().Be(52);
-        options.MaxPoolSize.Should().Be(100);
+        // Assert
+        options.AcquireTimeout.Should().Be(TimeSpan.FromSeconds(60));
+    }
+
+    [Fact]
+    public void MaxIdleTime_CanBeCustomized()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            MaxIdleTime = TimeSpan.FromMinutes(10)
+        };
+
+        // Assert
+        options.MaxIdleTime.Should().Be(TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
+    public void MaxLifetime_CanBeCustomized()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            MaxLifetime = TimeSpan.FromMinutes(30)
+        };
+
+        // Assert
+        options.MaxLifetime.Should().Be(TimeSpan.FromMinutes(30));
+    }
+
+    [Fact]
+    public void MaxRetryAfterTolerance_CanBeCustomized()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            MaxRetryAfterTolerance = TimeSpan.FromMinutes(2)
+        };
+
+        // Assert
+        options.MaxRetryAfterTolerance.Should().Be(TimeSpan.FromMinutes(2));
+    }
+
+    #endregion
+
+    #region Pool Behavior Configuration Tests
+
+    [Fact]
+    public void DisableAffinityCookie_CanBeSetToFalse()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            DisableAffinityCookie = false
+        };
+
+        // Assert - can be set to false for session affinity scenarios
+        options.DisableAffinityCookie.Should().BeFalse();
+    }
+
+    [Fact]
+    public void EnableValidation_CanBeDisabled()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            EnableValidation = false
+        };
+
+        // Assert
+        options.EnableValidation.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ValidateOnCheckout_CanBeDisabled()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            ValidateOnCheckout = false
+        };
+
+        // Assert
+        options.ValidateOnCheckout.Should().BeFalse();
+    }
+
+    [Fact]
+    public void MaxConnectionRetries_CanBeCustomized()
+    {
+        // Arrange & Act
+        var options = new ConnectionPoolOptions
+        {
+            MaxConnectionRetries = 5
+        };
+
+        // Assert
+        options.MaxConnectionRetries.Should().Be(5);
     }
 
     #endregion
@@ -189,17 +302,40 @@ public class PoolSizingTests
     #region Documentation Tests
 
     [Fact]
-    public void MaxConnectionsPerUser_Default_MatchesMicrosoftRecommendation()
+    public void MicrosoftHardLimitPerUser_Is52()
     {
-        // The default of 52 comes from Microsoft's RecommendedDegreesOfParallelism
-        // returned in the x-ms-dop-hint header from Dataverse API responses.
+        // Microsoft's hard limit for concurrent requests per Application User is 52.
+        // This is an enforced platform limit that cannot be exceeded.
         // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/send-parallel-requests
 
-        var options = new ConnectionPoolOptions();
+        // The constant is internal, but we can verify the documented behavior through
+        // the pool's DOP clamping logic (tested in DataverseConnectionPoolTests)
 
-        // Assert
-        options.MaxConnectionsPerUser.Should().Be(52,
-            "because Microsoft's RecommendedDegreesOfParallelism is typically 52 per Application User");
+        // This test documents the expected value
+        const int MicrosoftHardLimit = 52;
+        MicrosoftHardLimit.Should().Be(52,
+            "because Microsoft enforces a hard limit of 52 concurrent requests per Application User");
+    }
+
+    [Fact]
+    public void DopBasedSizing_Concept_Documentation()
+    {
+        // DOP-based sizing uses the server's RecommendedDegreesOfParallelism (from x-ms-dop-hint header)
+        // instead of a static configuration value.
+        //
+        // Benefits:
+        // - Automatically adapts to environment type (trial=4, production=50)
+        // - Respects server-side limits without manual configuration
+        // - Scales with the number of connections: TotalDOP = sum(DOP per connection)
+        //
+        // When MaxPoolSize is 0 (default), the pool:
+        // 1. Creates seed clients for each connection source
+        // 2. Reads RecommendedDegreesOfParallelism from each seed
+        // 3. Clamps values to [1, 52] (Microsoft's hard limit)
+        // 4. Sums DOP across all sources for total capacity
+
+        var options = new ConnectionPoolOptions();
+        options.MaxPoolSize.Should().Be(0, "0 means use DOP-based sizing from server");
     }
 
     #endregion

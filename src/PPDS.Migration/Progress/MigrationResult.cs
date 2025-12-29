@@ -39,6 +39,18 @@ namespace PPDS.Migration.Progress
         public IReadOnlyList<MigrationError> Errors { get; set; } = Array.Empty<MigrationError>();
 
         /// <summary>
+        /// Gets or sets the number of records created during upsert operations.
+        /// Only populated for upsert mode; null for create/update modes.
+        /// </summary>
+        public int? CreatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records updated during upsert operations.
+        /// Only populated for upsert mode; null for create/update modes.
+        /// </summary>
+        public int? UpdatedCount { get; set; }
+
+        /// <summary>
         /// Gets the average records per second.
         /// </summary>
         public double RecordsPerSecond => Duration.TotalSeconds > 0

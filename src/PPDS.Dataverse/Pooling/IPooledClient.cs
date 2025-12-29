@@ -28,9 +28,15 @@ namespace PPDS.Dataverse.Pooling
 
         /// <summary>
         /// Gets the name of the connection configuration this client came from.
-        /// Useful for debugging and monitoring which Application User is being used.
+        /// Used as a stable key for throttle tracking and rate control.
         /// </summary>
         string ConnectionName { get; }
+
+        /// <summary>
+        /// Gets a formatted display name for logging, combining identity and org name.
+        /// Format: "{ConnectionName}@{ConnectedOrgFriendlyName}"
+        /// </summary>
+        string DisplayName { get; }
 
         /// <summary>
         /// Gets when this connection was created.

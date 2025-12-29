@@ -59,6 +59,34 @@ namespace PPDS.Dataverse.Pooling
         public string ConnectionName { get; }
 
         /// <inheritdoc />
+        public string DisplayName
+        {
+            get
+            {
+                try
+                {
+                    var orgName = ConnectedOrgFriendlyName;
+
+                    // If org name is empty or already included in ConnectionName, use as-is.
+                    // ProfileConnectionSource includes environment name in the connection name,
+                    // so we avoid double-appending.
+                    if (string.IsNullOrEmpty(orgName) || ConnectionName.Contains(orgName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return ConnectionName;
+                    }
+
+                    return $"{ConnectionName}@{orgName}";
+                }
+                catch
+                {
+                    // ConnectedOrgFriendlyName can throw if the connection isn't fully
+                    // initialized or has auth issues. Fall back to just the connection name.
+                    return ConnectionName;
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public DateTime CreatedAt { get; }
 
         /// <inheritdoc />

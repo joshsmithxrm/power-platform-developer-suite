@@ -86,6 +86,19 @@ public sealed class ServiceClientSource : IConnectionSource
         return _client;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// For <see cref="ServiceClientSource"/>, this is a no-op because the client
+    /// is provided externally and cannot be recreated. The caller must handle
+    /// seed invalidation by creating a new source with a fresh client.
+    /// </remarks>
+    public void InvalidateSeed()
+    {
+        // ServiceClientSource wraps an externally-provided client.
+        // We cannot recreate it - the caller must create a new source.
+        // This is intentionally a no-op; the pool will log a warning.
+    }
+
     /// <summary>
     /// Disposes the underlying ServiceClient.
     /// </summary>

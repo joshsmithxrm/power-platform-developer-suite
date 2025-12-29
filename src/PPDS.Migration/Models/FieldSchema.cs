@@ -43,6 +43,18 @@ namespace PPDS.Migration.Models
         public bool IsPrimaryKey { get; set; }
 
         /// <summary>
+        /// Gets or sets whether the field is valid for create operations.
+        /// Default is true for backwards compatibility with existing schema files.
+        /// </summary>
+        public bool IsValidForCreate { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether the field is valid for update operations.
+        /// Default is true for backwards compatibility with existing schema files.
+        /// </summary>
+        public bool IsValidForUpdate { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets the maximum length for string fields.
         /// </summary>
         public int? MaxLength { get; set; }

@@ -48,6 +48,11 @@ namespace PPDS.Migration.Progress
         public double? RecordsPerSecond { get; set; }
 
         /// <summary>
+        /// Gets or sets the estimated time remaining for the current entity/operation.
+        /// </summary>
+        public TimeSpan? EstimatedRemaining { get; set; }
+
+        /// <summary>
         /// Gets or sets the number of records that succeeded in the current batch/phase.
         /// </summary>
         public int SuccessCount { get; set; }

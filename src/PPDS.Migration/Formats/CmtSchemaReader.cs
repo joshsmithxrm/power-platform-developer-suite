@@ -162,6 +162,10 @@ namespace PPDS.Migration.Formats
             var isRequired = ParseBool(element.Attribute("isrequired")?.Value);
             var isPrimaryKey = ParseBool(element.Attribute("primaryKey")?.Value);
 
+            // Parse validity flags - default to true for backwards compatibility
+            var isValidForCreate = ParseBoolWithDefault(element.Attribute("isValidForCreate")?.Value, defaultValue: true);
+            var isValidForUpdate = ParseBoolWithDefault(element.Attribute("isValidForUpdate")?.Value, defaultValue: true);
+
             return new FieldSchema
             {
                 LogicalName = logicalName,
@@ -171,6 +175,8 @@ namespace PPDS.Migration.Formats
                 IsCustomField = isCustomField,
                 IsRequired = isRequired,
                 IsPrimaryKey = isPrimaryKey,
+                IsValidForCreate = isValidForCreate,
+                IsValidForUpdate = isValidForUpdate,
                 MaxLength = ParseInt(element.Attribute("maxlength")?.Value),
                 Precision = ParseInt(element.Attribute("precision")?.Value)
             };
@@ -230,6 +236,18 @@ namespace PPDS.Migration.Formats
             if (string.IsNullOrEmpty(value))
             {
                 return false;
+            }
+
+            return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("1", StringComparison.Ordinal) ||
+                   value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ParseBoolWithDefault(string? value, bool defaultValue)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return defaultValue;
             }
 
             return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||

@@ -28,9 +28,10 @@ namespace PPDS.Dataverse.Pooling
         private readonly IReadOnlyList<IConnectionSource> _sources;
         private readonly ConnectionPoolOptions _poolOptions;
         private readonly IThrottleTracker _throttleTracker;
-        private readonly IAdaptiveRateController _adaptiveRateController;
         private readonly IConnectionSelectionStrategy _selectionStrategy;
         private readonly ConcurrentDictionary<string, ServiceClient> _seedClients = new();
+        private readonly ConcurrentDictionary<string, int> _sourceDop = new();
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _seedCreationLocks = new();
 
         private readonly ConcurrentDictionary<string, ConcurrentQueue<PooledClient>> _pools;
         private readonly ConcurrentDictionary<string, int> _activeConnections;
@@ -58,25 +59,21 @@ namespace PPDS.Dataverse.Pooling
         /// Each source's seed will be cloned to create pool members.
         /// </param>
         /// <param name="throttleTracker">Throttle tracking service.</param>
-        /// <param name="adaptiveRateController">Adaptive rate control service.</param>
         /// <param name="poolOptions">Pool configuration options.</param>
         /// <param name="logger">Logger instance.</param>
         public DataverseConnectionPool(
             IEnumerable<IConnectionSource> sources,
             IThrottleTracker throttleTracker,
-            IAdaptiveRateController adaptiveRateController,
             ConnectionPoolOptions poolOptions,
             ILogger<DataverseConnectionPool> logger)
         {
             ArgumentNullException.ThrowIfNull(sources);
             ArgumentNullException.ThrowIfNull(throttleTracker);
-            ArgumentNullException.ThrowIfNull(adaptiveRateController);
             ArgumentNullException.ThrowIfNull(poolOptions);
             ArgumentNullException.ThrowIfNull(logger);
 
             _sources = sources.ToList().AsReadOnly();
             _throttleTracker = throttleTracker;
-            _adaptiveRateController = adaptiveRateController;
             _poolOptions = poolOptions;
             _logger = logger;
 
@@ -88,10 +85,6 @@ namespace PPDS.Dataverse.Pooling
             _pools = new ConcurrentDictionary<string, ConcurrentQueue<PooledClient>>();
             _activeConnections = new ConcurrentDictionary<string, int>();
             _requestCounts = new ConcurrentDictionary<string, long>();
-            _totalPoolCapacity = CalculateTotalPoolCapacity();
-            _connectionSemaphore = new SemaphoreSlim(_totalPoolCapacity, _totalPoolCapacity);
-
-            _selectionStrategy = CreateSelectionStrategy();
 
             // Initialize pools for each source
             foreach (var source in _sources)
@@ -101,8 +94,17 @@ namespace PPDS.Dataverse.Pooling
                 _requestCounts[source.Name] = 0;
             }
 
-            // Apply performance settings once
+            // Apply performance settings before creating connections
             ApplyPerformanceSettings();
+
+            // Create seeds first to discover DOP from server before sizing the semaphore
+            InitializeSeedsAndDiscoverDop();
+
+            // Now size the semaphore based on actual DOP (not the 52 hard limit)
+            _totalPoolCapacity = CalculateTotalPoolCapacity();
+            _connectionSemaphore = new SemaphoreSlim(_totalPoolCapacity, _totalPoolCapacity);
+
+            _selectionStrategy = CreateSelectionStrategy();
 
             // Start background validation if enabled
             _validationCts = new CancellationTokenSource();
@@ -115,14 +117,13 @@ namespace PPDS.Dataverse.Pooling
                 _validationTask = Task.CompletedTask;
             }
 
-            // Initialize minimum connections
-            InitializeMinimumConnections();
+            // Warm up pool with 1 connection per source
+            WarmUpConnections();
 
             _logger.LogInformation(
-                "DataverseConnectionPool initialized. Sources: {SourceCount}, PoolCapacity: {PoolCapacity}, PerUser: {PerUser}, Strategy: {Strategy}",
+                "DataverseConnectionPool initialized. Sources: {SourceCount}, TotalDOP: {TotalDOP}, Strategy: {Strategy}",
                 _sources.Count,
                 _totalPoolCapacity,
-                _poolOptions.MaxConnectionsPerUser,
                 _poolOptions.SelectionStrategy);
         }
 
@@ -134,12 +135,10 @@ namespace PPDS.Dataverse.Pooling
         public DataverseConnectionPool(
             IOptions<DataverseOptions> options,
             IThrottleTracker throttleTracker,
-            IAdaptiveRateController adaptiveRateController,
             ILogger<DataverseConnectionPool> logger)
             : this(
                 CreateSourcesFromOptions(options?.Value ?? throw new ArgumentNullException(nameof(options))),
                 throttleTracker,
-                adaptiveRateController,
                 options.Value.Pool,
                 logger)
         {
@@ -166,7 +165,147 @@ namespace PPDS.Dataverse.Pooling
         public bool IsEnabled => _poolOptions.Enabled;
 
         /// <inheritdoc />
+        public int SourceCount => _sources.Count;
+
+        /// <inheritdoc />
         public PoolStatistics Statistics => GetStatistics();
+
+        /// <inheritdoc />
+        public int GetTotalRecommendedParallelism()
+        {
+            // Sum live DOP values from seed clients
+            int total = 0;
+            foreach (var source in _sources)
+            {
+                total += GetLiveSourceDop(source.Name);
+            }
+            return total;
+        }
+
+        /// <inheritdoc />
+        public int GetLiveSourceDop(string sourceName)
+        {
+            // Read live value from seed client if available
+            if (_seedClients.TryGetValue(sourceName, out var seed))
+            {
+                return Math.Clamp(seed.RecommendedDegreesOfParallelism, 1, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
+            }
+
+            // Fall back to cached value if seed exists in cache
+            if (_sourceDop.TryGetValue(sourceName, out var cached))
+            {
+                return cached;
+            }
+
+            // Conservative default
+            return 4;
+        }
+
+        /// <inheritdoc />
+        public int GetActiveConnectionCount(string sourceName)
+        {
+            return _activeConnections.GetValueOrDefault(sourceName, 0);
+        }
+
+        /// <inheritdoc />
+        public async Task<IPooledClient?> TryGetClientWithCapacityAsync(CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!IsEnabled)
+            {
+                return CreateDirectClient(null);
+            }
+
+            // Find a source that has DOP headroom and is not throttled
+            foreach (var source in _sources)
+            {
+                var active = _activeConnections.GetValueOrDefault(source.Name, 0);
+                var dop = GetLiveSourceDop(source.Name);
+
+                if (active < dop && !_throttleTracker.IsThrottled(source.Name))
+                {
+                    // This source has capacity - try to get a client from it
+                    try
+                    {
+                        return await GetClientFromSourceAsync(source.Name, null, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to get client from {Source}, trying next", source.Name);
+                        // Continue to next source
+                    }
+                }
+            }
+
+            // No source has capacity
+            return null;
+        }
+
+        /// <summary>
+        /// Gets a client specifically from the named source.
+        /// </summary>
+        private async Task<IPooledClient> GetClientFromSourceAsync(
+            string sourceName,
+            DataverseClientOptions? options,
+            CancellationToken cancellationToken)
+        {
+            // Acquire semaphore
+            var acquired = await _connectionSemaphore.WaitAsync(_poolOptions.AcquireTimeout, cancellationToken);
+            if (!acquired)
+            {
+                throw new TimeoutException($"Timed out waiting for connection from {sourceName}");
+            }
+
+            try
+            {
+                var pool = _pools[sourceName];
+
+                // Try to get from pool first
+                while (pool.TryDequeue(out var existingClient))
+                {
+                    if (IsValidConnection(existingClient))
+                    {
+                        _activeConnections.AddOrUpdate(sourceName, 1, (_, v) => v + 1);
+                        Interlocked.Increment(ref _totalRequestsServed);
+                        _requestCounts.AddOrUpdate(sourceName, 1, (_, v) => v + 1);
+
+                        existingClient.UpdateLastUsed();
+                        if (options != null)
+                        {
+                            existingClient.ApplyOptions(options);
+                        }
+
+                        _logger.LogDebug(
+                            "Retrieved connection from pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
+                            existingClient.ConnectionId, existingClient.ConnectionName);
+
+                        return existingClient;
+                    }
+
+                    // Invalid - dispose and try next
+                    existingClient.ForceDispose();
+                }
+
+                // Pool is empty, create new connection
+                var newClient = CreateNewConnection(sourceName);
+                _activeConnections.AddOrUpdate(sourceName, 1, (_, v) => v + 1);
+                Interlocked.Increment(ref _totalRequestsServed);
+                _requestCounts.AddOrUpdate(sourceName, 1, (_, v) => v + 1);
+
+                if (options != null)
+                {
+                    newClient.ApplyOptions(options);
+                }
+
+                return newClient;
+            }
+            catch
+            {
+                _connectionSemaphore.Release();
+                throw;
+            }
+        }
 
         /// <inheritdoc />
         public async Task<IPooledClient> GetClientAsync(
@@ -216,6 +355,14 @@ namespace PPDS.Dataverse.Pooling
                     // Phase 4: Get the actual connection from pool
                     return GetConnectionFromPoolCore(connectionName, options);
                 }
+                catch (DataverseConnectionException ex) when (ex.Message.Contains("throttled"))
+                {
+                    // CreateNewConnection blocked due to throttle (race condition).
+                    // Release semaphore and retry - WaitForNonThrottledConnectionAsync will wait.
+                    _connectionSemaphore.Release();
+                    _logger.LogDebug("Clone blocked by throttle, retrying after wait. {Message}", ex.Message);
+                    continue;
+                }
                 catch
                 {
                     _connectionSemaphore.Release();
@@ -258,6 +405,9 @@ namespace PPDS.Dataverse.Pooling
         /// Waits until at least one connection is not throttled.
         /// This method does NOT hold the semaphore, allowing other requests to also wait.
         /// </summary>
+        /// <exception cref="ServiceProtectionException">
+        /// Thrown when all connections are throttled and the wait time exceeds MaxRetryAfterTolerance.
+        /// </exception>
         private async Task WaitForNonThrottledConnectionAsync(
             string? excludeConnectionName,
             CancellationToken cancellationToken)
@@ -277,11 +427,19 @@ namespace PPDS.Dataverse.Pooling
                     return; // At least one connection is available
                 }
 
-                // All connections are throttled - wait for shortest expiry
+                // All connections are throttled - check tolerance before waiting
                 var waitTime = _throttleTracker.GetShortestExpiry();
                 if (waitTime <= TimeSpan.Zero)
                 {
                     return; // Throttle already expired
+                }
+
+                // Check if wait exceeds tolerance
+                if (_poolOptions.MaxRetryAfterTolerance.HasValue &&
+                    waitTime > _poolOptions.MaxRetryAfterTolerance.Value)
+                {
+                    throw new ServiceProtectionException(
+                        $"All connections throttled. Wait time ({waitTime:g}) exceeds tolerance ({_poolOptions.MaxRetryAfterTolerance.Value:g}).");
                 }
 
                 // Add a small buffer for timing
@@ -396,16 +554,117 @@ namespace PPDS.Dataverse.Pooling
 
         private ServiceClient GetSeedClient(string connectionName)
         {
-            return _seedClients.GetOrAdd(connectionName, name =>
+            // Fast path - seed already exists and is ready
+            if (_seedClients.TryGetValue(connectionName, out var existingSeed) && existingSeed.IsReady)
             {
-                var source = _sources.First(s => s.Name == name);
-                return source.GetSeedClient();
-            });
+                return existingSeed;
+            }
+
+            // Slow path - need to create/recreate seed, use lock to prevent races
+            var seedLock = _seedCreationLocks.GetOrAdd(connectionName, _ => new SemaphoreSlim(1, 1));
+
+            seedLock.Wait();
+            try
+            {
+                // Double-check after acquiring lock
+                if (_seedClients.TryGetValue(connectionName, out existingSeed) && existingSeed.IsReady)
+                {
+                    return existingSeed;
+                }
+
+                var source = _sources.First(s => s.Name == connectionName);
+                ServiceClient? seed = null;
+                Exception? lastException = null;
+
+                // Retry loop for transient failures (e.g., token refresh)
+                const int maxAttempts = 3;
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    try
+                    {
+                        seed = source.GetSeedClient();
+
+                        // Wait briefly for connection to become ready if needed
+                        if (!seed.IsReady)
+                        {
+                            _logger.LogDebug(
+                                "Seed not ready for {ConnectionName}, waiting... (attempt {Attempt}/{MaxAttempts})",
+                                connectionName, attempt, maxAttempts);
+
+                            // Give it a moment - interactive auth may still be completing
+                            Thread.Sleep(500);
+
+                            if (!seed.IsReady)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Seed connection not ready for {connectionName} after wait. LastError: {seed.LastError}");
+                            }
+                        }
+
+                        break; // Success
+                    }
+                    catch (Exception ex) when (attempt < maxAttempts)
+                    {
+                        lastException = ex;
+                        _logger.LogWarning(ex,
+                            "Seed creation attempt {Attempt}/{MaxAttempts} failed for {ConnectionName}, retrying after backoff",
+                            attempt, maxAttempts, connectionName);
+
+                        // Exponential backoff: 1s, 2s
+                        Thread.Sleep(1000 * attempt);
+                    }
+                    catch (Exception ex)
+                    {
+                        lastException = ex;
+                        _logger.LogError(ex,
+                            "Seed creation failed after {MaxAttempts} attempts for {ConnectionName}",
+                            maxAttempts, connectionName);
+                    }
+                }
+
+                if (seed == null || !seed.IsReady)
+                {
+                    throw new DataverseConnectionException(
+                        connectionName,
+                        $"Failed to create seed after {maxAttempts} attempts",
+                        lastException ?? new InvalidOperationException("Seed creation failed with no exception"));
+                }
+
+                // Initialize DOP for this source from the seed client
+                var dop = seed.RecommendedDegreesOfParallelism;
+                var cappedDop = Math.Clamp(dop, 1, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
+                _sourceDop[connectionName] = cappedDop;
+
+                // Store the seed (overwrites any stale entry)
+                _seedClients[connectionName] = seed;
+
+                _logger.LogDebug(
+                    "Initialized DOP for {ConnectionName}: {Dop} (capped at {Cap})",
+                    connectionName, cappedDop, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
+
+                return seed;
+            }
+            finally
+            {
+                seedLock.Release();
+            }
         }
 
         private PooledClient CreateNewConnection(string connectionName)
         {
             _logger.LogDebug("Creating new connection for {ConnectionName}", connectionName);
+
+            // Don't attempt to clone when the connection is throttled.
+            // Clone() internally calls RefreshInstanceDetails() which makes an API call.
+            // If we're throttled (especially execution time limit), that call will fail,
+            // causing the entire operation to fail instead of just waiting.
+            if (_throttleTracker.IsThrottled(connectionName))
+            {
+                var expiry = _throttleTracker.GetThrottleExpiry(connectionName);
+                throw new DataverseConnectionException(connectionName,
+                    $"Cannot create new connection while throttled. Throttle expires at {expiry:HH:mm:ss}.",
+                    new InvalidOperationException("Connection source is throttled"));
+            }
 
             var seed = GetSeedClient(connectionName);
 
@@ -444,7 +703,7 @@ namespace PPDS.Dataverse.Pooling
             _logger.LogDebug(
                 "Created new connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}, IsReady: {IsReady}",
                 pooledClient.ConnectionId,
-                connectionName,
+                pooledClient.DisplayName,
                 pooledClient.IsReady);
 
             return pooledClient;
@@ -455,8 +714,8 @@ namespace PPDS.Dataverse.Pooling
         /// </summary>
         private void OnThrottleDetected(string connectionName, TimeSpan retryAfter)
         {
+            // Record throttle per-connection for routing decisions (avoid throttled connections)
             _throttleTracker.RecordThrottle(connectionName, retryAfter);
-            _adaptiveRateController.RecordThrottle(connectionName, retryAfter);
         }
 
         private PooledClient CreateDirectClient(DataverseClientOptions? options)
@@ -495,7 +754,7 @@ namespace PPDS.Dataverse.Pooling
                         "Connection marked invalid, disposing instead of returning. " +
                         "ConnectionId: {ConnectionId}, Name: {ConnectionName}, Reason: {Reason}",
                         client.ConnectionId,
-                        client.ConnectionName,
+                        client.DisplayName,
                         client.InvalidReason);
 
                     Interlocked.Increment(ref _invalidConnectionCount);
@@ -527,7 +786,7 @@ namespace PPDS.Dataverse.Pooling
                         _logger.LogDebug(
                             "Returned connection to pool. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
                             client.ConnectionId,
-                            client.ConnectionName);
+                            client.DisplayName);
                     }
                     else
                     {
@@ -535,7 +794,7 @@ namespace PPDS.Dataverse.Pooling
                         _logger.LogDebug(
                             "Pool full, disposed connection. ConnectionId: {ConnectionId}, Name: {ConnectionName}",
                             client.ConnectionId,
-                            client.ConnectionName);
+                            client.DisplayName);
                     }
                 }
             }
@@ -628,31 +887,49 @@ namespace PPDS.Dataverse.Pooling
             }
         }
 
-        private void InitializeMinimumConnections()
+        /// <summary>
+        /// Creates seed clients for all sources and discovers their DOP values.
+        /// Must be called before CalculateTotalPoolCapacity() to enable DOP-based sizing.
+        /// </summary>
+        private void InitializeSeedsAndDiscoverDop()
         {
-            if (!IsEnabled || _poolOptions.MinPoolSize <= 0)
+            if (!IsEnabled)
             {
                 return;
             }
 
-            _logger.LogDebug("Initializing minimum pool connections");
+            foreach (var source in _sources)
+            {
+                try
+                {
+                    // GetSeedClient populates _sourceDop with the server's RecommendedDegreesOfParallelism
+                    GetSeedClient(source.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to initialize seed for {ConnectionName}, using default DOP=4", source.Name);
+                    // Use conservative default if seed creation fails
+                    _sourceDop[source.Name] = 4;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Warms up the pool by creating one connection per source.
+        /// </summary>
+        private void WarmUpConnections()
+        {
+            if (!IsEnabled)
+            {
+                return;
+            }
 
             foreach (var source in _sources)
             {
                 var pool = _pools[source.Name];
-                var activeCount = _activeConnections.GetValueOrDefault(source.Name, 0);
-                var currentTotal = pool.Count + activeCount;
-                var targetMin = Math.Min(_poolOptions.MinPoolSize, source.MaxPoolSize);
-                var toCreate = Math.Max(0, targetMin - currentTotal);
 
-                if (toCreate > 0)
-                {
-                    _logger.LogDebug(
-                        "Pool {ConnectionName}: Active={Active}, Idle={Idle}, Target={Target}, Creating={ToCreate}",
-                        source.Name, activeCount, pool.Count, targetMin, toCreate);
-                }
-
-                for (int i = 0; i < toCreate; i++)
+                // Only warm up if pool is empty
+                if (pool.IsEmpty)
                 {
                     try
                     {
@@ -661,7 +938,7 @@ namespace PPDS.Dataverse.Pooling
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to initialize connection for {ConnectionName}", source.Name);
+                        _logger.LogWarning(ex, "Failed to warm up connection for {ConnectionName}", source.Name);
                     }
                 }
             }
@@ -716,15 +993,18 @@ namespace PPDS.Dataverse.Pooling
                 }
             }
 
-            // Ensure minimum pool size
-            InitializeMinimumConnections();
+            // Ensure at least 1 warm connection per source
+            WarmUpConnections();
         }
 
         /// <summary>
-        /// Calculates the total pool capacity based on sources.
-        /// Uses per-source sizing (MaxConnectionsPerUser × source count) unless
-        /// MaxPoolSize override is set.
+        /// Calculates the total pool capacity based on discovered DOP values.
         /// </summary>
+        /// <remarks>
+        /// Pool capacity = sum of DOP for all sources. This is the server-recommended
+        /// parallelism based on RecommendedDegreesOfParallelism from each connection.
+        /// Seeds must be initialized before calling this method.
+        /// </remarks>
         private int CalculateTotalPoolCapacity()
         {
             // Fixed pool size override
@@ -733,8 +1013,14 @@ namespace PPDS.Dataverse.Pooling
                 return _poolOptions.MaxPoolSize;
             }
 
-            // Per-source sizing
-            return _sources.Count * _poolOptions.MaxConnectionsPerUser;
+            // DOP-based sizing from discovered values
+            if (!_sourceDop.IsEmpty)
+            {
+                return _sourceDop.Values.Sum();
+            }
+
+            // Fallback: conservative default if seeds not yet initialized (shouldn't happen)
+            return _sources.Count * 4;
         }
 
         private static void ValidateConnection(DataverseConnection connection)
@@ -815,6 +1101,61 @@ namespace PPDS.Dataverse.Pooling
         public void RecordConnectionFailure()
         {
             Interlocked.Increment(ref _connectionFailureCount);
+        }
+
+        /// <inheritdoc />
+        public void InvalidateSeed(string connectionName)
+        {
+            if (string.IsNullOrEmpty(connectionName))
+            {
+                return;
+            }
+
+            // Remove from our seed cache
+            if (_seedClients.TryRemove(connectionName, out var oldSeed))
+            {
+                _logger.LogWarning(
+                    "Invalidating seed client for connection {ConnectionName} due to token failure. " +
+                    "Next connection request will create fresh authentication.",
+                    connectionName);
+
+                // Dispose the old seed
+                try
+                {
+                    oldSeed.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error disposing old seed client for {ConnectionName}", connectionName);
+                }
+            }
+
+            // Invalidate the source's cached seed so GetSeedClient() creates a fresh one
+            var source = _sources.FirstOrDefault(s =>
+                string.Equals(s.Name, connectionName, StringComparison.OrdinalIgnoreCase));
+
+            if (source != null)
+            {
+                source.InvalidateSeed();
+            }
+
+            // Drain all pool members for this connection - they're clones of the broken seed
+            if (_pools.TryGetValue(connectionName, out var pool))
+            {
+                var drained = 0;
+                while (pool.TryDequeue(out var client))
+                {
+                    client.ForceDispose();
+                    drained++;
+                }
+
+                if (drained > 0)
+                {
+                    _logger.LogInformation(
+                        "Drained {Count} pooled connections for {ConnectionName} after seed invalidation",
+                        drained, connectionName);
+                }
+            }
         }
 
         private void ThrowIfDisposed()

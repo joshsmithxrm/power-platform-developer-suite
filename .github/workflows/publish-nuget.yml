@@ -6,6 +6,8 @@ on:
       - 'Plugins-v*'
       - 'Dataverse-v*'
       - 'Migration-v*'
+      - 'Auth-v*'
+      - 'Cli-v*'
 
 jobs:
   publish:
@@ -21,6 +23,7 @@ jobs:
       with:
         dotnet-version: |
           8.0.x
+          9.0.x
           10.0.x
 
     - name: Determine package to publish
@@ -38,7 +41,13 @@ jobs:
           echo "projects=src/PPDS.Dataverse/PPDS.Dataverse.csproj" >> $GITHUB_OUTPUT
         elif [[ $TAG == Migration-v* ]]; then
           echo "package=PPDS.Migration" >> $GITHUB_OUTPUT
-          echo "projects=src/PPDS.Migration/PPDS.Migration.csproj src/PPDS.Migration.Cli/PPDS.Migration.Cli.csproj" >> $GITHUB_OUTPUT
+          echo "projects=src/PPDS.Migration/PPDS.Migration.csproj" >> $GITHUB_OUTPUT
+        elif [[ $TAG == Auth-v* ]]; then
+          echo "package=PPDS.Auth" >> $GITHUB_OUTPUT
+          echo "projects=src/PPDS.Auth/PPDS.Auth.csproj" >> $GITHUB_OUTPUT
+        elif [[ $TAG == Cli-v* ]]; then
+          echo "package=PPDS.Cli" >> $GITHUB_OUTPUT
+          echo "projects=src/PPDS.Cli/PPDS.Cli.csproj" >> $GITHUB_OUTPUT
         else
           echo "Unknown tag format: $TAG"
           exit 1

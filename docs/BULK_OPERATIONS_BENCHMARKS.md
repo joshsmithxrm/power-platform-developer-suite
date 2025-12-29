@@ -4,11 +4,11 @@ Performance testing for bulk operations against Dataverse.
 
 ## Test Environment
 
-- **Entity:** `ppds_zipcode` (simple entity with alternate key)
-- **Record count:** 42,366
-- **Environment:** Developer environment (single tenant)
-- **App registrations:** Single (one set of API limits)
-- **Parallelism tested:** Server-recommended (5) and elevated (50)
+- **Entities:** `ppds_state`, `ppds_city`, `ppds_zipcode` (hierarchical with alternate keys)
+- **Record count:** 72,493 (51 states, 30,076 cities, 42,366 ZIP codes)
+- **Environment:** Developer environment (DOP=5 per user)
+- **Application Users:** 1 and 2 (to demonstrate quota scaling)
+- **Strategy:** DOP-based parallelism (server-recommended limits)
 
 ## Microsoft's Reference Benchmarks
 
@@ -32,133 +32,136 @@ From [Microsoft Learn - Use bulk operation messages](https://learn.microsoft.com
 For elastic tables specifically:
 > "The recommended number of record operations to send with CreateMultiple and UpdateMultiple for elastic tables is **100**."
 
-## Results: Creates (UpsertMultiple)
+## Results: DOP-Based Scaling
 
-### Standard Mode (Server-Recommended Parallelism)
+### Primary Key Operations (GUID-based upsert)
 
-| Approach | Batch Size | Parallelism | Time (s) | Throughput (rec/s) | Notes |
-|----------|------------|-------------|----------|-------------------|-------|
-| Single ServiceClient | 100 | 4 | 933 | 45.4 | Baseline |
-| Connection Pool | 100 | 4 | 888 | 47.7 | 5% faster than baseline |
-| Connection Pool | 1000 | 4 | 919 | 46.1 | 3% slower than batch 100 |
-| Connection Pool | 100 | 5 (server) | 704 | **60.2** | +26% using server-recommended parallelism |
+Using primary key (GUID) for record matching - optimal performance path:
 
-### High-Throughput Mode (Elevated Parallelism)
+| Users | DOP | Records | Duration | Throughput | Scaling |
+|-------|-----|---------|----------|------------|---------|
+| 1 | 5 | 72,493 | 05:58 | **202.1 rec/s** | baseline |
+| 2 | 10 | 72,493 | 03:03 | **394.5 rec/s** | **1.95x** |
 
-For bulk data loading scenarios where throughput is critical, parallelism can be increased beyond the server-recommended value:
+**Key result:** Near-linear scaling with additional Application Users. Zero throttles when respecting DOP limits.
 
-| Approach | Batch Size | Parallelism | Time (s) | Throughput (rec/s) | Notes |
-|----------|------------|-------------|----------|-------------------|-------|
-| Connection Pool | 100 | 50 | 83 | **508.6** | 8.4x faster than server-recommended |
+### Alternate Key Operations
 
-**Key result:** 42,366 records loaded in 83 seconds with zero failures.
+Using alternate key (string field) for record matching - additional lookup overhead:
 
-### When to Use Each Mode
+| Users | DOP | Records | Duration | Throughput | vs GUID |
+|-------|-----|---------|----------|------------|---------|
+| 2 | 10 | 42,366 | 04:22 | **161.4 rec/s** | 2.4x slower |
 
-| Mode | Parallelism | Use Case |
-|------|-------------|----------|
-| **Standard** | Server-recommended (typically 5) | Interactive operations, mixed workloads, shared environments |
-| **High-Throughput** | 50+ | Bulk data migrations, initial data loads, batch processing jobs |
+### Scaling Strategy
 
-**Considerations for high-throughput mode:**
+The DOP-based approach uses server-recommended parallelism as the ceiling, not a floor:
 
-- Requires sufficient pool connections (`MaxPoolSize` ≥ parallelism)
-- Consumes more API quota - avoid during business hours on shared environments
-- Single app registration was used; multiple app registrations could potentially increase throughput further (untested)
-- Monitor for throttling in production; the SDK handles 429 responses automatically
+| Users | Per-User DOP | Total DOP | Expected Throughput |
+|-------|--------------|-----------|---------------------|
+| 1 | 5 | 5 | ~200 rec/s |
+| 2 | 5 | 10 | ~400 rec/s |
+| 4 | 5 | 20 | ~800 rec/s (projected) |
+
+**Scaling is achieved by adding Application Users, not by exceeding DOP.**
 
 ### Key Findings
 
-1. **Server-recommended parallelism is a safe default** (+26% vs hardcoded)
-   - `RecommendedDegreesOfParallelism` returns server-tuned value
-   - Automatically adapts to environment capacity
-   - No guesswork required
+1. **DOP-based parallelism prevents throttling**
+   - 1-user tests that exceeded DOP saw 98-155 throttle events with 30-second waits
+   - Tests respecting DOP saw 0-2 throttle events
+   - Throttle recovery adds significant latency (~30s per event)
 
-2. **Elevated parallelism unlocks massive gains for bulk operations** (+744% over server-recommended)
-   - 508.6 rec/s vs 60.2 rec/s
-   - ~1.83M records/hour vs ~217K records/hour
-   - Appropriate for dedicated data loading scenarios
+2. **Near-linear scaling with multiple users**
+   - 2 users = 1.95x throughput (theoretical max = 2.0x)
+   - Each Application User has independent API quota
+   - No contention between users
 
-3. **Connection Pool is faster than Single ServiceClient** (+5%)
-   - True parallelism with independent connections
-   - No internal locking/serialization overhead
-   - Affinity cookie disabled improves server-side distribution
+3. **Alternate keys add ~2.4x overhead**
+   - Non-clustered index lookup + key lookup vs direct clustered index seek
+   - Expected SQL behavior, not a bug
+   - Use primary keys when GUIDs are available
 
-4. **Batch size 100 is optimal** (+3% vs batch 1000)
+4. **Batch size 100 remains optimal**
    - Aligns with Microsoft's recommendation
-   - More granular parallelism
-   - Less memory pressure per request
+   - More granular parallelism distribution
+   - Reduces timeout risk with plugins
 
-### Recommended Configurations
-
-**Standard (default):** Connection Pool + Batch Size 100 + Server Parallelism = **60.2 records/sec** (~217K/hour)
-
-**High-Throughput:** Connection Pool + Batch Size 100 + Parallelism 50 = **508.6 records/sec** (~1.83M/hour)
-
-## Results: Updates (UpsertMultiple)
-
-| Approach | Batch Size | Time (s) | Throughput (rec/s) | Notes |
-|----------|------------|----------|-------------------|-------|
-| Connection Pool | 100 | 1153 | 36.7 | Alternate key lookup overhead |
-
-### Observations
-
-- Updates are ~23% slower than creates (36.7/s vs 47.7/s)
-- Expected due to server-side alternate key lookup before modification
-- Connection approach doesn't affect this - it's server-side overhead
-
-## Configuration
-
-```json
-{
-  "Dataverse": {
-    "Pool": {
-      "Enabled": true,
-      "MaxPoolSize": 50,
-      "MinPoolSize": 5,
-      "DisableAffinityCookie": true
-    }
-  }
-}
-```
+### Recommended Configuration
 
 ```csharp
-var options = new BulkOperationOptions
+// Pool sizes automatically based on DOP - no manual tuning needed
+services.AddDataverseConnectionPool(options =>
 {
-    BatchSize = 100
-    // MaxParallelBatches omitted - uses RecommendedDegreesOfParallelism from server
-};
+    // Add Application Users for scaling
+    options.Connections.Add(new("User1", connectionString1));
+    options.Connections.Add(new("User2", connectionString2));  // 2x throughput
+
+    options.Pool.SelectionStrategy = ConnectionSelectionStrategy.ThrottleAware;
+});
+
+// Operations automatically use sum(DOP) as parallelism ceiling
+var result = await bulkExecutor.UpsertMultipleAsync("account", records);
 ```
+
+## Alternate Key Performance Deep Dive
+
+### Why Alternate Keys Are Slower
+
+When using UpsertMultiple with alternate keys vs primary keys (GUIDs):
+
+| Key Type | Lookup Path | I/O Operations |
+|----------|-------------|----------------|
+| Primary Key (GUID) | Clustered index seek | 1 |
+| Alternate Key | Non-clustered index seek → Key lookup | 2+ |
+
+The ~2.4x overhead is inherent to SQL index mechanics:
+1. **Non-clustered index** stores the alternate key values in a separate B-tree
+2. **Key lookup** fetches the actual row data from the clustered index
+3. **Uniqueness check** must verify no duplicates exist
+
+### Microsoft's Guidance
+
+From [Use Upsert to Create or Update a record](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/use-upsert-insert-update-record):
+
+> "There's a performance penalty in using Upsert versus using Create. If you're sure the record doesn't exist, use Create."
+
+### When to Use Each Approach
+
+| Scenario | Recommended Approach |
+|----------|---------------------|
+| Migrating between environments | Primary key (GUID) - fastest |
+| Syncing from external system | Alternate key - required, accept overhead |
+| Initial data load (no existing records) | CreateMultiple - skip upsert logic |
+| Incremental sync | Alternate key upsert - correctness over speed |
 
 ## Analysis: Our Results vs Microsoft Benchmarks
 
-Microsoft's reference benchmark shows ~10M records/hour for CreateMultiple/UpdateMultiple. Our high-throughput mode achieved **~1.83M records/hour** in a developer environment.
+Microsoft's reference shows ~10M records/hour for CreateMultiple/UpdateMultiple. Our DOP-based approach in a developer environment achieved:
+
+| Configuration | Records/Hour | vs Microsoft |
+|---------------|--------------|--------------|
+| 1 user, DOP=5 | ~727K | 7.3% |
+| 2 users, DOP=10 | ~1.42M | 14.2% |
+| Projected: 10 users, DOP=50 | ~7.1M | 71% |
 
 The gap is expected due to:
 
-1. **Developer environment** - Single-tenant dev environments have lower resource allocation than production
-2. **Single app registration** - One client credential = one set of API limits
-3. **Entity complexity** - Alternate key lookups add overhead
-4. **Service protection limits** - Dev environments have stricter throttling
+1. **Developer environment** - Lower resource allocation than production
+2. **Conservative DOP** - Production environments report DOP=50 vs dev DOP=5
+3. **Respecting limits** - We don't exceed DOP to avoid throttle recovery latency
 
-In production environments with multiple app registrations (each with independent API quotas), throughput could approach Microsoft's benchmarks.
+### Scaling Projection
 
-### Progression Summary
+| Users | DOP | Throughput (projected) |
+|-------|-----|------------------------|
+| 1 | 5 | 200 rec/s (727K/hr) |
+| 2 | 10 | 400 rec/s (1.44M/hr) |
+| 5 | 25 | 1,000 rec/s (3.6M/hr) |
+| 10 | 50 | 2,000 rec/s (7.2M/hr) |
+| 20 | 100 | 4,000 rec/s (14.4M/hr) |
 
-| Change | Improvement | Throughput |
-|--------|-------------|------------|
-| Single client (baseline) | — | 45.4 rec/s |
-| → Connection pool | +5% | 47.7 rec/s |
-| → Batch 100 (vs 1000) | +3% | — |
-| → Server-recommended parallelism | +26% | 60.2 rec/s |
-| → Elevated parallelism (50) | +744% | **508.6 rec/s** |
-| **Total improvement** | **+1,020%** | 45.4 → 508.6 rec/s |
-
-### Key Insights
-
-1. **Server-recommended parallelism is a good starting point** - Provides +26% improvement with automatic tuning
-2. **Elevated parallelism is the largest lever** - +744% improvement for bulk operations
-3. **Multi-app-registration pooling** - Untested but theoretically could multiply throughput further by distributing load across independent API quotas
+**Note:** Production environments with DOP=50 per user would reach Microsoft's benchmarks with fewer Application Users.
 
 ## References
 

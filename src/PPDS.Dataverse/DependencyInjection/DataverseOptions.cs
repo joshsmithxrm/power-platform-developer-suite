@@ -65,11 +65,5 @@ namespace PPDS.Dataverse.DependencyInjection
         /// Gets or sets the bulk operation settings.
         /// </summary>
         public BulkOperationOptions BulkOperations { get; set; } = new();
-
-        /// <summary>
-        /// Gets or sets the adaptive rate control settings.
-        /// Controls how parallelism adjusts based on throttle responses.
-        /// </summary>
-        public AdaptiveRateOptions AdaptiveRate { get; set; } = new();
     }
 }

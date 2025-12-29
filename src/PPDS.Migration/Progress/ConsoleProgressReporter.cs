@@ -18,6 +18,9 @@ namespace PPDS.Migration.Progress
         private string? _lastEntity;
         private int _lastProgress;
 
+        /// <inheritdoc />
+        public string OperationName { get; set; } = "Operation";
+
         /// <summary>
         /// Initializes a new instance of the <see cref="ConsoleProgressReporter"/> class.
         /// </summary>
@@ -30,7 +33,7 @@ namespace PPDS.Migration.Progress
         public void Report(ProgressEventArgs args)
         {
             var elapsed = _stopwatch.Elapsed;
-            var prefix = $"[{elapsed:hh\\:mm\\:ss}]";
+            var prefix = $"[+{elapsed:hh\\:mm\\:ss\\.fff}]";
 
             switch (args.Phase)
             {
@@ -40,19 +43,33 @@ namespace PPDS.Migration.Progress
 
                 case MigrationPhase.Exporting:
                 case MigrationPhase.Importing:
+                    // Handle message-only events (e.g., "Writing output file...")
+                    if (!string.IsNullOrEmpty(args.Message) && string.IsNullOrEmpty(args.Entity))
+                    {
+                        Console.WriteLine($"{prefix} {args.Message}");
+                        break;
+                    }
+
+                    // Handle entity progress events - skip if no entity specified
+                    if (string.IsNullOrEmpty(args.Entity))
+                    {
+                        break;
+                    }
+
                     if (args.Entity != _lastEntity || args.Current == args.Total || ShouldUpdate(args.Current))
                     {
                         var phase = args.Phase == MigrationPhase.Exporting ? "Export" : "Import";
                         var tierInfo = args.TierNumber.HasValue ? $" (Tier {args.TierNumber})" : "";
                         var rps = args.RecordsPerSecond.HasValue ? $" @ {args.RecordsPerSecond:F1} rec/s" : "";
                         var pct = args.Total > 0 ? $" ({args.PercentComplete:F0}%)" : "";
+                        var eta = args.EstimatedRemaining.HasValue ? $" | ETA: {FormatEta(args.EstimatedRemaining.Value)}" : "";
 
                         // Show success/failure breakdown if there are failures
                         var failureInfo = args.FailureCount > 0
                             ? $" [{args.SuccessCount} ok, {args.FailureCount} failed]"
                             : "";
 
-                        Console.WriteLine($"{prefix} [{phase}] {args.Entity}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{failureInfo}");
+                        Console.WriteLine($"{prefix} [{phase}] {args.Entity}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
 
                         _lastEntity = args.Entity;
                         _lastProgress = args.Current;
@@ -90,32 +107,40 @@ namespace PPDS.Migration.Progress
         {
             _stopwatch.Stop();
             Console.WriteLine();
-            Console.WriteLine(new string('=', 60));
 
+            // Header line: "Export succeeded." or "Export completed with errors."
             if (result.Success)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("Migration Completed Successfully");
+                Console.WriteLine($"{OperationName} succeeded.");
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Migration Completed with Errors");
+                Console.WriteLine($"{OperationName} completed with errors.");
             }
             Console.ResetColor();
 
-            Console.WriteLine(new string('=', 60));
-            Console.WriteLine($"Duration:    {result.Duration:hh\\:mm\\:ss}");
-            Console.WriteLine($"Succeeded:   {result.SuccessCount:N0}");
+            // Summary line: "    42,366 records in 00:00:08 (4,774.5 rec/s)"
+            Console.WriteLine($"    {result.SuccessCount:N0} record(s) in {result.Duration:hh\\:mm\\:ss} ({result.RecordsPerSecond:F1} rec/s)");
 
+            // Show created/updated breakdown for upsert operations
+            if (result.CreatedCount.HasValue && result.UpdatedCount.HasValue)
+            {
+                Console.WriteLine($"        Created: {result.CreatedCount:N0} | Updated: {result.UpdatedCount:N0}");
+            }
+
+            // Error count if any
             if (result.FailureCount > 0)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Failed:      {result.FailureCount:N0}");
+                Console.WriteLine($"    {result.FailureCount:N0} Error(s)");
                 Console.ResetColor();
             }
-
-            Console.WriteLine($"Throughput:  {result.RecordsPerSecond:F1} records/second");
+            else
+            {
+                Console.WriteLine($"    0 Error(s)");
+            }
 
             // Display error details if available
             if (result.Errors?.Count > 0)
@@ -331,10 +356,30 @@ namespace PPDS.Migration.Progress
             Console.ResetColor();
         }
 
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _stopwatch.Restart();
+            _lastEntity = null;
+            _lastProgress = 0;
+        }
+
         private bool ShouldUpdate(int current)
         {
             // Update every 1000 records or 100 records, whichever comes first
             return current - _lastProgress >= 1000 || current - _lastProgress >= 100;
+        }
+
+        /// <summary>
+        /// Formats a TimeSpan for ETA display, handling hour+ durations correctly.
+        /// </summary>
+        private static string FormatEta(TimeSpan eta)
+        {
+            if (eta.TotalHours >= 1)
+            {
+                return $"{(int)eta.TotalHours}:{eta.Minutes:D2}:{eta.Seconds:D2}";
+            }
+            return $"{eta.Minutes}:{eta.Seconds:D2}";
         }
     }
 }
