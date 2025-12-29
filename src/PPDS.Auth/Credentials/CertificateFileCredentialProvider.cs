@@ -215,9 +215,10 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
                 store.Add(_certificate);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore store errors - ServiceClient may still work
+            // Log warning but don't fail - ServiceClient may still work with in-memory cert
+            Console.Error.WriteLine($"Warning: Could not store certificate in cert store ({ex.Message}). Authentication may still succeed.");
         }
     }
 

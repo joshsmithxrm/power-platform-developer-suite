@@ -434,7 +434,7 @@ namespace PPDS.Dataverse.BulkOperations
         private static bool IsAuthFailure(Exception exception)
         {
             // MessageSecurityException indicates the token wasn't sent or was rejected.
-            // This happens when OAuth token expires and MSAL refresh fails silently.
+            // This can occur when the OAuth token expires and refresh fails.
             if (exception is MessageSecurityException)
             {
                 return true;

@@ -379,7 +379,7 @@ namespace PPDS.Migration.Progress
             {
                 return $"{(int)eta.TotalHours}:{eta.Minutes:D2}:{eta.Seconds:D2}";
             }
-            return $"{(int)eta.TotalMinutes}:{eta.Seconds:D2}";
+            return $"{eta.Minutes}:{eta.Seconds:D2}";
         }
     }
 }
