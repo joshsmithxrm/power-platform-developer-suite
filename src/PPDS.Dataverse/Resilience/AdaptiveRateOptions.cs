@@ -343,6 +343,24 @@ namespace PPDS.Dataverse.Resilience
         /// </summary>
         internal double BatchDurationSmoothingFactor => 0.3;
 
+        /// <summary>
+        /// Conservative ceiling applied before enough batch samples are collected.
+        /// Prevents aggressive ramp-up when we don't yet know server behavior.
+        /// </summary>
+        internal int InitialCeilingBeforeSamples => 20;
+
+        /// <summary>
+        /// Hard cap on request rate (batches per second) regardless of other ceilings.
+        /// 6000 requests per 5 min = 20/sec. This is 90% of that limit as safety margin.
+        /// </summary>
+        internal double HardRequestRateCapBatchesPerSecond => 18.0;
+
+        /// <summary>
+        /// Number of successful batches required before using aggressive ramp-up
+        /// (floor as increase rate). Prevents 8→16→24→... in first minute.
+        /// </summary>
+        internal int MinBatchesForAggressiveRamp => 30;
+
         #endregion
     }
 }

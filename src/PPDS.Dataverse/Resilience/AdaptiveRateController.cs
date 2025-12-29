@@ -43,11 +43,25 @@ namespace PPDS.Dataverse.Resilience
         private int? _throttleCeiling;
         private DateTime? _throttleCeilingExpiry;
 
+        // Throttle debouncing: when 52 requests all 429 simultaneously,
+        // we only want to process the first throttle, not cascade 52 times
+        private DateTime? _lastThrottleProcessed;
+        private static readonly TimeSpan ThrottleDebounceWindow = TimeSpan.FromSeconds(2);
+
+        // Request rate tracking: batches per second (EMA-based)
+        private double? _batchRateEma;
+        private DateTime? _lastBatchTime;
+
         // Batch duration tracking for execution time and request rate ceilings
         private double? _batchDurationEmaMs;
+        private double? _minimumBatchDurationMs; // Fastest observed batch (for request rate ceiling)
         private int _batchDurationSampleCount;
         private int? _executionTimeCeiling;
         private int? _requestRateCeiling;
+
+        // Ramp-up protection: track total successful batches and first throttle
+        private int _totalSuccessfulBatches;
+        private bool _hasHadFirstThrottle;
 
         private bool _initialized;
 
@@ -114,8 +128,30 @@ namespace PPDS.Dataverse.Resilience
 
             lock (_syncRoot)
             {
-                _lastActivityTime = DateTime.UtcNow;
+                var now = DateTime.UtcNow;
+                _lastActivityTime = now;
                 _batchesSinceThrottle++;
+
+                // Update batch rate EMA (batches per second)
+                if (_lastBatchTime.HasValue)
+                {
+                    var timeSinceLastBatch = (now - _lastBatchTime.Value).TotalSeconds;
+                    if (timeSinceLastBatch > 0)
+                    {
+                        var instantRate = 1.0 / timeSinceLastBatch;
+                        if (_batchRateEma.HasValue)
+                        {
+                            // EMA with same smoothing factor as batch duration
+                            var alpha = _options.BatchDurationSmoothingFactor;
+                            _batchRateEma = (alpha * instantRate) + ((1 - alpha) * _batchRateEma.Value);
+                        }
+                        else
+                        {
+                            _batchRateEma = instantRate;
+                        }
+                    }
+                }
+                _lastBatchTime = now;
 
                 // Update batch duration EMA
                 var durationMs = duration.TotalMilliseconds;
@@ -128,7 +164,16 @@ namespace PPDS.Dataverse.Resilience
                 {
                     _batchDurationEmaMs = durationMs;
                 }
+
+                // Track minimum batch duration (fastest observed) for request rate ceiling
+                // Using minimum prevents feedback loop: slow batches → higher ceiling → more load → slower batches
+                if (!_minimumBatchDurationMs.HasValue || durationMs < _minimumBatchDurationMs.Value)
+                {
+                    _minimumBatchDurationMs = durationMs;
+                }
+
                 _batchDurationSampleCount++;
+                _totalSuccessfulBatches++;
 
                 // Calculate ceilings once we have enough samples
                 if (_batchDurationSampleCount >= _options.MinBatchSamplesForCeiling)
@@ -159,46 +204,78 @@ namespace PPDS.Dataverse.Resilience
 
             lock (_syncRoot)
             {
-                var oldParallelism = _currentParallelism;
+                var now = DateTime.UtcNow;
+
+                // Always count throttle events for statistics
                 _totalThrottleEvents++;
-                _lastThrottleTime = DateTime.UtcNow;
-                _lastActivityTime = DateTime.UtcNow;
+                _lastThrottleTime = now;
+                _lastActivityTime = now;
+
+                // Throttle debouncing: when 52 requests all 429 simultaneously,
+                // only process the first one to avoid cascade (52->26->13->6->4 in <1s)
+                if (_lastThrottleProcessed.HasValue &&
+                    (now - _lastThrottleProcessed.Value) < ThrottleDebounceWindow)
+                {
+                    _logger.LogDebug(
+                        "Throttle debounced ({TimeSinceLast:F1}s < {Window:F1}s window). " +
+                        "Total throttles in burst: {Total}",
+                        (now - _lastThrottleProcessed.Value).TotalSeconds,
+                        ThrottleDebounceWindow.TotalSeconds,
+                        _totalThrottleEvents);
+                    return;
+                }
+
+                _lastThrottleProcessed = now;
+                _hasHadFirstThrottle = true;
+                var oldParallelism = _currentParallelism;
+                var atFloor = oldParallelism == _floorParallelism;
 
                 // Remember where we were (minus one step) as last known good
                 _lastKnownGoodParallelism = Math.Max(
                     _currentParallelism - _options.IncreaseRate,
                     _floorParallelism);
-                _lastKnownGoodTime = DateTime.UtcNow;
+                _lastKnownGoodTime = now;
 
-                // Calculate throttle ceiling based on how badly we overshot
-                // overshootRatio: how much of the 5-min budget we consumed
-                // reductionFactor: how much to reduce ceiling (more overshoot = more reduction)
-                var overshootRatio = retryAfter.TotalMinutes / 5.0;
-                var reductionFactor = 1.0 - (overshootRatio / 2.0);
-                reductionFactor = Math.Max(0.5, Math.Min(1.0, reductionFactor)); // Clamp to [0.5, 1.0]
+                // Floor protection: don't reduce throttle ceiling when already at floor.
+                // The throttle ceiling dropping to 4 when parallelism is already 4 serves no purpose.
+                if (!atFloor)
+                {
+                    // Calculate throttle ceiling based on how badly we overshot
+                    // overshootRatio: how much of the 5-min budget we consumed
+                    // reductionFactor: how much to reduce ceiling (more overshoot = more reduction)
+                    var overshootRatio = retryAfter.TotalMinutes / 5.0;
+                    var reductionFactor = 1.0 - (overshootRatio / 2.0);
+                    reductionFactor = Math.Max(0.5, Math.Min(1.0, reductionFactor)); // Clamp to [0.5, 1.0]
 
-                // Use the higher of current parallelism or existing throttle ceiling as base
-                var ceilingBase = _throttleCeiling.HasValue
-                    ? Math.Max(oldParallelism, _throttleCeiling.Value)
-                    : oldParallelism;
+                    // Use the higher of current parallelism or existing throttle ceiling as base
+                    var ceilingBase = _throttleCeiling.HasValue
+                        ? Math.Max(oldParallelism, _throttleCeiling.Value)
+                        : oldParallelism;
 
-                var newThrottleCeiling = (int)(ceilingBase * reductionFactor);
-                newThrottleCeiling = Math.Max(newThrottleCeiling, _floorParallelism);
+                    var newThrottleCeiling = (int)(ceilingBase * reductionFactor);
+                    newThrottleCeiling = Math.Max(newThrottleCeiling, _floorParallelism);
 
-                _throttleCeiling = newThrottleCeiling;
-                _throttleCeilingExpiry = DateTime.UtcNow + retryAfter + TimeSpan.FromMinutes(5);
+                    _throttleCeiling = newThrottleCeiling;
+                    _throttleCeilingExpiry = now + retryAfter + TimeSpan.FromMinutes(5);
+                }
 
                 // AIMD: Multiplicative decrease
                 var calculatedNew = (int)(oldParallelism * _options.DecreaseFactor);
                 _currentParallelism = Math.Max(calculatedNew, _floorParallelism);
                 _batchesSinceThrottle = 0;
 
-                var atFloor = _currentParallelism == _floorParallelism;
+                // Build rate info for logging
+                var rateInfo = _batchRateEma.HasValue
+                    ? $", rate: {_batchRateEma.Value:F1} batch/s"
+                    : "";
+
                 _logger.LogInformation(
-                    "Throttle (Retry-After: {RetryAfter}). {Old} -> {New} (throttle ceiling: {ThrottleCeiling}, expires: {Expiry:HH:mm:ss}){FloorNote}",
+                    "Throttle (Retry-After: {RetryAfter}). {Old} -> {New} (throttle ceiling: {ThrottleCeiling}, expires: {Expiry:HH:mm:ss}{RateInfo}){FloorNote}",
                     retryAfter, oldParallelism, _currentParallelism,
-                    newThrottleCeiling, _throttleCeilingExpiry.Value,
-                    atFloor ? " (at floor)" : "");
+                    _throttleCeiling ?? _floorParallelism,
+                    _throttleCeilingExpiry ?? now.AddMinutes(5),
+                    rateInfo,
+                    atFloor ? " (at floor, ceiling unchanged)" : "");
             }
         }
 
@@ -238,7 +315,13 @@ namespace PPDS.Dataverse.Resilience
                     AverageBatchDuration = _batchDurationEmaMs.HasValue
                         ? TimeSpan.FromMilliseconds(_batchDurationEmaMs.Value)
                         : null,
+                    MinimumBatchDuration = _minimumBatchDurationMs.HasValue
+                        ? TimeSpan.FromMilliseconds(_minimumBatchDurationMs.Value)
+                        : null,
                     BatchDurationSampleCount = _batchDurationSampleCount,
+                    TotalSuccessfulBatches = _totalSuccessfulBatches,
+                    HasHadFirstThrottle = _hasHadFirstThrottle,
+                    BatchesPerSecond = _batchRateEma,
                     LastKnownGoodParallelism = _lastKnownGoodParallelism,
                     IsLastKnownGoodStale = isStale,
                     BatchesSinceThrottle = _batchesSinceThrottle,
@@ -274,9 +357,14 @@ namespace PPDS.Dataverse.Resilience
 
             // Clear batch duration tracking (new operation, different entity characteristics)
             _batchDurationEmaMs = null;
+            _minimumBatchDurationMs = null;
             _batchDurationSampleCount = 0;
             _executionTimeCeiling = null;
             _requestRateCeiling = null;
+
+            // Clear ramp-up protection state
+            _totalSuccessfulBatches = 0;
+            _hasHadFirstThrottle = false;
 
             _initialized = true;
 
@@ -299,10 +387,16 @@ namespace PPDS.Dataverse.Resilience
             _lastActivityTime = null;
             _throttleCeiling = null;
             _throttleCeilingExpiry = null;
+            _lastThrottleProcessed = null;
             _batchDurationEmaMs = null;
+            _minimumBatchDurationMs = null;
             _batchDurationSampleCount = 0;
             _executionTimeCeiling = null;
             _requestRateCeiling = null;
+            _batchRateEma = null;
+            _lastBatchTime = null;
+            _totalSuccessfulBatches = 0;
+            _hasHadFirstThrottle = false;
         }
 
         private void UpdateCeilings()
@@ -314,16 +408,17 @@ namespace PPDS.Dataverse.Resilience
 
             var avgBatchSeconds = _batchDurationEmaMs.Value / 1000.0;
 
-            // Execution time ceiling: Factor / batchDuration
+            // Execution time ceiling: Factor / batchDuration (uses EMA - slow batches need this)
             // Protects slow operations from exhausting the 20-minute execution time budget
             // Lower batch duration = higher ceiling (fast ops don't need this protection)
             var execTimeCeiling = (int)(_options.ExecutionTimeCeilingFactor / avgBatchSeconds);
             execTimeCeiling = Math.Max(_floorParallelism, Math.Min(execTimeCeiling, _ceilingParallelism));
 
-            // Request rate ceiling: Factor × batchDuration
-            // Protects fast operations from exhausting the 6,000 requests/5-min budget
-            // Lower batch duration = lower ceiling (fast ops complete more requests/sec)
-            var requestRateCeiling = (int)(_options.RequestRateCeilingFactor * avgBatchSeconds);
+            // Request rate ceiling: Factor × batchDuration (uses MINIMUM - fastest observed)
+            // Using minimum prevents feedback loop: slow batches → higher ceiling → more load → slower batches
+            // The fastest batch represents the server's true capability without contention
+            var minBatchSeconds = (_minimumBatchDurationMs ?? _batchDurationEmaMs.Value) / 1000.0;
+            var requestRateCeiling = (int)(_options.RequestRateCeilingFactor * minBatchSeconds);
             requestRateCeiling = Math.Max(_floorParallelism, Math.Min(requestRateCeiling, _ceilingParallelism));
 
             // Log when either ceiling changes significantly
@@ -360,11 +455,32 @@ namespace PPDS.Dataverse.Resilience
                 return;
             }
 
+            // Hard request rate cap: 6000 requests per 5 min = 20/sec
+            // Stop increasing if we're already at 90% of this limit (18 batch/sec)
+            // This is a safety valve regardless of other ceiling calculations
+            // Only apply when rate is in realistic range (0.1 to 100 batch/sec)
+            // Higher rates indicate measurement artifacts (e.g., tests completing batches instantly)
+            if (_batchRateEma.HasValue &&
+                _batchRateEma.Value >= _options.HardRequestRateCapBatchesPerSecond &&
+                _batchRateEma.Value < 100.0) // Skip if rate is unrealistically high
+            {
+                return;
+            }
+
             // Calculate effective ceiling (minimum of all applicable ceilings)
             var effectiveCeiling = _ceilingParallelism;
             var throttleCeilingActive = false;
             var execTimeCeilingActive = false;
             var requestRateCeilingActive = false;
+            var initialCeilingActive = false;
+
+            // Conservative initial ceiling: Before we have enough samples, cap at 20
+            // Prevents aggressive ramp-up when we don't yet know server behavior
+            if (_batchDurationSampleCount < _options.MinBatchSamplesForCeiling)
+            {
+                effectiveCeiling = Math.Min(effectiveCeiling, _options.InitialCeilingBeforeSamples * _connectionCount);
+                initialCeilingActive = true;
+            }
 
             if (_throttleCeilingExpiry.HasValue && _throttleCeilingExpiry > DateTime.UtcNow && _throttleCeiling.HasValue)
             {
@@ -397,10 +513,19 @@ namespace PPDS.Dataverse.Resilience
             // AIMD: Additive increase
             var oldParallelism = _currentParallelism;
 
-            // Increment by floor (server's recommendation) for faster ramp
+            // Slower initial ramp-up: Only use floor as base increase after we've
+            // had first throttle OR after 30+ successful batches (proven stable)
+            // Before that, use small fixed IncreaseRate to avoid aggressive ramp
+            var useAggressiveRamp = _hasHadFirstThrottle ||
+                _totalSuccessfulBatches >= _options.MinBatchesForAggressiveRamp;
+
+            var baseIncrease = useAggressiveRamp
+                ? Math.Max(_floorParallelism, _options.IncreaseRate)
+                : _options.IncreaseRate;
+
             // Recovery phase uses multiplier to get back to known-good faster
-            var baseIncrease = Math.Max(_floorParallelism, _options.IncreaseRate);
-            var increase = _currentParallelism < _lastKnownGoodParallelism
+            // But only if we're using aggressive ramp (i.e., after first throttle or stable)
+            var increase = useAggressiveRamp && _currentParallelism < _lastKnownGoodParallelism
                 ? (int)(baseIncrease * _options.RecoveryMultiplier)
                 : baseIncrease;
 
@@ -414,6 +539,8 @@ namespace PPDS.Dataverse.Resilience
 
                 // Build ceiling note for logging
                 var ceilingNotes = new System.Collections.Generic.List<string>();
+                if (initialCeilingActive)
+                    ceilingNotes.Add($"initial ceiling {_options.InitialCeilingBeforeSamples * _connectionCount}");
                 if (throttleCeilingActive)
                     ceilingNotes.Add($"throttle ceiling until {_throttleCeilingExpiry:HH:mm:ss}");
                 if (requestRateCeilingActive)

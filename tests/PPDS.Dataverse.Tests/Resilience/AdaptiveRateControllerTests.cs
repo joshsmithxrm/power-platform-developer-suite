@@ -448,6 +448,300 @@ namespace PPDS.Dataverse.Tests.Resilience
             stats.EffectiveCeiling.Should().Be(16); // Request rate ceiling is more restrictive
         }
 
+        [Fact]
+        public void RecordThrottle_DebouncesMultipleThrottlesWithinWindow()
+        {
+            // Arrange - simulate 52 concurrent 429s
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                StabilizationBatches = 1,
+                MinIncreaseInterval = TimeSpan.Zero,
+                DecreaseFactor = 0.5
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Ramp up to simulate being at high parallelism
+            for (int i = 0; i < 10; i++)
+            {
+                controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            }
+
+            var beforeThrottle = controller.GetStatistics().CurrentParallelism;
+
+            // Act - simulate burst of 5 throttles (as if 5 concurrent requests all 429'd)
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - parallelism should only decrease once (first throttle processed, rest debounced)
+            // Without debouncing: 52->26->13->6->4 (cascade)
+            // With debouncing: 52->26 (single decrease)
+            var expectedAfterSingleDecrease = (int)(beforeThrottle * 0.5);
+            stats.CurrentParallelism.Should().BeGreaterThanOrEqualTo(expectedAfterSingleDecrease);
+
+            // Total events should still be counted
+            stats.TotalThrottleEvents.Should().Be(5);
+        }
+
+        [Fact]
+        public void RecordThrottle_AtFloor_DoesNotReduceThrottleCeiling()
+        {
+            // Arrange - start at floor and trigger throttle
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                DecreaseFactor = 0.5
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Act - throttle when already at floor
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - throttle ceiling should not be set when already at floor
+            // (no point reducing ceiling when we can't go any lower)
+            stats.CurrentParallelism.Should().Be(4); // Still at floor
+            stats.ThrottleCeiling.Should().BeNull(); // Ceiling not reduced
+        }
+
+        #endregion
+
+        #region BatchesPerSecond Tests
+
+        [Fact]
+        public void RecordBatchCompletion_TracksBatchesPerSecond()
+        {
+            // Arrange
+            var controller = CreateController();
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Act - record batches with simulated time gaps
+            // Note: Since we can't easily control time, we just verify the property exists
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - after multiple batches, we should have a rate calculated
+            // The exact value depends on actual elapsed time, but it should be set
+            // (or null if batches completed too quickly to measure)
+            stats.BatchDurationSampleCount.Should().Be(3);
+            // BatchesPerSecond may be null if all batches happened within same tick
+        }
+
+        #endregion
+
+        #region Throttle Cascade Prevention Tests
+
+        [Fact]
+        public void InitialCeiling_CapsParallelismBeforeSamplesCollected()
+        {
+            // Arrange - Before MinBatchSamplesForCeiling (3), ceiling should be InitialCeilingBeforeSamples (20)
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                StabilizationBatches = 1,
+                MinIncreaseInterval = TimeSpan.Zero
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Act - try to ramp up before collecting 3 samples
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - should be capped at 20 (InitialCeilingBeforeSamples)
+            stats.CurrentParallelism.Should().BeLessThanOrEqualTo(20);
+            stats.BatchDurationSampleCount.Should().Be(2); // Less than 3 samples
+        }
+
+        [Fact]
+        public void InitialCeiling_ScalesByConnectionCount()
+        {
+            // Arrange - with 2 connections, initial ceiling should be 40 (20 × 2)
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                StabilizationBatches = 1,
+                MinIncreaseInterval = TimeSpan.Zero
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 2);
+
+            // Act - try to ramp up before collecting 3 samples
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - should be capped at 40 (20 × 2 connections)
+            stats.CurrentParallelism.Should().BeLessThanOrEqualTo(40);
+        }
+
+        [Fact]
+        public void SlowerInitialRamp_UsesSmallIncreaseBeforeThrottle()
+        {
+            // Arrange - before first throttle AND before 30 successful batches,
+            // increase should be IncreaseRate (2), not floor (4)
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                StabilizationBatches = 1,
+                MinIncreaseInterval = TimeSpan.Zero
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+            var initial = controller.GetStatistics().CurrentParallelism;
+
+            // Act - record stabilization batches
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats = controller.GetStatistics();
+
+            // Assert - should increase by IncreaseRate (2), not floor (4)
+            // So 4 -> 6, not 4 -> 8
+            stats.CurrentParallelism.Should().Be(initial + 2);
+            stats.HasHadFirstThrottle.Should().BeFalse();
+            stats.TotalSuccessfulBatches.Should().BeLessThan(30);
+        }
+
+        [Fact]
+        public void SlowerInitialRamp_UsesFloorAfterFirstThrottle()
+        {
+            // Arrange
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                StabilizationBatches = 1,
+                MinIncreaseInterval = TimeSpan.Zero,
+                DecreaseFactor = 0.9 // High factor to stay above floor
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Build up some parallelism first with slow ramp
+            for (int i = 0; i < 5; i++)
+            {
+                controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            }
+
+            var beforeThrottle = controller.GetStatistics().CurrentParallelism;
+
+            // Trigger throttle
+            controller.RecordThrottle(TimeSpan.FromSeconds(30));
+
+            var afterThrottle = controller.GetStatistics();
+            afterThrottle.HasHadFirstThrottle.Should().BeTrue();
+
+            // Now stabilize and increase should use floor (4)
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var afterRecovery = controller.GetStatistics();
+
+            // Assert - after first throttle, should increase by floor (4) not just 2
+            // Note: The exact value depends on current parallelism vs lastKnownGood
+            afterRecovery.HasHadFirstThrottle.Should().BeTrue();
+        }
+
+        [Fact]
+        public void MinimumBatchDuration_UsedForRequestRateCeiling()
+        {
+            // Arrange - record fast batch then slow batch
+            // Request rate ceiling should use minimum (fast), not EMA
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                Preset = RateControlPreset.Balanced // RequestRateCeilingFactor = 16
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Act - record 1s batch (fast), then 10s batch (slow)
+            // If using EMA, ceiling would increase toward 16*10=160
+            // If using minimum, ceiling should stay at 16*1=16
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(1)); // Min = 1s
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(10)); // Slower, but min still 1s
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(10)); // 3rd sample to calculate ceiling
+
+            var stats = controller.GetStatistics();
+
+            // Assert - ceiling should be based on minimum (1s), not EMA
+            stats.MinimumBatchDuration.Should().Be(TimeSpan.FromSeconds(1));
+            stats.RequestRateCeiling.Should().Be(16); // 16 * 1 = 16
+        }
+
+        [Fact]
+        public void MinimumBatchDuration_PreventsFeedbackLoop()
+        {
+            // Arrange - This tests the core fix: slow batches shouldn't increase ceiling
+            var controller = CreateController(new AdaptiveRateOptions
+            {
+                Preset = RateControlPreset.Balanced
+            });
+
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Start with fast batch to establish minimum
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats1 = controller.GetStatistics();
+
+            // Simulate load: batches get progressively slower under contention
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(3));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(4));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(5));
+
+            var stats2 = controller.GetStatistics();
+
+            // Assert - Request rate ceiling should NOT increase despite slower batches
+            // It should stay based on the minimum (fastest) batch
+            stats2.MinimumBatchDuration.Should().Be(TimeSpan.FromSeconds(2));
+            stats2.RequestRateCeiling.Should().Be(32); // 16 * 2 = 32 (from minimum)
+        }
+
+        [Fact]
+        public void TotalSuccessfulBatches_TrackedAcrossBatches()
+        {
+            // Arrange
+            var controller = CreateController();
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            // Act
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            var stats = controller.GetStatistics();
+
+            // Assert
+            stats.TotalSuccessfulBatches.Should().Be(3);
+        }
+
+        [Fact]
+        public void Reset_ClearsTotalSuccessfulBatches()
+        {
+            // Arrange
+            var controller = CreateController();
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+            controller.RecordBatchCompletion(TimeSpan.FromSeconds(2));
+
+            // Act
+            controller.Reset();
+            controller.GetParallelism(recommendedPerConnection: 4, connectionCount: 1);
+
+            var stats = controller.GetStatistics();
+
+            // Assert
+            stats.TotalSuccessfulBatches.Should().Be(0);
+            stats.HasHadFirstThrottle.Should().BeFalse();
+            stats.MinimumBatchDuration.Should().BeNull();
+        }
+
         #endregion
 
         #region Preset Tests

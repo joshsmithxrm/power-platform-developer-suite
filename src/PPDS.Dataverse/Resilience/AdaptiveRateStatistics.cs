@@ -55,15 +55,41 @@ namespace PPDS.Dataverse.Resilience
         public int? RequestRateCeiling { get; init; }
 
         /// <summary>
-        /// Gets the average batch duration used to calculate ceilings.
+        /// Gets the average batch duration used to calculate execution time ceiling.
         /// Null if not enough samples have been collected yet.
         /// </summary>
         public TimeSpan? AverageBatchDuration { get; init; }
 
         /// <summary>
+        /// Gets the minimum (fastest) batch duration used to calculate request rate ceiling.
+        /// Using minimum prevents feedback loop where slow batches increase ceiling.
+        /// Null if no samples have been collected yet.
+        /// </summary>
+        public TimeSpan? MinimumBatchDuration { get; init; }
+
+        /// <summary>
         /// Gets the number of batch duration samples collected.
         /// </summary>
         public int BatchDurationSampleCount { get; init; }
+
+        /// <summary>
+        /// Gets the total number of successful batches since initialization.
+        /// Used to determine when aggressive ramp-up can be enabled.
+        /// </summary>
+        public int TotalSuccessfulBatches { get; init; }
+
+        /// <summary>
+        /// Gets whether a throttle has been observed since initialization.
+        /// After first throttle, recovery multiplier and floor-based increases are enabled.
+        /// </summary>
+        public bool HasHadFirstThrottle { get; init; }
+
+        /// <summary>
+        /// Gets the observed batch completion rate in batches per second.
+        /// Calculated as an exponential moving average.
+        /// Null if not enough samples have been collected yet.
+        /// </summary>
+        public double? BatchesPerSecond { get; init; }
 
         /// <summary>
         /// Gets the effective ceiling (minimum of all applicable ceilings).
