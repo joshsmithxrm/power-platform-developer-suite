@@ -50,12 +50,6 @@ public static class SchemaCommand
             DefaultValueFactory = _ => false
         };
 
-        var includeRelationshipsOption = new Option<bool>("--include-relationships")
-        {
-            Description = "Include relationship definitions",
-            DefaultValueFactory = _ => true
-        };
-
         var disablePluginsOption = new Option<bool>("--disable-plugins")
         {
             Description = "Set disableplugins=true on all entities",
@@ -99,7 +93,6 @@ public static class SchemaCommand
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
             includeAuditFieldsOption,
-            includeRelationshipsOption,
             disablePluginsOption,
             includeAttributesOption,
             excludeAttributesOption,
@@ -115,7 +108,6 @@ public static class SchemaCommand
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var includeAuditFields = parseResult.GetValue(includeAuditFieldsOption);
-            var includeRelationships = parseResult.GetValue(includeRelationshipsOption);
             var disablePlugins = parseResult.GetValue(disablePluginsOption);
             var includeAttributes = parseResult.GetValue(includeAttributesOption);
             var excludeAttributes = parseResult.GetValue(excludeAttributesOption);
@@ -140,7 +132,7 @@ public static class SchemaCommand
 
             return await ExecuteGenerateAsync(
                 profile, environment, entityList, output,
-                includeAuditFields, includeRelationships, disablePlugins,
+                includeAuditFields, disablePlugins,
                 includeAttrList, excludeAttrList,
                 json, verbose, debug, cancellationToken);
         });
@@ -208,7 +200,6 @@ public static class SchemaCommand
         List<string> entities,
         FileInfo output,
         bool includeAuditFields,
-        bool includeRelationships,
         bool disablePlugins,
         List<string>? includeAttributes,
         List<string>? excludeAttributes,
@@ -253,7 +244,6 @@ public static class SchemaCommand
             var options = new SchemaGeneratorOptions
             {
                 IncludeAuditFields = includeAuditFields,
-                IncludeRelationships = includeRelationships,
                 DisablePluginsByDefault = disablePlugins,
                 IncludeAttributes = includeAttributes,
                 ExcludeAttributes = excludeAttributes

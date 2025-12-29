@@ -170,10 +170,8 @@ namespace PPDS.Migration.Schema
             // Generate fields
             var fields = GenerateFields(metadata, options);
 
-            // Generate relationships
-            var relationships = options.IncludeRelationships
-                ? GenerateRelationships(metadata, includedEntities)
-                : Array.Empty<RelationshipSchema>();
+            // Generate relationships (always included for dependency analysis and M2M support)
+            var relationships = GenerateRelationships(metadata, includedEntities);
 
             return new EntitySchema
             {

@@ -20,11 +20,6 @@ namespace PPDS.Migration.Schema
         public bool IncludeAuditFields { get; set; } = false;
 
         /// <summary>
-        /// Gets or sets whether to include relationships. Default: true.
-        /// </summary>
-        public bool IncludeRelationships { get; set; } = true;
-
-        /// <summary>
         /// Gets or sets whether to include only custom fields. Default: false.
         /// </summary>
         public bool CustomFieldsOnly { get; set; } = false;

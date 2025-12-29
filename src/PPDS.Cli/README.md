@@ -151,7 +151,6 @@ Options:
 - `--entities`, `-e` (required) - Entity logical names (comma-separated or multiple flags)
 - `--output`, `-o` (required) - Output schema file path
 - `--include-audit-fields` - Include audit fields (createdon, createdby, modifiedon, modifiedby, overriddencreatedon)
-- `--include-relationships` - Include relationship definitions (default: true)
 - `--disable-plugins` - Set disableplugins=true on all entities
 - `--include-attributes`, `-a` - Only include these attributes (whitelist)
 - `--exclude-attributes` - Exclude these attributes (blacklist)
