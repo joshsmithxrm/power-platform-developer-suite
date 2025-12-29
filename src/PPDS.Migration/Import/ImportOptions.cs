@@ -1,3 +1,4 @@
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Models;
 
 namespace PPDS.Migration.Import
@@ -14,10 +15,22 @@ namespace PPDS.Migration.Import
         public bool UseBulkApis { get; set; } = true;
 
         /// <summary>
-        /// Gets or sets whether to bypass custom plugin execution.
-        /// Default: false
+        /// Gets or sets which custom business logic to bypass during import.
         /// </summary>
-        public bool BypassCustomPluginExecution { get; set; } = false;
+        /// <remarks>
+        /// <para>
+        /// Requires the <c>prvBypassCustomBusinessLogic</c> privilege.
+        /// By default, only users with the System Administrator security role have this privilege.
+        /// </para>
+        /// <para>
+        /// This bypasses custom plugins and workflows only. Microsoft's core system plugins
+        /// and workflows included in Microsoft-published solutions are NOT bypassed.
+        /// </para>
+        /// <para>
+        /// Does not affect Power Automate flows. Use <see cref="BypassPowerAutomateFlows"/> for that.
+        /// </para>
+        /// </remarks>
+        public CustomLogicBypass BypassCustomPlugins { get; set; } = CustomLogicBypass.None;
 
         /// <summary>
         /// Gets or sets whether to bypass Power Automate flows.

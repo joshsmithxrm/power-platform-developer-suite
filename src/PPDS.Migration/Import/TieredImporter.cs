@@ -359,7 +359,7 @@ namespace PPDS.Migration.Import
             var bulkOptions = new BulkOperationOptions
             {
                 ContinueOnError = options.ContinueOnError,
-                BypassCustomLogic = options.BypassCustomPluginExecution ? CustomLogicBypass.All : CustomLogicBypass.None,
+                BypassCustomLogic = options.BypassCustomPlugins,
                 BypassPowerAutomateFlows = options.BypassPowerAutomateFlows
             };
 

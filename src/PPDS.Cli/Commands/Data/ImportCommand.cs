@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;
 using PPDS.Migration.Models;
@@ -21,15 +22,15 @@ public static class ImportCommand
             Required = true
         }.AcceptExistingOnly();
 
-        var bypassPluginsOption = new Option<bool>("--bypass-plugins")
+        var bypassPluginsOption = new Option<string?>("--bypass-plugins")
         {
-            Description = "Bypass custom plugin execution during import",
-            DefaultValueFactory = _ => false
+            Description = "Bypass custom plugin execution: sync, async, or all (requires prvBypassCustomBusinessLogic privilege)"
         };
+        bypassPluginsOption.AcceptOnlyFromAmong("sync", "async", "all");
 
         var bypassFlowsOption = new Option<bool>("--bypass-flows")
         {
-            Description = "Bypass Power Automate flow triggers during import",
+            Description = "Bypass Power Automate flow triggers (no special privilege required)",
             DefaultValueFactory = _ => false
         };
 
@@ -101,7 +102,7 @@ public static class ImportCommand
             var data = parseResult.GetValue(dataOption)!;
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
-            var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
+            var bypassPluginsValue = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
             var mode = parseResult.GetValue(modeOption);
@@ -110,6 +111,8 @@ public static class ImportCommand
             var json = parseResult.GetValue(jsonOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
+
+            var bypassPlugins = ParseBypassPlugins(bypassPluginsValue);
 
             return await ExecuteAsync(
                 profile, environment, data, bypassPlugins, bypassFlows,
@@ -120,11 +123,22 @@ public static class ImportCommand
         return command;
     }
 
+    private static CustomLogicBypass ParseBypassPlugins(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "sync" => CustomLogicBypass.Synchronous,
+            "async" => CustomLogicBypass.Asynchronous,
+            "all" => CustomLogicBypass.All,
+            _ => CustomLogicBypass.None
+        };
+    }
+
     private static async Task<int> ExecuteAsync(
         string? profileName,
         string? environment,
         FileInfo data,
-        bool bypassPlugins,
+        CustomLogicBypass bypassPlugins,
         bool bypassFlows,
         bool continueOnError,
         ImportMode mode,
@@ -187,7 +201,7 @@ public static class ImportCommand
 
             var importOptions = new ImportOptions
             {
-                BypassCustomPluginExecution = bypassPlugins,
+                BypassCustomPlugins = bypassPlugins,
                 BypassPowerAutomateFlows = bypassFlows,
                 ContinueOnError = continueOnError,
                 Mode = mode,

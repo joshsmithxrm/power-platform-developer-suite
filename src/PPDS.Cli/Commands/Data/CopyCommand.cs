@@ -2,6 +2,7 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Export;
 using PPDS.Migration.Import;
 using PPDS.Migration.Progress;
@@ -73,15 +74,15 @@ public static class CopyCommand
                 result.AddError("--batch-size cannot exceed 5000 (Dataverse limit)");
         });
 
-        var bypassPluginsOption = new Option<bool>("--bypass-plugins")
+        var bypassPluginsOption = new Option<string?>("--bypass-plugins")
         {
-            Description = "Bypass custom plugin execution on target",
-            DefaultValueFactory = _ => false
+            Description = "Bypass custom plugin execution on target: sync, async, or all (requires prvBypassCustomBusinessLogic privilege)"
         };
+        bypassPluginsOption.AcceptOnlyFromAmong("sync", "async", "all");
 
         var bypassFlowsOption = new Option<bool>("--bypass-flows")
         {
-            Description = "Bypass Power Automate flow triggers on target",
+            Description = "Bypass Power Automate flow triggers on target (no special privilege required)",
             DefaultValueFactory = _ => false
         };
 
@@ -130,11 +131,13 @@ public static class CopyCommand
             var tempDir = parseResult.GetValue(tempDirOption);
             var parallel = parseResult.GetValue(parallelOption);
             var batchSize = parseResult.GetValue(batchSizeOption);
-            var bypassPlugins = parseResult.GetValue(bypassPluginsOption);
+            var bypassPluginsValue = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var json = parseResult.GetValue(jsonOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
+
+            var bypassPlugins = ParseBypassPlugins(bypassPluginsValue);
 
             return await ExecuteAsync(
                 sourceProfile, targetProfile,
@@ -147,6 +150,17 @@ public static class CopyCommand
         return command;
     }
 
+    private static CustomLogicBypass ParseBypassPlugins(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "sync" => CustomLogicBypass.Synchronous,
+            "async" => CustomLogicBypass.Asynchronous,
+            "all" => CustomLogicBypass.All,
+            _ => CustomLogicBypass.None
+        };
+    }
+
     private static async Task<int> ExecuteAsync(
         string? sourceProfileName,
         string? targetProfileName,
@@ -156,7 +170,7 @@ public static class CopyCommand
         DirectoryInfo? tempDir,
         int parallel,
         int batchSize,
-        bool bypassPlugins,
+        CustomLogicBypass bypassPlugins,
         bool bypassFlows,
         bool json,
         bool verbose,
@@ -231,7 +245,7 @@ public static class CopyCommand
 
             var importOptions = new ImportOptions
             {
-                BypassCustomPluginExecution = bypassPlugins,
+                BypassCustomPlugins = bypassPlugins,
                 BypassPowerAutomateFlows = bypassFlows
             };
 
