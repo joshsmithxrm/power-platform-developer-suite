@@ -41,7 +41,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.68.*" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.68.*" />
-    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />
+    <PackageReference Include="MinVer" Version="6.1.0" PrivateAssets="all" />
     <PackageReference Include="System.CommandLine" Version="2.0.1" />
   </ItemGroup>
 </Project>
