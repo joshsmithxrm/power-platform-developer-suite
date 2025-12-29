@@ -1448,8 +1448,9 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
-        /// Executes batches with adaptive per-source DOP control.
-        /// Respects the live DOP limit for each connection source.
+        /// Executes batches with adaptive DOP control.
+        /// Reads live DOP from the pool and limits concurrency accordingly.
+        /// Pool's selection strategy handles per-source distribution.
         /// </summary>
         private async Task<BulkOperationResult> ExecuteBatchesAdaptiveAsync<T>(
             List<List<T>> batches,
@@ -1468,27 +1469,18 @@ namespace PPDS.Dataverse.BulkOperations
 
             var pending = new Queue<List<T>>(batches);
             var inFlight = new List<Task<(BulkOperationResult result, List<T> batch)>>();
-            const int capacityCheckDelayMs = 10;
 
             while (pending.Count > 0 || inFlight.Count > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Try to start new batches while there's capacity
-                while (pending.Count > 0)
+                // Get current recommended parallelism (live value from pool)
+                // This reads from seed clients, so it reflects server's current recommendation
+                var maxParallelism = _connectionPool.GetTotalRecommendedParallelism();
+
+                // Start new batches while under the DOP limit
+                while (pending.Count > 0 && inFlight.Count < maxParallelism)
                 {
-                    // Check if any source has DOP capacity
-                    var client = await _connectionPool.TryGetClientWithCapacityAsync(cancellationToken);
-                    if (client == null)
-                    {
-                        // No capacity available - break and wait for in-flight to complete
-                        break;
-                    }
-
-                    // We got a client - return it immediately (we just needed to check capacity)
-                    // The batch function will get its own client
-                    await client.DisposeAsync();
-
                     var batch = pending.Dequeue();
                     var task = ExecuteBatchWithResultAsync(batch, executeBatch, cancellationToken);
                     inFlight.Add(task);
@@ -1496,8 +1488,11 @@ namespace PPDS.Dataverse.BulkOperations
 
                 if (inFlight.Count == 0)
                 {
-                    // No capacity and nothing in flight - wait briefly and retry
-                    await Task.Delay(capacityCheckDelayMs, cancellationToken);
+                    // DOP is 0 or no batches - shouldn't happen but handle gracefully
+                    if (pending.Count > 0)
+                    {
+                        await Task.Delay(100, cancellationToken);
+                    }
                     continue;
                 }
 

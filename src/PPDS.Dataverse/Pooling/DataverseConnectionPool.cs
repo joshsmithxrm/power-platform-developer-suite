@@ -31,6 +31,7 @@ namespace PPDS.Dataverse.Pooling
         private readonly IConnectionSelectionStrategy _selectionStrategy;
         private readonly ConcurrentDictionary<string, ServiceClient> _seedClients = new();
         private readonly ConcurrentDictionary<string, int> _sourceDop = new();
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _seedCreationLocks = new();
 
         private readonly ConcurrentDictionary<string, ConcurrentQueue<PooledClient>> _pools;
         private readonly ConcurrentDictionary<string, int> _activeConnections;
@@ -553,23 +554,100 @@ namespace PPDS.Dataverse.Pooling
 
         private ServiceClient GetSeedClient(string connectionName)
         {
-            return _seedClients.GetOrAdd(connectionName, name =>
+            // Fast path - seed already exists and is ready
+            if (_seedClients.TryGetValue(connectionName, out var existingSeed) && existingSeed.IsReady)
             {
-                var source = _sources.First(s => s.Name == name);
-                var seed = source.GetSeedClient();
+                return existingSeed;
+            }
+
+            // Slow path - need to create/recreate seed, use lock to prevent races
+            var seedLock = _seedCreationLocks.GetOrAdd(connectionName, _ => new SemaphoreSlim(1, 1));
+
+            seedLock.Wait();
+            try
+            {
+                // Double-check after acquiring lock
+                if (_seedClients.TryGetValue(connectionName, out existingSeed) && existingSeed.IsReady)
+                {
+                    return existingSeed;
+                }
+
+                var source = _sources.First(s => s.Name == connectionName);
+                ServiceClient? seed = null;
+                Exception? lastException = null;
+
+                // Retry loop for transient failures (e.g., token refresh)
+                const int maxAttempts = 3;
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    try
+                    {
+                        seed = source.GetSeedClient();
+
+                        // Wait briefly for connection to become ready if needed
+                        if (!seed.IsReady)
+                        {
+                            _logger.LogDebug(
+                                "Seed not ready for {ConnectionName}, waiting... (attempt {Attempt}/{MaxAttempts})",
+                                connectionName, attempt, maxAttempts);
+
+                            // Give it a moment - interactive auth may still be completing
+                            Thread.Sleep(500);
+
+                            if (!seed.IsReady)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Seed connection not ready for {connectionName} after wait. LastError: {seed.LastError}");
+                            }
+                        }
+
+                        break; // Success
+                    }
+                    catch (Exception ex) when (attempt < maxAttempts)
+                    {
+                        lastException = ex;
+                        _logger.LogWarning(ex,
+                            "Seed creation attempt {Attempt}/{MaxAttempts} failed for {ConnectionName}, retrying after backoff",
+                            attempt, maxAttempts, connectionName);
+
+                        // Exponential backoff: 1s, 2s
+                        Thread.Sleep(1000 * attempt);
+                    }
+                    catch (Exception ex)
+                    {
+                        lastException = ex;
+                        _logger.LogError(ex,
+                            "Seed creation failed after {MaxAttempts} attempts for {ConnectionName}",
+                            maxAttempts, connectionName);
+                    }
+                }
+
+                if (seed == null || !seed.IsReady)
+                {
+                    throw new DataverseConnectionException(
+                        connectionName,
+                        $"Failed to create seed after {maxAttempts} attempts",
+                        lastException ?? new InvalidOperationException("Seed creation failed with no exception"));
+                }
 
                 // Initialize DOP for this source from the seed client
-                // ServiceClient.RecommendedDegreesOfParallelism is populated after first request (WhoAmI during connection)
                 var dop = seed.RecommendedDegreesOfParallelism;
-                var cappedDop = Math.Min(Math.Max(dop, 1), ConnectionPoolOptions.MicrosoftHardLimitPerUser);
+                var cappedDop = Math.Clamp(dop, 1, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
                 _sourceDop[connectionName] = cappedDop;
+
+                // Store the seed (overwrites any stale entry)
+                _seedClients[connectionName] = seed;
 
                 _logger.LogDebug(
                     "Initialized DOP for {ConnectionName}: {Dop} (capped at {Cap})",
-                    connectionName, dop, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
+                    connectionName, cappedDop, ConnectionPoolOptions.MicrosoftHardLimitPerUser);
 
                 return seed;
-            });
+            }
+            finally
+            {
+                seedLock.Release();
+            }
         }
 
         private PooledClient CreateNewConnection(string connectionName)
