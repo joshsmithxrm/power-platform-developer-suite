@@ -2,10 +2,10 @@ using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -82,8 +82,9 @@ public static class DiffCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
-            var serviceClient = serviceProvider.GetRequiredService<ServiceClient>();
-            var registrationService = new PluginRegistrationService(serviceClient);
+            var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+            await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
+            var registrationService = new PluginRegistrationService(client);
 
             if (!json)
             {
