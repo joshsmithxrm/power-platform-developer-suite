@@ -3,6 +3,7 @@ using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Auth;
 using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Commands.Env;
+using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli;
@@ -21,6 +22,7 @@ public static class Program
         rootCommand.Subcommands.Add(EnvCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.CreateOrgAlias()); // 'org' alias for 'env'
         rootCommand.Subcommands.Add(DataCommandGroup.Create());
+        rootCommand.Subcommands.Add(PluginsCommandGroup.Create());
         rootCommand.Subcommands.Add(SchemaCommand.Create());
         rootCommand.Subcommands.Add(UsersCommand.Create());
 

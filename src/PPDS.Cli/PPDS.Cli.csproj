@@ -39,9 +39,11 @@
     <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
     <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+    <ProjectReference Include="..\PPDS.Plugins\PPDS.Plugins.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
     <PackageReference Include="MinVer" Version="6.1.0" PrivateAssets="all" />
     <PackageReference Include="System.CommandLine" Version="2.0.1" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.1" />
   </ItemGroup>
 </Project>

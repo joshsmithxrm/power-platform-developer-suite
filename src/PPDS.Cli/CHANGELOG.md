@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ppds plugins` command group for plugin registration management:
+  - `ppds plugins extract` - Extract `[PluginStep]`/`[PluginImage]` attributes from assembly (.dll) or NuGet package (.nupkg) to registrations.json
+  - `ppds plugins deploy` - Deploy plugin registrations to Dataverse environment
+  - `ppds plugins diff` - Compare configuration against environment state, detect drift
+  - `ppds plugins list` - List registered plugins in environment
+  - `ppds plugins clean` - Remove orphaned registrations not in configuration
+- Plugin deployment options:
+  - `--solution` to add components to a solution
+  - `--clean` to remove orphaned steps during deployment
+  - `--what-if` to preview changes without applying
+- Uses `MetadataLoadContext` for safe, read-only assembly reflection
+- JSON output for all plugin commands (`--json` flag)
+- Supports both classic assemblies and NuGet plugin packages
+
 ## [1.0.0-beta.1] - 2025-12-29
 
 ### Added
