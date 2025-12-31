@@ -19,7 +19,8 @@ public class PluginStepAttributeTests
         Assert.Null(attribute.FilteringAttributes);
         Assert.Null(attribute.Name);
         Assert.Null(attribute.UnsecureConfiguration);
-        Assert.Null(attribute.SecureConfiguration);
+        Assert.Null(attribute.Description);
+        Assert.False(attribute.AsyncAutoDelete);
         Assert.Null(attribute.StepId);
         Assert.Null(attribute.SecondaryEntityLogicalName);
     }
@@ -144,11 +145,25 @@ public class PluginStepAttributeTests
     }
 
     [Fact]
-    public void SecureConfiguration_CanBeSet()
+    public void Description_CanBeSet()
     {
-        const string config = "{\"apiKey\": \"secret123\"}";
-        var attribute = new PluginStepAttribute { SecureConfiguration = config };
-        Assert.Equal(config, attribute.SecureConfiguration);
+        const string description = "Logs account changes to audit table";
+        var attribute = new PluginStepAttribute { Description = description };
+        Assert.Equal(description, attribute.Description);
+    }
+
+    [Fact]
+    public void AsyncAutoDelete_CanBeSet()
+    {
+        var attribute = new PluginStepAttribute { AsyncAutoDelete = true };
+        Assert.True(attribute.AsyncAutoDelete);
+    }
+
+    [Fact]
+    public void AsyncAutoDelete_DefaultsToFalse()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.False(attribute.AsyncAutoDelete);
     }
 
     [Fact]
@@ -232,16 +247,31 @@ public class PluginStepAttributeTests
     }
 
     [Fact]
-    public void PluginWithBothConfigurations()
+    public void PluginWithConfigurationAndDescription()
     {
         var attribute = new PluginStepAttribute("Create", "email", PluginStage.PostOperation)
         {
             UnsecureConfiguration = "{\"retryCount\": 3}",
-            SecureConfiguration = "{\"apiKey\": \"secret\"}"
+            Description = "Sends email notifications on record creation"
         };
 
         Assert.NotNull(attribute.UnsecureConfiguration);
-        Assert.NotNull(attribute.SecureConfiguration);
+        Assert.NotNull(attribute.Description);
+    }
+
+    [Fact]
+    public void AsyncPluginWithAutoDelete()
+    {
+        var attribute = new PluginStepAttribute("Update", "account", PluginStage.PostOperation)
+        {
+            Mode = PluginMode.Asynchronous,
+            AsyncAutoDelete = true,
+            Description = "Async audit logging with auto-cleanup"
+        };
+
+        Assert.Equal(PluginMode.Asynchronous, attribute.Mode);
+        Assert.True(attribute.AsyncAutoDelete);
+        Assert.NotNull(attribute.Description);
     }
 
     #endregion

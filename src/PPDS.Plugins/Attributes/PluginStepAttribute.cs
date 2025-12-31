@@ -81,11 +81,17 @@ namespace PPDS.Plugins
         public string? UnsecureConfiguration { get; set; }
 
         /// <summary>
-        /// Gets or sets the secure configuration string passed to the plugin constructor.
-        /// This configuration is encrypted and only accessible by the plugin at runtime.
-        /// Use for sensitive data like API keys or connection strings.
+        /// Gets or sets a description of what this plugin step does.
+        /// This is stored as metadata in Dataverse and helps document the step's purpose.
         /// </summary>
-        public string? SecureConfiguration { get; set; }
+        public string? Description { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether to automatically delete the async job on successful completion.
+        /// Only applies when Mode is Asynchronous. Default is false (keep async job records).
+        /// Set to true to clean up async job records after successful execution.
+        /// </summary>
+        public bool AsyncAutoDelete { get; set; }
 
         /// <summary>
         /// Gets or sets a unique identifier for this step when a plugin has multiple steps.

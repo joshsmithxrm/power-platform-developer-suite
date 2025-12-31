@@ -181,6 +181,12 @@ public sealed class AssemblyExtractor : IDisposable
                 case "UnsecureConfiguration":
                     step.Configuration = value?.ToString();
                     break;
+                case "Description":
+                    step.Description = value?.ToString();
+                    break;
+                case "AsyncAutoDelete":
+                    step.AsyncAutoDelete = value is true;
+                    break;
                 case "StepId":
                     step.StepId = value?.ToString();
                     break;
