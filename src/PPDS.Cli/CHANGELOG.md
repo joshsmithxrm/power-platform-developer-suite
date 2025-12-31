@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2025-12-30
+
 ### Added
 
 - `ppds plugins` command group for plugin registration management:
@@ -19,9 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--solution` to add components to a solution
   - `--clean` to remove orphaned steps during deployment
   - `--what-if` to preview changes without applying
+- Full step registration field support:
+  - `deployment` - ServerOnly (default), Offline, or Both
+  - `runAsUser` - CallingUser (default) or systemuser GUID
+  - `description` - Step documentation
+  - `asyncAutoDelete` - Auto-delete async jobs on success
+- Extract command enhancements:
+  - `--solution` option to set solution on initial extract
+  - `--force` option to skip merge and overwrite
+  - Merge behavior: re-running extract preserves deployment settings from existing file
+  - `[JsonExtensionData]` on all config models for forward compatibility
+- List command enhancements:
+  - `--package` filter to list specific packages
+  - Full package hierarchy output: Package → Assembly → Type → Step → Image
+  - Summary includes types and images with proper pluralization
+  - Shows non-default step options (deployment, runAsUser, asyncAutoDelete)
 - Uses `MetadataLoadContext` for safe, read-only assembly reflection
 - JSON output for all plugin commands (`--json` flag)
 - Supports both classic assemblies and NuGet plugin packages
+- Connection pooling for plugin commands (improved performance)
 
 ## [1.0.0-beta.1] - 2025-12-29
 
@@ -46,5 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged as .NET global tool (`ppds`)
 - Targets: `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.2...HEAD
+[1.0.0-beta.2]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.1...Cli-v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Cli-v1.0.0-beta.1
