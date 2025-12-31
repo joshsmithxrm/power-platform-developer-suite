@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2025-12-31
+
+### Added
+
+- `Description` property to `PluginStepAttribute` for documenting step purpose
+- `AsyncAutoDelete` property to `PluginStepAttribute` for auto-deleting async job records on success
+
+### Removed
+
+- **BREAKING:** `SecureConfiguration` property removed from `PluginStepAttribute`
+  - Secure configuration contains secrets that should never be committed to source control
+  - Use environment variables, Azure Key Vault, or Dataverse secure configuration via Plugin Registration Tool instead
+
 ## [1.1.1] - 2025-12-29
 
 ### Changed
@@ -46,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full XML documentation
 - Comprehensive unit test suite
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Plugins-v1.1.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Plugins-v2.0.0...HEAD
+[2.0.0]: https://github.com/joshsmithxrm/ppds-sdk/compare/Plugins-v1.1.1...Plugins-v2.0.0
 [1.1.1]: https://github.com/joshsmithxrm/ppds-sdk/compare/Plugins-v1.1.0...Plugins-v1.1.1
 [1.1.0]: https://github.com/joshsmithxrm/ppds-sdk/compare/Plugins-v1.0.0...Plugins-v1.1.0
 [1.0.0]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Plugins-v1.0.0
