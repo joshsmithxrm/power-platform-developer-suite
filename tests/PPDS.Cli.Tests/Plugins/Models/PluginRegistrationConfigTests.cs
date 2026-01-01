@@ -262,7 +262,7 @@ public class PluginRegistrationConfigTests
                                     Mode = "Synchronous",
                                     ExecutionOrder = 10,
                                     FilteringAttributes = null,
-                                    Configuration = "some config",
+                                    UnsecureConfiguration = "some config",
                                     StepId = "step1",
                                     Images = []
                                 }
@@ -293,7 +293,7 @@ public class PluginRegistrationConfigTests
         Assert.Equal(origStep.Name, deserStep.Name);
         Assert.Equal(origStep.Message, deserStep.Message);
         Assert.Equal(origStep.ExecutionOrder, deserStep.ExecutionOrder);
-        Assert.Equal(origStep.Configuration, deserStep.Configuration);
+        Assert.Equal(origStep.UnsecureConfiguration, deserStep.UnsecureConfiguration);
         Assert.Equal(origStep.StepId, deserStep.StepId);
     }
 

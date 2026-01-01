@@ -250,6 +250,7 @@ public static class ListCommand
                     Deployment = step.Deployment,
                     RunAsUser = step.ImpersonatingUserName,
                     AsyncAutoDelete = step.AsyncAutoDelete,
+                    UnsecureConfiguration = step.Configuration,
                     Images = []
                 };
 
@@ -260,6 +261,7 @@ public static class ListCommand
                     stepOutput.Images.Add(new ImageOutput
                     {
                         Name = image.Name,
+                        EntityAlias = image.EntityAlias ?? image.Name,
                         ImageType = image.ImageType,
                         Attributes = image.Attributes
                     });
@@ -422,6 +424,9 @@ public static class ListCommand
         [JsonPropertyName("asyncAutoDelete")]
         public bool AsyncAutoDelete { get; set; }
 
+        [JsonPropertyName("unsecureConfiguration")]
+        public string? UnsecureConfiguration { get; set; }
+
         [JsonPropertyName("images")]
         public List<ImageOutput> Images { get; set; } = [];
     }
@@ -430,6 +435,9 @@ public static class ListCommand
     {
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("entityAlias")]
+        public string EntityAlias { get; set; } = string.Empty;
 
         [JsonPropertyName("imageType")]
         public string ImageType { get; set; } = string.Empty;

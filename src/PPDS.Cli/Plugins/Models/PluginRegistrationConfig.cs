@@ -4,6 +4,30 @@ using System.Text.Json.Serialization;
 namespace PPDS.Cli.Plugins.Models;
 
 /// <summary>
+/// Converts DateTimeOffset to/from Zulu time format (yyyy-MM-ddTHH:mm:ssZ).
+/// </summary>
+public sealed class ZuluTimeConverter : JsonConverter<DateTimeOffset?>
+{
+    public override DateTimeOffset? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        return string.IsNullOrEmpty(value) ? null : DateTimeOffset.Parse(value);
+    }
+
+    public override void Write(Utf8JsonWriter writer, DateTimeOffset? value, JsonSerializerOptions options)
+    {
+        if (value.HasValue)
+        {
+            writer.WriteStringValue(value.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
+}
+
+/// <summary>
 /// Root configuration for plugin registrations.
 /// Serialized to/from registrations.json.
 /// </summary>
@@ -25,6 +49,7 @@ public sealed class PluginRegistrationConfig
     /// Timestamp when the configuration was generated.
     /// </summary>
     [JsonPropertyName("generatedAt")]
+    [JsonConverter(typeof(ZuluTimeConverter))]
     public DateTimeOffset? GeneratedAt { get; set; }
 
     /// <summary>
@@ -175,9 +200,10 @@ public sealed class PluginStepConfig
 
     /// <summary>
     /// Unsecure configuration string passed to plugin constructor.
+    /// Safe for source control (never contains secrets).
     /// </summary>
-    [JsonPropertyName("configuration")]
-    public string? Configuration { get; set; }
+    [JsonPropertyName("unsecureConfiguration")]
+    public string? UnsecureConfiguration { get; set; }
 
     /// <summary>
     /// Deployment target: ServerOnly (default), Offline, or Both.

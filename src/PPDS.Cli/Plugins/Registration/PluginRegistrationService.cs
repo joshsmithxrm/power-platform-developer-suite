@@ -1,6 +1,8 @@
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Plugins.Models;
 
@@ -13,6 +15,16 @@ public sealed class PluginRegistrationService
 {
     private readonly IOrganizationService _service;
     private readonly IOrganizationServiceAsync2? _asyncService;
+
+    // Cache for entity type codes (ETCs) - some like pluginpackage vary by environment
+    private readonly Dictionary<string, int> _entityTypeCodeCache = new();
+
+    // Well-known component type codes that are consistent across all environments
+    private static readonly Dictionary<string, int> WellKnownComponentTypes = new()
+    {
+        ["pluginassembly"] = 91,
+        ["sdkmessageprocessingstep"] = 92
+    };
 
     public PluginRegistrationService(IOrganizationService service)
     {
@@ -357,6 +369,13 @@ public sealed class PluginRegistrationService
         {
             entity.Id = existing.Id;
             await UpdateAsync(entity);
+
+            // Add to solution even on update (handles case where component exists but isn't in solution)
+            if (!string.IsNullOrEmpty(solutionName))
+            {
+                await AddToSolutionAsync(existing.Id, 91, solutionName); // 91 = Plugin Assembly
+            }
+
             return existing.Id;
         }
         else
@@ -452,9 +471,9 @@ public sealed class PluginRegistrationService
             entity["filteringattributes"] = stepConfig.FilteringAttributes;
         }
 
-        if (!string.IsNullOrEmpty(stepConfig.Configuration))
+        if (!string.IsNullOrEmpty(stepConfig.UnsecureConfiguration))
         {
-            entity["configuration"] = stepConfig.Configuration;
+            entity["configuration"] = stepConfig.UnsecureConfiguration;
         }
 
         if (!string.IsNullOrEmpty(stepConfig.Description))
@@ -482,6 +501,13 @@ public sealed class PluginRegistrationService
         {
             entity.Id = existing.Id;
             await UpdateAsync(entity);
+
+            // Add to solution even on update (handles case where component exists but isn't in solution)
+            if (!string.IsNullOrEmpty(solutionName))
+            {
+                await AddToSolutionAsync(existing.Id, 92, solutionName); // 92 = SDK Message Processing Step
+            }
+
             return existing.Id;
         }
         else
@@ -604,18 +630,52 @@ public sealed class PluginRegistrationService
 
     #region Private Helpers
 
+    /// <summary>
+    /// Gets the solution component type code for an entity.
+    /// Uses well-known values for system entities, queries metadata for custom entities like pluginpackage.
+    /// </summary>
+    private async Task<int> GetComponentTypeAsync(string entityLogicalName)
+    {
+        // Check well-known types first (no API call needed)
+        if (WellKnownComponentTypes.TryGetValue(entityLogicalName, out var wellKnownType))
+        {
+            return wellKnownType;
+        }
+
+        // Check cache
+        if (_entityTypeCodeCache.TryGetValue(entityLogicalName, out var cachedType))
+        {
+            return cachedType;
+        }
+
+        // Query entity metadata to get ObjectTypeCode
+        var request = new RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName,
+            EntityFilters = EntityFilters.Entity
+        };
+
+        try
+        {
+            var response = (RetrieveEntityResponse)await ExecuteAsync(request);
+            var objectTypeCode = response.EntityMetadata.ObjectTypeCode ?? 0;
+            _entityTypeCodeCache[entityLogicalName] = objectTypeCode;
+            return objectTypeCode;
+        }
+        catch
+        {
+            // Entity doesn't exist or can't be queried - return 0 to skip solution addition
+            return 0;
+        }
+    }
+
     private async Task<Guid> CreateWithSolutionAsync(Entity entity, string? solutionName)
     {
         var id = await CreateAsync(entity);
 
         if (!string.IsNullOrEmpty(solutionName))
         {
-            var componentType = entity.LogicalName switch
-            {
-                "pluginassembly" => 91,
-                "sdkmessageprocessingstep" => 92,
-                _ => 0
-            };
+            var componentType = await GetComponentTypeAsync(entity.LogicalName);
 
             if (componentType > 0)
             {
@@ -630,6 +690,7 @@ public sealed class PluginRegistrationService
     {
         10 => "PreValidation",
         20 => "PreOperation",
+        30 => "MainOperation",
         40 => "PostOperation",
         _ => value.ToString()
     };
@@ -653,6 +714,7 @@ public sealed class PluginRegistrationService
     {
         "PreValidation" => 10,
         "PreOperation" => 20,
+        "MainOperation" => 30,
         "PostOperation" => 40,
         _ => int.TryParse(stage, out var v) ? v : 40
     };

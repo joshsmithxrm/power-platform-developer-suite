@@ -179,7 +179,7 @@ public sealed class AssemblyExtractor : IDisposable
                     step.Name = value?.ToString();
                     break;
                 case "UnsecureConfiguration":
-                    step.Configuration = value?.ToString();
+                    step.UnsecureConfiguration = value?.ToString();
                     break;
                 case "Description":
                     step.Description = value?.ToString();
@@ -249,6 +249,9 @@ public sealed class AssemblyExtractor : IDisposable
             }
         }
 
+        // Default entityAlias to name if not explicitly specified
+        image.EntityAlias ??= image.Name;
+
         return image;
     }
 
@@ -280,6 +283,7 @@ public sealed class AssemblyExtractor : IDisposable
             {
                 10 => "PreValidation",
                 20 => "PreOperation",
+                30 => "MainOperation",
                 40 => "PostOperation",
                 _ => intValue.ToString()
             };
