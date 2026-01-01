@@ -221,11 +221,12 @@ public static class DeployCommand
                 // Get the assembly ID from the package (Dataverse creates it automatically)
                 // Use assemblyConfig.Name here since that's the assembly name inside the package
                 var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(packageId, assemblyConfig.Name);
-                if (pkgAssemblyId == null)
+                if (pkgAssemblyId == null && !whatIf)
                 {
                     throw new InvalidOperationException($"Could not find assembly '{assemblyConfig.Name}' in package after deployment");
                 }
-                assemblyId = pkgAssemblyId.Value;
+                // In what-if mode for new packages, the assembly won't exist yet - use a placeholder ID
+                assemblyId = pkgAssemblyId ?? Guid.NewGuid();
             }
             else
             {
