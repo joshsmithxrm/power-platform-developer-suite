@@ -24,6 +24,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
     private readonly CloudEnvironment _cloud;
     private readonly string? _tenantId;
+    private readonly AuthMethod? _preferredAuthMethod;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
 
     private IPublicClientApplication? _msalClient;
@@ -35,14 +36,17 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
     /// </summary>
     /// <param name="cloud">The cloud environment to use.</param>
     /// <param name="tenantId">Optional tenant ID.</param>
+    /// <param name="preferredAuthMethod">Optional preferred auth method from profile.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
     public GlobalDiscoveryService(
         CloudEnvironment cloud = CloudEnvironment.Public,
         string? tenantId = null,
+        AuthMethod? preferredAuthMethod = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null)
     {
         _cloud = cloud;
         _tenantId = tenantId;
+        _preferredAuthMethod = preferredAuthMethod;
         _deviceCodeCallback = deviceCodeCallback;
     }
 
@@ -59,6 +63,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
         return new GlobalDiscoveryService(
             profile.Cloud,
             profile.TenantId,
+            profile.AuthMethod,
             deviceCodeCallback);
     }
 
@@ -156,36 +161,57 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                 }
             }
 
-            // Fall back to device code flow
-            var result = await _msalClient
-                .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
+            // Fall back to interactive or device code based on profile's auth method
+            AuthenticationResult result;
+
+            // Honor the profile's preferred auth method if it's interactive and available
+            if (_preferredAuthMethod == AuthMethod.InteractiveBrowser &&
+                InteractiveBrowserCredentialProvider.IsAvailable())
+            {
+                if (_deviceCodeCallback == null)
                 {
-                    if (_deviceCodeCallback != null)
+                    Console.WriteLine("Opening browser for authentication...");
+                }
+
+                result = await _msalClient
+                    .AcquireTokenInteractive(scopes)
+                    .WithUseEmbeddedWebView(false)
+                    .ExecuteAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // Fall back to device code flow
+                result = await _msalClient
+                    .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
                     {
-                        _deviceCodeCallback(new DeviceCodeInfo(
-                            deviceCodeResult.UserCode,
-                            deviceCodeResult.VerificationUrl,
-                            deviceCodeResult.Message));
-                    }
-                    else
-                    {
-                        Console.WriteLine();
-                        Console.WriteLine("To sign in, use a web browser to open the page:");
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine($"  {deviceCodeResult.VerificationUrl}");
-                        Console.ResetColor();
-                        Console.WriteLine();
-                        Console.WriteLine("Enter the code:");
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine($"  {deviceCodeResult.UserCode}");
-                        Console.ResetColor();
-                        Console.WriteLine();
-                        Console.WriteLine("Waiting for authentication...");
-                    }
-                    return Task.CompletedTask;
-                })
-                .ExecuteAsync(cancellationToken)
-                .ConfigureAwait(false);
+                        if (_deviceCodeCallback != null)
+                        {
+                            _deviceCodeCallback(new DeviceCodeInfo(
+                                deviceCodeResult.UserCode,
+                                deviceCodeResult.VerificationUrl,
+                                deviceCodeResult.Message));
+                        }
+                        else
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("To sign in, use a web browser to open the page:");
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine($"  {deviceCodeResult.VerificationUrl}");
+                            Console.ResetColor();
+                            Console.WriteLine();
+                            Console.WriteLine("Enter the code:");
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"  {deviceCodeResult.UserCode}");
+                            Console.ResetColor();
+                            Console.WriteLine();
+                            Console.WriteLine("Waiting for authentication...");
+                        }
+                        return Task.CompletedTask;
+                    })
+                    .ExecuteAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             if (_deviceCodeCallback == null)
             {
@@ -206,11 +232,13 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             return;
 
         var cloudInstance = CloudEndpoints.GetAzureCloudInstance(_cloud);
-        var tenant = string.IsNullOrWhiteSpace(_tenantId) ? "organizations" : _tenantId;
 
+        // Always use "organizations" (multi-tenant) authority for discovery.
+        // This ensures tokens cached during profile creation (also using "organizations")
+        // can be reused. Tenant-specific authority is only needed for environment connections.
         _msalClient = PublicClientApplicationBuilder
             .Create(MicrosoftPublicClientId)
-            .WithAuthority(cloudInstance, tenant)
+            .WithAuthority(cloudInstance, "organizations")
             .WithDefaultRedirectUri()
             .Build();
 
