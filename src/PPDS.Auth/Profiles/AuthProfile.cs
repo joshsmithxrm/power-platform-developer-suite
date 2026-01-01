@@ -165,6 +165,13 @@ public sealed class AuthProfile
     [JsonPropertyName("puid")]
     public string? Puid { get; set; }
 
+    /// <summary>
+    /// Gets or sets the MSAL home account identifier.
+    /// Format: {objectId}.{tenantId} - uniquely identifies the account+tenant for token cache lookup.
+    /// </summary>
+    [JsonPropertyName("homeAccountId")]
+    public string? HomeAccountId { get; set; }
+
     #endregion
 
     /// <summary>

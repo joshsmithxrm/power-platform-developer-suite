@@ -104,7 +104,8 @@ public static class ExtractCommand
             var outputDir = Path.GetDirectoryName(outputPath) ?? ".";
 
             // Calculate relative path from output to input
-            var relativePath = Path.GetRelativePath(outputDir, input.FullName);
+            // Normalize to forward slashes for cross-platform compatibility
+            var relativePath = Path.GetRelativePath(outputDir, input.FullName).Replace('\\', '/');
             if (assemblyConfig.Type == "Assembly")
             {
                 assemblyConfig.Path = relativePath;

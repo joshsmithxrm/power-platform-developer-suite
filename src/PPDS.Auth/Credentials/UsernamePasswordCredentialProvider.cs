@@ -45,6 +45,9 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
     public string? ObjectId => _cachedResult?.UniqueId;
 
     /// <inheritdoc />
+    public string? HomeAccountId => _cachedResult?.Account?.HomeAccountId?.Identifier;
+
+    /// <inheritdoc />
     public string? AccessToken => _cachedResult?.AccessToken;
 
     /// <inheritdoc />

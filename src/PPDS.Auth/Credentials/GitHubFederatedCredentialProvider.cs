@@ -39,6 +39,9 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
     public string? ObjectId => null; // Not available for federated auth without additional calls
 
     /// <inheritdoc />
+    public string? HomeAccountId => null; // Federated auth doesn't use MSAL user cache
+
+    /// <inheritdoc />
     public string? AccessToken => _cachedToken?.Token;
 
     /// <inheritdoc />

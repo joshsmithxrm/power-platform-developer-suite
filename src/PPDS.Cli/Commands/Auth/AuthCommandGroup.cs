@@ -286,6 +286,7 @@ public static class AuthCommandGroup
                 profile.Username = provider.Identity;
                 profile.ObjectId = provider.ObjectId;
                 profile.TokenExpiresOn = provider.TokenExpiresAt;
+                profile.HomeAccountId = provider.HomeAccountId;
 
                 // Store tenant ID from auth result if not already set
                 if (string.IsNullOrEmpty(profile.TenantId) && !string.IsNullOrEmpty(provider.TenantId))

@@ -40,6 +40,9 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
     public string? ObjectId => null; // Service principals don't have a user OID
 
     /// <inheritdoc />
+    public string? HomeAccountId => null; // Service principals don't use MSAL user cache
+
+    /// <inheritdoc />
     public string? AccessToken => null; // Connection string auth doesn't expose the token
 
     /// <inheritdoc />

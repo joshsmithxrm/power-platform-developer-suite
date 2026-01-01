@@ -54,6 +54,13 @@ public interface ICredentialProvider : IDisposable
     string? ObjectId { get; }
 
     /// <summary>
+    /// Gets the MSAL home account identifier.
+    /// Format: {objectId}.{tenantId} - uniquely identifies the account+tenant for token cache lookup.
+    /// Available after successful authentication.
+    /// </summary>
+    string? HomeAccountId { get; }
+
+    /// <summary>
     /// Gets the access token from the last authentication.
     /// Available after successful authentication. Used for extracting JWT claims.
     /// </summary>

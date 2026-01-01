@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-01-01
+
+### Added
+
+- `entityAlias` field in plugin image configuration (defaults to `name` if not specified)
+- `unsecureConfiguration` field for plugin step configuration (renamed from `configuration` for clarity)
+- `MainOperation` stage (30) support for Custom API plugin steps
+- JSON schema for `plugin-registration.json` at `schemas/plugin-registration.schema.json`
+- Zulu time format (`Z` suffix) for `generatedAt` timestamps in extracted config
+
+### Fixed
+
+- Solution component addition now works on UPDATE path (was only adding on CREATE) ([#59](https://github.com/joshsmithxrm/ppds-sdk/issues/59))
+- Cross-platform path normalization uses forward slashes consistently
+- Runtime ETC lookup for `pluginpackage` entity type code
+
 ## [1.0.0-beta.2] - 2025-12-30
 
 ### Added
@@ -64,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged as .NET global tool (`ppds`)
 - Targets: `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.2...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.3...HEAD
+[1.0.0-beta.3]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.2...Cli-v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.1...Cli-v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Cli-v1.0.0-beta.1

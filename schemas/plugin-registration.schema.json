@@ -1,0 +1,200 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/plugin-registration.schema.json",
+  "title": "PPDS Plugin Registration Configuration",
+  "description": "Schema for plugin registration configuration files used by the PPDS CLI.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON schema reference for validation."
+    },
+    "version": {
+      "type": "string",
+      "description": "Schema version for forward compatibility.",
+      "default": "1.0"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the configuration was generated (Zulu time format)."
+    },
+    "assemblies": {
+      "type": "array",
+      "description": "List of plugin assemblies in this configuration.",
+      "items": {
+        "$ref": "#/$defs/assembly"
+      }
+    }
+  },
+  "required": ["assemblies"],
+  "additionalProperties": true,
+  "$defs": {
+    "assembly": {
+      "type": "object",
+      "description": "Configuration for a single plugin assembly.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Assembly name (without extension)."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Assembly", "Nuget"],
+          "description": "Assembly type: 'Assembly' for classic DLL, 'Nuget' for NuGet package.",
+          "default": "Assembly"
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the assembly DLL (from the config file location). Use forward slashes for cross-platform compatibility."
+        },
+        "packagePath": {
+          "type": "string",
+          "description": "Relative path to the NuGet package (for Nuget type only)."
+        },
+        "solution": {
+          "type": "string",
+          "description": "Solution unique name to add components to."
+        },
+        "allTypeNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All plugin type names in this assembly (for orphan detection)."
+        },
+        "types": {
+          "type": "array",
+          "description": "Plugin types with their step registrations.",
+          "items": {
+            "$ref": "#/$defs/pluginType"
+          }
+        }
+      },
+      "required": ["name", "types"],
+      "additionalProperties": true
+    },
+    "pluginType": {
+      "type": "object",
+      "description": "Configuration for a single plugin type (class).",
+      "properties": {
+        "typeName": {
+          "type": "string",
+          "description": "Fully qualified type name (namespace.classname)."
+        },
+        "steps": {
+          "type": "array",
+          "description": "Step registrations for this plugin type.",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      },
+      "required": ["typeName", "steps"],
+      "additionalProperties": true
+    },
+    "step": {
+      "type": "object",
+      "description": "Configuration for a single plugin step registration.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the step. Auto-generated if not specified: '{TypeName}: {Message} of {Entity}'."
+        },
+        "message": {
+          "type": "string",
+          "description": "SDK message name (Create, Update, Delete, Retrieve, etc.)."
+        },
+        "entity": {
+          "type": "string",
+          "description": "Primary entity logical name. Use 'none' for global messages."
+        },
+        "secondaryEntity": {
+          "type": "string",
+          "description": "Secondary entity logical name for relationship messages (Associate, etc.)."
+        },
+        "stage": {
+          "type": "string",
+          "enum": ["PreValidation", "PreOperation", "MainOperation", "PostOperation"],
+          "description": "Pipeline stage. MainOperation is for Custom API plugins."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["Synchronous", "Asynchronous"],
+          "description": "Execution mode.",
+          "default": "Synchronous"
+        },
+        "executionOrder": {
+          "type": "integer",
+          "description": "Execution order when multiple plugins handle the same event.",
+          "default": 1
+        },
+        "filteringAttributes": {
+          "type": "string",
+          "description": "Comma-separated list of attributes that trigger this step (Update message only)."
+        },
+        "unsecureConfiguration": {
+          "type": "string",
+          "description": "Unsecure configuration string passed to plugin constructor. Safe for source control."
+        },
+        "deployment": {
+          "type": "string",
+          "enum": ["ServerOnly", "Offline", "Both"],
+          "description": "Deployment target.",
+          "default": "ServerOnly"
+        },
+        "runAsUser": {
+          "type": "string",
+          "description": "User context to run the plugin as. Use 'CallingUser' (default), 'System', or a systemuser GUID."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what this step does."
+        },
+        "asyncAutoDelete": {
+          "type": "boolean",
+          "description": "For async steps, whether to delete the async job on successful completion.",
+          "default": false
+        },
+        "stepId": {
+          "type": "string",
+          "description": "Step identifier for associating images with specific steps on multi-step plugins."
+        },
+        "images": {
+          "type": "array",
+          "description": "Entity images registered for this step.",
+          "items": {
+            "$ref": "#/$defs/image"
+          }
+        }
+      },
+      "required": ["message", "entity", "stage"],
+      "additionalProperties": true
+    },
+    "image": {
+      "type": "object",
+      "description": "Configuration for a plugin step image (pre-image or post-image).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name used to access the image in plugin context."
+        },
+        "entityAlias": {
+          "type": "string",
+          "description": "Entity alias for the image. Defaults to 'name' if not specified."
+        },
+        "imageType": {
+          "type": "string",
+          "enum": ["PreImage", "PostImage", "Both"],
+          "description": "Image type."
+        },
+        "attributes": {
+          "type": "string",
+          "description": "Comma-separated list of attributes to include. Null means all attributes (not recommended for performance)."
+        }
+      },
+      "required": ["name", "imageType"],
+      "additionalProperties": true
+    }
+  }
+}

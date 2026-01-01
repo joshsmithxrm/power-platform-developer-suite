@@ -28,6 +28,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     private readonly CloudEnvironment _cloud;
     private readonly string? _tenantId;
     private readonly string? _username;
+    private readonly string? _homeAccountId;
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
@@ -50,6 +51,9 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     public string? ObjectId => _cachedResult?.UniqueId;
 
     /// <inheritdoc />
+    public string? HomeAccountId => _cachedResult?.Account?.HomeAccountId?.Identifier;
+
+    /// <inheritdoc />
     public string? AccessToken => _cachedResult?.AccessToken;
 
     /// <inheritdoc />
@@ -61,14 +65,17 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <param name="cloud">The cloud environment.</param>
     /// <param name="tenantId">Optional tenant ID (defaults to "organizations" for multi-tenant).</param>
     /// <param name="username">Optional username for silent auth lookup.</param>
+    /// <param name="homeAccountId">Optional MSAL home account identifier for precise account lookup.</param>
     public InteractiveBrowserCredentialProvider(
         CloudEnvironment cloud = CloudEnvironment.Public,
         string? tenantId = null,
-        string? username = null)
+        string? username = null,
+        string? homeAccountId = null)
     {
         _cloud = cloud;
         _tenantId = tenantId;
         _username = username;
+        _homeAccountId = homeAccountId;
     }
 
     /// <summary>
@@ -81,7 +88,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         return new InteractiveBrowserCredentialProvider(
             profile.Cloud,
             profile.TenantId,
-            profile.Username);
+            profile.Username,
+            profile.HomeAccountId);
     }
 
     /// <summary>
@@ -176,19 +184,14 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
                 return _cachedResult.AccessToken;
             }
 
-            // Try silent acquisition from MSAL cache
-            var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
-
-            // Look up by username if we have one, otherwise fall back to first account
-            var account = !string.IsNullOrEmpty(_username)
-                ? accounts.FirstOrDefault(a => string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase))
-                : accounts.FirstOrDefault();
+            // Try to find the correct account for silent acquisition
+            var account = await FindAccountAsync().ConfigureAwait(false);
 
             if (account != null)
             {
                 try
                 {
-                    _cachedResult = await _msalClient
+                    _cachedResult = await _msalClient!
                         .AcquireTokenSilent(scopes, account)
                         .ExecuteAsync(cancellationToken)
                         .ConfigureAwait(false);
@@ -224,6 +227,12 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
         return _cachedResult.AccessToken;
     }
+
+    /// <summary>
+    /// Finds the correct cached account for this profile.
+    /// </summary>
+    private Task<IAccount?> FindAccountAsync()
+        => MsalAccountHelper.FindAccountAsync(_msalClient!, _homeAccountId, _tenantId, _username);
 
     /// <summary>
     /// Ensures the MSAL client is initialized with token cache.

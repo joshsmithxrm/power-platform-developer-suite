@@ -41,6 +41,9 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     public string? ObjectId => null; // Managed identity doesn't expose OID
 
     /// <inheritdoc />
+    public string? HomeAccountId => null; // Managed identity doesn't use MSAL user cache
+
+    /// <inheritdoc />
     public string? AccessToken => _cachedToken?.Token;
 
     /// <inheritdoc />
