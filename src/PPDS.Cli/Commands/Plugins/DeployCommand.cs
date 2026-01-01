@@ -1,6 +1,8 @@
 using System.CommandLine;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Models;
@@ -191,32 +193,59 @@ public static class DeployCommand
                 throw new FileNotFoundException($"Assembly file not found: {assemblyConfig.Path ?? assemblyConfig.PackagePath}");
             }
 
-            // Read assembly bytes
-            byte[] assemblyBytes;
+            // Deploy assembly or package based on type
+            Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
             {
-                // For NuGet packages, we need to extract the DLL
-                assemblyBytes = ExtractDllFromNupkg(assemblyPath, assemblyConfig.Name);
-            }
-            else
-            {
-                assemblyBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
-            }
+                // Extract package ID from .nuspec inside the nupkg - this is what Dataverse uses as uniquename
+                var packageName = GetPackageIdFromNupkg(assemblyPath);
 
-            // Upsert assembly
-            Guid assemblyId;
-            if (whatIf)
-            {
-                var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
-                assemblyId = existing?.Id ?? Guid.NewGuid();
-                if (!json)
-                    Console.WriteLine($"  [What-If] Would {(existing == null ? "create" : "update")} assembly");
+                // For NuGet packages, upload the entire .nupkg to pluginpackage entity
+                var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+
+                Guid packageId;
+                if (whatIf)
+                {
+                    var existingPkg = await service.GetPackageByNameAsync(packageName);
+                    packageId = existingPkg?.Id ?? Guid.NewGuid();
+                    if (!json)
+                        Console.WriteLine($"  [What-If] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
+                }
+                else
+                {
+                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution);
+                    if (!json)
+                        Console.WriteLine($"  Package registered: {packageId}");
+                }
+
+                // Get the assembly ID from the package (Dataverse creates it automatically)
+                // Use assemblyConfig.Name here since that's the assembly name inside the package
+                var pkgAssemblyId = await service.GetAssemblyIdForPackageAsync(packageId, assemblyConfig.Name);
+                if (pkgAssemblyId == null && !whatIf)
+                {
+                    throw new InvalidOperationException($"Could not find assembly '{assemblyConfig.Name}' in package after deployment");
+                }
+                // In what-if mode for new packages, the assembly won't exist yet - use a placeholder ID
+                assemblyId = pkgAssemblyId ?? Guid.NewGuid();
             }
             else
             {
-                assemblyId = await service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution);
-                if (!json)
-                    Console.WriteLine($"  Assembly registered: {assemblyId}");
+                // For classic assemblies, upload the DLL directly
+                var assemblyBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
+
+                if (whatIf)
+                {
+                    var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
+                    assemblyId = existing?.Id ?? Guid.NewGuid();
+                    if (!json)
+                        Console.WriteLine($"  [What-If] Would {(existing == null ? "create" : "update")} assembly");
+                }
+                else
+                {
+                    assemblyId = await service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution);
+                    if (!json)
+                        Console.WriteLine($"  Assembly registered: {assemblyId}");
+                }
             }
 
             // Track existing steps for orphan detection - use dictionary for O(1) lookup during cleanup
@@ -389,43 +418,37 @@ public static class DeployCommand
         return null;
     }
 
-    private static byte[] ExtractDllFromNupkg(string nupkgPath, string assemblyName)
+    /// <summary>
+    /// Extracts the package ID from the .nuspec file inside a .nupkg.
+    /// This is the authoritative source - Dataverse uses this as the uniquename.
+    /// </summary>
+    private static string GetPackageIdFromNupkg(string nupkgPath)
     {
-        using var archive = System.IO.Compression.ZipFile.OpenRead(nupkgPath);
+        using var archive = ZipFile.OpenRead(nupkgPath);
 
-        // Look for the DLL in lib/net462 (preferred) or any lib folder
-        var possiblePaths = new[]
-        {
-            $"lib/net462/{assemblyName}.dll",
-            $"lib/net48/{assemblyName}.dll",
-            $"lib/netstandard2.0/{assemblyName}.dll"
-        };
+        // Find the .nuspec file (there's exactly one at the root level)
+        var nuspecEntry = archive.Entries.FirstOrDefault(e =>
+            e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) &&
+            !e.FullName.Contains('/'));
 
-        foreach (var path in possiblePaths)
+        if (nuspecEntry == null)
         {
-            var entry = archive.GetEntry(path) ?? archive.GetEntry(path.Replace('/', '\\'));
-            if (entry != null)
-            {
-                using var stream = entry.Open();
-                using var ms = new MemoryStream();
-                stream.CopyTo(ms);
-                return ms.ToArray();
-            }
+            throw new InvalidOperationException($"No .nuspec file found in package: {nupkgPath}");
         }
 
-        // Fallback: find any DLL matching the assembly name
-        var matchingEntry = archive.Entries
-            .FirstOrDefault(e => e.FullName.EndsWith($"{assemblyName}.dll", StringComparison.OrdinalIgnoreCase));
+        using var stream = nuspecEntry.Open();
+        var doc = XDocument.Load(stream);
 
-        if (matchingEntry != null)
+        // Nuspec namespace
+        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+        var id = doc.Root?.Element(ns + "metadata")?.Element(ns + "id")?.Value;
+
+        if (string.IsNullOrEmpty(id))
         {
-            using var stream = matchingEntry.Open();
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            return ms.ToArray();
+            throw new InvalidOperationException($"No <id> element found in nuspec: {nupkgPath}");
         }
 
-        throw new InvalidOperationException($"Could not find {assemblyName}.dll in NuGet package");
+        return id;
     }
 
     #region Result Models

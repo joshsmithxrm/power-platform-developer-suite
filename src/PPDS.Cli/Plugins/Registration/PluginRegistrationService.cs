@@ -299,6 +299,15 @@ public sealed class PluginRegistrationService
     }
 
     /// <summary>
+    /// Gets a plugin package by name or unique name.
+    /// </summary>
+    public async Task<PluginPackageInfo?> GetPackageByNameAsync(string name)
+    {
+        var packages = await ListPackagesAsync(name);
+        return packages.FirstOrDefault();
+    }
+
+    /// <summary>
     /// Gets the SDK message ID for a message name.
     /// </summary>
     public async Task<Guid?> GetSdkMessageIdAsync(string messageName)
@@ -351,7 +360,8 @@ public sealed class PluginRegistrationService
     #region Create Operations
 
     /// <summary>
-    /// Creates or updates a plugin assembly.
+    /// Creates or updates a plugin assembly (for classic DLL assemblies only).
+    /// For NuGet packages, use <see cref="UpsertPackageAsync"/> instead.
     /// </summary>
     public async Task<Guid> UpsertAssemblyAsync(string name, byte[] content, string? solutionName = null)
     {
@@ -382,6 +392,56 @@ public sealed class PluginRegistrationService
         {
             return await CreateWithSolutionAsync(entity, solutionName);
         }
+    }
+
+    /// <summary>
+    /// Creates or updates a plugin package (for NuGet packages).
+    /// </summary>
+    /// <param name="packageName">The package name from .nuspec (e.g., "ppds_MyPlugin"). This is what Dataverse uses as uniquename.</param>
+    /// <param name="nupkgContent">The raw .nupkg file content.</param>
+    /// <param name="solutionName">Solution to add the package to.</param>
+    /// <returns>The package ID.</returns>
+    public async Task<Guid> UpsertPackageAsync(string packageName, byte[] nupkgContent, string? solutionName = null)
+    {
+        // packageName comes from .nuspec <id> (parsed from .nuspec)
+        // Dataverse extracts uniquename from the nupkg content, so we use packageName for lookup
+        var existing = await GetPackageByNameAsync(packageName);
+
+        if (existing != null)
+        {
+            // UPDATE: Only update content, use solution header for solution association
+            var updateEntity = new Entity("pluginpackage", existing.Id)
+            {
+                ["content"] = Convert.ToBase64String(nupkgContent)
+            };
+
+            var request = new UpdateRequest { Target = updateEntity };
+            if (!string.IsNullOrEmpty(solutionName))
+            {
+                request.Parameters["SolutionUniqueName"] = solutionName;
+            }
+            await ExecuteAsync(request);
+
+            return existing.Id;
+        }
+
+        // CREATE: Set name and content only - Dataverse extracts uniquename from .nuspec <id> inside nupkg
+        var entity = new Entity("pluginpackage")
+        {
+            ["name"] = packageName,
+            ["content"] = Convert.ToBase64String(nupkgContent)
+        };
+
+        return await CreateWithSolutionHeaderAsync(entity, solutionName);
+    }
+
+    /// <summary>
+    /// Gets the assembly ID for an assembly that is part of a plugin package.
+    /// </summary>
+    public async Task<Guid?> GetAssemblyIdForPackageAsync(Guid packageId, string assemblyName)
+    {
+        var assemblies = await ListAssembliesForPackageAsync(packageId);
+        return assemblies.FirstOrDefault(a => a.Name == assemblyName)?.Id;
     }
 
     /// <summary>
@@ -684,6 +744,23 @@ public sealed class PluginRegistrationService
         }
 
         return id;
+    }
+
+    /// <summary>
+    /// Creates an entity with atomic solution association using CreateRequest.SolutionUniqueName.
+    /// This is the SDK equivalent of the MSCRM.SolutionUniqueName HTTP header.
+    /// </summary>
+    private async Task<Guid> CreateWithSolutionHeaderAsync(Entity entity, string? solutionName)
+    {
+        var request = new CreateRequest { Target = entity };
+
+        if (!string.IsNullOrEmpty(solutionName))
+        {
+            request.Parameters["SolutionUniqueName"] = solutionName;
+        }
+
+        var response = (CreateResponse)await ExecuteAsync(request);
+        return response.id;
     }
 
     private static string MapStageFromValue(int value) => value switch
