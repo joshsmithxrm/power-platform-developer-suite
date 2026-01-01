@@ -193,7 +193,7 @@
           "description": "Comma-separated list of attributes to include. Null means all attributes (not recommended for performance)."
         }
       },
-      "required": ["name", "entityAlias", "imageType"],
+      "required": ["name", "imageType"],
       "additionalProperties": true
     }
   }

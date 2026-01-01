@@ -214,47 +214,9 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 
     /// <summary>
     /// Finds the correct cached account for this profile.
-    /// Uses HomeAccountId for precise lookup, falls back to tenant filtering, then username.
     /// </summary>
-    private async Task<IAccount?> FindAccountAsync()
-    {
-        // Best case: we have the exact account identifier stored
-        if (!string.IsNullOrEmpty(_homeAccountId))
-        {
-            var account = await _msalClient!.GetAccountAsync(_homeAccountId).ConfigureAwait(false);
-            if (account != null)
-                return account;
-        }
-
-        // Fall back to filtering accounts
-        var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
-        var accountList = accounts.ToList();
-
-        if (accountList.Count == 0)
-            return null;
-
-        // If we have a tenant ID, filter by it to avoid cross-tenant token usage
-        if (!string.IsNullOrEmpty(_tenantId))
-        {
-            var tenantAccount = accountList.FirstOrDefault(a =>
-                string.Equals(a.HomeAccountId?.TenantId, _tenantId, StringComparison.OrdinalIgnoreCase));
-            if (tenantAccount != null)
-                return tenantAccount;
-        }
-
-        // Fall back to username match
-        if (!string.IsNullOrEmpty(_username))
-        {
-            var usernameAccount = accountList.FirstOrDefault(a =>
-                string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase));
-            if (usernameAccount != null)
-                return usernameAccount;
-        }
-
-        // If we can't find the right account, return null to force re-authentication.
-        // Never silently use a random cached account - that causes cross-tenant issues.
-        return null;
-    }
+    private Task<IAccount?> FindAccountAsync()
+        => MsalAccountHelper.FindAccountAsync(_msalClient!, _homeAccountId, _tenantId, _username);
 
     /// <summary>
     /// Ensures the MSAL client is initialized with token cache.
