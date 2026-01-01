@@ -397,73 +397,44 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Creates or updates a plugin package (for NuGet packages).
     /// </summary>
-    /// <param name="name">The package name (used as display name).</param>
+    /// <param name="name">The package name from config (assembly name without prefix).</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
-    /// <param name="solutionName">Optional solution to add the package to (required for new packages to get publisher prefix).</param>
+    /// <param name="solutionName">Solution to add the package to (required for new packages to get publisher prefix).</param>
     /// <returns>The package ID.</returns>
     public async Task<Guid> UpsertPackageAsync(string name, byte[] nupkgContent, string? solutionName = null)
     {
         var existing = await GetPackageByNameAsync(name);
 
-        // For new packages, uniquename must have publisher prefix
-        // For existing packages, preserve the existing uniquename
-        string uniqueName;
         if (existing != null)
         {
-            uniqueName = existing.UniqueName ?? name;
-        }
-        else
-        {
-            // Get publisher prefix from solution
-            var prefix = await GetPublisherPrefixAsync(solutionName);
-            if (string.IsNullOrEmpty(prefix))
+            // UPDATE: Only update content, preserve existing name/uniquename
+            var updateEntity = new Entity("pluginpackage", existing.Id)
             {
-                throw new InvalidOperationException(
-                    "Cannot create plugin package without a solution. The --solution option is required for new package deployments " +
-                    "to determine the publisher prefix for the uniquename.");
-            }
-            uniqueName = $"{prefix}_{name}";
+                ["content"] = Convert.ToBase64String(nupkgContent)
+            };
+            await UpdateAsync(updateEntity);
+            return existing.Id;
         }
 
+        // CREATE: name = uniquename = {prefix}_{name} (must be identical per Plugin Registration Tool behavior)
+        var prefix = await GetPublisherPrefixAsync(solutionName);
+        if (string.IsNullOrEmpty(prefix))
+        {
+            throw new InvalidOperationException(
+                "Cannot create plugin package without a solution. The --solution option is required for new package deployments " +
+                "to determine the publisher prefix for the name and uniquename.");
+        }
+
+        var prefixedName = $"{prefix}_{name}";
         var entity = new Entity("pluginpackage")
         {
-            ["name"] = name,
-            ["uniquename"] = uniqueName,
+            ["name"] = prefixedName,
+            ["uniquename"] = prefixedName,
             ["content"] = Convert.ToBase64String(nupkgContent)
         };
 
-        if (existing != null)
-        {
-            entity.Id = existing.Id;
-            await UpdateAsync(entity);
-
-            // Add to solution even on update
-            if (!string.IsNullOrEmpty(solutionName))
-            {
-                var componentType = await GetComponentTypeAsync("pluginpackage");
-                if (componentType > 0)
-                {
-                    await AddToSolutionAsync(existing.Id, componentType, solutionName);
-                }
-            }
-
-            return existing.Id;
-        }
-        else
-        {
-            var packageId = await CreateAsync(entity);
-
-            if (!string.IsNullOrEmpty(solutionName))
-            {
-                var componentType = await GetComponentTypeAsync("pluginpackage");
-                if (componentType > 0)
-                {
-                    await AddToSolutionAsync(packageId, componentType, solutionName);
-                }
-            }
-
-            return packageId;
-        }
+        // Use CreateRequest with SolutionUniqueName for atomic solution association
+        return await CreateWithSolutionHeaderAsync(entity, solutionName);
     }
 
     /// <summary>
@@ -824,6 +795,23 @@ public sealed class PluginRegistrationService
         }
 
         return id;
+    }
+
+    /// <summary>
+    /// Creates an entity with atomic solution association using CreateRequest.SolutionUniqueName.
+    /// This is the SDK equivalent of the MSCRM.SolutionUniqueName HTTP header.
+    /// </summary>
+    private async Task<Guid> CreateWithSolutionHeaderAsync(Entity entity, string? solutionName)
+    {
+        var request = new CreateRequest { Target = entity };
+
+        if (!string.IsNullOrEmpty(solutionName))
+        {
+            request.Parameters["SolutionUniqueName"] = solutionName;
+        }
+
+        var response = (CreateResponse)await ExecuteAsync(request);
+        return response.id;
     }
 
     private static string MapStageFromValue(int value) => value switch
