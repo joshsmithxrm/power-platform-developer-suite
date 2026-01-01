@@ -415,6 +415,17 @@ public sealed class PluginRegistrationService
                 ["content"] = Convert.ToBase64String(nupkgContent)
             };
             await UpdateAsync(updateEntity);
+
+            // Add to solution if specified (handles case where package exists but isn't in solution)
+            if (!string.IsNullOrEmpty(solutionName))
+            {
+                var componentType = await GetComponentTypeAsync("pluginpackage");
+                if (componentType > 0)
+                {
+                    await AddToSolutionAsync(existing.Id, componentType, solutionName);
+                }
+            }
+
             return existing.Id;
         }
 
