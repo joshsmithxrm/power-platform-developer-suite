@@ -1,7 +1,8 @@
 using System.CommandLine;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Models;
@@ -196,9 +197,8 @@ public static class DeployCommand
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
             {
-                // Parse package name from .nupkg filename (e.g., "ppds_MyPlugin.1.0.0.nupkg" -> "ppds_MyPlugin")
-                // This matches the <id> in .nuspec, which Dataverse uses as uniquename
-                var packageName = ParsePackageNameFromPath(assemblyPath);
+                // Extract package ID from .nuspec inside the nupkg - this is what Dataverse uses as uniquename
+                var packageName = GetPackageIdFromNupkg(assemblyPath);
 
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
                 var packageBytes = await File.ReadAllBytesAsync(assemblyPath, cancellationToken);
@@ -418,24 +418,36 @@ public static class DeployCommand
     }
 
     /// <summary>
-    /// Parses the package name from a .nupkg file path.
-    /// Example: "bin/Debug/ppds_MyPlugin.1.0.0.nupkg" -> "ppds_MyPlugin"
-    /// The package name matches the nuspec &lt;id&gt; which Dataverse uses as uniquename.
+    /// Extracts the package ID from the .nuspec file inside a .nupkg.
+    /// This is the authoritative source - Dataverse uses this as the uniquename.
     /// </summary>
-    private static string ParsePackageNameFromPath(string nupkgPath)
+    private static string GetPackageIdFromNupkg(string nupkgPath)
     {
-        var filename = Path.GetFileName(nupkgPath);
+        using var archive = ZipFile.OpenRead(nupkgPath);
 
-        // Remove .nupkg extension
-        var filenameWithoutExt = filename.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase)
-            ? filename[..^6]
-            : filename;
+        // Find the .nuspec file (there's exactly one at the root level)
+        var nuspecEntry = archive.Entries.FirstOrDefault(e =>
+            e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) &&
+            !e.FullName.Contains('/'));
 
-        // Parse: PackageName.1.0.0 or PackageName.1.0.0-beta1
-        // Version pattern: X.Y.Z optionally followed by prerelease suffix
-        var match = Regex.Match(filenameWithoutExt, @"^(.+?)\.(\d+\.\d+\.\d+.*)$");
+        if (nuspecEntry == null)
+        {
+            throw new InvalidOperationException($"No .nuspec file found in package: {nupkgPath}");
+        }
 
-        return match.Success ? match.Groups[1].Value : filenameWithoutExt;
+        using var stream = nuspecEntry.Open();
+        var doc = XDocument.Load(stream);
+
+        // Nuspec namespace
+        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+        var id = doc.Root?.Element(ns + "metadata")?.Element(ns + "id")?.Value;
+
+        if (string.IsNullOrEmpty(id))
+        {
+            throw new InvalidOperationException($"No <id> element found in nuspec: {nupkgPath}");
+        }
+
+        return id;
     }
 
     #region Result Models

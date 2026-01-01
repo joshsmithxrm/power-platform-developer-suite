@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - NuGet plugin package deployment now works correctly ([#62](https://github.com/joshsmithxrm/ppds-sdk/issues/62))
-  - Package name is parsed from .nupkg filename (matches nuspec `<id>`)
+  - Package ID is read directly from `.nuspec` inside the nupkg (authoritative source)
   - Dataverse extracts `uniquename` from package content automatically - CLI no longer sets it
   - Solution association works on both create and update via `SolutionUniqueName` request parameter
   - Removed unnecessary publisher prefix querying logic
