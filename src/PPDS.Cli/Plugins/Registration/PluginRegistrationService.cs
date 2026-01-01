@@ -397,18 +397,38 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Creates or updates a plugin package (for NuGet packages).
     /// </summary>
-    /// <param name="name">The package name (used as uniquename).</param>
+    /// <param name="name">The package name (used as display name).</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
-    /// <param name="solutionName">Optional solution to add the package to.</param>
+    /// <param name="solutionName">Optional solution to add the package to (required for new packages to get publisher prefix).</param>
     /// <returns>The package ID.</returns>
     public async Task<Guid> UpsertPackageAsync(string name, byte[] nupkgContent, string? solutionName = null)
     {
         var existing = await GetPackageByNameAsync(name);
 
+        // For new packages, uniquename must have publisher prefix
+        // For existing packages, preserve the existing uniquename
+        string uniqueName;
+        if (existing != null)
+        {
+            uniqueName = existing.UniqueName ?? name;
+        }
+        else
+        {
+            // Get publisher prefix from solution
+            var prefix = await GetPublisherPrefixAsync(solutionName);
+            if (string.IsNullOrEmpty(prefix))
+            {
+                throw new InvalidOperationException(
+                    "Cannot create plugin package without a solution. The --solution option is required for new package deployments " +
+                    "to determine the publisher prefix for the uniquename.");
+            }
+            uniqueName = $"{prefix}_{name}";
+        }
+
         var entity = new Entity("pluginpackage")
         {
             ["name"] = name,
-            ["uniquename"] = name,
+            ["uniquename"] = uniqueName,
             ["content"] = Convert.ToBase64String(nupkgContent)
         };
 
@@ -700,6 +720,55 @@ public sealed class PluginRegistrationService
     #endregion
 
     #region Private Helpers
+
+    /// <summary>
+    /// Gets the publisher customization prefix for a solution.
+    /// </summary>
+    private async Task<string?> GetPublisherPrefixAsync(string? solutionName)
+    {
+        if (string.IsNullOrEmpty(solutionName))
+            return null;
+
+        // Query solution to get publisher reference
+        var solutionQuery = new QueryExpression("solution")
+        {
+            ColumnSet = new ColumnSet("publisherid"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("uniquename", ConditionOperator.Equal, solutionName)
+                }
+            }
+        };
+
+        var solutionResult = await RetrieveMultipleAsync(solutionQuery);
+        var solution = solutionResult.Entities.FirstOrDefault();
+        if (solution == null)
+            return null;
+
+        var publisherRef = solution.GetAttributeValue<EntityReference>("publisherid");
+        if (publisherRef == null)
+            return null;
+
+        // Query publisher to get customization prefix
+        var publisherQuery = new QueryExpression("publisher")
+        {
+            ColumnSet = new ColumnSet("customizationprefix"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("publisherid", ConditionOperator.Equal, publisherRef.Id)
+                }
+            }
+        };
+
+        var publisherResult = await RetrieveMultipleAsync(publisherQuery);
+        var publisher = publisherResult.Entities.FirstOrDefault();
+
+        return publisher?.GetAttributeValue<string>("customizationprefix");
+    }
 
     /// <summary>
     /// Gets the solution component type code for an entity.
