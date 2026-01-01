@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-01-01
+
 ### Fixed
 
 - **Cross-tenant token cache issue** - Fixed bug where `ppds env list` would return environments from wrong tenant when user had profiles for multiple tenants. Root cause was MSAL account lookup using `FirstOrDefault()` instead of filtering by tenant. Now uses `HomeAccountId` for precise account lookup with tenant filtering fallback. ([#59](https://github.com/joshsmithxrm/ppds-sdk/issues/59))
@@ -39,5 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JWT claims parsing for identity information
 - Targets: `net8.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Auth-v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Auth-v1.0.0-beta.2...HEAD
+[1.0.0-beta.2]: https://github.com/joshsmithxrm/ppds-sdk/compare/Auth-v1.0.0-beta.1...Auth-v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Auth-v1.0.0-beta.1
