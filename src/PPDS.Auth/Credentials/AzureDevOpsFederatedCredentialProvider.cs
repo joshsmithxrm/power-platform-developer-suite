@@ -77,8 +77,11 @@ public sealed class AzureDevOpsFederatedCredentialProvider : ICredentialProvider
 
         EnsureCredentialInitialized();
 
+        // Get token and prime the cache (uses cancellationToken for cancellable first request)
+        await GetTokenAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+
         // Create ServiceClient using ConnectionOptions.
-        // The provider function acquires tokens on demand and refreshes when needed.
+        // The provider function uses cached tokens and refreshes when needed.
         var options = new ConnectionOptions
         {
             ServiceUri = new Uri(environmentUrl),

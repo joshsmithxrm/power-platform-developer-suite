@@ -91,8 +91,11 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
         // Normalize URL
         environmentUrl = environmentUrl.TrimEnd('/');
 
+        // Get token and prime the cache (uses cancellationToken for cancellable first request)
+        await GetTokenAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+
         // Create ServiceClient using ConnectionOptions.
-        // The provider function acquires tokens on demand and refreshes when needed.
+        // The provider function uses cached tokens and refreshes when needed.
         ServiceClient client;
         try
         {

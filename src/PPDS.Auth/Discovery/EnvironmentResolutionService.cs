@@ -251,23 +251,9 @@ public sealed class EnvironmentResolutionService : IDisposable
     /// </remarks>
     private static bool CanUseGlobalDiscovery(AuthMethod authMethod)
     {
-        return authMethod switch
-        {
-            // User authentication methods - can use Global Discovery
-            AuthMethod.InteractiveBrowser => true,
-            AuthMethod.DeviceCode => true,
-            AuthMethod.UsernamePassword => true,
-
-            // Service principal methods - cannot use Global Discovery
-            AuthMethod.ClientSecret => false,
-            AuthMethod.CertificateFile => false,
-            AuthMethod.CertificateStore => false,
-            AuthMethod.ManagedIdentity => false,
-            AuthMethod.GitHubFederated => false,
-            AuthMethod.AzureDevOpsFederated => false,
-
-            _ => false
-        };
+        // Global Discovery requires user authentication (delegated permissions).
+        // Service principals cannot access Global Discovery.
+        return authMethod is AuthMethod.InteractiveBrowser or AuthMethod.DeviceCode or AuthMethod.UsernamePassword;
     }
 
     /// <inheritdoc />
