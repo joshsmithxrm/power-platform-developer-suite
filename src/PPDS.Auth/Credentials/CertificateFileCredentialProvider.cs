@@ -156,9 +156,17 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
         {
             var flags = X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet;
 
+#if NET9_0_OR_GREATER
+            // Use X509CertificateLoader for .NET 9+ (X509Certificate2 constructors are obsolete)
+            _certificate = X509CertificateLoader.LoadPkcs12FromFile(
+                _certificatePath,
+                _certificatePassword,
+                flags);
+#else
             _certificate = string.IsNullOrEmpty(_certificatePassword)
                 ? new X509Certificate2(_certificatePath, (string?)null, flags)
                 : new X509Certificate2(_certificatePath, _certificatePassword, flags);
+#endif
 
             if (!_certificate.HasPrivateKey)
             {
