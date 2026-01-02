@@ -1,3 +1,4 @@
+using System;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Models;
 
@@ -8,6 +9,7 @@ namespace PPDS.Migration.Import
     /// </summary>
     public class ImportOptions
     {
+        private int _maxParallelEntities = 4;
         /// <summary>
         /// Gets or sets whether to use modern bulk APIs (CreateMultiple, etc.).
         /// Default: true
@@ -46,9 +48,20 @@ namespace PPDS.Migration.Import
 
         /// <summary>
         /// Gets or sets the maximum parallel entities within a tier.
+        /// Must be at least 1.
         /// Default: 4
         /// </summary>
-        public int MaxParallelEntities { get; set; } = 4;
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when value is less than 1.</exception>
+        public int MaxParallelEntities
+        {
+            get => _maxParallelEntities;
+            set
+            {
+                if (value < 1)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "MaxParallelEntities must be at least 1.");
+                _maxParallelEntities = value;
+            }
+        }
 
         /// <summary>
         /// Gets or sets the import mode.

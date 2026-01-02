@@ -94,18 +94,12 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
         var environments = new List<DiscoveredEnvironment>();
         foreach (var org in organizations)
         {
-            // Get the web API endpoint from the Endpoints dictionary
-            string apiUrl = string.Empty;
+            // Get the web application URL - used for both API connections and web interface
+            // In Dataverse, the WebApplication endpoint is the base URL (e.g., https://org.crm.dynamics.com)
+            string? baseUrl = null;
             if (org.Endpoints.TryGetValue(Microsoft.Xrm.Sdk.Discovery.EndpointType.WebApplication, out var webAppUrl))
             {
-                apiUrl = webAppUrl;
-            }
-
-            // Get the application URL
-            string? appUrl = null;
-            if (org.Endpoints.TryGetValue(Microsoft.Xrm.Sdk.Discovery.EndpointType.WebApplication, out var webUrl))
-            {
-                appUrl = webUrl;
+                baseUrl = webAppUrl;
             }
 
             // Parse TenantId if present (it may be a string or Guid depending on version)
@@ -122,8 +116,8 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                 FriendlyName = org.FriendlyName,
                 UniqueName = org.UniqueName,
                 UrlName = org.UrlName,
-                ApiUrl = apiUrl,
-                Url = appUrl,
+                ApiUrl = baseUrl ?? string.Empty,
+                Url = baseUrl,
                 State = (int)org.State,
                 Version = org.OrganizationVersion,
                 Region = org.Geo,
@@ -174,7 +168,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             {
                 if (_deviceCodeCallback == null)
                 {
-                    Console.WriteLine("Opening browser for authentication...");
+                    AuthenticationOutput.WriteLine("Opening browser for authentication...");
                 }
 
                 result = await _msalClient!
@@ -198,18 +192,14 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                         }
                         else
                         {
-                            Console.WriteLine();
-                            Console.WriteLine("To sign in, use a web browser to open the page:");
-                            Console.ForegroundColor = ConsoleColor.Cyan;
-                            Console.WriteLine($"  {deviceCodeResult.VerificationUrl}");
-                            Console.ResetColor();
-                            Console.WriteLine();
-                            Console.WriteLine("Enter the code:");
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"  {deviceCodeResult.UserCode}");
-                            Console.ResetColor();
-                            Console.WriteLine();
-                            Console.WriteLine("Waiting for authentication...");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("To sign in, use a web browser to open the page:");
+                            AuthenticationOutput.WriteLine($"  {deviceCodeResult.VerificationUrl}");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("Enter the code:");
+                            AuthenticationOutput.WriteLine($"  {deviceCodeResult.UserCode}");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("Waiting for authentication...");
                         }
                         return Task.CompletedTask;
                     })
@@ -219,8 +209,8 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
             if (_deviceCodeCallback == null)
             {
-                Console.WriteLine($"Authenticated as: {result.Account.Username}");
-                Console.WriteLine();
+                AuthenticationOutput.WriteLine($"Authenticated as: {result.Account.Username}");
+                AuthenticationOutput.WriteLine();
             }
 
             return result.AccessToken;
@@ -277,6 +267,12 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
     {
         if (_disposed)
             return;
+
+        // Unregister cache helper to release file locks on token cache
+        if (_cacheHelper != null && _msalClient != null)
+        {
+            _cacheHelper.UnregisterCache(_msalClient.UserTokenCache);
+        }
 
         _disposed = true;
     }

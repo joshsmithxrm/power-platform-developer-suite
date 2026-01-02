@@ -17,7 +17,7 @@ public sealed class ConnectionStringSource : IConnectionSource
 {
     private readonly DataverseConnection _config;
     private readonly object _lock = new();
-    private ServiceClient? _client;
+    private volatile ServiceClient? _client;
     private bool _disposed;
 
     /// <summary>

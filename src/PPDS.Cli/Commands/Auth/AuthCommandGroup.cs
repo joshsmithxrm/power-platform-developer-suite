@@ -1287,24 +1287,12 @@ public static class AuthCommandGroup
 
     private static string ExtractEnvironmentName(string url)
     {
-        try
-        {
-            var uri = new Uri(url);
-            var host = uri.Host;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return url;
 
-            // Extract org name from host (e.g., "myorg" from "myorg.crm.dynamics.com")
-            var parts = host.Split('.');
-            if (parts.Length > 0)
-            {
-                return parts[0];
-            }
-        }
-        catch
-        {
-            // Ignore parse errors
-        }
-
-        return url;
+        // Extract org name from host (e.g., "myorg" from "myorg.crm.dynamics.com")
+        var parts = uri.Host.Split('.');
+        return parts.Length > 0 ? parts[0] : url;
     }
 
     #endregion

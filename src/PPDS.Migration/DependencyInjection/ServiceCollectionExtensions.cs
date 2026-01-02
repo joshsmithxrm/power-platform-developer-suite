@@ -57,7 +57,12 @@ namespace PPDS.Migration.DependencyInjection
             // Export
             services.AddTransient<IExporter, ParallelExporter>();
 
-            // Import
+            // Import - Phase processors
+            services.AddTransient<ISchemaValidator, SchemaValidator>();
+            services.AddTransient<DeferredFieldProcessor>();
+            services.AddTransient<RelationshipProcessor>();
+
+            // Import - Orchestration
             services.AddTransient<IPluginStepManager, PluginStepManager>();
             services.AddTransient<IImporter, TieredImporter>();
 

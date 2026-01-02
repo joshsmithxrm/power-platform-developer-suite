@@ -7,8 +7,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Suppress known vulnerability in transitive dependency until upstream fix -->
-    <NoWarn>$(NoWarn);NU1903</NoWarn>
+    <!-- NU1702: PPDS.Plugins targets net462 (required for Dataverse plugin sandbox) but is
+         referenced from net8.0+. The package contains only attributes/enums with no
+         framework-specific APIs, so cross-framework reference is safe. -->
+    <NoWarn>$(NoWarn);NU1702</NoWarn>
 
     <!-- MinVer Configuration -->
     <MinVerTagPrefix>Cli-v</MinVerTagPrefix>

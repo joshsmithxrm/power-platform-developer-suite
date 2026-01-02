@@ -7,6 +7,10 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- NU1702: PPDS.Plugins targets net462 (required for Dataverse plugin sandbox) but is
+         referenced from net8.0+. The package contains only attributes/enums with no
+         framework-specific APIs, so cross-framework reference is safe. -->
+    <NoWarn>$(NoWarn);NU1702</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

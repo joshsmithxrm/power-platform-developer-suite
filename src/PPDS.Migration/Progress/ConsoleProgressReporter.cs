@@ -9,6 +9,10 @@ namespace PPDS.Migration.Progress
     /// <summary>
     /// Progress reporter that writes human-readable output to the console.
     /// </summary>
+    /// <remarks>
+    /// This class is not thread-safe. It is designed for single-threaded CLI usage
+    /// where progress events are reported sequentially.
+    /// </remarks>
     public class ConsoleProgressReporter : IProgressReporter
     {
         private const int MaxErrorsToDisplay = 10;

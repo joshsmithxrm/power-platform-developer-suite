@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Dataverse.BulkOperations;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -37,5 +38,21 @@ public static class DataCommandGroup
         command.Subcommands.Add(AnalyzeCommand.Create());
 
         return command;
+    }
+
+    /// <summary>
+    /// Parses the --bypass-plugins option value to CustomLogicBypass enum.
+    /// </summary>
+    /// <param name="value">The option value: "sync", "async", "all", or null.</param>
+    /// <returns>The corresponding CustomLogicBypass value.</returns>
+    internal static CustomLogicBypass ParseBypassPlugins(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "sync" => CustomLogicBypass.Synchronous,
+            "async" => CustomLogicBypass.Asynchronous,
+            "all" => CustomLogicBypass.All,
+            _ => CustomLogicBypass.None
+        };
     }
 }

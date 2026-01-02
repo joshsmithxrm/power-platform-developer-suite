@@ -184,19 +184,15 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
                 }
                 else
                 {
-                    // Default console output
-                    Console.WriteLine();
-                    Console.WriteLine("To sign in, use a web browser to open the page:");
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"  {deviceCodeResult.VerificationUrl}");
-                    Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine("Enter the code:");
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"  {deviceCodeResult.UserCode}");
-                    Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine("Waiting for authentication...");
+                    // Default output via AuthenticationOutput (can be redirected or suppressed)
+                    AuthenticationOutput.WriteLine();
+                    AuthenticationOutput.WriteLine("To sign in, use a web browser to open the page:");
+                    AuthenticationOutput.WriteLine($"  {deviceCodeResult.VerificationUrl}");
+                    AuthenticationOutput.WriteLine();
+                    AuthenticationOutput.WriteLine("Enter the code:");
+                    AuthenticationOutput.WriteLine($"  {deviceCodeResult.UserCode}");
+                    AuthenticationOutput.WriteLine();
+                    AuthenticationOutput.WriteLine("Waiting for authentication...");
                 }
                 return Task.CompletedTask;
             })
@@ -205,8 +201,8 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
 
         if (_deviceCodeCallback == null)
         {
-            Console.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
-            Console.WriteLine();
+            AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
+            AuthenticationOutput.WriteLine();
         }
 
         return _cachedResult.AccessToken;
@@ -261,6 +257,12 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
     {
         if (_disposed)
             return;
+
+        // Unregister cache before disposal to release file locks
+        if (_cacheHelper != null && _msalClient != null)
+        {
+            _cacheHelper.UnregisterCache(_msalClient.UserTokenCache);
+        }
 
         _disposed = true;
     }

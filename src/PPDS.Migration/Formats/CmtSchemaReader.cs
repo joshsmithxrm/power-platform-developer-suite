@@ -105,7 +105,11 @@ namespace PPDS.Migration.Formats
 
         private EntitySchema ParseEntity(XElement element)
         {
-            var logicalName = element.Attribute("name")?.Value ?? string.Empty;
+            var logicalName = element.Attribute("name")?.Value;
+            if (string.IsNullOrWhiteSpace(logicalName))
+            {
+                throw new InvalidOperationException("Entity element is missing required 'name' attribute.");
+            }
             var displayName = element.Attribute("displayname")?.Value ?? logicalName;
             var objectTypeCode = ParseInt(element.Attribute("etc")?.Value);
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
@@ -154,7 +158,11 @@ namespace PPDS.Migration.Formats
 
         private FieldSchema ParseField(XElement element)
         {
-            var logicalName = element.Attribute("name")?.Value ?? string.Empty;
+            var logicalName = element.Attribute("name")?.Value;
+            if (string.IsNullOrWhiteSpace(logicalName))
+            {
+                throw new InvalidOperationException("Field element is missing required 'name' attribute.");
+            }
             var displayName = element.Attribute("displayname")?.Value ?? logicalName;
             var type = element.Attribute("type")?.Value ?? "string";
             var lookupEntity = element.Attribute("lookupType")?.Value;

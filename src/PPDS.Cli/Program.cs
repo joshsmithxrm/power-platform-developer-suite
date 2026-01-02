@@ -29,14 +29,9 @@ public static class Program
         // Prepend [Required] to required option descriptions for scannability
         HelpCustomization.ApplyRequiredOptionStyle(rootCommand);
 
-        // Handle cancellation
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
-        {
-            e.Cancel = true;
-            cts.Cancel();
-            Console.Error.WriteLine("\nCancellation requested. Waiting for current operation to complete...");
-        };
+        // Note: System.CommandLine handles Ctrl+C automatically and passes the
+        // CancellationToken to command handlers via SetAction's cancellationToken parameter.
+        // No manual CancelKeyPress handler is needed.
 
         var parseResult = rootCommand.Parse(args);
         return await parseResult.InvokeAsync();

@@ -164,6 +164,12 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
         if (_disposed)
             return;
 
+        // Unregister cache before disposal to release file locks
+        if (_cacheHelper != null && _msalClient != null)
+        {
+            _cacheHelper.UnregisterCache(_msalClient.UserTokenCache);
+        }
+
         _disposed = true;
     }
 }

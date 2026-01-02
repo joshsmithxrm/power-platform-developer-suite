@@ -312,7 +312,7 @@ public class ProgressTrackerTests
     #region Thread Safety Tests
 
     [Fact]
-    public void RecordProgress_ThreadSafe()
+    public async Task RecordProgress_ThreadSafe()
     {
         // Arrange
         var tracker = new ProgressTracker(10000);
@@ -331,14 +331,14 @@ public class ProgressTrackerTests
                 }
             });
         }
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
 
         // Assert
         tracker.Succeeded.Should().Be(threadCount * incrementsPerThread);
     }
 
     [Fact]
-    public void GetSnapshot_ThreadSafe()
+    public async Task GetSnapshot_ThreadSafe()
     {
         // Arrange
         var tracker = new ProgressTracker(10000);
@@ -369,7 +369,7 @@ public class ProgressTrackerTests
             }
         });
 
-        Task.WaitAll(recordTask, snapshotTask);
+        await Task.WhenAll(recordTask, snapshotTask);
 
         // Assert - all snapshots should be valid (no exceptions thrown)
         snapshots.Count.Should().Be(iterations);

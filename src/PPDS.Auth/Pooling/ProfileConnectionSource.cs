@@ -18,9 +18,9 @@ public sealed class ProfileConnectionSource : IDisposable
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly int _maxPoolSize;
 
-    private ServiceClient? _seedClient;
+    private volatile ServiceClient? _seedClient;
     private ICredentialProvider? _provider;
-    private readonly object _lock = new();
+    private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _disposed;
 
     /// <summary>
@@ -117,8 +117,14 @@ public sealed class ProfileConnectionSource : IDisposable
         if (_disposed)
             throw new ObjectDisposedException(nameof(ProfileConnectionSource));
 
-        lock (_lock)
+        // Fast path if already created (volatile read)
+        if (_seedClient != null)
+            return _seedClient;
+
+        _lock.Wait();
+        try
         {
+            // Double-check after acquiring lock
             if (_seedClient != null)
                 return _seedClient;
 
@@ -127,9 +133,11 @@ public sealed class ProfileConnectionSource : IDisposable
 
             try
             {
-                // Create ServiceClient synchronously (pool expects sync method)
-                _seedClient = _provider
-                    .CreateServiceClientAsync(_environmentUrl, CancellationToken.None)
+                // Create ServiceClient synchronously (pool expects sync method).
+                // Wrap in Task.Run to avoid deadlock in sync contexts (UI/ASP.NET)
+                // by running async code on threadpool which has no sync context.
+                _seedClient = System.Threading.Tasks.Task.Run(() =>
+                    _provider.CreateServiceClientAsync(_environmentUrl, CancellationToken.None))
                     .GetAwaiter()
                     .GetResult();
 
@@ -142,6 +150,10 @@ public sealed class ProfileConnectionSource : IDisposable
                 throw new InvalidOperationException(
                     $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
             }
+        }
+        finally
+        {
+            _lock.Release();
         }
     }
 
@@ -156,27 +168,39 @@ public sealed class ProfileConnectionSource : IDisposable
         if (_disposed)
             throw new ObjectDisposedException(nameof(ProfileConnectionSource));
 
-        // Fast path if already created
+        // Fast path if already created (volatile read)
         if (_seedClient != null)
             return _seedClient;
 
-        // Create credential provider
-        _provider = CredentialProviderFactory.Create(_profile, _deviceCodeCallback);
-
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _seedClient = await _provider
-                .CreateServiceClientAsync(_environmentUrl, cancellationToken)
-                .ConfigureAwait(false);
+            // Double-check after acquiring lock
+            if (_seedClient != null)
+                return _seedClient;
 
-            return _seedClient;
+            // Create credential provider
+            _provider = CredentialProviderFactory.Create(_profile, _deviceCodeCallback);
+
+            try
+            {
+                _seedClient = await _provider
+                    .CreateServiceClientAsync(_environmentUrl, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return _seedClient;
+            }
+            catch (Exception ex)
+            {
+                _provider?.Dispose();
+                _provider = null;
+                throw new InvalidOperationException(
+                    $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _provider?.Dispose();
-            _provider = null;
-            throw new InvalidOperationException(
-                $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
+            _lock.Release();
         }
     }
 
@@ -189,7 +213,8 @@ public sealed class ProfileConnectionSource : IDisposable
     /// </remarks>
     public void InvalidateSeed()
     {
-        lock (_lock)
+        _lock.Wait();
+        try
         {
             if (_seedClient == null)
                 return;
@@ -201,6 +226,10 @@ public sealed class ProfileConnectionSource : IDisposable
             _provider?.Dispose();
             _provider = null;
         }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -209,11 +238,17 @@ public sealed class ProfileConnectionSource : IDisposable
         if (_disposed)
             return;
 
-        lock (_lock)
+        _lock.Wait();
+        try
         {
             _seedClient?.Dispose();
             _provider?.Dispose();
             _disposed = true;
+        }
+        finally
+        {
+            _lock.Release();
+            _lock.Dispose();
         }
     }
 }

@@ -120,7 +120,7 @@ public static class ImportCommand
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
 
-            var bypassPlugins = ParseBypassPlugins(bypassPluginsValue);
+            var bypassPlugins = DataCommandGroup.ParseBypassPlugins(bypassPluginsValue);
 
             return await ExecuteAsync(
                 profile, environment, data, bypassPlugins, bypassFlows,
@@ -129,17 +129,6 @@ public static class ImportCommand
         });
 
         return command;
-    }
-
-    private static CustomLogicBypass ParseBypassPlugins(string? value)
-    {
-        return value?.ToLowerInvariant() switch
-        {
-            "sync" => CustomLogicBypass.Synchronous,
-            "async" => CustomLogicBypass.Asynchronous,
-            "all" => CustomLogicBypass.All,
-            _ => CustomLogicBypass.None
-        };
     }
 
     private static async Task<int> ExecuteAsync(

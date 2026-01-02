@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
@@ -17,7 +18,7 @@ public sealed class PluginRegistrationService
     private readonly IOrganizationServiceAsync2? _asyncService;
 
     // Cache for entity type codes (ETCs) - some like pluginpackage vary by environment
-    private readonly Dictionary<string, int> _entityTypeCodeCache = new();
+    private readonly ConcurrentDictionary<string, int> _entityTypeCodeCache = new();
 
     // Well-known component type codes that are consistent across all environments
     private static readonly Dictionary<string, int> WellKnownComponentTypes = new()

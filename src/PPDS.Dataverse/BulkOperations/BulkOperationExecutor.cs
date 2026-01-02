@@ -1371,83 +1371,6 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
-        /// Executes batches in parallel with fixed concurrency (legacy method).
-        /// Used when MaxParallelBatches is explicitly set.
-        /// </summary>
-        private static async Task<BulkOperationResult> ExecuteBatchesParallelAsync<T>(
-            List<List<T>> batches,
-            Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
-            int maxParallelism,
-            ProgressTracker tracker,
-            IProgress<ProgressSnapshot>? progress,
-            CancellationToken cancellationToken)
-        {
-            var allErrors = new ConcurrentBag<BulkOperationError>();
-            var allCreatedIds = new ConcurrentBag<Guid>();
-            var successCount = 0;
-            var failureCount = 0;
-            var createdCount = 0;
-            var updatedCount = 0;
-            var hasUpsertCounts = 0; // 0 = false, 1 = true (for thread-safe flag)
-
-            await Parallel.ForEachAsync(
-                batches,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = maxParallelism,
-                    CancellationToken = cancellationToken
-                },
-                async (batch, ct) =>
-                {
-                    // Use the combined cancellation token (ct) which includes Parallel.ForEachAsync's internal cancellation
-                    var batchResult = await executeBatch(batch, ct).ConfigureAwait(false);
-
-                    Interlocked.Add(ref successCount, batchResult.SuccessCount);
-                    Interlocked.Add(ref failureCount, batchResult.FailureCount);
-
-                    foreach (var error in batchResult.Errors)
-                    {
-                        allErrors.Add(error);
-                    }
-
-                    if (batchResult.CreatedIds != null)
-                    {
-                        foreach (var id in batchResult.CreatedIds)
-                        {
-                            allCreatedIds.Add(id);
-                        }
-                    }
-
-                    // Aggregate upsert created/updated counts
-                    if (batchResult.CreatedCount.HasValue)
-                    {
-                        Interlocked.Exchange(ref hasUpsertCounts, 1);
-                        Interlocked.Add(ref createdCount, batchResult.CreatedCount.Value);
-                    }
-                    if (batchResult.UpdatedCount.HasValue)
-                    {
-                        Interlocked.Exchange(ref hasUpsertCounts, 1);
-                        Interlocked.Add(ref updatedCount, batchResult.UpdatedCount.Value);
-                    }
-
-                    // Report progress after each batch
-                    tracker.RecordProgress(batchResult.SuccessCount, batchResult.FailureCount);
-                    progress?.Report(tracker.GetSnapshot());
-                }).ConfigureAwait(false);
-
-            return new BulkOperationResult
-            {
-                SuccessCount = successCount,
-                FailureCount = failureCount,
-                Errors = allErrors.ToList(),
-                Duration = TimeSpan.Zero,
-                CreatedIds = allCreatedIds.Count > 0 ? allCreatedIds.ToList() : null,
-                CreatedCount = hasUpsertCounts == 1 ? createdCount : null,
-                UpdatedCount = hasUpsertCounts == 1 ? updatedCount : null
-            };
-        }
-
-        /// <summary>
         /// Executes batches with adaptive DOP control.
         /// Reads live DOP from the pool and limits concurrency accordingly.
         /// Pool's selection strategy handles per-source distribution.
@@ -1612,15 +1535,28 @@ namespace PPDS.Dataverse.BulkOperations
         }
 
         /// <summary>
+        /// Extracts the error code from an exception if it's a FaultException, otherwise returns -1.
+        /// </summary>
+        private static int ExtractErrorCode(Exception ex)
+        {
+            if (ex is FaultException<OrganizationServiceFault> faultEx)
+            {
+                return faultEx.Detail.ErrorCode;
+            }
+            return -1;
+        }
+
+        /// <summary>
         /// Creates a failure result for a batch of entities that failed due to a non-retryable error.
         /// </summary>
         private static BulkOperationResult CreateFailureResultForEntities(List<Entity> batch, Exception ex)
         {
+            var errorCode = ExtractErrorCode(ex);
             var errors = batch.Select((e, i) => new BulkOperationError
             {
                 Index = i,
                 RecordId = e.Id != Guid.Empty ? e.Id : null,
-                ErrorCode = -1,
+                ErrorCode = errorCode,
                 Message = ex.Message
             }).ToList();
 
@@ -1638,11 +1574,12 @@ namespace PPDS.Dataverse.BulkOperations
         /// </summary>
         private static BulkOperationResult CreateFailureResultForIds(List<Guid> batch, Exception ex)
         {
+            var errorCode = ExtractErrorCode(ex);
             var errors = batch.Select((id, i) => new BulkOperationError
             {
                 Index = i,
                 RecordId = id,
-                ErrorCode = -1,
+                ErrorCode = errorCode,
                 Message = ex.Message
             }).ToList();
 

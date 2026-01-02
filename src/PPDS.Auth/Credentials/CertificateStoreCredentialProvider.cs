@@ -225,7 +225,7 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
         // Add store location if not default
         if (_storeLocation != StoreLocation.CurrentUser)
         {
-            builder.Append($"StoreName={_storeLocation};");
+            builder.Append($"StoreLocation={_storeLocation};");
         }
 
         // Add authority for non-public clouds

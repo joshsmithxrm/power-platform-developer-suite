@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -17,7 +18,7 @@ public sealed class ServiceClientFactory : IDisposable
 {
     private readonly ProfileStore _profileStore;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
-    private readonly List<ICredentialProvider> _activeProviders = new();
+    private readonly ConcurrentBag<ICredentialProvider> _activeProviders = new();
     private bool _disposed;
 
     /// <summary>
@@ -242,6 +243,11 @@ public sealed class ServiceClientFactory : IDisposable
             ThreadPool.SetMinThreads(100, completionPortThreads);
         }
 
+        // SYSLIB0014: ServicePointManager is obsolete, but these settings are required for
+        // optimal Dataverse throughput. The Dataverse SDK uses HttpWebRequest internally,
+        // so these settings still apply. No alternative exists until Microsoft updates
+        // their SDK to use HttpClient.
+#pragma warning disable SYSLIB0014
         // Increase connection limit (default is 2)
         ServicePointManager.DefaultConnectionLimit = 65000;
 
@@ -250,6 +256,7 @@ public sealed class ServiceClientFactory : IDisposable
 
         // Disable Nagle algorithm for better latency
         ServicePointManager.UseNagleAlgorithm = false;
+#pragma warning restore SYSLIB0014
     }
 
     /// <inheritdoc />
@@ -258,12 +265,11 @@ public sealed class ServiceClientFactory : IDisposable
         if (_disposed)
             return;
 
-        foreach (var provider in _activeProviders)
+        while (_activeProviders.TryTake(out var provider))
         {
             provider.Dispose();
         }
 
-        _activeProviders.Clear();
         _profileStore.Dispose();
         _disposed = true;
     }
