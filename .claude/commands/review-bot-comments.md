@@ -41,6 +41,25 @@ For each bot comment, determine:
 | Resource not disposed | Yes - leak |
 | Generic catch clause | Context-dependent |
 
+### 5. Reply to Each Comment Individually
+
+After fixing or triaging, reply directly to each bot comment. Do NOT batch responses into a single PR comment.
+
+```bash
+# Reply to a specific review comment
+gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments \
+  -f body="Fixed in abc123" \
+  -F in_reply_to={comment_id}
+```
+
+**Important:** The `in_reply_to` parameter must be the comment ID (numeric), not a URL. Get IDs from the fetch step.
+
+| Verdict | Reply Template |
+|---------|----------------|
+| Valid (fixed) | `Fixed in {commit_sha} - {brief description}` |
+| Declined | `Declining - {reason}` |
+| False positive | `False positive - {explanation}` |
+
 ## Output
 
 ```markdown
