@@ -128,7 +128,6 @@
       "Bash(git branch -d:*)",
       "Bash(git tag -d:*)",
       "Bash(git tag -fa:*)",
-      "Bash(gh api:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr merge:*)",
       "Bash(gh pr close:*)",
