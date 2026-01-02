@@ -26,7 +26,8 @@ public abstract class FakeXrmEasyTestsBase : IDisposable
 
     /// <summary>
     /// Initializes a new instance of the test base with FakeXrmEasy middleware.
-    /// Registers custom message executors for CreateMultiple, UpdateMultiple, UpsertMultiple.
+    /// Registers custom message executors for bulk operations (CreateMultiple, UpdateMultiple,
+    /// UpsertMultiple, DeleteMultiple).
     /// </summary>
     protected FakeXrmEasyTestsBase()
     {
@@ -37,6 +38,7 @@ public abstract class FakeXrmEasyTestsBase : IDisposable
             .AddFakeMessageExecutor(new CreateMultipleRequestExecutor())
             .AddFakeMessageExecutor(new UpdateMultipleRequestExecutor())
             .AddFakeMessageExecutor(new UpsertMultipleRequestExecutor())
+            .AddFakeMessageExecutor(new DeleteMultipleRequestExecutor())
             .UseCrud()
             .UseMessages()
             .SetLicense(FakeXrmEasyLicense.RPL_1_5)
