@@ -40,8 +40,7 @@ public sealed class EnvironmentResolutionService : IDisposable
     /// </summary>
     /// <param name="identifier">The environment identifier (URL, name, ID, etc.).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resolved environment info, or null if not found.</returns>
-    /// <exception cref="InvalidOperationException">If resolution fails with a specific error.</exception>
+    /// <returns>A result containing the resolved environment info on success, or an error message on failure.</returns>
     public async Task<EnvironmentResolutionResult> ResolveAsync(
         string identifier,
         CancellationToken cancellationToken = default)
@@ -236,8 +235,9 @@ public sealed class EnvironmentResolutionService : IDisposable
 
             return host;
         }
-        catch
+        catch (Exception)
         {
+            // Best-effort parsing - return input if URL parsing fails for any reason
             return url;
         }
     }
