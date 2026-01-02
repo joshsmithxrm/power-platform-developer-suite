@@ -243,6 +243,11 @@ public sealed class ServiceClientFactory : IDisposable
             ThreadPool.SetMinThreads(100, completionPortThreads);
         }
 
+        // SYSLIB0014: ServicePointManager is obsolete, but these settings are required for
+        // optimal Dataverse throughput. The Dataverse SDK uses HttpWebRequest internally,
+        // so these settings still apply. No alternative exists until Microsoft updates
+        // their SDK to use HttpClient.
+#pragma warning disable SYSLIB0014
         // Increase connection limit (default is 2)
         ServicePointManager.DefaultConnectionLimit = 65000;
 
@@ -251,6 +256,7 @@ public sealed class ServiceClientFactory : IDisposable
 
         // Disable Nagle algorithm for better latency
         ServicePointManager.UseNagleAlgorithm = false;
+#pragma warning restore SYSLIB0014
     }
 
     /// <inheritdoc />
