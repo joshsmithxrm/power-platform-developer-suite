@@ -879,7 +879,7 @@ public static class AuthCommandGroup
 
         var envOption = new Option<string?>("--environment", "-env")
         {
-            Description = "Default environment (URL)"
+            Description = "Default environment (ID, URL, unique name, or partial name)"
         };
 
         var command = new Command("update", "Update profile name or default environment")
@@ -934,13 +934,24 @@ public static class AuthCommandGroup
 
             if (!string.IsNullOrWhiteSpace(newEnvironment))
             {
-                var envUrl = newEnvironment.TrimEnd('/');
-                profile.Environment = new EnvironmentInfo
+                Console.WriteLine($"Resolving environment '{newEnvironment}'...");
+
+                // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
+                using var resolver = new EnvironmentResolutionService(profile);
+                var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
+
+                if (!result.Success)
                 {
-                    Url = envUrl,
-                    DisplayName = ExtractEnvironmentName(envUrl)
-                };
-                Console.WriteLine($"Default environment set: {profile.Environment.DisplayName}");
+                    Console.Error.WriteLine($"Error: {result.ErrorMessage}");
+                    return ExitCodes.Failure;
+                }
+
+                profile.Environment = result.Environment;
+
+                var methodNote = result.Method == ResolutionMethod.DirectConnection
+                    ? " (via direct connection)"
+                    : " (via Global Discovery)";
+                Console.WriteLine($"Environment set: {result.Environment!.DisplayName}{methodNote}");
             }
 
             await store.SaveAsync(collection, cancellationToken);

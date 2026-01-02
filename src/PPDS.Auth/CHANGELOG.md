@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ServiceClient org metadata not populated** - Credential providers now use `ConnectionOptions` constructor instead of token provider constructor, which triggers org metadata discovery. This populates `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` properties. ([#86](https://github.com/joshsmithxrm/ppds-sdk/issues/86))
+- **ServiceClient org metadata not populated** - Credential providers now force eager org metadata discovery by accessing `ConnectedOrgFriendlyName` immediately after creating the ServiceClient. Discovery is lazy by default, and the connection pool clones clients before properties are accessed, resulting in empty metadata. This fix ensures `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` are populated. ([#86](https://github.com/joshsmithxrm/ppds-sdk/issues/86))
 
 ### Added
 
+- **`EnvironmentResolutionService`** - Multi-layer environment resolution that tries direct Dataverse connection first (works for service principals), then falls back to Global Discovery for user authentication. Returns full org metadata. ([#89](https://github.com/joshsmithxrm/ppds-sdk/issues/89), [#88](https://github.com/joshsmithxrm/ppds-sdk/issues/88))
 - **Integration tests for credential providers** - Live tests for `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, and `GitHubFederatedCredentialProvider` ([#55](https://github.com/joshsmithxrm/ppds-sdk/issues/55))
 - Manual test procedures documentation for interactive browser and device code authentication
 

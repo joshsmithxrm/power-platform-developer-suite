@@ -113,9 +113,9 @@ internal static class MsalClientBuilder
             {
                 cacheHelper.UnregisterCache(client.UserTokenCache);
             }
-            catch
+            catch (Exception)
             {
-                // Ignore errors during cleanup
+                // Cleanup should never throw - swallow all errors
             }
         }
     }

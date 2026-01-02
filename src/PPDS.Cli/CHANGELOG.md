@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Environment resolution for service principals** - `ppds env select` now works with full URLs for service principals by trying direct Dataverse connection first, before falling back to Global Discovery (which requires user auth). ([#89](https://github.com/joshsmithxrm/ppds-sdk/issues/89))
+- **`auth update --environment` now validates and resolves** - Previously only parsed the URL string without connecting. Now performs full resolution with org metadata population. ([#88](https://github.com/joshsmithxrm/ppds-sdk/issues/88))
+
 ### Changed
 
 - **BREAKING: Standardized output format flag** - Replaced `--json` / `-j` with `--output-format` / `-f` enum option (values: `Text`, `Json`) across all commands for consistency ([#73](https://github.com/joshsmithxrm/ppds-sdk/issues/73))

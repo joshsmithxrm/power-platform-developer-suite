@@ -225,47 +225,27 @@ public static class EnvCommandGroup
             }
 
             ConsoleHeader.WriteConnectedAs(profile);
-            Console.WriteLine($"Looking for environment '{environmentIdentifier}'");
+            Console.WriteLine($"Resolving environment '{environmentIdentifier}'...");
 
-            using var gds = GlobalDiscoveryService.FromProfile(profile);
-            var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
+            // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
+            using var resolver = new EnvironmentResolutionService(profile);
+            var result = await resolver.ResolveAsync(environmentIdentifier, cancellationToken);
 
-            DiscoveredEnvironment? resolved;
-            try
+            if (!result.Success)
             {
-                resolved = EnvironmentResolver.Resolve(environments, environmentIdentifier);
-            }
-            catch (AmbiguousMatchException ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {result.ErrorMessage}");
                 return ExitCodes.Failure;
             }
 
-            if (resolved == null)
-            {
-                Console.Error.WriteLine($"Error: Environment '{environmentIdentifier}' not found.");
-                Console.Error.WriteLine();
-                Console.Error.WriteLine("Use 'ppds env list' to see available environments.");
-                return ExitCodes.Failure;
-            }
-
-            Console.WriteLine("Validating connection...");
-
-            profile.Environment = new EnvironmentInfo
-            {
-                Url = resolved.ApiUrl,
-                DisplayName = resolved.FriendlyName,
-                UniqueName = resolved.UniqueName,
-                EnvironmentId = resolved.EnvironmentId,
-                OrganizationId = resolved.Id.ToString(),
-                Type = resolved.EnvironmentType,
-                Region = resolved.Region
-            };
-
+            profile.Environment = result.Environment;
             await store.SaveAsync(collection, cancellationToken);
 
+            var methodNote = result.Method == ResolutionMethod.DirectConnection
+                ? " (via direct connection)"
+                : " (via Global Discovery)";
+
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Connected to... {resolved.FriendlyName}");
+            Console.WriteLine($"Connected to {result.Environment!.DisplayName}{methodNote}");
             Console.ResetColor();
 
             return ExitCodes.Success;
