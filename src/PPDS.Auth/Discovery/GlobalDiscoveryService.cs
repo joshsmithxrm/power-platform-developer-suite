@@ -278,6 +278,12 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
         if (_disposed)
             return;
 
+        // Unregister cache helper to release file locks on token cache
+        if (_cacheHelper != null && _msalClient != null)
+        {
+            _cacheHelper.UnregisterCache(_msalClient.UserTokenCache);
+        }
+
         _disposed = true;
     }
 }
