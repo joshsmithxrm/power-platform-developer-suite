@@ -298,4 +298,111 @@ public class PluginRegistrationConfigTests
     }
 
     #endregion
+
+    #region Validation Tests
+
+    [Fact]
+    public void Validate_ValidExecutionOrder_DoesNotThrow()
+    {
+        var config = CreateConfigWithExecutionOrder(1);
+        config.Validate(); // Should not throw
+    }
+
+    [Fact]
+    public void Validate_MaxExecutionOrder_DoesNotThrow()
+    {
+        var config = CreateConfigWithExecutionOrder(999999);
+        config.Validate(); // Should not throw
+    }
+
+    [Fact]
+    public void Validate_ExecutionOrderBelowMinimum_Throws()
+    {
+        var config = CreateConfigWithExecutionOrder(0);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Validate());
+        Assert.Contains("invalid executionOrder", ex.Message);
+        Assert.Contains("0", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_ExecutionOrderAboveMaximum_Throws()
+    {
+        var config = CreateConfigWithExecutionOrder(1000000);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Validate());
+        Assert.Contains("invalid executionOrder", ex.Message);
+        Assert.Contains("1000000", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_MultipleInvalidSteps_ReportsAll()
+    {
+        var config = new PluginRegistrationConfig
+        {
+            Assemblies =
+            [
+                new PluginAssemblyConfig
+                {
+                    Name = "TestPlugins",
+                    Types =
+                    [
+                        new PluginTypeConfig
+                        {
+                            TypeName = "Plugin1",
+                            Steps =
+                            [
+                                new PluginStepConfig { Name = "Step1", ExecutionOrder = 0 },
+                                new PluginStepConfig { Name = "Step2", ExecutionOrder = 1000000 }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Validate());
+        Assert.Contains("Step1", ex.Message);
+        Assert.Contains("Step2", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_EmptyConfig_DoesNotThrow()
+    {
+        var config = new PluginRegistrationConfig();
+        config.Validate(); // Should not throw
+    }
+
+    private static PluginRegistrationConfig CreateConfigWithExecutionOrder(int executionOrder)
+    {
+        return new PluginRegistrationConfig
+        {
+            Assemblies =
+            [
+                new PluginAssemblyConfig
+                {
+                    Name = "TestPlugins",
+                    Types =
+                    [
+                        new PluginTypeConfig
+                        {
+                            TypeName = "TestPlugin",
+                            Steps =
+                            [
+                                new PluginStepConfig
+                                {
+                                    Name = "TestStep",
+                                    Message = "Create",
+                                    Entity = "account",
+                                    ExecutionOrder = executionOrder
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+    }
+
+    #endregion
 }
