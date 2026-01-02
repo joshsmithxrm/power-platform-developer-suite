@@ -102,7 +102,8 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
             var options = new ConnectionOptions
             {
                 ServiceUri = new Uri(environmentUrl),
-                AccessTokenProviderFunctionAsync = _ => GetTokenAsync(environmentUrl, CancellationToken.None)
+                AccessTokenProviderFunctionAsync = _ => GetTokenAsync(environmentUrl, CancellationToken.None),
+                SkipDiscovery = false
             };
             client = new ServiceClient(options);
 
