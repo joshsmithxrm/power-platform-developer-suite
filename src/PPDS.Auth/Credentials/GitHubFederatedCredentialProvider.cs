@@ -77,11 +77,9 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
 
         EnsureCredentialInitialized();
 
-        // Get token and prime the cache (uses cancellationToken for cancellable first request)
-        await GetTokenAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
-
-        // Create ServiceClient using ConnectionOptions.
-        // The provider function uses cached tokens and refreshes when needed.
+        // Create ServiceClient using ConnectionOptions to ensure org metadata discovery.
+        // The provider function acquires tokens on demand and refreshes when needed.
+        // SkipDiscovery = false forces org metadata population (ConnectedOrgFriendlyName, etc.)
         var options = new ConnectionOptions
         {
             ServiceUri = new Uri(environmentUrl),
@@ -91,9 +89,7 @@ public sealed class GitHubFederatedCredentialProvider : ICredentialProvider
         var client = new ServiceClient(options);
 
         // Force org metadata discovery before client is cloned by pool.
-        // ServiceClient uses lazy initialization - properties like ConnectedOrgFriendlyName
-        // are only populated when first accessed. The connection pool clones clients before
-        // properties are accessed, so clones would have empty metadata.
+        // Discovery is lazy - accessing a property triggers it.
         _ = client.ConnectedOrgFriendlyName;
 
         if (!client.IsReady)

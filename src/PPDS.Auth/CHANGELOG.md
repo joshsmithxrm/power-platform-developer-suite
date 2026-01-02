@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ServiceClient org metadata not populated** - Credential providers now force eager org metadata discovery by accessing `ConnectedOrgFriendlyName` immediately after creating the ServiceClient. Discovery is lazy by default, and the connection pool clones clients before properties are accessed, resulting in empty metadata. This fix ensures `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` are populated. ([#86](https://github.com/joshsmithxrm/ppds-sdk/issues/86))
+- **ServiceClient org metadata not populated** - Credential providers now use `ConnectionOptions` constructor with `SkipDiscovery = false` and force eager discovery by accessing `ConnectedOrgFriendlyName` before the client is cloned by the connection pool. This populates `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` properties. ([#86](https://github.com/joshsmithxrm/ppds-sdk/issues/86))
 
 ### Added
 
