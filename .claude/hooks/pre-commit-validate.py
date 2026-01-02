@@ -4,6 +4,7 @@ Pre-commit validation hook for PPDS SDK.
 Runs dotnet build and test before allowing git commit.
 """
 import json
+import shlex
 import subprocess
 import sys
 import os
@@ -19,8 +20,15 @@ def main():
     tool_input = input_data.get("tool_input", {})
     command = tool_input.get("command", "")
 
-    # Only validate git commit commands
-    if tool_name != "Bash" or "git commit" not in command:
+    # Only validate git commit commands (robust check using shlex)
+    if tool_name != "Bash":
+        sys.exit(0)
+    try:
+        parts = shlex.split(command)
+        is_git_commit = len(parts) >= 2 and os.path.basename(parts[0]) == "git" and parts[1] == "commit"
+    except ValueError:
+        is_git_commit = False
+    if not is_git_commit:
         sys.exit(0)  # Allow non-commit commands
 
     # Get project directory
@@ -39,7 +47,10 @@ def main():
 
         if build_result.returncode != 0:
             print("❌ Build failed. Fix errors before committing:", file=sys.stderr)
-            print(build_result.stderr or build_result.stdout, file=sys.stderr)
+            if build_result.stdout:
+                print(build_result.stdout, file=sys.stderr)
+            if build_result.stderr:
+                print(build_result.stderr, file=sys.stderr)
             sys.exit(2)  # Block commit
 
         # Run dotnet test (unit tests only - integration tests run on PR)
@@ -54,7 +65,10 @@ def main():
 
         if test_result.returncode != 0:
             print("❌ Unit tests failed. Fix before committing:", file=sys.stderr)
-            print(test_result.stderr or test_result.stdout, file=sys.stderr)
+            if test_result.stdout:
+                print(test_result.stdout, file=sys.stderr)
+            if test_result.stderr:
+                print(test_result.stderr, file=sys.stderr)
             sys.exit(2)  # Block commit
 
         print("✅ Build and unit tests passed", file=sys.stderr)
