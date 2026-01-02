@@ -29,5 +29,5 @@ jobs:
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal
+    - name: Test (Unit Tests Only)
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"

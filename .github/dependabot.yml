@@ -27,6 +27,9 @@ updates:
       dataverse:
         patterns:
           - "Microsoft.PowerPlatform.Dataverse.*"
+      fakexrmeasy:
+        patterns:
+          - "FakeXrmEasy*"
     # Widen version constraints when needed (e.g., 1.1.* -> 1.2.*)
     versioning-strategy: increase
 
