@@ -63,7 +63,8 @@ public abstract class FakeXrmEasyTestsBase : IDisposable
     /// </summary>
     public virtual void Dispose()
     {
-        Context.Dispose();
+        // IXrmFakedContext doesn't declare IDisposable, but runtime type may implement it
+        (Context as IDisposable)?.Dispose();
         GC.SuppressFinalize(this);
     }
 }
