@@ -115,9 +115,11 @@ dotnet clean
 
 1. Create feature branch from `main`
 2. Make changes
-3. Run `dotnet build` and `dotnet test`
-4. Update `CHANGELOG.md`
-5. Create PR to `main`
+3. **Add tests for new classes** (no new code without tests)
+4. Update `CHANGELOG.md` (same commit, not after)
+5. Run `/pre-pr` before committing
+6. Create PR to `main`
+7. Run `/review-bot-comments` after bots comment
 
 ### Code Conventions
 
@@ -144,57 +146,21 @@ public class PluginStepAttribute : Attribute { }
 
 ### Code Comments
 
-Comments explain WHY, not WHAT. The code documents what it does.
+Comments explain WHY, not WHAT.
 
 ```csharp
-// ❌ Bad - explains what (the code already shows this)
-// Loop through all options and check if required
+// ❌ Bad - explains what
+// Loop through all options
 foreach (var option in command.Options)
 
-// ❌ Bad - references external tool as justification
-// Use [Required] prefix like Azure CLI does
-option.Description = $"[Required] {desc}";
-
-// ✅ Good - explains why (non-obvious side effect)
+// ✅ Good - explains why
 // Required=false hides the default suffix; we show [Required] in description instead
 option.Required = false;
-
-// ✅ Good - explains why (workaround for framework limitation)
-// Option validators only run when the option is present on command line,
-// so we need command-level validation to catch missing required options
-command.Validators.Add(result => { ... });
 ```
 
 ### Namespaces
 
-```csharp
-// PPDS.Plugins
-namespace PPDS.Plugins;              // Root
-namespace PPDS.Plugins.Attributes;   // Attributes
-namespace PPDS.Plugins.Enums;        // Enums
-
-// PPDS.Dataverse
-namespace PPDS.Dataverse.Pooling;        // Connection pool, IConnectionSource
-namespace PPDS.Dataverse.BulkOperations; // Bulk API wrappers
-namespace PPDS.Dataverse.Configuration;  // Options, connection config
-namespace PPDS.Dataverse.Resilience;     // Throttle tracking, service protection
-
-// PPDS.Migration
-namespace PPDS.Migration.Export;     // IExporter
-namespace PPDS.Migration.Import;     // IImporter
-
-// PPDS.Auth
-namespace PPDS.Auth.Profiles;        // AuthProfile, ProfileStore, ProfileCollection
-namespace PPDS.Auth.Credentials;     // ICredentialProvider, credential implementations
-namespace PPDS.Auth.Discovery;       // GlobalDiscoveryService, EnvironmentResolver
-namespace PPDS.Auth.Cloud;           // CloudEnvironment, CloudEndpoints
-
-// PPDS.Cli
-namespace PPDS.Cli.Commands.Auth;    // Auth command group
-namespace PPDS.Cli.Commands.Env;     // Environment command group
-namespace PPDS.Cli.Commands.Data;    // Data command group (export, import, copy)
-namespace PPDS.Cli.Infrastructure;   // ServiceFactory, ProfileServiceFactory
-```
+Follow existing patterns: `PPDS.{Package}.{Area}` (e.g., `PPDS.Auth.Credentials`). Infer from code.
 
 ---
 
@@ -411,10 +377,57 @@ See [CLI README](src/PPDS.Cli/README.md) for full documentation.
 
 ## 🧪 Testing Requirements
 
-- **Target 80% code coverage**
-- Unit tests for all public API (attributes, enums)
-- Run `dotnet test` before submitting PR
-- All tests must pass before merge
+| Package | Test Project | Status |
+|---------|--------------|--------|
+| PPDS.Plugins | PPDS.Plugins.Tests | ✅ |
+| PPDS.Dataverse | PPDS.Dataverse.Tests | ✅ |
+| PPDS.Cli | PPDS.Cli.Tests | ✅ |
+| PPDS.Auth | **Needs test project** | ❌ |
+| PPDS.Migration | **Needs test project** | ❌ |
+
+**Rules:**
+- New public class → must have corresponding test class
+- New public method → must have test coverage
+- Mark integration tests with `[Trait("Category", "Integration")]`
+
+**Test filtering:**
+- **Commits:** Unit tests only (`--filter Category!=Integration`)
+- **PRs:** All tests including integration
+
+---
+
+## 🤖 Bot Review Handling
+
+PRs get reviewed by Copilot, Gemini, and CodeQL. **Not all findings are valid.**
+
+| Finding Type | Action |
+|--------------|--------|
+| Unused code, resource leaks, missing tests | Usually valid - fix |
+| "Use .Where()", style suggestions | Often preference - dismiss with reason |
+| Logic errors (OR/AND) | Verify manually - bots misread DeMorgan |
+
+**Workflow:** After PR created, run `/review-bot-comments [PR#]` to triage.
+
+---
+
+## 🛠️ Claude Commands & Hooks
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/pre-pr` | Validate before PR (build, test, changelog) |
+| `/review-bot-comments [PR#]` | Triage bot review findings |
+| `/handoff` | Session summary (workspace) |
+| `/create-issue [repo]` | Create issue (workspace) |
+
+### Hooks (Automatic)
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `pre-commit-validate.py` | `git commit` | Build + unit tests (skips integration), blocks if failed |
+
+Hooks in `.claude/settings.json`. Pre-commit runs ~10s, keeps broken code out of commits.
 
 ---
 
