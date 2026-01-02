@@ -128,9 +128,11 @@ public sealed class ProfileConnectionSource : IDisposable
 
             try
             {
-                // Create ServiceClient synchronously (pool expects sync method)
-                _seedClient = _provider
-                    .CreateServiceClientAsync(_environmentUrl, CancellationToken.None)
+                // Create ServiceClient synchronously (pool expects sync method).
+                // Wrap in Task.Run to avoid deadlock in sync contexts (UI/ASP.NET)
+                // by running async code on threadpool which has no sync context.
+                _seedClient = System.Threading.Tasks.Task.Run(() =>
+                    _provider.CreateServiceClientAsync(_environmentUrl, CancellationToken.None))
                     .GetAwaiter()
                     .GetResult();
 
