@@ -205,8 +205,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         }
 
         // Interactive browser authentication
-        Console.WriteLine();
-        Console.WriteLine("Opening browser for authentication...");
+        AuthenticationOutput.WriteLine();
+        AuthenticationOutput.WriteLine("Opening browser for authentication...");
 
         try
         {
@@ -222,8 +222,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             throw new OperationCanceledException("Authentication was canceled by the user.", ex);
         }
 
-        Console.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
-        Console.WriteLine();
+        AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
+        AuthenticationOutput.WriteLine();
 
         return _cachedResult.AccessToken;
     }

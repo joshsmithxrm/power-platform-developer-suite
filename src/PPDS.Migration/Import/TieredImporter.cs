@@ -872,6 +872,20 @@ namespace PPDS.Migration.Import
             return cache;
         }
 
+        /// <summary>
+        /// Attempts to find a matching role in the target environment by ID.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This method only succeeds when the source and target environments share the same role IDs
+        /// (e.g., same tenant or restored from backup). For cross-environment migrations where role IDs
+        /// differ, this returns null because we don't have the source role name to look up by name.
+        /// </para>
+        /// <para>
+        /// Known limitation: Proper role mapping requires exporting role names alongside IDs in the
+        /// migration schema. This is tracked for future enhancement.
+        /// </para>
+        /// </remarks>
         private async Task<Guid?> LookupRoleByIdAsync(
             Guid sourceRoleId,
             Dictionary<string, Guid> roleNameCache,

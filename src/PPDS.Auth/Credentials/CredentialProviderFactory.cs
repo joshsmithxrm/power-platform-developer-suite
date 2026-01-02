@@ -14,6 +14,8 @@ public static class CredentialProviderFactory
     /// <param name="profile">The auth profile.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display (for DeviceCode auth in headless mode).</param>
     /// <returns>A credential provider for the profile's auth method.</returns>
+    /// <exception cref="ArgumentNullException">If profile is null.</exception>
+    /// <exception cref="ArgumentException">If required profile fields are missing for the auth method.</exception>
     /// <exception cref="NotSupportedException">If the auth method is not supported.</exception>
     public static ICredentialProvider Create(
         AuthProfile profile,
@@ -21,6 +23,9 @@ public static class CredentialProviderFactory
     {
         if (profile == null)
             throw new ArgumentNullException(nameof(profile));
+
+        // Validate required fields based on auth method
+        ValidateRequiredFields(profile);
 
         return profile.AuthMethod switch
         {
@@ -38,6 +43,41 @@ public static class CredentialProviderFactory
                 profile.Username!, profile.Password!, profile.Cloud, profile.TenantId),
             _ => throw new NotSupportedException($"Unknown auth method: {profile.AuthMethod}")
         };
+    }
+
+    /// <summary>
+    /// Validates that required fields are present for the profile's auth method.
+    /// </summary>
+    private static void ValidateRequiredFields(AuthProfile profile)
+    {
+        switch (profile.AuthMethod)
+        {
+            case AuthMethod.GitHubFederated:
+            case AuthMethod.AzureDevOpsFederated:
+                RequireField(profile.ApplicationId, nameof(profile.ApplicationId), profile.AuthMethod);
+                RequireField(profile.TenantId, nameof(profile.TenantId), profile.AuthMethod);
+                break;
+
+            case AuthMethod.UsernamePassword:
+                RequireField(profile.Username, nameof(profile.Username), profile.AuthMethod);
+                RequireField(profile.Password, nameof(profile.Password), profile.AuthMethod);
+                break;
+
+            // Other auth methods validate in their FromProfile methods
+        }
+    }
+
+    /// <summary>
+    /// Throws if a required field is null or empty.
+    /// </summary>
+    private static void RequireField(string? value, string fieldName, AuthMethod authMethod)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(
+                $"Profile field '{fieldName}' is required for {authMethod} authentication.",
+                fieldName);
+        }
     }
 
     /// <summary>

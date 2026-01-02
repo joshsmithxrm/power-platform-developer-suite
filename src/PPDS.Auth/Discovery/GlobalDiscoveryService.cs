@@ -168,7 +168,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             {
                 if (_deviceCodeCallback == null)
                 {
-                    Console.WriteLine("Opening browser for authentication...");
+                    AuthenticationOutput.WriteLine("Opening browser for authentication...");
                 }
 
                 result = await _msalClient!
@@ -192,18 +192,14 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                         }
                         else
                         {
-                            Console.WriteLine();
-                            Console.WriteLine("To sign in, use a web browser to open the page:");
-                            Console.ForegroundColor = ConsoleColor.Cyan;
-                            Console.WriteLine($"  {deviceCodeResult.VerificationUrl}");
-                            Console.ResetColor();
-                            Console.WriteLine();
-                            Console.WriteLine("Enter the code:");
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"  {deviceCodeResult.UserCode}");
-                            Console.ResetColor();
-                            Console.WriteLine();
-                            Console.WriteLine("Waiting for authentication...");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("To sign in, use a web browser to open the page:");
+                            AuthenticationOutput.WriteLine($"  {deviceCodeResult.VerificationUrl}");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("Enter the code:");
+                            AuthenticationOutput.WriteLine($"  {deviceCodeResult.UserCode}");
+                            AuthenticationOutput.WriteLine();
+                            AuthenticationOutput.WriteLine("Waiting for authentication...");
                         }
                         return Task.CompletedTask;
                     })
@@ -213,8 +209,8 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
             if (_deviceCodeCallback == null)
             {
-                Console.WriteLine($"Authenticated as: {result.Account.Username}");
-                Console.WriteLine();
+                AuthenticationOutput.WriteLine($"Authenticated as: {result.Account.Username}");
+                AuthenticationOutput.WriteLine();
             }
 
             return result.AccessToken;
