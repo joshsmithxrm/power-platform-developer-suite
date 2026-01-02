@@ -4,6 +4,7 @@ using FakeXrmEasy.Middleware;
 using FakeXrmEasy.Middleware.Crud;
 using FakeXrmEasy.Middleware.Messages;
 using Microsoft.Xrm.Sdk;
+using PPDS.Dataverse.IntegrationTests.FakeMessageExecutors;
 
 namespace PPDS.Dataverse.IntegrationTests;
 
@@ -25,6 +26,7 @@ public abstract class FakeXrmEasyTestsBase : IDisposable
 
     /// <summary>
     /// Initializes a new instance of the test base with FakeXrmEasy middleware.
+    /// Registers custom message executors for CreateMultiple, UpdateMultiple, UpsertMultiple.
     /// </summary>
     protected FakeXrmEasyTestsBase()
     {
@@ -32,6 +34,9 @@ public abstract class FakeXrmEasyTestsBase : IDisposable
             .New()
             .AddCrud()
             .AddFakeMessageExecutors()
+            .AddFakeMessageExecutor(new CreateMultipleRequestExecutor())
+            .AddFakeMessageExecutor(new UpdateMultipleRequestExecutor())
+            .AddFakeMessageExecutor(new UpsertMultipleRequestExecutor())
             .UseCrud()
             .UseMessages()
             .SetLicense(FakeXrmEasyLicense.RPL_1_5)

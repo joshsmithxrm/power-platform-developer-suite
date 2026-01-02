@@ -21,6 +21,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
     <!-- FakeXrmEasy for mocked Dataverse tests -->
     <PackageReference Include="FakeXrmEasy.v9" Version="3.8.0" />
   </ItemGroup>
