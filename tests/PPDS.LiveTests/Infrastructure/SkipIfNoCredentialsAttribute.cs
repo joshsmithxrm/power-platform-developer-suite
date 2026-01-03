@@ -79,3 +79,23 @@ public sealed class SkipIfNoGitHubOidcAttribute : FactAttribute
         }
     }
 }
+
+/// <summary>
+/// Skips the test if Azure DevOps OIDC federated credentials are not configured.
+/// This is only available when running inside Azure Pipelines with workload identity federation.
+/// </summary>
+public sealed class SkipIfNoAzureDevOpsOidcAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips if Azure DevOps OIDC credentials are missing.
+    /// </summary>
+    public SkipIfNoAzureDevOpsOidcAttribute()
+    {
+        if (!Configuration.HasAzureDevOpsOidcCredentials)
+        {
+            Skip = "Azure DevOps OIDC not available. This test only runs in Azure Pipelines with workload identity federation service connection.";
+        }
+    }
+}

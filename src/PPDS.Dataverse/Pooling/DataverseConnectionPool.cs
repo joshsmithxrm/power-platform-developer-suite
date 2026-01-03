@@ -1112,25 +1112,18 @@ namespace PPDS.Dataverse.Pooling
             }
 
             // Remove from our seed cache
-            if (_seedClients.TryRemove(connectionName, out var oldSeed))
+            if (_seedClients.TryRemove(connectionName, out _))
             {
                 _logger.LogWarning(
                     "Invalidating seed client for connection {ConnectionName} due to token failure. " +
                     "Next connection request will create fresh authentication.",
                     connectionName);
-
-                // Dispose the old seed
-                try
-                {
-                    oldSeed.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Error disposing old seed client for {ConnectionName}", connectionName);
-                }
             }
 
-            // Invalidate the source's cached seed so GetSeedClient() creates a fresh one
+            // Invalidate the source's cached seed so GetSeedClient() creates a fresh one.
+            // The source owns the seed client and is responsible for disposal:
+            // - ConnectionStringSource: disposes and recreates on next GetSeedClient()
+            // - ServiceClientSource: no-op (externally-managed client, caller owns lifecycle)
             var source = _sources.FirstOrDefault(s =>
                 string.Equals(s.Name, connectionName, StringComparison.OrdinalIgnoreCase));
 

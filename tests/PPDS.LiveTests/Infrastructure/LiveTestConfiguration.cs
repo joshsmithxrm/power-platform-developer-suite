@@ -58,6 +58,21 @@ public sealed class LiveTestConfiguration : IDisposable
     public string? GitHubOidcRequestToken { get; }
 
     /// <summary>
+    /// Azure DevOps OIDC request URI (set automatically by Azure DevOps).
+    /// </summary>
+    public string? AzureDevOpsOidcRequestUri { get; }
+
+    /// <summary>
+    /// Azure DevOps system access token (set automatically by Azure DevOps).
+    /// </summary>
+    public string? AzureDevOpsAccessToken { get; }
+
+    /// <summary>
+    /// Azure DevOps service connection ID for workload identity federation.
+    /// </summary>
+    public string? AzureDevOpsServiceConnectionId { get; }
+
+    /// <summary>
     /// Gets a value indicating whether client secret credentials are available.
     /// </summary>
     public bool HasClientSecretCredentials =>
@@ -87,9 +102,21 @@ public sealed class LiveTestConfiguration : IDisposable
         !string.IsNullOrWhiteSpace(GitHubOidcRequestToken);
 
     /// <summary>
+    /// Gets a value indicating whether Azure DevOps OIDC federated credentials are available.
+    /// This is true when running inside Azure Pipelines with workload identity federation.
+    /// </summary>
+    public bool HasAzureDevOpsOidcCredentials =>
+        !string.IsNullOrWhiteSpace(DataverseUrl) &&
+        !string.IsNullOrWhiteSpace(ApplicationId) &&
+        !string.IsNullOrWhiteSpace(TenantId) &&
+        !string.IsNullOrWhiteSpace(AzureDevOpsOidcRequestUri) &&
+        !string.IsNullOrWhiteSpace(AzureDevOpsAccessToken) &&
+        !string.IsNullOrWhiteSpace(AzureDevOpsServiceConnectionId);
+
+    /// <summary>
     /// Gets a value indicating whether any live test credentials are available.
     /// </summary>
-    public bool HasAnyCredentials => HasClientSecretCredentials || HasCertificateCredentials || HasGitHubOidcCredentials;
+    public bool HasAnyCredentials => HasClientSecretCredentials || HasCertificateCredentials || HasGitHubOidcCredentials || HasAzureDevOpsOidcCredentials;
 
     /// <summary>
     /// Initializes a new instance reading from environment variables.
@@ -105,6 +132,9 @@ public sealed class LiveTestConfiguration : IDisposable
         CertificatePath = Environment.GetEnvironmentVariable("PPDS_TEST_CERT_PATH");
         GitHubOidcTokenUrl = Environment.GetEnvironmentVariable("ACTIONS_ID_TOKEN_REQUEST_URL");
         GitHubOidcRequestToken = Environment.GetEnvironmentVariable("ACTIONS_ID_TOKEN_REQUEST_TOKEN");
+        AzureDevOpsOidcRequestUri = Environment.GetEnvironmentVariable("SYSTEM_OIDCREQUESTURI");
+        AzureDevOpsAccessToken = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
+        AzureDevOpsServiceConnectionId = Environment.GetEnvironmentVariable("AZURESUBSCRIPTION_SERVICE_CONNECTION_ID");
     }
 
     /// <summary>
