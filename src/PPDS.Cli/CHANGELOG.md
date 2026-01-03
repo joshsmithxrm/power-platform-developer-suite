@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **PluginRegistrationService refactored to use early-bound entities** - Replaced all magic string attribute access with strongly-typed `PPDS.Dataverse.Generated` classes (`PluginAssembly`, `PluginPackage`, `PluginType`, `SdkMessageProcessingStep`, `SdkMessageProcessingStepImage`, `SdkMessage`, `SdkMessageFilter`, `SystemUser`). Provides compile-time type safety and IntelliSense for all Dataverse entity operations. ([#56](https://github.com/joshsmithxrm/ppds-sdk/issues/56))
+- **`PluginRegistrationService` now requires logger** - Constructor now requires `ILogger<PluginRegistrationService>` for diagnostic output. ([#61](https://github.com/joshsmithxrm/ppds-sdk/issues/61))
 
 ### Fixed
 
+- **Improved exception handling in `GetComponentTypeAsync`** - Replaced generic catch clause with specific `FaultException<OrganizationServiceFault>` and `FaultException` handlers. Logs failures at Debug level for troubleshooting while maintaining graceful degradation behavior. ([#61](https://github.com/joshsmithxrm/ppds-sdk/issues/61))
 - **Environment resolution for service principals** - `ppds env select` now works with full URLs for service principals by trying direct Dataverse connection first, before falling back to Global Discovery (which requires user auth). ([#89](https://github.com/joshsmithxrm/ppds-sdk/issues/89))
 - **`auth update --environment` now validates and resolves** - Previously only parsed the URL string without connecting. Now performs full resolution with org metadata population. ([#88](https://github.com/joshsmithxrm/ppds-sdk/issues/88))
 - **`env select` validates connection before saving** - Now performs actual WhoAmI request to verify user has access before saving environment selection. Previously resolved metadata but didn't validate access. ([#91](https://github.com/joshsmithxrm/ppds-sdk/issues/91))

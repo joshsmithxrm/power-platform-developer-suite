@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
@@ -73,8 +74,9 @@ public static class ListCommand
                 cancellationToken);
 
             var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+            var logger = serviceProvider.GetRequiredService<ILogger<PluginRegistrationService>>();
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-            var registrationService = new PluginRegistrationService(client);
+            var registrationService = new PluginRegistrationService(client, logger);
 
             if (outputFormat != OutputFormat.Json)
             {

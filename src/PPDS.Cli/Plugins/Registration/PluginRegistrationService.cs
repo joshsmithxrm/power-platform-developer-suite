@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.ServiceModel;
 using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -17,6 +19,7 @@ public sealed class PluginRegistrationService
 {
     private readonly IOrganizationService _service;
     private readonly IOrganizationServiceAsync2? _asyncService;
+    private readonly ILogger<PluginRegistrationService> _logger;
 
     // Cache for entity type codes (ETCs) - some like pluginpackage vary by environment
     private readonly ConcurrentDictionary<string, int> _entityTypeCodeCache = new();
@@ -42,9 +45,15 @@ public sealed class PluginRegistrationService
 
     #endregion
 
-    public PluginRegistrationService(IOrganizationService service)
+    /// <summary>
+    /// Creates a new instance of the plugin registration service.
+    /// </summary>
+    /// <param name="service">The Dataverse organization service.</param>
+    /// <param name="logger">Logger for diagnostic output.</param>
+    public PluginRegistrationService(IOrganizationService service, ILogger<PluginRegistrationService> logger)
     {
         _service = service;
+        _logger = logger;
         // Use native async when available (ServiceClient implements IOrganizationServiceAsync2)
         _asyncService = service as IOrganizationServiceAsync2;
     }
@@ -769,9 +778,23 @@ public sealed class PluginRegistrationService
             _entityTypeCodeCache[entityLogicalName] = objectTypeCode;
             return objectTypeCode;
         }
-        catch
+        catch (FaultException<OrganizationServiceFault> ex)
         {
-            // Entity doesn't exist or can't be queried - return 0 to skip solution addition
+            // Entity doesn't exist or user lacks metadata read permissions - skip solution addition
+            _logger.LogDebug(
+                "Could not retrieve component type for entity '{EntityLogicalName}': {ErrorMessage} (ErrorCode: {ErrorCode})",
+                entityLogicalName,
+                ex.Detail?.Message ?? ex.Message,
+                ex.Detail?.ErrorCode);
+            return 0;
+        }
+        catch (FaultException ex)
+        {
+            // Generic SOAP fault - entity may not exist in this environment
+            _logger.LogDebug(
+                "Could not retrieve component type for entity '{EntityLogicalName}': {ErrorMessage}",
+                entityLogicalName,
+                ex.Message);
             return 0;
         }
     }
