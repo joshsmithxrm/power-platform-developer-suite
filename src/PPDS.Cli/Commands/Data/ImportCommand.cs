@@ -164,7 +164,7 @@ public static class ImportCommand
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var importer = serviceProvider.GetRequiredService<IImporter>();

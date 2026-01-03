@@ -16,11 +16,11 @@ public static class ConsoleHeader
     public static void WriteConnectedAs(AuthProfile profile, string? environmentName = null)
     {
         var identity = GetIdentityDisplay(profile);
-        Console.WriteLine($"Connected as {identity}");
+        Console.Error.WriteLine($"Connected as {identity}");
 
         if (!string.IsNullOrEmpty(environmentName))
         {
-            Console.WriteLine($"Connected to... {environmentName}");
+            Console.Error.WriteLine($"Connected to... {environmentName}");
         }
     }
 
@@ -32,12 +32,12 @@ public static class ConsoleHeader
     public static void WriteConnectedAs(ResolvedConnectionInfo connectionInfo)
     {
         var identity = GetIdentityDisplay(connectionInfo.Profile);
-        Console.WriteLine($"Connected as {identity}");
+        Console.Error.WriteLine($"Connected as {identity}");
 
         var envDisplay = connectionInfo.EnvironmentDisplayName ?? connectionInfo.EnvironmentUrl;
         if (!string.IsNullOrEmpty(envDisplay))
         {
-            Console.WriteLine($"Connected to... {envDisplay}");
+            Console.Error.WriteLine($"Connected to... {envDisplay}");
         }
     }
 
@@ -49,12 +49,12 @@ public static class ConsoleHeader
     public static void WriteConnectedAsLabeled(string label, ResolvedConnectionInfo connectionInfo)
     {
         var identity = GetIdentityDisplay(connectionInfo.Profile);
-        Console.WriteLine($"{label}: Connected as {identity}");
+        Console.Error.WriteLine($"{label}: Connected as {identity}");
 
         var envDisplay = connectionInfo.EnvironmentDisplayName ?? connectionInfo.EnvironmentUrl;
         if (!string.IsNullOrEmpty(envDisplay))
         {
-            Console.WriteLine($"{new string(' ', label.Length + 2)}Connected to... {envDisplay}");
+            Console.Error.WriteLine($"{new string(' ', label.Length + 2)}Connected to... {envDisplay}");
         }
     }
 

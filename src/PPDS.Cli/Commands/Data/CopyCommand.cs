@@ -279,7 +279,7 @@ public static class CopyCommand
             {
                 var targetConnectionInfo = targetProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAsLabeled("Target", targetConnectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var importer = targetProvider.GetRequiredService<IImporter>();

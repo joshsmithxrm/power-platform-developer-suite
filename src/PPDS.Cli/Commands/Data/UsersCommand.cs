@@ -2,6 +2,8 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.UserMapping;
 
@@ -144,7 +146,7 @@ public static class UsersCommand
 
                 ConsoleHeader.WriteConnectedAsLabeled("Source", sourceConnectionInfo);
                 ConsoleHeader.WriteConnectedAsLabeled("Target", targetConnectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var sourcePool = sourceProvider.GetRequiredService<IDataverseConnectionPool>();
@@ -157,7 +159,7 @@ public static class UsersCommand
 
             if (outputFormat != OutputFormat.Json)
             {
-                Console.WriteLine("  Querying users from both environments...");
+                Console.Error.WriteLine("  Querying users from both environments...");
             }
 
             var result = await generator.GenerateAsync(sourcePool, targetPool, cancellationToken: cancellationToken);
@@ -172,21 +174,21 @@ public static class UsersCommand
 
                 if (!analyzeOnly)
                 {
-                    Console.WriteLine($"  Writing mapping file: {output.FullName}");
+                    Console.Error.WriteLine($"  Writing mapping file: {output.FullName}");
                     await generator.WriteAsync(result, output.FullName, cancellationToken);
-                    Console.WriteLine();
+                    Console.Error.WriteLine();
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"  Success: Generated {result.Mappings.Count} user mappings");
+                    Console.Error.WriteLine($"  Success: Generated {result.Mappings.Count} user mappings");
                     Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine("  Usage:");
-                    Console.WriteLine($"    ppds data import --data <file> --user-mapping \"{output.FullName}\"");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("  Usage:");
+                    Console.Error.WriteLine($"    ppds data import --data <file> --user-mapping \"{output.FullName}\"");
                 }
                 else
                 {
-                    Console.WriteLine();
+                    Console.Error.WriteLine();
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("  [ANALYZE ONLY] No mapping file generated.");
+                    Console.Error.WriteLine("  [ANALYZE ONLY] No mapping file generated.");
                     Console.ResetColor();
                 }
             }
@@ -195,68 +197,69 @@ public static class UsersCommand
         }
         catch (OperationCanceledException)
         {
-            ConsoleOutput.WriteError("Operation cancelled by user.", outputFormat == OutputFormat.Json);
+            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+            writer.WriteError(new StructuredError(
+                ErrorCodes.Operation.Cancelled,
+                "Operation cancelled by user."));
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            ConsoleOutput.WriteError($"Failed to generate user mapping: {ex.Message}", outputFormat == OutputFormat.Json);
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.StackTrace);
-            }
-            return ExitCodes.Failure;
+            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+            var error = ExceptionMapper.Map(ex, context: "generating user mapping", debug: debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 
     private static void OutputConsole(UserMappingResult result, bool analyzeOnly, string outputPath)
     {
-        Console.WriteLine();
-        Console.WriteLine("  Results:");
-        Console.WriteLine($"    Source users: {result.SourceUserCount}");
-        Console.WriteLine($"    Target users: {result.TargetUserCount}");
-        Console.WriteLine();
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("  Results:");
+        Console.Error.WriteLine($"    Source users: {result.SourceUserCount}");
+        Console.Error.WriteLine($"    Target users: {result.TargetUserCount}");
+        Console.Error.WriteLine();
 
-        Console.Write("    Matched: ");
+        Console.Error.Write("    Matched: ");
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine(result.Mappings.Count);
+        Console.Error.WriteLine(result.Mappings.Count);
         Console.ResetColor();
-        Console.WriteLine($"      By AAD Object ID: {result.MatchedByAadId}");
-        Console.WriteLine($"      By Domain Name:   {result.MatchedByDomain}");
+        Console.Error.WriteLine($"      By AAD Object ID: {result.MatchedByAadId}");
+        Console.Error.WriteLine($"      By Domain Name:   {result.MatchedByDomain}");
 
         if (result.UnmappedUsers.Count > 0)
         {
-            Console.Write("    Unmapped: ");
+            Console.Error.Write("    Unmapped: ");
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(result.UnmappedUsers.Count);
+            Console.Error.WriteLine(result.UnmappedUsers.Count);
             Console.ResetColor();
         }
-        Console.WriteLine();
+        Console.Error.WriteLine();
 
         // Show sample mappings
         if (result.Mappings.Count > 0)
         {
-            Console.WriteLine("  Sample Mappings (first 5):");
+            Console.Error.WriteLine("  Sample Mappings (first 5):");
             foreach (var mapping in result.Mappings.Take(5))
             {
-                Console.WriteLine($"    {mapping.Source.FullName}");
-                Console.WriteLine($"      Source: {mapping.Source.SystemUserId}");
-                Console.WriteLine($"      Target: {mapping.Target.SystemUserId} (matched by {mapping.MatchedBy})");
+                Console.Error.WriteLine($"    {mapping.Source.FullName}");
+                Console.Error.WriteLine($"      Source: {mapping.Source.SystemUserId}");
+                Console.Error.WriteLine($"      Target: {mapping.Target.SystemUserId} (matched by {mapping.MatchedBy})");
             }
-            Console.WriteLine();
+            Console.Error.WriteLine();
         }
 
         // Show unmapped users
         if (result.UnmappedUsers.Count > 0)
         {
-            Console.WriteLine("  Unmapped Users (first 10):");
+            Console.Error.WriteLine("  Unmapped Users (first 10):");
             foreach (var user in result.UnmappedUsers.Take(10))
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"    {user.FullName} ({user.DomainName ?? "no domain"})");
+                Console.Error.WriteLine($"    {user.FullName} ({user.DomainName ?? "no domain"})");
                 Console.ResetColor();
             }
-            Console.WriteLine();
+            Console.Error.WriteLine();
         }
     }
 

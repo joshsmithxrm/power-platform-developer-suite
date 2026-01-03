@@ -1,6 +1,8 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
 using PPDS.Migration.Schema;
@@ -112,7 +114,11 @@ public static class SchemaCommand
 
             if (entityList.Count == 0)
             {
-                ConsoleOutput.WriteError("No entities specified.", outputFormat == OutputFormat.Json);
+                var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.RequiredField,
+                    "No entities specified.",
+                    Target: "--entities"));
                 return ExitCodes.InvalidArguments;
             }
 
@@ -175,7 +181,7 @@ public static class SchemaCommand
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             progressReporter.Report(new ProgressEventArgs

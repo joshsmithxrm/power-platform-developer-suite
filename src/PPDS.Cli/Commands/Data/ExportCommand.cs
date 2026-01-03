@@ -138,7 +138,7 @@ public static class ExportCommand
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var exporter = serviceProvider.GetRequiredService<IExporter>();
