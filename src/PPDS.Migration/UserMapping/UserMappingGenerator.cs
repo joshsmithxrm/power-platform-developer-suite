@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Models;
 
@@ -165,23 +166,23 @@ namespace PPDS.Migration.UserMapping
         {
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            var query = new QueryExpression("systemuser")
+            var query = new QueryExpression(SystemUser.EntityLogicalName)
             {
                 ColumnSet = new ColumnSet(
-                    "systemuserid",
-                    "fullname",
-                    "domainname",
-                    "internalemailaddress",
-                    "azureactivedirectoryobjectid",
-                    "isdisabled",
-                    "accessmode"
+                    SystemUser.Fields.SystemUserId,
+                    SystemUser.Fields.FullName,
+                    SystemUser.Fields.DomainName,
+                    SystemUser.Fields.InternalEmailAddress,
+                    SystemUser.Fields.AzureActiveDirectoryObjectId,
+                    SystemUser.Fields.IsDisabled,
+                    SystemUser.Fields.AccessMode
                 ),
                 Criteria = new FilterExpression
                 {
                     Conditions =
                     {
                         // Exclude disabled users
-                        new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
+                        new ConditionExpression(SystemUser.Fields.IsDisabled, ConditionOperator.Equal, false)
                     }
                 }
             };
@@ -191,12 +192,12 @@ namespace PPDS.Migration.UserMapping
             return results.Entities.Select(e => new UserInfo
             {
                 SystemUserId = e.Id,
-                FullName = e.GetAttributeValue<string>("fullname") ?? "(no name)",
-                DomainName = e.GetAttributeValue<string>("domainname"),
-                Email = e.GetAttributeValue<string>("internalemailaddress"),
-                AadObjectId = e.GetAttributeValue<Guid?>("azureactivedirectoryobjectid"),
-                IsDisabled = e.GetAttributeValue<bool>("isdisabled"),
-                AccessMode = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("accessmode")?.Value ?? 0
+                FullName = e.GetAttributeValue<string>(SystemUser.Fields.FullName) ?? "(no name)",
+                DomainName = e.GetAttributeValue<string>(SystemUser.Fields.DomainName),
+                Email = e.GetAttributeValue<string>(SystemUser.Fields.InternalEmailAddress),
+                AadObjectId = e.GetAttributeValue<Guid?>(SystemUser.Fields.AzureActiveDirectoryObjectId),
+                IsDisabled = e.GetAttributeValue<bool>(SystemUser.Fields.IsDisabled),
+                AccessMode = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(SystemUser.Fields.AccessMode)?.Value ?? 0
             }).ToList();
         }
     }

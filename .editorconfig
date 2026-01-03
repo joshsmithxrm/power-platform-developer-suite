@@ -68,3 +68,20 @@ csharp_new_line_before_open_brace = all
 csharp_new_line_before_else = true
 csharp_new_line_before_catch = true
 csharp_new_line_before_finally = true
+
+# Generated code - relax rules that are noisy for auto-generated files
+[**/Generated/*.cs]
+# Disable naming warnings (generated code may not follow conventions)
+dotnet_diagnostic.IDE1006.severity = none
+
+# Disable documentation warnings (generated code has its own docs)
+dotnet_diagnostic.CS1591.severity = none
+
+# Disable nullable warnings (generated code handles nullability its own way)
+dotnet_diagnostic.CS8618.severity = none
+
+# Don't enforce file-scoped namespaces on generated code
+csharp_style_namespace_declarations = block_scoped:none
+
+# Don't warn about partial class declarations
+dotnet_diagnostic.CA1052.severity = none

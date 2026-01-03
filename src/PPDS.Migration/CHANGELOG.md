@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **PluginStepManager and UserMappingGenerator refactored to use early-bound entities** - Replaced magic string attribute access with strongly-typed `PPDS.Dataverse.Generated` classes (`SdkMessageProcessingStep`, `SdkMessageFilter`, `SystemUser`). Provides compile-time type safety and IntelliSense for entity operations. ([#56](https://github.com/joshsmithxrm/ppds-sdk/issues/56))
+
 ## [1.0.0-beta.2] - 2026-01-02
 
 ### Changed

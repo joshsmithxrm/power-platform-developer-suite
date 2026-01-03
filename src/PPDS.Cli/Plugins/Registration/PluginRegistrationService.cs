@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Dataverse.Generated;
 
 namespace PPDS.Cli.Plugins.Registration;
 
@@ -29,8 +30,8 @@ public sealed class PluginRegistrationService
     // Well-known component type codes that are consistent across all environments
     private static readonly Dictionary<string, int> WellKnownComponentTypes = new()
     {
-        ["pluginassembly"] = ComponentTypePluginAssembly,
-        ["sdkmessageprocessingstep"] = ComponentTypeSdkMessageProcessingStep
+        [PluginAssembly.EntityLogicalName] = ComponentTypePluginAssembly,
+        [SdkMessageProcessingStep.EntityLogicalName] = ComponentTypeSdkMessageProcessingStep
     };
 
     // Pipeline stage values (from SDK Message Processing Step entity)
@@ -56,23 +57,29 @@ public sealed class PluginRegistrationService
     /// <param name="assemblyNameFilter">Optional filter by assembly name.</param>
     public async Task<List<PluginAssemblyInfo>> ListAssembliesAsync(string? assemblyNameFilter = null)
     {
-        var query = new QueryExpression("pluginassembly")
+        var query = new QueryExpression(PluginAssembly.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("name", "version", "publickeytoken", "culture", "isolationmode", "sourcetype"),
+            ColumnSet = new ColumnSet(
+                PluginAssembly.Fields.Name,
+                PluginAssembly.Fields.Version,
+                PluginAssembly.Fields.PublicKeyToken,
+                PluginAssembly.Fields.Culture,
+                PluginAssembly.Fields.IsolationMode,
+                PluginAssembly.Fields.SourceType),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
                     // Exclude system assemblies
-                    new ConditionExpression("ishidden", ConditionOperator.Equal, false)
+                    new ConditionExpression(PluginAssembly.Fields.IsHidden, ConditionOperator.Equal, false)
                 }
             },
-            Orders = { new OrderExpression("name", OrderType.Ascending) }
+            Orders = { new OrderExpression(PluginAssembly.Fields.Name, OrderType.Ascending) }
         };
 
         if (!string.IsNullOrEmpty(assemblyNameFilter))
         {
-            query.Criteria.AddCondition("name", ConditionOperator.Equal, assemblyNameFilter);
+            query.Criteria.AddCondition(PluginAssembly.Fields.Name, ConditionOperator.Equal, assemblyNameFilter);
         }
 
         var results = await RetrieveMultipleAsync(query);
@@ -80,10 +87,10 @@ public sealed class PluginRegistrationService
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
             Id = e.Id,
-            Name = e.GetAttributeValue<string>("name") ?? string.Empty,
-            Version = e.GetAttributeValue<string>("version"),
-            PublicKeyToken = e.GetAttributeValue<string>("publickeytoken"),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>("isolationmode")?.Value ?? 2
+            Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
+            Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
+            PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)PluginAssembly_IsolationMode.Sandbox
         }).ToList();
     }
 
@@ -93,10 +100,13 @@ public sealed class PluginRegistrationService
     /// <param name="packageNameFilter">Optional filter by package name or unique name.</param>
     public async Task<List<PluginPackageInfo>> ListPackagesAsync(string? packageNameFilter = null)
     {
-        var query = new QueryExpression("pluginpackage")
+        var query = new QueryExpression(PluginPackage.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("name", "uniquename", "version"),
-            Orders = { new OrderExpression("name", OrderType.Ascending) }
+            ColumnSet = new ColumnSet(
+                PluginPackage.Fields.Name,
+                PluginPackage.Fields.UniqueName,
+                PluginPackage.Fields.Version),
+            Orders = { new OrderExpression(PluginPackage.Fields.Name, OrderType.Ascending) }
         };
 
         if (!string.IsNullOrEmpty(packageNameFilter))
@@ -106,8 +116,8 @@ public sealed class PluginRegistrationService
             {
                 Conditions =
                 {
-                    new ConditionExpression("name", ConditionOperator.Equal, packageNameFilter),
-                    new ConditionExpression("uniquename", ConditionOperator.Equal, packageNameFilter)
+                    new ConditionExpression(PluginPackage.Fields.Name, ConditionOperator.Equal, packageNameFilter),
+                    new ConditionExpression(PluginPackage.Fields.UniqueName, ConditionOperator.Equal, packageNameFilter)
                 }
             };
         }
@@ -117,9 +127,9 @@ public sealed class PluginRegistrationService
         return results.Entities.Select(e => new PluginPackageInfo
         {
             Id = e.Id,
-            Name = e.GetAttributeValue<string>("name") ?? string.Empty,
-            UniqueName = e.GetAttributeValue<string>("uniquename"),
-            Version = e.GetAttributeValue<string>("version")
+            Name = e.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? string.Empty,
+            UniqueName = e.GetAttributeValue<string>(PluginPackage.Fields.UniqueName),
+            Version = e.GetAttributeValue<string>(PluginPackage.Fields.Version)
         }).ToList();
     }
 
@@ -128,17 +138,23 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<List<PluginAssemblyInfo>> ListAssembliesForPackageAsync(Guid packageId)
     {
-        var query = new QueryExpression("pluginassembly")
+        var query = new QueryExpression(PluginAssembly.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("name", "version", "publickeytoken", "culture", "isolationmode", "sourcetype"),
+            ColumnSet = new ColumnSet(
+                PluginAssembly.Fields.Name,
+                PluginAssembly.Fields.Version,
+                PluginAssembly.Fields.PublicKeyToken,
+                PluginAssembly.Fields.Culture,
+                PluginAssembly.Fields.IsolationMode,
+                PluginAssembly.Fields.SourceType),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("packageid", ConditionOperator.Equal, packageId)
+                    new ConditionExpression(PluginAssembly.Fields.PackageId, ConditionOperator.Equal, packageId)
                 }
             },
-            Orders = { new OrderExpression("name", OrderType.Ascending) }
+            Orders = { new OrderExpression(PluginAssembly.Fields.Name, OrderType.Ascending) }
         };
 
         var results = await RetrieveMultipleAsync(query);
@@ -146,10 +162,10 @@ public sealed class PluginRegistrationService
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
             Id = e.Id,
-            Name = e.GetAttributeValue<string>("name") ?? string.Empty,
-            Version = e.GetAttributeValue<string>("version"),
-            PublicKeyToken = e.GetAttributeValue<string>("publickeytoken"),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>("isolationmode")?.Value ?? 2
+            Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
+            Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
+            PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)PluginAssembly_IsolationMode.Sandbox
         }).ToList();
     }
 
@@ -178,17 +194,20 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<List<PluginTypeInfo>> ListTypesForAssemblyAsync(Guid assemblyId)
     {
-        var query = new QueryExpression("plugintype")
+        var query = new QueryExpression(PluginType.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("typename", "friendlyname", "name"),
+            ColumnSet = new ColumnSet(
+                PluginType.Fields.TypeName,
+                PluginType.Fields.FriendlyName,
+                PluginType.Fields.Name),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("pluginassemblyid", ConditionOperator.Equal, assemblyId)
+                    new ConditionExpression(PluginType.Fields.PluginAssemblyId, ConditionOperator.Equal, assemblyId)
                 }
             },
-            Orders = { new OrderExpression("typename", OrderType.Ascending) }
+            Orders = { new OrderExpression(PluginType.Fields.TypeName, OrderType.Ascending) }
         };
 
         var results = await RetrieveMultipleAsync(query);
@@ -196,8 +215,8 @@ public sealed class PluginRegistrationService
         return results.Entities.Select(e => new PluginTypeInfo
         {
             Id = e.Id,
-            TypeName = e.GetAttributeValue<string>("typename") ?? string.Empty,
-            FriendlyName = e.GetAttributeValue<string>("friendlyname")
+            TypeName = e.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
+            FriendlyName = e.GetAttributeValue<string>(PluginType.Fields.FriendlyName)
         }).ToList();
     }
 
@@ -206,66 +225,74 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<List<PluginStepInfo>> ListStepsForTypeAsync(Guid pluginTypeId)
     {
-        var query = new QueryExpression("sdkmessageprocessingstep")
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
-                "name", "stage", "mode", "rank", "filteringattributes",
-                "configuration", "statecode", "description", "supporteddeployment",
-                "impersonatinguserid", "asyncautodelete"),
+                SdkMessageProcessingStep.Fields.Name,
+                SdkMessageProcessingStep.Fields.Stage,
+                SdkMessageProcessingStep.Fields.Mode,
+                SdkMessageProcessingStep.Fields.Rank,
+                SdkMessageProcessingStep.Fields.FilteringAttributes,
+                SdkMessageProcessingStep.Fields.Configuration,
+                SdkMessageProcessingStep.Fields.StateCode,
+                SdkMessageProcessingStep.Fields.Description,
+                SdkMessageProcessingStep.Fields.SupportedDeployment,
+                SdkMessageProcessingStep.Fields.ImpersonatingUserId,
+                SdkMessageProcessingStep.Fields.AsyncAutoDelete),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("plugintypeid", ConditionOperator.Equal, pluginTypeId)
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.PluginTypeId, ConditionOperator.Equal, pluginTypeId)
                 }
             },
             LinkEntities =
             {
-                new LinkEntity("sdkmessageprocessingstep", "sdkmessage", "sdkmessageid", "sdkmessageid", JoinOperator.Inner)
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SdkMessage.EntityLogicalName, SdkMessageProcessingStep.Fields.SdkMessageId, SdkMessage.Fields.SdkMessageId, JoinOperator.Inner)
                 {
-                    Columns = new ColumnSet("name"),
+                    Columns = new ColumnSet(SdkMessage.Fields.Name),
                     EntityAlias = "message"
                 },
-                new LinkEntity("sdkmessageprocessingstep", "sdkmessagefilter", "sdkmessagefilterid", "sdkmessagefilterid", JoinOperator.LeftOuter)
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SdkMessageFilter.EntityLogicalName, SdkMessageProcessingStep.Fields.SdkMessageFilterId, SdkMessageFilter.Fields.SdkMessageFilterId, JoinOperator.LeftOuter)
                 {
-                    Columns = new ColumnSet("primaryobjecttypecode", "secondaryobjecttypecode"),
+                    Columns = new ColumnSet(SdkMessageFilter.Fields.PrimaryObjectTypeCode, SdkMessageFilter.Fields.SecondaryObjectTypeCode),
                     EntityAlias = "filter"
                 },
-                new LinkEntity("sdkmessageprocessingstep", "systemuser", "impersonatinguserid", "systemuserid", JoinOperator.LeftOuter)
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SystemUser.EntityLogicalName, SdkMessageProcessingStep.Fields.ImpersonatingUserId, SystemUser.Fields.SystemUserId, JoinOperator.LeftOuter)
                 {
-                    Columns = new ColumnSet("fullname", "domainname"),
+                    Columns = new ColumnSet(SystemUser.Fields.FullName, SystemUser.Fields.DomainName),
                     EntityAlias = "impersonatinguser"
                 }
             },
-            Orders = { new OrderExpression("name", OrderType.Ascending) }
+            Orders = { new OrderExpression(SdkMessageProcessingStep.Fields.Name, OrderType.Ascending) }
         };
 
         var results = await RetrieveMultipleAsync(query);
 
         return results.Entities.Select(e =>
         {
-            var impersonatingUserRef = e.GetAttributeValue<EntityReference>("impersonatinguserid");
-            var impersonatingUserName = e.GetAttributeValue<AliasedValue>("impersonatinguser.fullname")?.Value?.ToString()
-                ?? e.GetAttributeValue<AliasedValue>("impersonatinguser.domainname")?.Value?.ToString();
+            var impersonatingUserRef = e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.ImpersonatingUserId);
+            var impersonatingUserName = e.GetAttributeValue<AliasedValue>($"impersonatinguser.{SystemUser.Fields.FullName}")?.Value?.ToString()
+                ?? e.GetAttributeValue<AliasedValue>($"impersonatinguser.{SystemUser.Fields.DomainName}")?.Value?.ToString();
 
             return new PluginStepInfo
             {
                 Id = e.Id,
-                Name = e.GetAttributeValue<string>("name") ?? string.Empty,
-                Message = e.GetAttributeValue<AliasedValue>("message.name")?.Value?.ToString() ?? string.Empty,
-                PrimaryEntity = e.GetAttributeValue<AliasedValue>("filter.primaryobjecttypecode")?.Value?.ToString() ?? "none",
-                SecondaryEntity = e.GetAttributeValue<AliasedValue>("filter.secondaryobjecttypecode")?.Value?.ToString(),
-                Stage = MapStageFromValue(e.GetAttributeValue<OptionSetValue>("stage")?.Value ?? StagePostOperation),
-                Mode = MapModeFromValue(e.GetAttributeValue<OptionSetValue>("mode")?.Value ?? 0),
-                ExecutionOrder = e.GetAttributeValue<int>("rank"),
-                FilteringAttributes = e.GetAttributeValue<string>("filteringattributes"),
-                Configuration = e.GetAttributeValue<string>("configuration"),
-                IsEnabled = e.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0,
-                Description = e.GetAttributeValue<string>("description"),
-                Deployment = MapDeploymentFromValue(e.GetAttributeValue<OptionSetValue>("supporteddeployment")?.Value ?? 0),
+                Name = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name) ?? string.Empty,
+                Message = e.GetAttributeValue<AliasedValue>($"message.{SdkMessage.Fields.Name}")?.Value?.ToString() ?? string.Empty,
+                PrimaryEntity = e.GetAttributeValue<AliasedValue>($"filter.{SdkMessageFilter.Fields.PrimaryObjectTypeCode}")?.Value?.ToString() ?? "none",
+                SecondaryEntity = e.GetAttributeValue<AliasedValue>($"filter.{SdkMessageFilter.Fields.SecondaryObjectTypeCode}")?.Value?.ToString(),
+                Stage = MapStageFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Stage)?.Value ?? StagePostOperation),
+                Mode = MapModeFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Mode)?.Value ?? 0),
+                ExecutionOrder = e.GetAttributeValue<int>(SdkMessageProcessingStep.Fields.Rank),
+                FilteringAttributes = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.FilteringAttributes),
+                Configuration = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Configuration),
+                IsEnabled = e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value == (int)SdkMessageProcessingStep_StateCode.Enabled,
+                Description = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Description),
+                Deployment = MapDeploymentFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.SupportedDeployment)?.Value ?? 0),
                 ImpersonatingUserId = impersonatingUserRef?.Id,
                 ImpersonatingUserName = impersonatingUserName,
-                AsyncAutoDelete = e.GetAttributeValue<bool?>("asyncautodelete") ?? false
+                AsyncAutoDelete = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false
             };
         }).ToList();
     }
@@ -275,17 +302,21 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<List<PluginImageInfo>> ListImagesForStepAsync(Guid stepId)
     {
-        var query = new QueryExpression("sdkmessageprocessingstepimage")
+        var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("name", "entityalias", "imagetype", "attributes"),
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStepImage.Fields.Name,
+                SdkMessageProcessingStepImage.Fields.EntityAlias,
+                SdkMessageProcessingStepImage.Fields.ImageType,
+                SdkMessageProcessingStepImage.Fields.Attributes),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("sdkmessageprocessingstepid", ConditionOperator.Equal, stepId)
+                    new ConditionExpression(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, stepId)
                 }
             },
-            Orders = { new OrderExpression("name", OrderType.Ascending) }
+            Orders = { new OrderExpression(SdkMessageProcessingStepImage.Fields.Name, OrderType.Ascending) }
         };
 
         var results = await RetrieveMultipleAsync(query);
@@ -293,10 +324,10 @@ public sealed class PluginRegistrationService
         return results.Entities.Select(e => new PluginImageInfo
         {
             Id = e.Id,
-            Name = e.GetAttributeValue<string>("name") ?? string.Empty,
-            EntityAlias = e.GetAttributeValue<string>("entityalias"),
-            ImageType = MapImageTypeFromValue(e.GetAttributeValue<OptionSetValue>("imagetype")?.Value ?? 0),
-            Attributes = e.GetAttributeValue<string>("attributes")
+            Name = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty,
+            EntityAlias = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.EntityAlias),
+            ImageType = MapImageTypeFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStepImage.Fields.ImageType)?.Value ?? 0),
+            Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes)
         }).ToList();
     }
 
@@ -327,14 +358,14 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<Guid?> GetSdkMessageIdAsync(string messageName)
     {
-        var query = new QueryExpression("sdkmessage")
+        var query = new QueryExpression(SdkMessage.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("sdkmessageid"),
+            ColumnSet = new ColumnSet(SdkMessage.Fields.SdkMessageId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("name", ConditionOperator.Equal, messageName)
+                    new ConditionExpression(SdkMessage.Fields.Name, ConditionOperator.Equal, messageName)
                 }
             }
         };
@@ -348,22 +379,22 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task<Guid?> GetSdkMessageFilterIdAsync(Guid messageId, string primaryEntity, string? secondaryEntity = null)
     {
-        var query = new QueryExpression("sdkmessagefilter")
+        var query = new QueryExpression(SdkMessageFilter.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("sdkmessagefilterid"),
+            ColumnSet = new ColumnSet(SdkMessageFilter.Fields.SdkMessageFilterId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("sdkmessageid", ConditionOperator.Equal, messageId),
-                    new ConditionExpression("primaryobjecttypecode", ConditionOperator.Equal, primaryEntity)
+                    new ConditionExpression(SdkMessageFilter.Fields.SdkMessageId, ConditionOperator.Equal, messageId),
+                    new ConditionExpression(SdkMessageFilter.Fields.PrimaryObjectTypeCode, ConditionOperator.Equal, primaryEntity)
                 }
             }
         };
 
         if (!string.IsNullOrEmpty(secondaryEntity))
         {
-            query.Criteria.AddCondition("secondaryobjecttypecode", ConditionOperator.Equal, secondaryEntity);
+            query.Criteria.AddCondition(SdkMessageFilter.Fields.SecondaryObjectTypeCode, ConditionOperator.Equal, secondaryEntity);
         }
 
         var results = await RetrieveMultipleAsync(query);
@@ -382,12 +413,12 @@ public sealed class PluginRegistrationService
     {
         var existing = await GetAssemblyByNameAsync(name);
 
-        var entity = new Entity("pluginassembly")
+        var entity = new PluginAssembly
         {
-            ["name"] = name,
-            ["content"] = Convert.ToBase64String(content),
-            ["isolationmode"] = new OptionSetValue(2), // Sandbox
-            ["sourcetype"] = new OptionSetValue(0) // Database
+            Name = name,
+            Content = Convert.ToBase64String(content),
+            IsolationMode = PluginAssembly_IsolationMode.Sandbox,
+            SourceType = PluginAssembly_SourceType.Database
         };
 
         if (existing != null)
@@ -425,9 +456,9 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             // UPDATE: Only update content, use solution header for solution association
-            var updateEntity = new Entity("pluginpackage", existing.Id)
+            var updateEntity = new PluginPackage(existing.Id)
             {
-                ["content"] = Convert.ToBase64String(nupkgContent)
+                Content = Convert.ToBase64String(nupkgContent)
             };
 
             var request = new UpdateRequest { Target = updateEntity };
@@ -441,10 +472,10 @@ public sealed class PluginRegistrationService
         }
 
         // CREATE: Set name and content only - Dataverse extracts uniquename from .nuspec <id> inside nupkg
-        var entity = new Entity("pluginpackage")
+        var entity = new PluginPackage
         {
-            ["name"] = packageName,
-            ["content"] = Convert.ToBase64String(nupkgContent)
+            Name = packageName,
+            Content = Convert.ToBase64String(nupkgContent)
         };
 
         return await CreateWithSolutionHeaderAsync(entity, solutionName);
@@ -465,15 +496,15 @@ public sealed class PluginRegistrationService
     public async Task<Guid> UpsertPluginTypeAsync(Guid assemblyId, string typeName, string? solutionName = null)
     {
         // Check if type exists
-        var query = new QueryExpression("plugintype")
+        var query = new QueryExpression(PluginType.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("plugintypeid"),
+            ColumnSet = new ColumnSet(PluginType.Fields.PluginTypeId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("pluginassemblyid", ConditionOperator.Equal, assemblyId),
-                    new ConditionExpression("typename", ConditionOperator.Equal, typeName)
+                    new ConditionExpression(PluginType.Fields.PluginAssemblyId, ConditionOperator.Equal, assemblyId),
+                    new ConditionExpression(PluginType.Fields.TypeName, ConditionOperator.Equal, typeName)
                 }
             }
         };
@@ -486,12 +517,12 @@ public sealed class PluginRegistrationService
             return existing.Id;
         }
 
-        var entity = new Entity("plugintype")
+        var entity = new PluginType
         {
-            ["pluginassemblyid"] = new EntityReference("pluginassembly", assemblyId),
-            ["typename"] = typeName,
-            ["friendlyname"] = typeName,
-            ["name"] = typeName
+            PluginAssemblyId = new EntityReference(PluginAssembly.EntityLogicalName, assemblyId),
+            TypeName = typeName,
+            FriendlyName = typeName,
+            Name = typeName
         };
 
         return await CreateWithSolutionAsync(entity, solutionName);
@@ -508,15 +539,15 @@ public sealed class PluginRegistrationService
         string? solutionName = null)
     {
         // Check if step exists by name
-        var query = new QueryExpression("sdkmessageprocessingstep")
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("sdkmessageprocessingstepid"),
+            ColumnSet = new ColumnSet(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("plugintypeid", ConditionOperator.Equal, pluginTypeId),
-                    new ConditionExpression("name", ConditionOperator.Equal, stepConfig.Name)
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.PluginTypeId, ConditionOperator.Equal, pluginTypeId),
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
                 }
             }
         };
@@ -524,36 +555,36 @@ public sealed class PluginRegistrationService
         var results = await RetrieveMultipleAsync(query);
         var existing = results.Entities.FirstOrDefault();
 
-        var entity = new Entity("sdkmessageprocessingstep")
+        var entity = new SdkMessageProcessingStep
         {
-            ["name"] = stepConfig.Name,
-            ["plugintypeid"] = new EntityReference("plugintype", pluginTypeId),
-            ["sdkmessageid"] = new EntityReference("sdkmessage", messageId),
-            ["stage"] = new OptionSetValue(MapStageToValue(stepConfig.Stage)),
-            ["mode"] = new OptionSetValue(MapModeToValue(stepConfig.Mode)),
-            ["rank"] = stepConfig.ExecutionOrder,
-            ["supporteddeployment"] = new OptionSetValue(MapDeploymentToValue(stepConfig.Deployment)),
-            ["invocationsource"] = new OptionSetValue(0) // Internal (legacy, but required)
+            Name = stepConfig.Name,
+            PluginTypeId = new EntityReference(PluginType.EntityLogicalName, pluginTypeId),
+            SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
+            Stage = (SdkMessageProcessingStep_Stage)MapStageToValue(stepConfig.Stage),
+            Mode = (SdkMessageProcessingStep_Mode)MapModeToValue(stepConfig.Mode),
+            Rank = stepConfig.ExecutionOrder,
+            SupportedDeployment = (SdkMessageProcessingStep_SupportedDeployment)MapDeploymentToValue(stepConfig.Deployment),
+            InvocationSource = new OptionSetValue(0) // Internal (legacy, but required)
         };
 
         if (filterId.HasValue)
         {
-            entity["sdkmessagefilterid"] = new EntityReference("sdkmessagefilter", filterId.Value);
+            entity.SdkMessageFilterId = new EntityReference(SdkMessageFilter.EntityLogicalName, filterId.Value);
         }
 
         if (!string.IsNullOrEmpty(stepConfig.FilteringAttributes))
         {
-            entity["filteringattributes"] = stepConfig.FilteringAttributes;
+            entity.FilteringAttributes = stepConfig.FilteringAttributes;
         }
 
         if (!string.IsNullOrEmpty(stepConfig.UnsecureConfiguration))
         {
-            entity["configuration"] = stepConfig.UnsecureConfiguration;
+            entity.Configuration = stepConfig.UnsecureConfiguration;
         }
 
         if (!string.IsNullOrEmpty(stepConfig.Description))
         {
-            entity["description"] = stepConfig.Description;
+            entity.Description = stepConfig.Description;
         }
 
         // Handle impersonating user (Run in User's Context)
@@ -562,14 +593,14 @@ public sealed class PluginRegistrationService
         {
             if (Guid.TryParse(stepConfig.RunAsUser, out var userId))
             {
-                entity["impersonatinguserid"] = new EntityReference("systemuser", userId);
+                entity.ImpersonatingUserId = new EntityReference(SystemUser.EntityLogicalName, userId);
             }
         }
 
         // Async auto-delete (only applies to async steps)
         if (stepConfig.AsyncAutoDelete == true && stepConfig.Mode == "Asynchronous")
         {
-            entity["asyncautodelete"] = true;
+            entity.AsyncAutoDelete = true;
         }
 
         if (existing != null)
@@ -597,15 +628,15 @@ public sealed class PluginRegistrationService
     public async Task<Guid> UpsertImageAsync(Guid stepId, PluginImageConfig imageConfig)
     {
         // Check if image exists
-        var query = new QueryExpression("sdkmessageprocessingstepimage")
+        var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet("sdkmessageprocessingstepimageid"),
+            ColumnSet = new ColumnSet(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("sdkmessageprocessingstepid", ConditionOperator.Equal, stepId),
-                    new ConditionExpression("name", ConditionOperator.Equal, imageConfig.Name)
+                    new ConditionExpression(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, stepId),
+                    new ConditionExpression(SdkMessageProcessingStepImage.Fields.Name, ConditionOperator.Equal, imageConfig.Name)
                 }
             }
         };
@@ -613,18 +644,18 @@ public sealed class PluginRegistrationService
         var results = await RetrieveMultipleAsync(query);
         var existing = results.Entities.FirstOrDefault();
 
-        var entity = new Entity("sdkmessageprocessingstepimage")
+        var entity = new SdkMessageProcessingStepImage
         {
-            ["sdkmessageprocessingstepid"] = new EntityReference("sdkmessageprocessingstep", stepId),
-            ["name"] = imageConfig.Name,
-            ["entityalias"] = imageConfig.EntityAlias ?? imageConfig.Name,
-            ["imagetype"] = new OptionSetValue(MapImageTypeToValue(imageConfig.ImageType)),
-            ["messagepropertyname"] = "Target"
+            SdkMessageProcessingStepId = new EntityReference(SdkMessageProcessingStep.EntityLogicalName, stepId),
+            Name = imageConfig.Name,
+            EntityAlias = imageConfig.EntityAlias ?? imageConfig.Name,
+            ImageType = (SdkMessageProcessingStepImage_ImageType)MapImageTypeToValue(imageConfig.ImageType),
+            MessagePropertyName = "Target"
         };
 
         if (!string.IsNullOrEmpty(imageConfig.Attributes))
         {
-            entity["attributes"] = imageConfig.Attributes;
+            entity.Attributes = imageConfig.Attributes;
         }
 
         if (existing != null)
@@ -648,7 +679,7 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task DeleteImageAsync(Guid imageId)
     {
-        await DeleteAsync("sdkmessageprocessingstepimage", imageId);
+        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId);
     }
 
     /// <summary>
@@ -663,7 +694,7 @@ public sealed class PluginRegistrationService
             await DeleteImageAsync(image.Id);
         }
 
-        await DeleteAsync("sdkmessageprocessingstep", stepId);
+        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId);
     }
 
     /// <summary>
@@ -671,7 +702,7 @@ public sealed class PluginRegistrationService
     /// </summary>
     public async Task DeletePluginTypeAsync(Guid pluginTypeId)
     {
-        await DeleteAsync("plugintype", pluginTypeId);
+        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId);
     }
 
     #endregion
