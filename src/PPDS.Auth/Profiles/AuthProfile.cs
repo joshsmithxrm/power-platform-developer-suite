@@ -158,20 +158,6 @@ public sealed class AuthProfile
     [JsonPropertyName("authority")]
     public string? Authority { get; set; }
 
-    /// <summary>
-    /// Gets or sets the user's country from the JWT 'ctry' claim.
-    /// ISO 3166-1 alpha-2 country code (e.g., "US", "GB").
-    /// </summary>
-    [JsonPropertyName("userCountry")]
-    public string? UserCountry { get; set; }
-
-    /// <summary>
-    /// Gets or sets the tenant's country from the JWT 'tenant_ctry' claim.
-    /// ISO 3166-1 alpha-2 country code (e.g., "US", "GB").
-    /// </summary>
-    [JsonPropertyName("tenantCountry")]
-    public string? TenantCountry { get; set; }
-
     #endregion
 
     /// <summary>
@@ -301,9 +287,7 @@ public sealed class AuthProfile
             TokenExpiresOn = TokenExpiresOn,
             Puid = Puid,
             HomeAccountId = HomeAccountId,
-            Authority = Authority,
-            UserCountry = UserCountry,
-            TenantCountry = TenantCountry
+            Authority = Authority
         };
     }
 }

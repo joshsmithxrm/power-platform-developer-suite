@@ -9,25 +9,16 @@ public class EnvironmentInfoTests
     [Fact]
     public void Create_WithValidArguments_CreatesInstance()
     {
-        var info = EnvironmentInfo.Create("env-id", "https://test.crm.dynamics.com", "Test Env");
+        var info = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test Env");
 
-        info.Id.Should().Be("env-id");
         info.Url.Should().Be("https://test.crm.dynamics.com");
         info.DisplayName.Should().Be("Test Env");
     }
 
     [Fact]
-    public void Create_NullId_Throws()
-    {
-        var act = () => EnvironmentInfo.Create(null!, "url", "name");
-
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Fact]
     public void Create_NullUrl_Throws()
     {
-        var act = () => EnvironmentInfo.Create("id", null!, "name");
+        var act = () => EnvironmentInfo.Create(null!, "name");
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -35,7 +26,7 @@ public class EnvironmentInfoTests
     [Fact]
     public void Create_NullDisplayName_Throws()
     {
-        var act = () => EnvironmentInfo.Create("id", "url", null!);
+        var act = () => EnvironmentInfo.Create("url", null!);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -43,7 +34,7 @@ public class EnvironmentInfoTests
     [Fact]
     public void ToString_ReturnsDisplayNameAndUrl()
     {
-        var info = EnvironmentInfo.Create("id", "https://test.crm.dynamics.com", "Test Env");
+        var info = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test Env");
 
         var result = info.ToString();
 
@@ -56,7 +47,6 @@ public class EnvironmentInfoTests
     {
         var info = new EnvironmentInfo
         {
-            Id = "env-id",
             Url = "https://test.crm.dynamics.com",
             DisplayName = "Test Env",
             UniqueName = "unique",
@@ -69,7 +59,6 @@ public class EnvironmentInfoTests
         var clone = info.Clone();
 
         clone.Should().NotBeSameAs(info);
-        clone.Id.Should().Be("env-id");
         clone.Url.Should().Be("https://test.crm.dynamics.com");
         clone.DisplayName.Should().Be("Test Env");
         clone.UniqueName.Should().Be("unique");
@@ -82,7 +71,7 @@ public class EnvironmentInfoTests
     [Fact]
     public void Clone_ModifyingClone_DoesNotAffectOriginal()
     {
-        var info = EnvironmentInfo.Create("id", "url", "original");
+        var info = EnvironmentInfo.Create("url", "original");
         var clone = info.Clone();
 
         clone.DisplayName = "modified";
@@ -95,7 +84,6 @@ public class EnvironmentInfoTests
     {
         var info = new EnvironmentInfo();
 
-        info.Id.Should().BeEmpty();
         info.Url.Should().BeEmpty();
         info.DisplayName.Should().BeEmpty();
     }

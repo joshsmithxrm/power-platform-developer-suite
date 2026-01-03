@@ -19,15 +19,11 @@ public static class JwtClaimsParser
     public static ParsedJwtClaims? Parse(ClaimsPrincipal? claimsPrincipal, string? accessToken)
     {
         string? puid = null;
-        string? userCountry = null;
-        string? tenantCountry = null;
 
         // Try ClaimsPrincipal first (from ID token)
         if (claimsPrincipal?.Claims != null)
         {
             puid = GetClaimValue(claimsPrincipal, "puid");
-            userCountry = GetClaimValue(claimsPrincipal, "ctry");
-            tenantCountry = GetClaimValue(claimsPrincipal, "tenant_ctry");
         }
 
         // Fall back to access token for any missing claims
@@ -41,8 +37,6 @@ public static class JwtClaimsParser
                     var token = handler.ReadJwtToken(accessToken);
 
                     puid ??= GetClaimValue(token, "puid");
-                    userCountry ??= GetClaimValue(token, "ctry");
-                    tenantCountry ??= GetClaimValue(token, "tenant_ctry");
                 }
             }
             catch
@@ -52,16 +46,14 @@ public static class JwtClaimsParser
         }
 
         // Return null if we couldn't extract any claims
-        if (puid == null && userCountry == null && tenantCountry == null)
+        if (puid == null)
         {
             return null;
         }
 
         return new ParsedJwtClaims
         {
-            Puid = puid,
-            UserCountry = userCountry,
-            TenantCountry = tenantCountry
+            Puid = puid
         };
     }
 
@@ -99,16 +91,4 @@ public sealed class ParsedJwtClaims
     /// Gets or sets the PUID (from 'puid' claim).
     /// </summary>
     public string? Puid { get; set; }
-
-    /// <summary>
-    /// Gets or sets the user's country (from 'ctry' claim).
-    /// ISO 3166-1 alpha-2 country code (e.g., "US", "GB").
-    /// </summary>
-    public string? UserCountry { get; set; }
-
-    /// <summary>
-    /// Gets or sets the tenant's country (from 'tenant_ctry' claim).
-    /// ISO 3166-1 alpha-2 country code (e.g., "US", "GB").
-    /// </summary>
-    public string? TenantCountry { get; set; }
 }

@@ -30,7 +30,7 @@ public class AuthProfileTests
     {
         var profile = new AuthProfile
         {
-            Environment = EnvironmentInfo.Create("id", "https://test.crm.dynamics.com", "Test")
+            Environment = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test")
         };
 
         profile.HasEnvironment.Should().BeTrue();
@@ -136,7 +136,7 @@ public class AuthProfileTests
             Name = "test",
             AuthMethod = AuthMethod.ClientSecret,
             Cloud = CloudEnvironment.Public,
-            Environment = EnvironmentInfo.Create("id", "url", "Dev Environment")
+            Environment = EnvironmentInfo.Create("url", "Dev Environment")
         };
 
         var result = profile.ToString();
@@ -372,9 +372,7 @@ public class AuthProfileTests
             ObjectId = "obj-id",
             ApplicationId = "app-id",
             Authority = "https://login.microsoftonline.com/tenant",
-            UserCountry = "US",
-            TenantCountry = "GB",
-            Environment = EnvironmentInfo.Create("env-id", "https://test.crm.dynamics.com", "Test"),
+            Environment = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test"),
             CreatedAt = DateTimeOffset.Parse("2024-01-01T00:00:00Z"),
             LastUsedAt = DateTimeOffset.Parse("2024-01-02T00:00:00Z"),
             TokenExpiresOn = DateTimeOffset.Parse("2024-01-03T00:00:00Z"),
@@ -394,10 +392,8 @@ public class AuthProfileTests
         clone.ObjectId.Should().Be("obj-id");
         clone.ApplicationId.Should().Be("app-id");
         clone.Authority.Should().Be("https://login.microsoftonline.com/tenant");
-        clone.UserCountry.Should().Be("US");
-        clone.TenantCountry.Should().Be("GB");
         clone.Environment.Should().NotBeSameAs(profile.Environment);
-        clone.Environment!.Id.Should().Be("env-id");
+        clone.Environment!.Url.Should().Be("https://test.crm.dynamics.com");
         clone.CreatedAt.Should().Be(profile.CreatedAt);
         clone.LastUsedAt.Should().Be(profile.LastUsedAt);
         clone.TokenExpiresOn.Should().Be(profile.TokenExpiresOn);

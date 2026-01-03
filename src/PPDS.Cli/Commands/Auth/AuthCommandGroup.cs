@@ -330,8 +330,6 @@ public static class AuthCommandGroup
                 if (claims != null)
                 {
                     profile.Puid = claims.Puid;
-                    profile.UserCountry = claims.UserCountry;
-                    profile.TenantCountry = claims.TenantCountry;
                 }
 
                 // Resolve environment if specified (must happen before client disposal)
@@ -1218,11 +1216,9 @@ public static class AuthCommandGroup
                         type = cacheType.ToString(),
                         cloud = profile.Cloud.ToString(),
                         tenantId = profile.TenantId,
-                        tenantCountry = profile.TenantCountry,
                         user = profile.Username,
                         objectId = profile.ObjectId,
                         puid = profile.Puid,
-                        userCountry = profile.UserCountry,
                         applicationId = profile.ApplicationId,
                         tokenExpires = profile.TokenExpiresOn,
                         tokenStatus,
@@ -1270,11 +1266,6 @@ public static class AuthCommandGroup
                     Console.WriteLine($"Tenant Id:                   {profile.TenantId}");
                 }
 
-                if (!string.IsNullOrEmpty(profile.TenantCountry))
-                {
-                    Console.WriteLine($"Tenant Country:              {profile.TenantCountry}");
-                }
-
                 if (!string.IsNullOrEmpty(profile.Username))
                 {
                     Console.WriteLine($"User:                        {profile.Username}");
@@ -1288,11 +1279,6 @@ public static class AuthCommandGroup
                 if (!string.IsNullOrEmpty(profile.Puid))
                 {
                     Console.WriteLine($"PUID:                        {profile.Puid}");
-                }
-
-                if (!string.IsNullOrEmpty(profile.UserCountry))
-                {
-                    Console.WriteLine($"User Country/Region:         {profile.UserCountry}");
                 }
 
                 if (!string.IsNullOrEmpty(profile.ApplicationId))

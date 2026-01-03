@@ -9,12 +9,6 @@ namespace PPDS.Auth.Profiles;
 public sealed class EnvironmentInfo
 {
     /// <summary>
-    /// Gets or sets the environment ID (GUID).
-    /// </summary>
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = string.Empty;
-
-    /// <summary>
     /// Gets or sets the environment URL.
     /// Example: https://orgcabef92d.crm.dynamics.com/
     /// </summary>
@@ -64,15 +58,13 @@ public sealed class EnvironmentInfo
     /// <summary>
     /// Creates a new instance with the minimum required information.
     /// </summary>
-    /// <param name="id">The environment ID.</param>
     /// <param name="url">The environment URL.</param>
     /// <param name="displayName">The display name.</param>
     /// <returns>A new EnvironmentInfo instance.</returns>
-    public static EnvironmentInfo Create(string id, string url, string displayName)
+    public static EnvironmentInfo Create(string url, string displayName)
     {
         return new EnvironmentInfo
         {
-            Id = id ?? throw new ArgumentNullException(nameof(id)),
             Url = url ?? throw new ArgumentNullException(nameof(url)),
             DisplayName = displayName ?? throw new ArgumentNullException(nameof(displayName))
         };
@@ -93,7 +85,6 @@ public sealed class EnvironmentInfo
     {
         return new EnvironmentInfo
         {
-            Id = Id,
             Url = Url,
             DisplayName = DisplayName,
             UniqueName = UniqueName,

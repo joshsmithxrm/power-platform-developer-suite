@@ -216,7 +216,7 @@ public class ProfileStoreTests : IDisposable
         collection.Add(new AuthProfile
         {
             Name = "test",
-            Environment = EnvironmentInfo.Create("env-id", "https://test.crm.dynamics.com", "Test Env")
+            Environment = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test Env")
         });
 
         await _store.SaveAsync(collection);
@@ -225,8 +225,7 @@ public class ProfileStoreTests : IDisposable
 
         var env = loaded.All.First().Environment;
         env.Should().NotBeNull();
-        env!.Id.Should().Be("env-id");
-        env.Url.Should().Be("https://test.crm.dynamics.com");
+        env!.Url.Should().Be("https://test.crm.dynamics.com");
         env.DisplayName.Should().Be("Test Env");
     }
 
@@ -275,9 +274,7 @@ public class ProfileStoreTests : IDisposable
         collection.Add(new AuthProfile
         {
             Name = "test",
-            Authority = "https://login.microsoftonline.com/tenant-id",
-            UserCountry = "US",
-            TenantCountry = "GB"
+            Authority = "https://login.microsoftonline.com/tenant-id"
         });
 
         await _store.SaveAsync(collection);
@@ -286,8 +283,6 @@ public class ProfileStoreTests : IDisposable
 
         var profile = loaded.All.First();
         profile.Authority.Should().Be("https://login.microsoftonline.com/tenant-id");
-        profile.UserCountry.Should().Be("US");
-        profile.TenantCountry.Should().Be("GB");
     }
 
     [Fact]
