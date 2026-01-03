@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
@@ -42,14 +44,17 @@ public static class DiffCommand
             PluginsCommandGroup.OutputFormatOption
         };
 
+        // Add global options for verbosity and correlation
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var config = parseResult.GetValue(configOption)!;
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
-            var outputFormat = parseResult.GetValue(PluginsCommandGroup.OutputFormatOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(config, profile, environment, outputFormat, cancellationToken);
+            return await ExecuteAsync(config, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -59,9 +64,11 @@ public static class DiffCommand
         FileInfo configFile,
         string? profile,
         string? environment,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
         try
         {
             // Load configuration
@@ -70,8 +77,11 @@ public static class DiffCommand
 
             if (config?.Assemblies == null || config.Assemblies.Count == 0)
             {
-                Console.Error.WriteLine("No assemblies found in configuration file.");
-                return ExitCodes.Failure;
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    "No assemblies found in configuration file.",
+                    Target: configFile.Name));
+                return ExitCodes.InvalidArguments;
             }
 
             // Validate configuration
@@ -81,8 +91,8 @@ public static class DiffCommand
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
-                verbose: false,
-                debug: false,
+                globalOptions.Verbose,
+                globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
@@ -91,11 +101,11 @@ public static class DiffCommand
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
             var registrationService = new PluginRegistrationService(client, logger);
 
-            if (outputFormat != OutputFormat.Json)
+            if (!globalOptions.IsJsonMode)
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var allDrifts = new List<AssemblyDrift>();
@@ -110,15 +120,15 @@ public static class DiffCommand
                     hasDrift = true;
             }
 
-            if (outputFormat == OutputFormat.Json)
+            if (globalOptions.IsJsonMode)
             {
-                Console.WriteLine(JsonSerializer.Serialize(allDrifts, JsonWriteOptions));
+                writer.WriteSuccess(allDrifts);
             }
             else
             {
                 if (!hasDrift)
                 {
-                    Console.WriteLine("No drift detected. Environment matches configuration.");
+                    Console.Error.WriteLine("No drift detected. Environment matches configuration.");
                     return ExitCodes.Success;
                 }
 
@@ -127,55 +137,55 @@ public static class DiffCommand
                     if (!drift.HasDrift)
                         continue;
 
-                    Console.WriteLine($"Assembly: {drift.AssemblyName}");
+                    Console.Error.WriteLine($"Assembly: {drift.AssemblyName}");
 
                     if (drift.AssemblyMissing)
                     {
-                        Console.WriteLine("  [MISSING] Assembly not registered in environment");
+                        Console.Error.WriteLine("  [MISSING] Assembly not registered in environment");
                         continue;
                     }
 
                     foreach (var missing in drift.MissingSteps)
                     {
-                        Console.WriteLine($"  [+] Missing step: {missing.StepName}");
-                        Console.WriteLine($"      {missing.Message} on {missing.Entity} ({missing.Stage}, {missing.Mode})");
+                        Console.Error.WriteLine($"  [+] Missing step: {missing.StepName}");
+                        Console.Error.WriteLine($"      {missing.Message} on {missing.Entity} ({missing.Stage}, {missing.Mode})");
                     }
 
                     foreach (var orphan in drift.OrphanedSteps)
                     {
-                        Console.WriteLine($"  [-] Orphaned step: {orphan.StepName}");
-                        Console.WriteLine($"      {orphan.Message} on {orphan.Entity} ({orphan.Stage}, {orphan.Mode})");
+                        Console.Error.WriteLine($"  [-] Orphaned step: {orphan.StepName}");
+                        Console.Error.WriteLine($"      {orphan.Message} on {orphan.Entity} ({orphan.Stage}, {orphan.Mode})");
                     }
 
                     foreach (var modified in drift.ModifiedSteps)
                     {
-                        Console.WriteLine($"  [~] Modified step: {modified.StepName}");
+                        Console.Error.WriteLine($"  [~] Modified step: {modified.StepName}");
                         foreach (var change in modified.Changes)
                         {
-                            Console.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
+                            Console.Error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
                         }
                     }
 
                     foreach (var missingImage in drift.MissingImages)
                     {
-                        Console.WriteLine($"  [+] Missing image: {missingImage.ImageName} on step {missingImage.StepName}");
+                        Console.Error.WriteLine($"  [+] Missing image: {missingImage.ImageName} on step {missingImage.StepName}");
                     }
 
                     foreach (var orphanImage in drift.OrphanedImages)
                     {
-                        Console.WriteLine($"  [-] Orphaned image: {orphanImage.ImageName} on step {orphanImage.StepName}");
+                        Console.Error.WriteLine($"  [-] Orphaned image: {orphanImage.ImageName} on step {orphanImage.StepName}");
                     }
 
                     foreach (var modifiedImage in drift.ModifiedImages)
                     {
-                        Console.WriteLine($"  [~] Modified image: {modifiedImage.ImageName} on step {modifiedImage.StepName}");
+                        Console.Error.WriteLine($"  [~] Modified image: {modifiedImage.ImageName} on step {modifiedImage.StepName}");
                         foreach (var change in modifiedImage.Changes)
                         {
-                            Console.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
+                            Console.Error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
                         }
                     }
 
-                    Console.WriteLine();
+                    Console.Error.WriteLine();
                 }
             }
 
@@ -183,8 +193,9 @@ public static class DiffCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error comparing plugins: {ex.Message}");
-            return ExitCodes.Failure;
+            var error = ExceptionMapper.Map(ex, context: "comparing plugins", debug: globalOptions.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 

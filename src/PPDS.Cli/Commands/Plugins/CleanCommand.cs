@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
@@ -49,15 +51,18 @@ public static class CleanCommand
             PluginsCommandGroup.OutputFormatOption
         };
 
+        // Add global options for verbosity and correlation
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var config = parseResult.GetValue(configOption)!;
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var whatIf = parseResult.GetValue(whatIfOption);
-            var outputFormat = parseResult.GetValue(PluginsCommandGroup.OutputFormatOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(config, profile, environment, whatIf, outputFormat, cancellationToken);
+            return await ExecuteAsync(config, profile, environment, whatIf, globalOptions, cancellationToken);
         });
 
         return command;
@@ -68,9 +73,11 @@ public static class CleanCommand
         string? profile,
         string? environment,
         bool whatIf,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
         try
         {
             // Load configuration
@@ -79,8 +86,11 @@ public static class CleanCommand
 
             if (config?.Assemblies == null || config.Assemblies.Count == 0)
             {
-                Console.Error.WriteLine("No assemblies found in configuration file.");
-                return ExitCodes.Failure;
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    "No assemblies found in configuration file.",
+                    Target: configFile.Name));
+                return ExitCodes.InvalidArguments;
             }
 
             // Validate configuration
@@ -90,8 +100,8 @@ public static class CleanCommand
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
-                verbose: false,
-                debug: false,
+                globalOptions.Verbose,
+                globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
@@ -100,16 +110,16 @@ public static class CleanCommand
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
             var registrationService = new PluginRegistrationService(client, logger);
 
-            if (outputFormat != OutputFormat.Json)
+            if (!globalOptions.IsJsonMode)
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
 
                 if (whatIf)
                 {
-                    Console.WriteLine("[What-If Mode] No changes will be applied.");
-                    Console.WriteLine();
+                    Console.Error.WriteLine("[What-If Mode] No changes will be applied.");
+                    Console.Error.WriteLine();
                 }
             }
 
@@ -123,34 +133,34 @@ public static class CleanCommand
                     registrationService,
                     assemblyConfig,
                     whatIf,
-                    outputFormat,
+                    globalOptions,
                     cancellationToken);
 
                 results.Add(result);
             }
 
-            if (outputFormat == OutputFormat.Json)
+            if (globalOptions.IsJsonMode)
             {
-                Console.WriteLine(JsonSerializer.Serialize(results, JsonWriteOptions));
+                writer.WriteSuccess(results);
             }
             else
             {
-                Console.WriteLine();
+                Console.Error.WriteLine();
                 var totalOrphans = results.Sum(r => r.OrphanedSteps.Count);
                 var totalDeleted = results.Sum(r => r.StepsDeleted);
                 var totalTypesDeleted = results.Sum(r => r.TypesDeleted);
 
                 if (totalOrphans == 0)
                 {
-                    Console.WriteLine("No orphaned registrations found.");
+                    Console.Error.WriteLine("No orphaned registrations found.");
                 }
                 else if (whatIf)
                 {
-                    Console.WriteLine($"Would delete: {totalOrphans} step(s), {totalTypesDeleted} orphaned type(s)");
+                    Console.Error.WriteLine($"Would delete: {totalOrphans} step(s), {totalTypesDeleted} orphaned type(s)");
                 }
                 else
                 {
-                    Console.WriteLine($"Deleted: {totalDeleted} step(s), {totalTypesDeleted} orphaned type(s)");
+                    Console.Error.WriteLine($"Deleted: {totalDeleted} step(s), {totalTypesDeleted} orphaned type(s)");
                 }
             }
 
@@ -158,8 +168,9 @@ public static class CleanCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error cleaning plugins: {ex.Message}");
-            return ExitCodes.Failure;
+            var error = ExceptionMapper.Map(ex, context: "cleaning plugins", debug: globalOptions.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 
@@ -167,7 +178,7 @@ public static class CleanCommand
         PluginRegistrationService service,
         PluginAssemblyConfig assemblyConfig,
         bool whatIf,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
         var result = new CleanResult
@@ -179,13 +190,13 @@ public static class CleanCommand
         var assembly = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
         if (assembly == null)
         {
-            if (outputFormat != OutputFormat.Json)
-                Console.WriteLine($"Assembly not found: {assemblyConfig.Name}");
+            if (!globalOptions.IsJsonMode)
+                Console.Error.WriteLine($"Assembly not found: {assemblyConfig.Name}");
             return result;
         }
 
-        if (outputFormat != OutputFormat.Json)
-            Console.WriteLine($"Checking assembly: {assemblyConfig.Name}");
+        if (!globalOptions.IsJsonMode)
+            Console.Error.WriteLine($"Checking assembly: {assemblyConfig.Name}");
 
         // Build set of configured step names
         var configuredStepNames = new HashSet<string>();
@@ -221,15 +232,15 @@ public static class CleanCommand
 
                 if (whatIf)
                 {
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  [What-If] Would delete step: {step.Name}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [What-If] Would delete step: {step.Name}");
                 }
                 else
                 {
                     await service.DeleteStepAsync(step.Id);
                     result.StepsDeleted++;
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  Deleted step: {step.Name}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  Deleted step: {step.Name}");
                 }
             }
 
@@ -254,8 +265,8 @@ public static class CleanCommand
 
                     if (whatIf)
                     {
-                        if (outputFormat != OutputFormat.Json)
-                            Console.WriteLine($"  [What-If] Would delete orphaned type: {existingType.TypeName}");
+                        if (!globalOptions.IsJsonMode)
+                            Console.Error.WriteLine($"  [What-If] Would delete orphaned type: {existingType.TypeName}");
                     }
                     else
                     {
@@ -263,13 +274,13 @@ public static class CleanCommand
                         {
                             await service.DeletePluginTypeAsync(existingType.Id);
                             result.TypesDeleted++;
-                            if (outputFormat != OutputFormat.Json)
-                                Console.WriteLine($"  Deleted orphaned type: {existingType.TypeName}");
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"  Deleted orphaned type: {existingType.TypeName}");
                         }
                         catch (Exception ex)
                         {
-                            if (outputFormat != OutputFormat.Json)
-                                Console.WriteLine($"  Warning: Could not delete type {existingType.TypeName}: {ex.Message}");
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"  Warning: Could not delete type {existingType.TypeName}: {ex.Message}");
                         }
                     }
                 }

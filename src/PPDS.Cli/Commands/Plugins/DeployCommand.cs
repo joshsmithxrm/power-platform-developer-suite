@@ -6,6 +6,8 @@ using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
@@ -59,6 +61,9 @@ public static class DeployCommand
             PluginsCommandGroup.OutputFormatOption
         };
 
+        // Add global options for verbosity and correlation
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var config = parseResult.GetValue(configOption)!;
@@ -67,9 +72,9 @@ public static class DeployCommand
             var solution = parseResult.GetValue(PluginsCommandGroup.SolutionOption);
             var clean = parseResult.GetValue(cleanOption);
             var whatIf = parseResult.GetValue(whatIfOption);
-            var outputFormat = parseResult.GetValue(PluginsCommandGroup.OutputFormatOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(config, profile, environment, solution, clean, whatIf, outputFormat, cancellationToken);
+            return await ExecuteAsync(config, profile, environment, solution, clean, whatIf, globalOptions, cancellationToken);
         });
 
         return command;
@@ -82,9 +87,11 @@ public static class DeployCommand
         string? solutionOverride,
         bool clean,
         bool whatIf,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
         try
         {
             // Load configuration
@@ -93,8 +100,11 @@ public static class DeployCommand
 
             if (config?.Assemblies == null || config.Assemblies.Count == 0)
             {
-                Console.Error.WriteLine("No assemblies found in configuration file.");
-                return ExitCodes.Failure;
+                writer.WriteError(new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    "No assemblies found in configuration file.",
+                    Target: configFile.Name));
+                return ExitCodes.InvalidArguments;
             }
 
             // Validate configuration
@@ -104,8 +114,8 @@ public static class DeployCommand
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
-                verbose: false,
-                debug: false,
+                globalOptions.Verbose,
+                globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
@@ -114,16 +124,16 @@ public static class DeployCommand
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
             var registrationService = new PluginRegistrationService(client, logger);
 
-            if (outputFormat != OutputFormat.Json)
+            if (!globalOptions.IsJsonMode)
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
 
                 if (whatIf)
                 {
-                    Console.WriteLine("[What-If Mode] No changes will be applied.");
-                    Console.WriteLine();
+                    Console.Error.WriteLine("[What-If Mode] No changes will be applied.");
+                    Console.Error.WriteLine();
                 }
             }
 
@@ -139,32 +149,33 @@ public static class DeployCommand
                     solutionOverride,
                     clean,
                     whatIf,
-                    outputFormat,
+                    globalOptions,
                     cancellationToken);
 
                 results.Add(result);
             }
 
-            if (outputFormat == OutputFormat.Json)
+            if (globalOptions.IsJsonMode)
             {
-                Console.WriteLine(JsonSerializer.Serialize(results, JsonWriteOptions));
+                writer.WriteSuccess(results);
             }
             else
             {
-                Console.WriteLine();
+                Console.Error.WriteLine();
                 var totalCreated = results.Sum(r => r.StepsCreated + r.ImagesCreated);
                 var totalUpdated = results.Sum(r => r.StepsUpdated + r.ImagesUpdated);
                 var totalDeleted = results.Sum(r => r.StepsDeleted + r.ImagesDeleted);
 
-                Console.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
+                Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
             }
 
             return results.Any(r => !r.Success) ? ExitCodes.Failure : ExitCodes.Success;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error deploying plugins: {ex.Message}");
-            return ExitCodes.Failure;
+            var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 
@@ -175,7 +186,7 @@ public static class DeployCommand
         string? solutionOverride,
         bool clean,
         bool whatIf,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
         var result = new DeploymentResult
@@ -188,8 +199,8 @@ public static class DeployCommand
 
         try
         {
-            if (outputFormat != OutputFormat.Json)
-                Console.WriteLine($"Deploying assembly: {assemblyConfig.Name}");
+            if (!globalOptions.IsJsonMode)
+                Console.Error.WriteLine($"Deploying assembly: {assemblyConfig.Name}");
 
             // Resolve assembly path
             var assemblyPath = ResolveAssemblyPath(assemblyConfig, configDir);
@@ -213,14 +224,14 @@ public static class DeployCommand
                 {
                     var existingPkg = await service.GetPackageByNameAsync(packageName);
                     packageId = existingPkg?.Id ?? Guid.NewGuid();
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  [What-If] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [What-If] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
                 }
                 else
                 {
                     packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution);
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  Package registered: {packageId}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
 
                 // Get the assembly ID from the package (Dataverse creates it automatically)
@@ -242,14 +253,14 @@ public static class DeployCommand
                 {
                     var existing = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
                     assemblyId = existing?.Id ?? Guid.NewGuid();
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  [What-If] Would {(existing == null ? "create" : "update")} assembly");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [What-If] Would {(existing == null ? "create" : "update")} assembly");
                 }
                 else
                 {
                     assemblyId = await service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution);
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  Assembly registered: {assemblyId}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  Assembly registered: {assemblyId}");
                 }
             }
 
@@ -282,14 +293,14 @@ public static class DeployCommand
                     typeId = existingTypeMap.TryGetValue(typeConfig.TypeName, out var existing)
                         ? existing.Id
                         : Guid.NewGuid();
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  [What-If] Would register type: {typeConfig.TypeName}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  [What-If] Would register type: {typeConfig.TypeName}");
                 }
                 else
                 {
                     typeId = await service.UpsertPluginTypeAsync(assemblyId, typeConfig.TypeName, solution);
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  Type registered: {typeConfig.TypeName}");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  Type registered: {typeConfig.TypeName}");
                 }
 
                 // Deploy each step
@@ -302,8 +313,8 @@ public static class DeployCommand
                     var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message);
                     if (messageId == null)
                     {
-                        if (outputFormat != OutputFormat.Json)
-                            Console.WriteLine($"    [Skip] Unknown message: {stepConfig.Message}");
+                        if (!globalOptions.IsJsonMode)
+                            Console.Error.WriteLine($"    [Skip] Unknown message: {stepConfig.Message}");
                         continue;
                     }
 
@@ -318,8 +329,8 @@ public static class DeployCommand
                     if (whatIf)
                     {
                         stepId = Guid.NewGuid();
-                        if (outputFormat != OutputFormat.Json)
-                            Console.WriteLine($"    [What-If] Would {(isNew ? "create" : "update")} step: {stepName}");
+                        if (!globalOptions.IsJsonMode)
+                            Console.Error.WriteLine($"    [What-If] Would {(isNew ? "create" : "update")} step: {stepName}");
 
                         if (isNew) result.StepsCreated++;
                         else result.StepsUpdated++;
@@ -327,8 +338,8 @@ public static class DeployCommand
                     else
                     {
                         stepId = await service.UpsertStepAsync(typeId, stepConfig, messageId.Value, filterId, solution);
-                        if (outputFormat != OutputFormat.Json)
-                            Console.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
+                        if (!globalOptions.IsJsonMode)
+                            Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
 
                         if (isNew) result.StepsCreated++;
                         else result.StepsUpdated++;
@@ -344,8 +355,8 @@ public static class DeployCommand
 
                         if (whatIf)
                         {
-                            if (outputFormat != OutputFormat.Json)
-                                Console.WriteLine($"      [What-If] Would {(imageIsNew ? "create" : "update")} image: {imageConfig.Name}");
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"      [What-If] Would {(imageIsNew ? "create" : "update")} image: {imageConfig.Name}");
 
                             if (imageIsNew) result.ImagesCreated++;
                             else result.ImagesUpdated++;
@@ -353,8 +364,8 @@ public static class DeployCommand
                         else
                         {
                             await service.UpsertImageAsync(stepId, imageConfig);
-                            if (outputFormat != OutputFormat.Json)
-                                Console.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
+                            if (!globalOptions.IsJsonMode)
+                                Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
                             if (imageIsNew) result.ImagesCreated++;
                             else result.ImagesUpdated++;
@@ -370,8 +381,8 @@ public static class DeployCommand
 
                 if (orphanedStepNames.Count > 0)
                 {
-                    if (outputFormat != OutputFormat.Json)
-                        Console.WriteLine($"  Cleaning {orphanedStepNames.Count} orphaned step(s)...");
+                    if (!globalOptions.IsJsonMode)
+                        Console.Error.WriteLine($"  Cleaning {orphanedStepNames.Count} orphaned step(s)...");
 
                     foreach (var orphanName in orphanedStepNames)
                     {
@@ -380,15 +391,15 @@ public static class DeployCommand
                         {
                             if (whatIf)
                             {
-                                if (outputFormat != OutputFormat.Json)
-                                    Console.WriteLine($"    [What-If] Would delete step: {orphanName}");
+                                if (!globalOptions.IsJsonMode)
+                                    Console.Error.WriteLine($"    [What-If] Would delete step: {orphanName}");
                                 result.StepsDeleted++;
                             }
                             else
                             {
                                 await service.DeleteStepAsync(orphanStep.Id);
-                                if (outputFormat != OutputFormat.Json)
-                                    Console.WriteLine($"    Deleted step: {orphanName}");
+                                if (!globalOptions.IsJsonMode)
+                                    Console.Error.WriteLine($"    Deleted step: {orphanName}");
                                 result.StepsDeleted++;
                             }
                         }
@@ -401,7 +412,7 @@ public static class DeployCommand
             result.Success = false;
             result.Error = ex.Message;
 
-            if (outputFormat != OutputFormat.Json)
+            if (!globalOptions.IsJsonMode)
                 Console.Error.WriteLine($"  Error: {ex.Message}");
         }
 

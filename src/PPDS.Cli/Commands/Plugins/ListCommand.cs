@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
 
@@ -41,15 +43,18 @@ public static class ListCommand
             PluginsCommandGroup.OutputFormatOption
         };
 
+        // Add global options for verbosity and correlation
+        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var assembly = parseResult.GetValue(assemblyOption);
             var package = parseResult.GetValue(packageOption);
-            var outputFormat = parseResult.GetValue(PluginsCommandGroup.OutputFormatOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(profile, environment, assembly, package, outputFormat, cancellationToken);
+            return await ExecuteAsync(profile, environment, assembly, package, globalOptions, cancellationToken);
         });
 
         return command;
@@ -60,16 +65,18 @@ public static class ListCommand
         string? environment,
         string? assemblyFilter,
         string? packageFilter,
-        OutputFormat outputFormat,
+        GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+
         try
         {
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
-                verbose: false,
-                debug: false,
+                globalOptions.Verbose,
+                globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
@@ -78,11 +85,11 @@ public static class ListCommand
             await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
             var registrationService = new PluginRegistrationService(client, logger);
 
-            if (outputFormat != OutputFormat.Json)
+            if (!globalOptions.IsJsonMode)
             {
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.WriteLine();
+                Console.Error.WriteLine();
             }
 
             var output = new ListOutput();
@@ -150,38 +157,38 @@ public static class ListCommand
 
             if (totalAssemblies == 0 && totalPackages == 0)
             {
-                if (outputFormat == OutputFormat.Json)
+                if (globalOptions.IsJsonMode)
                 {
-                    Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+                    writer.WriteSuccess(output);
                 }
                 else
                 {
-                    Console.WriteLine("No plugin assemblies or packages found.");
+                    Console.Error.WriteLine("No plugin assemblies or packages found.");
                 }
                 return ExitCodes.Success;
             }
 
-            if (outputFormat == OutputFormat.Json)
+            if (globalOptions.IsJsonMode)
             {
-                Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+                writer.WriteSuccess(output);
             }
             else
             {
                 // Print assemblies
                 foreach (var assembly in output.Assemblies)
                 {
-                    Console.WriteLine($"Assembly: {assembly.Name} (v{assembly.Version})");
+                    Console.Error.WriteLine($"Assembly: {assembly.Name} (v{assembly.Version})");
                     PrintTypes(assembly.Types);
-                    Console.WriteLine();
+                    Console.Error.WriteLine();
                 }
 
                 // Print packages
                 foreach (var package in output.Packages)
                 {
                     var uniqueName = package.UniqueName != package.Name ? $" [{package.UniqueName}]" : "";
-                    Console.WriteLine($"Package: {package.Name}{uniqueName} (v{package.Version})");
+                    Console.Error.WriteLine($"Package: {package.Name}{uniqueName} (v{package.Version})");
                     PrintPackageAssemblies(package.Assemblies);
-                    Console.WriteLine();
+                    Console.Error.WriteLine();
                 }
 
                 var totalPackageAssemblies = output.Packages.Sum(p => p.Assemblies.Count);
@@ -209,15 +216,16 @@ public static class ListCommand
                     summaryParts.Add(Pluralize(totalImages, "image", "images"));
                 }
 
-                Console.WriteLine($"Total: {string.Join(", ", summaryParts)}");
+                Console.Error.WriteLine($"Total: {string.Join(", ", summaryParts)}");
             }
 
             return ExitCodes.Success;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error listing plugins: {ex.Message}");
-            return ExitCodes.Failure;
+            var error = ExceptionMapper.Map(ex, context: "listing plugins", debug: globalOptions.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 
@@ -280,13 +288,13 @@ public static class ListCommand
     {
         foreach (var type in types)
         {
-            Console.WriteLine($"{indent}Type: {type.TypeName}");
+            Console.Error.WriteLine($"{indent}Type: {type.TypeName}");
 
             foreach (var step in type.Steps)
             {
                 var status = step.IsEnabled ? "" : " [DISABLED]";
-                Console.WriteLine($"{indent}  Step: {step.Name}{status}");
-                Console.WriteLine($"{indent}    {step.Message} on {step.Entity} ({step.Stage}, {step.Mode})");
+                Console.Error.WriteLine($"{indent}  Step: {step.Name}{status}");
+                Console.Error.WriteLine($"{indent}    {step.Message} on {step.Entity} ({step.Stage}, {step.Mode})");
 
                 // Show non-default deployment/user/async settings on one line if any are set
                 var stepOptions = new List<string>();
@@ -304,23 +312,23 @@ public static class ListCommand
                 }
                 if (stepOptions.Count > 0)
                 {
-                    Console.WriteLine($"{indent}    {string.Join(" | ", stepOptions)}");
+                    Console.Error.WriteLine($"{indent}    {string.Join(" | ", stepOptions)}");
                 }
 
                 if (!string.IsNullOrEmpty(step.FilteringAttributes))
                 {
-                    Console.WriteLine($"{indent}    Filtering: {step.FilteringAttributes}");
+                    Console.Error.WriteLine($"{indent}    Filtering: {step.FilteringAttributes}");
                 }
 
                 if (!string.IsNullOrEmpty(step.Description))
                 {
-                    Console.WriteLine($"{indent}    Description: {step.Description}");
+                    Console.Error.WriteLine($"{indent}    Description: {step.Description}");
                 }
 
                 foreach (var image in step.Images)
                 {
                     var attrs = string.IsNullOrEmpty(image.Attributes) ? "all" : image.Attributes;
-                    Console.WriteLine($"{indent}    Image: {image.Name} ({image.ImageType}) - {attrs}");
+                    Console.Error.WriteLine($"{indent}    Image: {image.Name} ({image.ImageType}) - {attrs}");
                 }
             }
         }
@@ -330,7 +338,7 @@ public static class ListCommand
     {
         foreach (var assembly in assemblies)
         {
-            Console.WriteLine($"  Assembly: {assembly.Name} (v{assembly.Version})");
+            Console.Error.WriteLine($"  Assembly: {assembly.Name} (v{assembly.Version})");
             PrintTypes(assembly.Types, "    ");
         }
     }
