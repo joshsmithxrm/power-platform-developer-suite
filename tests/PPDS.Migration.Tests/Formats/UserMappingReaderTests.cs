@@ -22,7 +22,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -43,7 +43,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -58,7 +58,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -73,7 +73,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -95,7 +95,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -141,7 +141,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 
@@ -156,7 +156,7 @@ public class UserMappingReaderTests
 </userMappings>";
 
         var reader = new UserMappingReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var collection = await reader.ReadAsync(stream);
 

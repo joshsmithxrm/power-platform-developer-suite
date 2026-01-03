@@ -80,7 +80,7 @@ Get-Content $EnvFile | ForEach-Object {
 
         if (-not $Quiet) {
             # Mask sensitive values in output
-            $displayValue = if ($key -match '(SECRET|PASSWORD|TOKEN)') {
+            $displayValue = if ($key -match '(SECRET|PASSWORD|TOKEN|CERT)') {
                 '********'
             } else {
                 $value

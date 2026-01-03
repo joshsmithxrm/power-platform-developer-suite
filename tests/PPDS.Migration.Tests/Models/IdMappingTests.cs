@@ -196,7 +196,6 @@ public class IdMappingCollectionTests
 
         for (int i = 0; i < 100; i++)
         {
-            var index = i;
             tasks.Add(Task.Run(() =>
             {
                 collection.AddMapping("account", Guid.NewGuid(), Guid.NewGuid());

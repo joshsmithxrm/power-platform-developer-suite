@@ -36,12 +36,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         doc.Root.Should().NotBeNull();
@@ -92,12 +93,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var fieldsElement = doc.Root!.Element("entity")!.Element("fields");
@@ -153,12 +155,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var fieldElements = doc.Root!.Element("entity")!.Element("fields")!.Elements("field").ToList();
@@ -203,12 +206,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var relElement = doc.Root!.Element("entity")!.Element("relationships")!.Element("relationship");
@@ -253,12 +257,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var relElement = doc.Root!.Element("entity")!.Element("relationships")!.Element("relationship");
@@ -291,12 +296,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var filterElement = doc.Root!.Element("entity")!.Element("filter");
@@ -308,7 +314,7 @@ public class CmtSchemaWriterTests
     public async Task WriteAsync_ThrowsWhenSchemaIsNull()
     {
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         var act = async () => await writer.WriteAsync(null!, stream);
 
@@ -350,12 +356,13 @@ public class CmtSchemaWriterTests
         };
 
         var writer = new CmtSchemaWriter();
-        var stream = new MemoryStream();
+        using var stream = new MemoryStream();
 
         await writer.WriteAsync(schema, stream);
 
         stream.Position = 0;
-        var xml = await new StreamReader(stream).ReadToEndAsync();
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
         var doc = XDocument.Parse(xml);
 
         var entities = doc.Root!.Elements("entity").ToList();

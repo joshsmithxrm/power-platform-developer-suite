@@ -24,7 +24,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -56,7 +56,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -101,7 +101,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -132,7 +132,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -163,7 +163,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -191,7 +191,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -216,7 +216,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -267,7 +267,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
@@ -287,7 +287,7 @@ public class CmtSchemaReaderTests
 </entities>";
 
         var reader = new CmtSchemaReader();
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
 
         var schema = await reader.ReadAsync(stream);
 
