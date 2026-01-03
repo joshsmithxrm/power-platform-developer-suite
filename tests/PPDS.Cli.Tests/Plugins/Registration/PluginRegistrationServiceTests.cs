@@ -1,7 +1,9 @@
+using System.ServiceModel;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Dataverse.Generated;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Registration;
@@ -39,12 +41,13 @@ public class PluginRegistrationServiceTests
     {
         // Arrange
         var entities = new EntityCollection();
-        var assembly = new Entity("pluginassembly", Guid.NewGuid())
+        var assembly = new PluginAssembly
         {
-            ["name"] = "TestAssembly",
-            ["version"] = "1.0.0.0",
-            ["publickeytoken"] = "abc123",
-            ["isolationmode"] = new OptionSetValue(2)
+            Id = Guid.NewGuid(),
+            Name = "TestAssembly",
+            Version = "1.0.0.0",
+            PublicKeyToken = "abc123",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
         };
         entities.Entities.Add(assembly);
 
@@ -78,7 +81,7 @@ public class PluginRegistrationServiceTests
 
         // Assert
         Assert.Equal(expectedId, result);
-        _mockService.Verify(s => s.Create(It.Is<Entity>(e => e.LogicalName == "pluginassembly")), Times.Once);
+        _mockService.Verify(s => s.Create(It.Is<Entity>(e => e.LogicalName == PluginAssembly.EntityLogicalName)), Times.Once);
     }
 
     [Fact]
@@ -87,11 +90,13 @@ public class PluginRegistrationServiceTests
         // Arrange
         var existingId = Guid.NewGuid();
         var entities = new EntityCollection();
-        entities.Entities.Add(new Entity("pluginassembly", existingId)
+        var existingAssembly = new PluginAssembly
         {
-            ["name"] = "TestAssembly",
-            ["version"] = "1.0.0.0"
-        });
+            Id = existingId,
+            Name = "TestAssembly",
+            Version = "1.0.0.0"
+        };
+        entities.Entities.Add(existingAssembly);
 
         _mockService
             .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
@@ -127,7 +132,8 @@ public class PluginRegistrationServiceTests
         // Arrange
         var messageId = Guid.NewGuid();
         var entities = new EntityCollection();
-        entities.Entities.Add(new Entity("sdkmessage", messageId));
+        var message = new SdkMessage { Id = messageId };
+        entities.Entities.Add(message);
 
         _mockService
             .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
@@ -139,4 +145,126 @@ public class PluginRegistrationServiceTests
         // Assert
         Assert.Equal(messageId, result);
     }
+
+    #region GetComponentTypeAsync Exception Handling Tests
+
+    // Note: GetComponentTypeAsync is only called for entities NOT in WellKnownComponentTypes.
+    // pluginassembly (91) and sdkmessageprocessingstep (92) have well-known types.
+    // plugintype does NOT have a well-known type, so UpsertPluginTypeAsync exercises GetComponentTypeAsync.
+
+    [Fact]
+    public async Task UpsertPluginTypeAsync_LogsDebugAndSucceeds_WhenGetComponentTypeThrowsFaultException()
+    {
+        // Arrange - Create plugintype succeeds, but RetrieveEntityRequest for metadata throws FaultException
+        var assemblyId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+
+        // No existing plugin type
+        _mockService
+            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
+            .Returns(new EntityCollection());
+
+        // Create succeeds
+        _mockService
+            .Setup(s => s.Create(It.IsAny<Entity>()))
+            .Returns(expectedId);
+
+        // RetrieveEntityRequest throws FaultException (entity metadata not found)
+        _mockService
+            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Throws(new FaultException("Entity does not exist"));
+
+        // Act - Should succeed despite the FaultException (graceful degradation)
+        var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");
+
+        // Assert
+        Assert.Equal(expectedId, result);
+        // Verify Debug log was called (exception was caught and logged)
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Could not retrieve component type")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertPluginTypeAsync_LogsDebugAndSucceeds_WhenGetComponentTypeThrowsOrganizationServiceFault()
+    {
+        // Arrange - Create plugintype succeeds, but RetrieveEntityRequest throws FaultException<OrganizationServiceFault>
+        var assemblyId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+
+        // No existing plugin type
+        _mockService
+            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
+            .Returns(new EntityCollection());
+
+        // Create succeeds
+        _mockService
+            .Setup(s => s.Create(It.IsAny<Entity>()))
+            .Returns(expectedId);
+
+        // RetrieveEntityRequest throws FaultException<OrganizationServiceFault>
+        var fault = new OrganizationServiceFault { Message = "Entity not found", ErrorCode = -2147220969 };
+        _mockService
+            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Throws(new FaultException<OrganizationServiceFault>(fault, new FaultReason("Entity not found")));
+
+        // Act - Should succeed despite the FaultException (graceful degradation)
+        var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");
+
+        // Assert
+        Assert.Equal(expectedId, result);
+        // Verify Debug log was called with error code info
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Could not retrieve component type")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertPluginTypeAsync_SkipsSolutionAddition_WhenComponentTypeReturnsZero()
+    {
+        // Arrange - Create plugintype succeeds, metadata lookup fails (returns 0), so no solution addition
+        var assemblyId = Guid.NewGuid();
+        var expectedId = Guid.NewGuid();
+        var addSolutionComponentCalled = false;
+
+        // No existing plugin type
+        _mockService
+            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
+            .Returns(new EntityCollection());
+
+        // Create succeeds
+        _mockService
+            .Setup(s => s.Create(It.IsAny<Entity>()))
+            .Returns(expectedId);
+
+        // RetrieveEntityRequest throws (so GetComponentTypeAsync returns 0)
+        _mockService
+            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Throws(new FaultException("Entity does not exist"));
+
+        // Track if AddSolutionComponent is called
+        _mockService
+            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "AddSolutionComponent")))
+            .Callback(() => addSolutionComponentCalled = true)
+            .Returns(new OrganizationResponse());
+
+        // Act
+        var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");
+
+        // Assert - Plugin type was created, solution addition was skipped
+        Assert.Equal(expectedId, result);
+        Assert.False(addSolutionComponentCalled, "AddSolutionComponent should not be called when componentType is 0");
+    }
+
+    #endregion
 }
