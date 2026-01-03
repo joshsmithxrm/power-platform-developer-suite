@@ -15,10 +15,10 @@ namespace PPDS.Cli.Commands.Auth;
 public static class AuthCommandGroup
 {
     /// <summary>
-    /// Pattern for valid profile names: starts with letter/number, contains only letters, numbers, spaces, hyphens, or underscores.
+    /// Pattern for valid profile names: starts and ends with letter/number, contains only letters, numbers, spaces, hyphens, or underscores.
     /// </summary>
     private static readonly Regex ProfileNamePattern = new(
-        @"^[a-zA-Z0-9][a-zA-Z0-9 _-]*$",
+        @"^[a-zA-Z0-9](?:[a-zA-Z0-9 _-]*[a-zA-Z0-9])?$",
         RegexOptions.Compiled);
 
     /// <summary>

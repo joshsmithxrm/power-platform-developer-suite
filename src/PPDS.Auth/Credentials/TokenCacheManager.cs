@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Identity.Client.Extensions.Msal;
@@ -13,35 +11,28 @@ namespace PPDS.Auth.Credentials;
 public static class TokenCacheManager
 {
     /// <summary>
-    /// Clears all MSAL token caches including platform-specific secure storage.
+    /// Clears the MSAL file-based token cache.
     /// </summary>
     /// <remarks>
-    /// This method clears:
-    /// - The file-based token cache
-    /// - macOS Keychain entries (if applicable)
-    /// - Linux keyring entries (if applicable)
+    /// This method clears the unprotected file-based token cache used by the CLI.
+    /// The cache configuration matches <see cref="MsalClientBuilder.CreateAndRegisterCacheAsync"/>.
     /// </remarks>
     public static async Task ClearAllCachesAsync()
     {
-        // Delete the file-based token cache
+        // Delete the file-based token cache directly
         if (File.Exists(ProfilePaths.TokenCacheFile))
         {
             File.Delete(ProfilePaths.TokenCacheFile);
         }
 
-        // Clear platform-specific secure storage (Keychain, keyring, etc.)
+        // Also clear via MsalCacheHelper to ensure consistency
         try
         {
+            // Match the storage configuration from MsalClientBuilder
             var storageProperties = new StorageCreationPropertiesBuilder(
                     ProfilePaths.TokenCacheFileName,
                     ProfilePaths.DataDirectory)
-                .WithMacKeyChain("PPDS", "TokenCache")
-                .WithLinuxKeyring(
-                    "com.ppds.tokencache",
-                    "default",
-                    "PPDS Token Cache",
-                    new KeyValuePair<string, string>("app", "ppds"),
-                    new KeyValuePair<string, string>("version", "1"))
+                .WithUnprotectedFile()
                 .Build();
 
 #pragma warning disable CS0618 // Clear() is obsolete but appropriate for full logout
@@ -49,9 +40,9 @@ public static class TokenCacheManager
             cacheHelper.Clear();
 #pragma warning restore CS0618
         }
-        catch
+        catch (MsalCachePersistenceException)
         {
-            // Cache may not exist or platform doesn't support secure storage - ignore
+            // Cache persistence not available - file deletion above handles this case
         }
     }
 }
