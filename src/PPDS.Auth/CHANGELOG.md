@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4] - 2026-01-03
+
 ### Changed
 
 - **BREAKING: Profile storage schema v2** - Modernized profile storage format. Profiles now stored as array with name-based active profile instead of dictionary with numeric index. v1 profiles are automatically deleted on first load (pre-release breaking change). ([#107](https://github.com/joshsmithxrm/ppds-sdk/issues/107))

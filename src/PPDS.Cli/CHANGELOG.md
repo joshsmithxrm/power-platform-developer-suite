@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-01-03
+
 ### Added
 
 - **Self-contained binary publishing** - CLI can now be published as self-contained single-file executables for Windows, macOS, and Linux (x64 and ARM64) ([#53](https://github.com/joshsmithxrm/ppds-sdk/issues/53))
