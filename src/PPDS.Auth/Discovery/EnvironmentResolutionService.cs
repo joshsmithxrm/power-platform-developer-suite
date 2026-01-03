@@ -19,6 +19,7 @@ public sealed class EnvironmentResolutionService : IDisposable
 {
     private readonly AuthProfile _profile;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly ISecureCredentialStore? _credentialStore;
     private ICredentialProvider? _credentialProvider;
     private bool _disposed;
 
@@ -27,12 +28,15 @@ public sealed class EnvironmentResolutionService : IDisposable
     /// </summary>
     /// <param name="profile">The auth profile to use for resolution.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     public EnvironmentResolutionService(
         AuthProfile profile,
-        Action<DeviceCodeInfo>? deviceCodeCallback = null)
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        ISecureCredentialStore? credentialStore = null)
     {
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         _deviceCodeCallback = deviceCodeCallback;
+        _credentialStore = credentialStore;
     }
 
     /// <summary>
@@ -95,8 +99,10 @@ public sealed class EnvironmentResolutionService : IDisposable
             // Normalize URL
             url = NormalizeUrl(url);
 
-            // Create credential provider
-            _credentialProvider ??= CredentialProviderFactory.Create(_profile, _deviceCodeCallback);
+            // Create credential provider using async factory (supports secure store lookups)
+            _credentialProvider ??= await CredentialProviderFactory.CreateAsync(
+                _profile, _credentialStore, _deviceCodeCallback, cancellationToken)
+                .ConfigureAwait(false);
 
             // Connect to Dataverse and get org metadata
             using var client = await _credentialProvider.CreateServiceClientAsync(

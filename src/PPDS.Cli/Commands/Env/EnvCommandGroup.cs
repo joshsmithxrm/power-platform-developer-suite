@@ -2,6 +2,7 @@ using System.CommandLine;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Cloud;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
@@ -261,7 +262,8 @@ public static class EnvCommandGroup
             Console.WriteLine($"Resolving environment '{environmentIdentifier}'...");
 
             // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-            using var resolver = new EnvironmentResolutionService(profile);
+            using var credentialStore = new SecureCredentialStore();
+            using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
             var result = await resolver.ResolveAsync(environmentIdentifier, cancellationToken);
 
             if (!result.Success)
@@ -378,7 +380,8 @@ public static class EnvCommandGroup
                     Console.WriteLine($"Resolving environment '{environmentOverride}'...");
                 }
 
-                using var resolver = new EnvironmentResolutionService(profile);
+                using var credentialStore = new SecureCredentialStore();
+                using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(environmentOverride, cancellationToken);
 
                 if (!result.Success)

@@ -1054,7 +1054,8 @@ public static class AuthCommandGroup
                 Console.WriteLine($"Resolving environment '{newEnvironment}'...");
 
                 // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-                using var resolver = new EnvironmentResolutionService(profile);
+                using var credentialStore = new SecureCredentialStore();
+                using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
                 if (!result.Success)
