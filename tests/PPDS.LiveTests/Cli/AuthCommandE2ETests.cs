@@ -215,6 +215,88 @@ public class AuthCommandE2ETests : CliE2ETestBase
         result.ExitCode.Should().Be(0);
     }
 
+    [CliE2EWithCredentials]
+    public async Task AuthClear_ClearsStoredCredentials()
+    {
+        var profileName = GenerateTestProfileName();
+
+        // Create profile with credentials
+        var createResult = await RunCliAsync(
+            "auth", "create",
+            "--name", profileName,
+            "--applicationId", Configuration.ApplicationId!,
+            "--clientSecret", Configuration.ClientSecret!,
+            "--tenant", Configuration.TenantId!,
+            "--environment", Configuration.DataverseUrl!);
+
+        createResult.ExitCode.Should().Be(0);
+
+        // Verify credential file was created
+        var credentialFile = Path.Combine(IsolatedConfigDir, "ppds.credentials.dat");
+        File.Exists(credentialFile).Should().BeTrue("credential file should exist after creating profile");
+        var sizeBeforeClear = new FileInfo(credentialFile).Length;
+        sizeBeforeClear.Should().BeGreaterThan(0, "credential file should have content");
+
+        // Remove from cleanup list since we're clearing everything
+        CreatedProfiles.Remove(profileName);
+
+        // Clear all profiles
+        var clearResult = await RunCliAsync("auth", "clear");
+
+        clearResult.ExitCode.Should().Be(0);
+        clearResult.StdOut.Should().Contain("stored credentials removed");
+
+        // Credential file should be deleted by ClearAsync
+        File.Exists(credentialFile).Should().BeFalse("credential file should be deleted after auth clear");
+    }
+
+    #endregion
+
+    #region auth delete credential cleanup
+
+    [CliE2EWithCredentials]
+    public async Task AuthDelete_RemovesStoredCredentials()
+    {
+        var profileName = GenerateTestProfileName();
+
+        // Create profile with credentials
+        var createResult = await RunCliAsync(
+            "auth", "create",
+            "--name", profileName,
+            "--applicationId", Configuration.ApplicationId!,
+            "--clientSecret", Configuration.ClientSecret!,
+            "--tenant", Configuration.TenantId!,
+            "--environment", Configuration.DataverseUrl!);
+
+        createResult.ExitCode.Should().Be(0);
+
+        // Verify credential file was created and has content
+        var credentialFile = Path.Combine(IsolatedConfigDir, "ppds.credentials.dat");
+        File.Exists(credentialFile).Should().BeTrue("credential file should exist after creating profile");
+
+        // Read the credential file content to check later
+        var contentBefore = await File.ReadAllTextAsync(credentialFile);
+        contentBefore.Should().Contain(Configuration.ApplicationId!.ToLowerInvariant(),
+            "credential file should contain the application ID");
+
+        // Remove from cleanup list since we're deleting it manually
+        CreatedProfiles.Remove(profileName);
+
+        // Delete the profile
+        var deleteResult = await RunCliAsync("auth", "delete", "--name", profileName);
+
+        deleteResult.ExitCode.Should().Be(0);
+        deleteResult.StdOut.Should().Contain("deleted");
+
+        // After delete, credential file might still exist but shouldn't contain this app's credentials
+        if (File.Exists(credentialFile))
+        {
+            var contentAfter = await File.ReadAllTextAsync(credentialFile);
+            contentAfter.Should().NotContain(Configuration.ApplicationId!.ToLowerInvariant(),
+                "credential for deleted profile should be removed from credential file");
+        }
+    }
+
     #endregion
 
     #region auth name validation

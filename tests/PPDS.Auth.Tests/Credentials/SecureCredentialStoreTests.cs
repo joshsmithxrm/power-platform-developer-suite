@@ -266,4 +266,71 @@ public class SecureCredentialStoreTests : IDisposable
         (await _store.GetAsync("app2"))!.ClientSecret.Should().Be("s2");
         (await _store.GetAsync("app3"))!.ClientSecret.Should().Be("s3");
     }
+
+    [Fact]
+    public void IsCleartextCachingEnabled_WithFallbackEnabled_ReturnsCorrectValue()
+    {
+        // Create store with cleartext fallback enabled
+        var tempPath = Path.Combine(Path.GetTempPath(), $"test_creds_{Guid.NewGuid()}.dat");
+        try
+        {
+            using var store = new SecureCredentialStore(tempPath, allowCleartextFallback: true);
+
+            // On Linux with fallback enabled, should return true
+            // On Windows/macOS, secure storage is always available so returns false
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Linux))
+            {
+                store.IsCleartextCachingEnabled.Should().BeTrue();
+            }
+            else
+            {
+                store.IsCleartextCachingEnabled.Should().BeFalse();
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void IsCleartextCachingEnabled_WithFallbackDisabled_ReturnsFalse()
+    {
+        // Create store with cleartext fallback disabled
+        var tempPath = Path.Combine(Path.GetTempPath(), $"test_creds_{Guid.NewGuid()}.dat");
+        try
+        {
+            using var store = new SecureCredentialStore(tempPath, allowCleartextFallback: false);
+
+            // Should always return false when fallback is disabled
+            store.IsCleartextCachingEnabled.Should().BeFalse();
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void IsCleartextCachingEnabled_DefaultConstructor_ReturnsFalse()
+    {
+        // Default constructor should have fallback disabled
+        // Note: Can't easily test this without affecting real config, so we verify via a custom path
+        var tempPath = Path.Combine(Path.GetTempPath(), $"test_creds_{Guid.NewGuid()}.dat");
+        try
+        {
+            // Using the 1-param constructor which defaults allowCleartextFallback to false
+            using var store = new SecureCredentialStore(tempPath);
+
+            store.IsCleartextCachingEnabled.Should().BeFalse();
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
 }
