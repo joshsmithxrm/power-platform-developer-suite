@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Migration.Import
@@ -88,10 +89,11 @@ namespace PPDS.Migration.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var update = new Entity("sdkmessageprocessingstep", stepId)
+                var update = new SdkMessageProcessingStep
                 {
-                    ["statecode"] = new OptionSetValue(1), // Disabled
-                    ["statuscode"] = new OptionSetValue(2) // Disabled
+                    Id = stepId,
+                    StateCode = sdkmessageprocessingstep_statecode.Disabled,
+                    StatusCode = sdkmessageprocessingstep_statuscode.Disabled
                 };
 
                 try
@@ -125,10 +127,11 @@ namespace PPDS.Migration.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var update = new Entity("sdkmessageprocessingstep", stepId)
+                var update = new SdkMessageProcessingStep
                 {
-                    ["statecode"] = new OptionSetValue(0), // Enabled
-                    ["statuscode"] = new OptionSetValue(1) // Enabled
+                    Id = stepId,
+                    StateCode = sdkmessageprocessingstep_statecode.Enabled,
+                    StatusCode = sdkmessageprocessingstep_statuscode.Enabled
                 };
 
                 try
@@ -146,18 +149,18 @@ namespace PPDS.Migration.Import
         {
             // Build filter condition for multiple entities using Object Type Codes
             var entityConditions = string.Join("\n",
-                objectTypeCodes.Select(otc => $"<condition attribute='primaryobjecttypecode' operator='eq' value='{otc}' />"));
+                objectTypeCodes.Select(otc => $"<condition attribute='{SdkMessageFilter.Fields.PrimaryObjectTypeCode}' operator='eq' value='{otc}' />"));
 
             return $@"<fetch>
-                <entity name='sdkmessageprocessingstep'>
-                    <attribute name='sdkmessageprocessingstepid' />
-                    <attribute name='name' />
+                <entity name='{SdkMessageProcessingStep.EntityLogicalName}'>
+                    <attribute name='{SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId}' />
+                    <attribute name='{SdkMessageProcessingStep.Fields.Name}' />
                     <filter type='and'>
-                        <condition attribute='statecode' operator='eq' value='0' />
-                        <condition attribute='ishidden' operator='eq' value='0' />
-                        <condition attribute='customizationlevel' operator='eq' value='1' />
+                        <condition attribute='{SdkMessageProcessingStep.Fields.StateCode}' operator='eq' value='{(int)sdkmessageprocessingstep_statecode.Enabled}' />
+                        <condition attribute='{SdkMessageProcessingStep.Fields.IsHidden}' operator='eq' value='0' />
+                        <condition attribute='{SdkMessageProcessingStep.Fields.CustomizationLevel}' operator='eq' value='1' />
                     </filter>
-                    <link-entity name='sdkmessagefilter' from='sdkmessagefilterid' to='sdkmessagefilterid' link-type='inner'>
+                    <link-entity name='{SdkMessageFilter.EntityLogicalName}' from='{SdkMessageFilter.Fields.SdkMessageFilterId}' to='{SdkMessageProcessingStep.Fields.SdkMessageFilterId}' link-type='inner'>
                         <filter type='or'>
                             {entityConditions}
                         </filter>
