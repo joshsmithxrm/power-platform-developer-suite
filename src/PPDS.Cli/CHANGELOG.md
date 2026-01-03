@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Self-contained binary publishing** - CLI can now be published as self-contained single-file executables for Windows, macOS, and Linux (x64 and ARM64) ([#53](https://github.com/joshsmithxrm/ppds-sdk/issues/53))
+- **Automated release workflow** - GitHub Actions workflow builds and publishes platform binaries with SHA256 checksums to GitHub Releases on `Cli-v*` tags ([#54](https://github.com/joshsmithxrm/ppds-sdk/issues/54))
+
 ### Changed
 
 - **PluginRegistrationService refactored to use early-bound entities** - Replaced all magic string attribute access with strongly-typed `PPDS.Dataverse.Generated` classes (`PluginAssembly`, `PluginPackage`, `PluginType`, `SdkMessageProcessingStep`, `SdkMessageProcessingStepImage`, `SdkMessage`, `SdkMessageFilter`, `SystemUser`). Provides compile-time type safety and IntelliSense for all Dataverse entity operations. ([#56](https://github.com/joshsmithxrm/ppds-sdk/issues/56))

@@ -7,6 +7,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Self-Contained Publish Configuration
+         These are defaults for normal builds. CI/release workflows override
+         PublishSingleFile and SelfContained via -p: command-line parameters. -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- NU1702: PPDS.Plugins targets net462 (required for Dataverse plugin sandbox) but is
          referenced from net8.0+. The package contains only attributes/enums with no
          framework-specific APIs, so cross-framework reference is safe. -->

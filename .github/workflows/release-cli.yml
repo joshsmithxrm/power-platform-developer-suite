@@ -1,0 +1,123 @@
+name: Release CLI Binaries
+
+on:
+  push:
+    tags:
+      - 'Cli-v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            artifact: ppds-win-x64.exe
+          - rid: win-arm64
+            os: windows-latest
+            artifact: ppds-win-arm64.exe
+          - rid: osx-x64
+            os: macos-latest
+            artifact: ppds-osx-x64
+          - rid: osx-arm64
+            os: macos-latest
+            artifact: ppds-osx-arm64
+          - rid: linux-x64
+            os: ubuntu-latest
+            artifact: ppds-linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Required for MinVer to read git history
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish self-contained binary
+        run: |
+          dotnet publish src/PPDS.Cli/PPDS.Cli.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            -f net8.0 \
+            -p:PublishSingleFile=true \
+            --self-contained \
+            -o ./publish
+        shell: bash
+
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: mv ./publish/ppds ./publish/${{ matrix.artifact }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: mv ./publish/ppds.exe ./publish/${{ matrix.artifact }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./publish/${{ matrix.artifact }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p ./release
+          # Move all binaries to release folder (artifacts are in subdirectories)
+          find ./artifacts -type f -name "ppds-*" -exec mv {} ./release/ \;
+          ls -la ./release/
+
+      - name: Validate all binaries present
+        run: |
+          EXPECTED="ppds-win-x64.exe ppds-win-arm64.exe ppds-osx-x64 ppds-osx-arm64 ppds-linux-x64"
+          for binary in $EXPECTED; do
+            if [ ! -f "./release/$binary" ]; then
+              echo "ERROR: Missing expected binary: $binary"
+              exit 1
+            fi
+          done
+          echo "All 5 platform binaries present"
+
+      - name: Generate checksums
+        working-directory: ./release
+        run: |
+          sha256sum ppds-* > checksums.sha256
+          cat checksums.sha256
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#Cli-v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PPDS CLI v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            ./release/ppds-win-x64.exe
+            ./release/ppds-win-arm64.exe
+            ./release/ppds-osx-x64
+            ./release/ppds-osx-arm64
+            ./release/ppds-linux-x64
+            ./release/checksums.sha256
