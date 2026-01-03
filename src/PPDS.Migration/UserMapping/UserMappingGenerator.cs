@@ -172,7 +172,7 @@ namespace PPDS.Migration.UserMapping
                     SystemUser.Fields.SystemUserId,
                     SystemUser.Fields.FullName,
                     SystemUser.Fields.DomainName,
-                    SystemUser.Fields.InternalEmailAddress,
+                    SystemUser.Fields.InternalEMailAddress,
                     SystemUser.Fields.AzureActiveDirectoryObjectId,
                     SystemUser.Fields.IsDisabled,
                     SystemUser.Fields.AccessMode
@@ -194,7 +194,7 @@ namespace PPDS.Migration.UserMapping
                 SystemUserId = e.Id,
                 FullName = e.GetAttributeValue<string>(SystemUser.Fields.FullName) ?? "(no name)",
                 DomainName = e.GetAttributeValue<string>(SystemUser.Fields.DomainName),
-                Email = e.GetAttributeValue<string>(SystemUser.Fields.InternalEmailAddress),
+                Email = e.GetAttributeValue<string>(SystemUser.Fields.InternalEMailAddress),
                 AadObjectId = e.GetAttributeValue<Guid?>(SystemUser.Fields.AzureActiveDirectoryObjectId),
                 IsDisabled = e.GetAttributeValue<bool>(SystemUser.Fields.IsDisabled),
                 AccessMode = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(SystemUser.Fields.AccessMode)?.Value ?? 0

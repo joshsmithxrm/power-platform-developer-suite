@@ -89,10 +89,11 @@ namespace PPDS.Migration.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var update = new SdkMessageProcessingStep(stepId)
+                var update = new SdkMessageProcessingStep
                 {
-                    StateCode = SdkMessageProcessingStep_StateCode.Disabled,
-                    StatusCode = SdkMessageProcessingStep_StatusCode.Disabled
+                    Id = stepId,
+                    StateCode = sdkmessageprocessingstep_statecode.Disabled,
+                    StatusCode = sdkmessageprocessingstep_statuscode.Disabled
                 };
 
                 try
@@ -126,10 +127,11 @@ namespace PPDS.Migration.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var update = new SdkMessageProcessingStep(stepId)
+                var update = new SdkMessageProcessingStep
                 {
-                    StateCode = SdkMessageProcessingStep_StateCode.Enabled,
-                    StatusCode = SdkMessageProcessingStep_StatusCode.Enabled
+                    Id = stepId,
+                    StateCode = sdkmessageprocessingstep_statecode.Enabled,
+                    StatusCode = sdkmessageprocessingstep_statuscode.Enabled
                 };
 
                 try
@@ -154,7 +156,7 @@ namespace PPDS.Migration.Import
                     <attribute name='{SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId}' />
                     <attribute name='{SdkMessageProcessingStep.Fields.Name}' />
                     <filter type='and'>
-                        <condition attribute='{SdkMessageProcessingStep.Fields.StateCode}' operator='eq' value='{(int)SdkMessageProcessingStep_StateCode.Enabled}' />
+                        <condition attribute='{SdkMessageProcessingStep.Fields.StateCode}' operator='eq' value='{(int)sdkmessageprocessingstep_statecode.Enabled}' />
                         <condition attribute='{SdkMessageProcessingStep.Fields.IsHidden}' operator='eq' value='0' />
                         <condition attribute='{SdkMessageProcessingStep.Fields.CustomizationLevel}' operator='eq' value='1' />
                     </filter>

@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **Early-bound entity classes for system/development entities** - Generated strongly-typed classes for 11 entities used by PPDS CLI and Migration: `PluginAssembly`, `PluginPackage`, `PluginType`, `SdkMessage`, `SdkMessageFilter`, `SdkMessageProcessingStep`, `SdkMessageProcessingStepImage`, `SystemUser`, `Solution`, `SolutionComponent`, `Publisher`. Provides compile-time type safety, IntelliSense support, and eliminates magic string attribute names. ([#56](https://github.com/joshsmithxrm/ppds-sdk/issues/56))
-- **Entity-specific option set enums** - Strongly-typed enums for `IsolationMode`, `SourceType`, `Stage`, `Mode`, `SupportedDeployment`, `StateCode`, `StatusCode`, `ImageType`, `AccessMode`, and `ComponentType`.
-- **Model generation script** - `scripts/Generate-EarlyBoundModels.ps1` for regenerating entity classes from Dataverse metadata using `pac modelbuilder`.
-
 ### Changed
 
 - **Replaced Newtonsoft.Json with System.Text.Json** - Removed external dependency; uses built-in JSON serialization with case-insensitive property matching ([#72](https://github.com/joshsmithxrm/ppds-sdk/issues/72))

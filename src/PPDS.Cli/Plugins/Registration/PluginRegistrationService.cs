@@ -90,7 +90,7 @@ public sealed class PluginRegistrationService
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
             Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
             PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)PluginAssembly_IsolationMode.Sandbox
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox
         }).ToList();
     }
 
@@ -165,7 +165,7 @@ public sealed class PluginRegistrationService
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
             Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
             PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)PluginAssembly_IsolationMode.Sandbox
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox
         }).ToList();
     }
 
@@ -287,7 +287,7 @@ public sealed class PluginRegistrationService
                 ExecutionOrder = e.GetAttributeValue<int>(SdkMessageProcessingStep.Fields.Rank),
                 FilteringAttributes = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.FilteringAttributes),
                 Configuration = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Configuration),
-                IsEnabled = e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value == (int)SdkMessageProcessingStep_StateCode.Enabled,
+                IsEnabled = e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value == (int)sdkmessageprocessingstep_statecode.Enabled,
                 Description = e.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Description),
                 Deployment = MapDeploymentFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.SupportedDeployment)?.Value ?? 0),
                 ImpersonatingUserId = impersonatingUserRef?.Id,
@@ -308,7 +308,7 @@ public sealed class PluginRegistrationService
                 SdkMessageProcessingStepImage.Fields.Name,
                 SdkMessageProcessingStepImage.Fields.EntityAlias,
                 SdkMessageProcessingStepImage.Fields.ImageType,
-                SdkMessageProcessingStepImage.Fields.Attributes),
+                SdkMessageProcessingStepImage.Fields.Attributes1),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -327,7 +327,7 @@ public sealed class PluginRegistrationService
             Name = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty,
             EntityAlias = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.EntityAlias),
             ImageType = MapImageTypeFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStepImage.Fields.ImageType)?.Value ?? 0),
-            Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes)
+            Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1)
         }).ToList();
     }
 
@@ -417,8 +417,8 @@ public sealed class PluginRegistrationService
         {
             Name = name,
             Content = Convert.ToBase64String(content),
-            IsolationMode = PluginAssembly_IsolationMode.Sandbox,
-            SourceType = PluginAssembly_SourceType.Database
+            IsolationMode = pluginassembly_isolationmode.Sandbox,
+            SourceType = pluginassembly_sourcetype.Database
         };
 
         if (existing != null)
@@ -456,8 +456,9 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             // UPDATE: Only update content, use solution header for solution association
-            var updateEntity = new PluginPackage(existing.Id)
+            var updateEntity = new PluginPackage
             {
+                Id = existing.Id,
                 Content = Convert.ToBase64String(nupkgContent)
             };
 
@@ -558,13 +559,13 @@ public sealed class PluginRegistrationService
         var entity = new SdkMessageProcessingStep
         {
             Name = stepConfig.Name,
-            PluginTypeId = new EntityReference(PluginType.EntityLogicalName, pluginTypeId),
+            EventHandler = new EntityReference(PluginType.EntityLogicalName, pluginTypeId),
             SdkMessageId = new EntityReference(SdkMessage.EntityLogicalName, messageId),
-            Stage = (SdkMessageProcessingStep_Stage)MapStageToValue(stepConfig.Stage),
-            Mode = (SdkMessageProcessingStep_Mode)MapModeToValue(stepConfig.Mode),
+            Stage = (sdkmessageprocessingstep_stage)MapStageToValue(stepConfig.Stage),
+            Mode = (sdkmessageprocessingstep_mode)MapModeToValue(stepConfig.Mode),
             Rank = stepConfig.ExecutionOrder,
-            SupportedDeployment = (SdkMessageProcessingStep_SupportedDeployment)MapDeploymentToValue(stepConfig.Deployment),
-            InvocationSource = new OptionSetValue(0) // Internal (legacy, but required)
+            SupportedDeployment = (sdkmessageprocessingstep_supporteddeployment)MapDeploymentToValue(stepConfig.Deployment),
+            InvocationSource = sdkmessageprocessingstep_invocationsource.Internal
         };
 
         if (filterId.HasValue)
@@ -649,13 +650,13 @@ public sealed class PluginRegistrationService
             SdkMessageProcessingStepId = new EntityReference(SdkMessageProcessingStep.EntityLogicalName, stepId),
             Name = imageConfig.Name,
             EntityAlias = imageConfig.EntityAlias ?? imageConfig.Name,
-            ImageType = (SdkMessageProcessingStepImage_ImageType)MapImageTypeToValue(imageConfig.ImageType),
+            ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue(imageConfig.ImageType),
             MessagePropertyName = "Target"
         };
 
         if (!string.IsNullOrEmpty(imageConfig.Attributes))
         {
-            entity.Attributes = imageConfig.Attributes;
+            entity.Attributes1 = imageConfig.Attributes;
         }
 
         if (existing != null)

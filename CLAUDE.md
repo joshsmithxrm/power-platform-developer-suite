@@ -21,6 +21,8 @@
 | Guess parallelism values | Use `RecommendedDegreesOfParallelism` from server; guessing degrades performance |
 | Enable affinity cookie for bulk operations | Routes all requests to single backend node; 10x throughput loss |
 | Store pooled clients in fields | Causes connection leaks; get per operation, dispose immediately |
+| Use magic strings for generated entities | Use `EntityLogicalName` and `Fields.*` constants; see [Generated Entities](#-generated-entities) |
+| Use late-bound `Entity` for generated entity types | Use early-bound classes (`PluginAssembly`, `SystemUser`, etc.); compile-time safety |
 
 ---
 
@@ -32,13 +34,15 @@
 | XML documentation for public APIs | IntelliSense support for consumers |
 | Multi-target appropriately | PPDS.Plugins: 4.6.2 only; libraries: 8.0, 9.0, 10.0 |
 | Run `dotnet test` before PR | Ensures no regressions |
-| Update `CHANGELOG.md` with changes | Release notes for consumers |
+| Update `CHANGELOG.md` for user-facing changes only | Skip internal refactoring, tooling, generated code |
 | Follow SemVer versioning | Clear compatibility expectations |
 | Use connection pool for multi-request scenarios | Reuses connections, applies performance settings automatically |
 | Dispose pooled clients with `await using` | Returns connections to pool; prevents leaks |
 | Use bulk APIs (`CreateMultiple`, `UpdateMultiple`, `UpsertMultiple`) | 5x faster than `ExecuteMultiple` (~10M vs ~2M records/hour) |
 | Reference Microsoft Learn docs in ADRs | Authoritative source for Dataverse best practices |
 | Scale throughput by adding Application Users | Each user has independent API quota; DOP × connections = total parallelism |
+| Use early-bound classes for generated entities | Type safety, IntelliSense, refactoring support |
+| Ask user before using late-bound for ambiguous cases | If unsure whether dynamic entity handling is needed, ask first |
 
 ---
 
@@ -66,6 +70,7 @@ ppds-sdk/
 │   ├── PPDS.Dataverse/
 │   │   ├── BulkOperations/      # CreateMultiple, UpdateMultiple, UpsertMultiple
 │   │   ├── Client/              # DataverseClient, IDataverseClient
+│   │   ├── Generated/           # Early-bound entity classes (DO NOT manually edit)
 │   │   ├── Pooling/             # Connection pool, strategies
 │   │   ├── Resilience/          # Throttle tracking, retry logic
 │   │   └── PPDS.Dataverse.csproj
@@ -91,6 +96,79 @@ ppds-sdk/
 ├── PPDS.Sdk.sln
 └── CHANGELOG.md
 ```
+
+---
+
+## 🏗️ Generated Entities
+
+Early-bound entity classes in `src/PPDS.Dataverse/Generated/` provide compile-time type safety.
+
+### Available Entities
+
+| Entity Class | Logical Name | Used For |
+|--------------|--------------|----------|
+| `PluginAssembly` | `pluginassembly` | Plugin registration |
+| `PluginPackage` | `pluginpackage` | NuGet plugin packages |
+| `PluginType` | `plugintype` | Plugin type registration |
+| `SdkMessage` | `sdkmessage` | Message lookups |
+| `SdkMessageFilter` | `sdkmessagefilter` | Entity/message filtering |
+| `SdkMessageProcessingStep` | `sdkmessageprocessingstep` | Step registration |
+| `SdkMessageProcessingStepImage` | `sdkmessageprocessingstepimage` | Pre/post images |
+| `Solution` | `solution` | Solution operations |
+| `SolutionComponent` | `solutioncomponent` | Solution components |
+| `AsyncOperation` | `asyncoperation` | System jobs / async operations |
+| `ImportJob` | `importjob` | Solution import jobs |
+| `SystemUser` | `systemuser` | User mapping |
+| `Publisher` | `publisher` | Solution publishers |
+
+### Usage Patterns
+
+```csharp
+// ✅ Correct - Early-bound with constants
+var query = new QueryExpression(PluginAssembly.EntityLogicalName)
+{
+    ColumnSet = new ColumnSet(
+        PluginAssembly.Fields.Name,
+        PluginAssembly.Fields.Version)
+};
+
+var assembly = new PluginAssembly
+{
+    Name = "MyPlugin",
+    IsolationMode = pluginassembly_isolationmode.Sandbox
+};
+
+// ❌ Wrong - Magic strings
+var query = new QueryExpression("pluginassembly")
+{
+    ColumnSet = new ColumnSet("name", "version")
+};
+```
+
+### When Late-Bound Is Acceptable
+
+Late-bound `new Entity(logicalName)` is correct **only** when:
+- Entity type is determined at runtime (migration import/export)
+- Building generic tooling for arbitrary entities
+- Entity doesn't have a generated class
+
+```csharp
+// ✅ Correct - Dynamic entity from schema (migration scenario)
+var entity = new Entity(record.LogicalName);
+
+// ❌ Wrong - Known entity type, should use early-bound
+var entity = new Entity("pluginassembly");
+```
+
+### Regenerating Entities
+
+If Dataverse schema changes or new entities are needed:
+
+```powershell
+.\scripts\Generate-EarlyBoundModels.ps1 -Force
+```
+
+Requires `pac auth` to be configured. See script for entity list.
 
 ---
 

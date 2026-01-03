@@ -37,6 +37,7 @@ $ErrorActionPreference = 'Stop'
 
 # Entities used by PPDS CLI and Migration
 $Entities = @(
+    # Plugin registration
     'pluginassembly'
     'pluginpackage'
     'plugintype'
@@ -44,9 +45,13 @@ $Entities = @(
     'sdkmessagefilter'
     'sdkmessageprocessingstep'
     'sdkmessageprocessingstepimage'
-    'systemuser'
+    # Solution/ALM
     'solution'
     'solutioncomponent'
+    'asyncoperation'
+    'importjob'
+    # User management
+    'systemuser'
     'publisher'
 )
 
@@ -125,17 +130,14 @@ $Entities | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
 Write-Host ""
 
 # Run pac modelbuilder
+# Note: Most options are switches (present = enabled, absent = disabled)
+# Only include switches we want enabled
 $pacArgs = @(
     'modelbuilder', 'build'
     '--outdirectory', $OutputDirectory
     '--namespace', 'PPDS.Dataverse.Generated'
     '--entitynamesfilter', $entityFilter
-    '--generateActions', 'false'
-    '--generateGlobalOptionSets', 'false'
-    '--emitEntityETC', 'false'
-    '--emitFieldsClasses', 'true'
-    '--emitVirtualAttributes', 'false'
-    '--suppressGeneratedCodeAttribute', 'false'
+    '--emitfieldsclasses'           # Generate Field constants class
     '--language', 'CSharp'
 )
 
