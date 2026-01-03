@@ -58,3 +58,7 @@ schema.xml
 
 # Code coverage
 coverage/
+
+# Local environment secrets
+.env.local
+.env.*.local
