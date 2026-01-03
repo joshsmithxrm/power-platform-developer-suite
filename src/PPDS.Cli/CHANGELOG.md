@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Structured error handling** - All errors now return hierarchical error codes (`Auth.ProfileNotFound`, `Connection.Failed`, etc.) for reliable programmatic handling ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
+- **Expanded exit codes** - New exit codes 4 (ConnectionError), 5 (AuthError), 6 (NotFoundError) for finer-grained status ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
+- **Global options** - `--quiet`/`-q`, `--verbose`/`-v`, `--debug`, `--correlation-id` flags available on all commands ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
+- **JSON output schema versioning** - JSON output now includes `version: "1.0"` field for future compatibility ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
+- **ADR-0008** - Architecture decision record documenting CLI output architecture (ILogger, IOutputWriter, IProgressReporter separation)
+
+### Changed
+
+- **Progress output to stderr** - Progress messages now write to stderr, enabling clean piping: `ppds data export -f json | jq` ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
+- **Status messages to stderr** - Operational messages (connecting, authenticating, etc.) now write to stderr, keeping stdout for data only ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
+
 ## [1.0.0-beta.6] - 2026-01-03
 
 ### Added

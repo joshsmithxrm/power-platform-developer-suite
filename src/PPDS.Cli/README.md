@@ -296,29 +296,108 @@ Each Application User gets 6,000 requests per 5-minute window. Three users = 18,
 
 ---
 
+## Global Options
+
+These options are available on all commands:
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output-format` | `-f` | Output format: `text` (default) or `json` |
+| `--quiet` | `-q` | Show only warnings and errors |
+| `--verbose` | `-v` | Show debug messages |
+| `--debug` | | Show trace-level diagnostics |
+| `--correlation-id` | | Correlation ID for distributed tracing |
+
+---
+
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Failure |
-| 2 | Invalid arguments |
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | Success | Operation completed successfully |
+| 1 | PartialSuccess | Some items failed but operation completed |
+| 2 | Failure | Operation failed |
+| 3 | InvalidArguments | Invalid command-line arguments |
+| 4 | ConnectionError | Failed to connect to Dataverse |
+| 5 | AuthError | Authentication failed |
+| 6 | NotFoundError | Resource not found (profile, environment, file) |
+
+---
+
+## Error Codes
+
+Structured errors include a hierarchical code for programmatic handling:
+
+| Category | Codes |
+|----------|-------|
+| `Auth.*` | ProfileNotFound, Expired, InvalidCredentials, InsufficientPermissions, NoActiveProfile, ProfileExists, CertificateError |
+| `Connection.*` | Failed, Throttled, Timeout, EnvironmentNotFound, AmbiguousEnvironment, InvalidEnvironmentUrl |
+| `Validation.*` | RequiredField, InvalidValue, FileNotFound, DirectoryNotFound, SchemaInvalid, InvalidArguments |
+| `Operation.*` | NotFound, Duplicate, Dependency, PartialFailure, Cancelled, Internal, NotSupported |
 
 ---
 
 ## JSON Output
 
-The `--output-format Json` option enables structured JSON output for tool integration:
+The `--output-format json` option enables structured JSON output for tool integration:
 
 ```bash
-ppds data export --schema schema.xml --output data.zip --output-format Json
+ppds data export --schema schema.xml --output data.zip --output-format json
 ```
 
-Output format (one JSON object per line):
+### Command Results
+
+All commands return a consistent JSON envelope:
+
 ```json
-{"phase":"analyzing","message":"Parsing schema...","timestamp":"2025-12-19T10:30:00Z"}
+{
+  "version": "1.0",
+  "success": true,
+  "data": { ... },
+  "timestamp": "2026-01-03T12:00:00Z"
+}
+```
+
+Error response:
+```json
+{
+  "version": "1.0",
+  "success": false,
+  "error": {
+    "code": "Auth.ProfileNotFound",
+    "message": "Profile 'production' not found.",
+    "target": "production"
+  },
+  "timestamp": "2026-01-03T12:00:00Z"
+}
+```
+
+Partial success (batch operations):
+```json
+{
+  "version": "1.0",
+  "success": true,
+  "data": { ... },
+  "results": [
+    { "name": "account", "success": true },
+    { "name": "contact", "success": false, "error": { "code": "Operation.NotFound", "message": "..." } }
+  ],
+  "timestamp": "2026-01-03T12:00:00Z"
+}
+```
+
+### Progress Output
+
+Progress messages are written to **stderr** (not stdout), enabling piping:
+
+```bash
+# Progress goes to stderr, JSON data goes to stdout
+ppds data export --schema schema.xml --output data.zip -f json 2>/dev/null | jq '.data'
+```
+
+Progress format (stderr, one JSON object per line):
+```json
 {"phase":"export","entity":"account","current":450,"total":1000,"rps":287.5}
-{"phase":"complete","duration":"00:05:23","recordsProcessed":1505,"errors":0}
 ```
 
 ---
