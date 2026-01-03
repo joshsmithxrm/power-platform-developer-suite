@@ -243,7 +243,7 @@ public sealed class PluginRegistrationService
             {
                 Conditions =
                 {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.PluginTypeId, ConditionOperator.Equal, pluginTypeId)
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, pluginTypeId)
                 }
             },
             LinkEntities =
@@ -547,7 +547,7 @@ public sealed class PluginRegistrationService
             {
                 Conditions =
                 {
-                    new ConditionExpression(SdkMessageProcessingStep.Fields.PluginTypeId, ConditionOperator.Equal, pluginTypeId),
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.EventHandler, ConditionOperator.Equal, pluginTypeId),
                     new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepConfig.Name)
                 }
             }
