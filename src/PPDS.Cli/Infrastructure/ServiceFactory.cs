@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Commands;
+using PPDS.Cli.Infrastructure.Logging;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Migration.Analysis;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Progress;
@@ -46,5 +48,69 @@ public static class ServiceFactory
         services.AddTransient<IDependencyGraphBuilder, DependencyGraphBuilder>();
 
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Creates an output writer based on the output format.
+    /// </summary>
+    /// <param name="outputFormat">The desired output format.</param>
+    /// <param name="debugMode">Whether to include full error details.</param>
+    /// <returns>An appropriate IOutputWriter implementation.</returns>
+    public static IOutputWriter CreateOutputWriter(OutputFormat outputFormat, bool debugMode = false)
+    {
+        return outputFormat == OutputFormat.Json
+            ? new JsonOutputWriter(debugMode: debugMode)
+            : new TextOutputWriter(debugMode);
+    }
+
+    /// <summary>
+    /// Creates an output writer from global option values.
+    /// </summary>
+    /// <param name="options">The global option values.</param>
+    /// <returns>An appropriate IOutputWriter implementation.</returns>
+    public static IOutputWriter CreateOutputWriter(GlobalOptionValues options)
+    {
+        return CreateOutputWriter(options.OutputFormat, options.Debug);
+    }
+
+    /// <summary>
+    /// Creates CLI logger options from global option values.
+    /// </summary>
+    /// <param name="options">The global option values.</param>
+    /// <returns>Configured logger options.</returns>
+    public static CliLoggerOptions CreateLoggerOptions(GlobalOptionValues options)
+    {
+        return new CliLoggerOptions
+        {
+            MinimumLevel = CliLoggerOptions.ResolveLogLevel(options.Quiet, options.Verbose, options.Debug),
+            UseJsonFormat = options.IsJsonMode,
+            CorrelationId = options.CorrelationId,
+            EnableColors = !options.IsJsonMode
+        };
+    }
+
+    /// <summary>
+    /// Creates CLI logger options from individual flags.
+    /// </summary>
+    /// <param name="quiet">Whether --quiet flag was specified.</param>
+    /// <param name="verbose">Whether --verbose flag was specified.</param>
+    /// <param name="debug">Whether --debug flag was specified.</param>
+    /// <param name="jsonFormat">Whether JSON output format was requested.</param>
+    /// <param name="correlationId">Optional correlation ID.</param>
+    /// <returns>Configured logger options.</returns>
+    public static CliLoggerOptions CreateLoggerOptions(
+        bool quiet = false,
+        bool verbose = false,
+        bool debug = false,
+        bool jsonFormat = false,
+        string? correlationId = null)
+    {
+        return new CliLoggerOptions
+        {
+            MinimumLevel = CliLoggerOptions.ResolveLogLevel(quiet, verbose, debug),
+            UseJsonFormat = jsonFormat,
+            CorrelationId = correlationId,
+            EnableColors = !jsonFormat
+        };
     }
 }
