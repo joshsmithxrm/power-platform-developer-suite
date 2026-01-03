@@ -73,9 +73,12 @@ ppds-sdk/
 │   ├── PPDS.Auth/               # Authentication profiles and credentials
 │   └── PPDS.Cli/                # Unified CLI tool (ppds command)
 ├── tests/
-│   ├── PPDS.Plugins.Tests/
-│   ├── PPDS.Dataverse.Tests/
-│   └── PPDS.Cli.Tests/
+│   ├── PPDS.Plugins.Tests/          # Unit tests
+│   ├── PPDS.Dataverse.Tests/        # Unit tests
+│   ├── PPDS.Cli.Tests/              # Unit tests
+│   ├── PPDS.Auth.IntegrationTests/  # Auth smoke tests
+│   ├── PPDS.Dataverse.IntegrationTests/  # FakeXrmEasy mocked tests
+│   └── PPDS.LiveTests/              # Live Dataverse integration tests
 ├── docs/
 │   ├── adr/                     # Architecture Decision Records
 │   └── architecture/            # Pattern documentation
@@ -377,13 +380,24 @@ See [CLI README](src/PPDS.Cli/README.md) for full documentation.
 
 ## 🧪 Testing Requirements
 
-| Package | Test Project | Status |
-|---------|--------------|--------|
-| PPDS.Plugins | PPDS.Plugins.Tests | ✅ |
-| PPDS.Dataverse | PPDS.Dataverse.Tests | ✅ |
-| PPDS.Cli | PPDS.Cli.Tests | ✅ |
-| PPDS.Auth | **Needs test project** | ❌ |
-| PPDS.Migration | **Needs test project** | ❌ |
+### Test Projects
+
+| Package | Unit Tests | Integration Tests | Status |
+|---------|------------|-------------------|--------|
+| PPDS.Plugins | PPDS.Plugins.Tests | - | ✅ |
+| PPDS.Dataverse | PPDS.Dataverse.Tests | PPDS.Dataverse.IntegrationTests (FakeXrmEasy) | ✅ |
+| PPDS.Cli | PPDS.Cli.Tests | PPDS.LiveTests/Cli (E2E) | ⏳ E2E pending |
+| PPDS.Auth | **Needs unit tests** | PPDS.LiveTests/Authentication | ❌ Unit pending |
+| PPDS.Migration | **Needs unit tests** | - | ❌ Unit pending |
+
+### Live Tests (PPDS.LiveTests)
+
+Live integration tests against real Dataverse environment:
+- `Authentication/` - Client secret, certificate, GitHub OIDC, Azure DevOps OIDC
+- `Pooling/` - Connection pool, DOP detection
+- `Resilience/` - Throttle detection
+- `BulkOperations/` - Live bulk operation execution
+- `Cli/` - CLI E2E tests (pending)
 
 **Rules:**
 - New public class → must have corresponding test class
