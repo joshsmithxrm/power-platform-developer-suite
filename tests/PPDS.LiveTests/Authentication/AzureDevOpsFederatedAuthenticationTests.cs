@@ -76,9 +76,8 @@ public class AzureDevOpsFederatedAuthenticationTests : LiveTestBase, IDisposable
             Configuration.ApplicationId!,
             Configuration.TenantId!);
 
-        // Assert
-        provider.Identity.Should().NotBeNullOrWhiteSpace();
-        provider.Identity.Should().StartWith("app:");
+        // Assert - Identity returns the application ID directly
+        provider.Identity.Should().Be(Configuration.ApplicationId);
         provider.AuthMethod.Should().Be(PPDS.Auth.Profiles.AuthMethod.AzureDevOpsFederated);
     }
 

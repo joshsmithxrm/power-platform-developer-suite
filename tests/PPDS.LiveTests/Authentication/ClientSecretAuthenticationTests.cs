@@ -60,9 +60,8 @@ public class ClientSecretAuthenticationTests : LiveTestBase, IDisposable
             Configuration.ClientSecret!,
             Configuration.TenantId!);
 
-        // Assert - Identity is set before authentication
-        provider.Identity.Should().NotBeNullOrWhiteSpace();
-        provider.Identity.Should().StartWith("app:");
+        // Assert - Identity returns the application ID directly
+        provider.Identity.Should().Be(Configuration.ApplicationId);
         provider.AuthMethod.Should().Be(PPDS.Auth.Profiles.AuthMethod.ClientSecret);
     }
 
