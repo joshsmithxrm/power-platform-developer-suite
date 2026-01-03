@@ -71,13 +71,12 @@ After user approval:
 After changes are committed, reply to each bot comment. Do NOT batch responses into a single PR comment.
 
 ```bash
-# Reply to a specific review comment
-gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments \
-  -f body="Fixed in abc123" \
-  -F in_reply_to={comment_id}
+# Reply to a specific review comment (note: uses /replies endpoint)
+gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments/{comment_id}/replies \
+  -f body="Fixed in abc123"
 ```
 
-**Important:** The `in_reply_to` parameter must be the comment ID (numeric), not a URL. Get IDs from the fetch step.
+**Important:** Use the `/comments/{comment_id}/replies` endpoint, NOT the base comments endpoint with `in_reply_to`. The comment ID is numeric - get IDs from the fetch step.
 
 | Verdict | Reply Template |
 |---------|----------------|
