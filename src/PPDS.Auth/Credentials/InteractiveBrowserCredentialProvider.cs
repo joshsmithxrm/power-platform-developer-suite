@@ -153,24 +153,31 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         };
         var client = new ServiceClient(options);
 
-        // Force org metadata discovery before client is cloned by pool.
-        // ServiceClient uses lazy initialization - properties like ConnectedOrgFriendlyName
-        // are only populated when first accessed. The connection pool clones clients before
-        // properties are accessed, so clones would have empty metadata.
-        // Skip for globaldisco - it's the discovery service, not an actual org.
-        if (!environmentUrl.Contains("globaldisco", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            _ = client.ConnectedOrgFriendlyName;
-        }
+            // Force org metadata discovery before client is cloned by pool.
+            // ServiceClient uses lazy initialization - properties like ConnectedOrgFriendlyName
+            // are only populated when first accessed. The connection pool clones clients before
+            // properties are accessed, so clones would have empty metadata.
+            // Skip for globaldisco - it's the discovery service, not an actual org.
+            if (!environmentUrl.Contains("globaldisco", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = client.ConnectedOrgFriendlyName;
+            }
 
-        if (!client.IsReady)
+            if (!client.IsReady)
+            {
+                var error = client.LastError ?? "Unknown error";
+                throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
+            }
+
+            return client;
+        }
+        catch
         {
-            var error = client.LastError ?? "Unknown error";
             client.Dispose();
-            throw new AuthenticationException($"Failed to connect to Dataverse: {error}");
+            throw;
         }
-
-        return client;
     }
 
     /// <summary>
