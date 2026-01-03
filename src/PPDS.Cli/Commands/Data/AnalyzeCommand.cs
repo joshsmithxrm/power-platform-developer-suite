@@ -2,6 +2,8 @@ using System.CommandLine;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Migration.Analysis;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Models;
@@ -96,17 +98,18 @@ public static class AnalyzeCommand
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Analysis cancelled by user.");
+            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+            writer.WriteError(new StructuredError(
+                ErrorCodes.Operation.Cancelled,
+                "Analysis cancelled by user."));
             return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Analysis failed: {ex.Message}");
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.StackTrace);
-            }
-            return ExitCodes.Failure;
+            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+            var error = ExceptionMapper.Map(ex, context: "analyzing schema", debug: debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
         }
     }
 
@@ -169,50 +172,50 @@ public static class AnalyzeCommand
 
     private static void WriteTextOutput(SchemaAnalysis analysis, string schemaPath)
     {
-        Console.WriteLine("[Schema Analysis]");
-        Console.WriteLine();
-        Console.WriteLine($"Schema: {schemaPath}");
-        Console.WriteLine();
+        Console.Error.WriteLine("[Schema Analysis]");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"Schema: {schemaPath}");
+        Console.Error.WriteLine();
 
         if (analysis.EntityCount == 0)
         {
-            Console.WriteLine("No entities found in schema.");
+            Console.Error.WriteLine("No entities found in schema.");
             return;
         }
 
-        Console.WriteLine($"Entities: {analysis.EntityCount}");
-        Console.WriteLine($"Dependencies: {analysis.DependencyCount}");
-        Console.WriteLine($"Circular References: {analysis.CircularReferenceCount}");
-        Console.WriteLine();
+        Console.Error.WriteLine($"Entities: {analysis.EntityCount}");
+        Console.Error.WriteLine($"Dependencies: {analysis.DependencyCount}");
+        Console.Error.WriteLine($"Circular References: {analysis.CircularReferenceCount}");
+        Console.Error.WriteLine();
 
-        Console.WriteLine("Import Tiers:");
+        Console.Error.WriteLine("Import Tiers:");
         foreach (var tier in analysis.Tiers)
         {
             var entities = string.Join(", ", tier.Entities);
             var suffix = tier.HasCircular ? " (circular)" : "";
-            Console.WriteLine($"  Tier {tier.Tier}: {entities}{suffix}");
+            Console.Error.WriteLine($"  Tier {tier.Tier}: {entities}{suffix}");
         }
-        Console.WriteLine();
+        Console.Error.WriteLine();
 
         if (analysis.DeferredFields.Count > 0)
         {
-            Console.WriteLine("Deferred Fields:");
+            Console.Error.WriteLine("Deferred Fields:");
             foreach (var (entity, fields) in analysis.DeferredFields)
             {
                 foreach (var field in fields)
                 {
-                    Console.WriteLine($"  {entity}.{field}");
+                    Console.Error.WriteLine($"  {entity}.{field}");
                 }
             }
-            Console.WriteLine();
+            Console.Error.WriteLine();
         }
 
         if (analysis.ManyToManyRelationships.Length > 0)
         {
-            Console.WriteLine("Many-to-Many Relationships:");
+            Console.Error.WriteLine("Many-to-Many Relationships:");
             foreach (var relationship in analysis.ManyToManyRelationships)
             {
-                Console.WriteLine($"  {relationship}");
+                Console.Error.WriteLine($"  {relationship}");
             }
         }
     }
