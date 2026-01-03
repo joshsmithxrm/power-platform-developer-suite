@@ -89,12 +89,15 @@ public abstract class CliE2ETestBase : IAsyncLifetime
             CreateNoWindow = true
         };
 
-        // Build argument list: run --project <path> --framework net8.0 --no-build -- <args>
+        // Build argument list: run --project <path> --configuration Release --framework net8.0 --no-build -- <args>
         // Use net8.0 (LTS) since CLI behavior is framework-agnostic and libraries
         // are already tested per-TFM via LiveTests/Authentication/*, Pooling/*, etc.
+        // Use Release configuration to match CI build (--no-build requires matching config).
         startInfo.ArgumentList.Add("run");
         startInfo.ArgumentList.Add("--project");
         startInfo.ArgumentList.Add(CliProjectPath);
+        startInfo.ArgumentList.Add("--configuration");
+        startInfo.ArgumentList.Add("Release");
         startInfo.ArgumentList.Add("--framework");
         startInfo.ArgumentList.Add("net8.0");
         startInfo.ArgumentList.Add("--no-build");
