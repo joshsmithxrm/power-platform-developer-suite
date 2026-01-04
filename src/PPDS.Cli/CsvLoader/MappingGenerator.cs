@@ -173,20 +173,54 @@ public sealed class MappingGenerator
         var normalizedHeader = NormalizeForMatching(header);
         var samples = sampleValues?.Take(MaxSampleValues).ToList();
 
-        // Try to find matching attribute
-        if (attributesByName.TryGetValue(normalizedHeader, out var matchedAttr))
+        // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
+        var prefix = ExtractPublisherPrefix(entityMetadata.LogicalName ?? "");
+
+        // Try exact match first
+        if (attributesByName.TryGetValue(header, out var matchedAttr))
         {
             return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
         }
 
-        // Also try direct logical name match
-        if (attributesByName.TryGetValue(header, out matchedAttr))
+        // Try prefix + column (e.g., "city" → "ppds_city")
+        if (prefix != null && attributesByName.TryGetValue(prefix + header, out matchedAttr))
         {
             return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
+        }
+
+        // Try normalized match
+        if (attributesByName.TryGetValue(normalizedHeader, out matchedAttr))
+        {
+            return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
+        }
+
+        // Try normalized prefix + column
+        if (prefix != null)
+        {
+            var normalizedPrefixedHeader = NormalizeForMatching(prefix + header);
+            foreach (var (attrName, attr) in attributesByName)
+            {
+                if (NormalizeForMatching(attrName) == normalizedPrefixedHeader)
+                {
+                    return CreateMatchedEntry(attr, samples, entityMetadata);
+                }
+            }
         }
 
         // No match found
-        return CreateUnmatchedEntry(header, entityMetadata, samples);
+        return CreateUnmatchedEntry(header, entityMetadata, samples, prefix);
+    }
+
+    private static string? ExtractPublisherPrefix(string entityLogicalName)
+    {
+        // Standard Dataverse entity naming: <publisher>_<name>
+        // Extract the prefix including underscore: "ppds_city" → "ppds_"
+        var underscoreIndex = entityLogicalName.IndexOf('_');
+        if (underscoreIndex > 0)
+        {
+            return entityLogicalName[..(underscoreIndex + 1)];
+        }
+        return null;
     }
 
     private ColumnMappingEntry CreateMatchedEntry(
@@ -247,15 +281,16 @@ public sealed class MappingGenerator
     private ColumnMappingEntry CreateUnmatchedEntry(
         string header,
         EntityMetadata entityMetadata,
-        List<string>? samples)
+        List<string>? samples,
+        string? prefix)
     {
-        var similarAttributes = FindSimilarAttributes(header, entityMetadata);
+        var similarAttributes = FindSimilarAttributes(header, entityMetadata, prefix);
 
         return new ColumnMappingEntry
         {
-            Skip = true,
-            Status = "no-match",
-            Note = "No matching attribute found. Set 'field' to map, or keep 'skip' to ignore.",
+            Field = null, // Forces explicit decision
+            Status = "needs-configuration",
+            Note = "No matching attribute found. Set 'field' to map to an attribute, or set 'skip: true' to ignore this column.",
             SimilarAttributes = similarAttributes.Count > 0 ? similarAttributes : null,
             CsvSample = samples?.Count > 0 ? samples : null
         };
@@ -304,7 +339,7 @@ public sealed class MappingGenerator
         return result;
     }
 
-    private static List<string> FindSimilarAttributes(string header, EntityMetadata entityMetadata)
+    private static List<string> FindSimilarAttributes(string header, EntityMetadata entityMetadata, string? prefix)
     {
         if (entityMetadata.Attributes == null)
         {
@@ -312,7 +347,8 @@ public sealed class MappingGenerator
         }
 
         var normalizedHeader = NormalizeForMatching(header);
-        var results = new List<(string Name, int Score)>();
+        var normalizedPrefixedHeader = prefix != null ? NormalizeForMatching(prefix + header) : null;
+        var results = new List<(string Name, int Score, bool PrefixMatch)>();
 
         foreach (var attr in entityMetadata.Attributes)
         {
@@ -323,16 +359,23 @@ public sealed class MappingGenerator
 
             var normalizedAttr = NormalizeForMatching(attr.LogicalName);
 
+            // Check for prefixed match first (higher priority)
+            if (normalizedPrefixedHeader != null && normalizedAttr.Contains(normalizedPrefixedHeader))
+            {
+                var score = Math.Abs(normalizedAttr.Length - normalizedPrefixedHeader.Length);
+                results.Add((attr.LogicalName, score, true));
+            }
             // Simple similarity: check if one contains the other
-            if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
+            else if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
             {
                 var score = Math.Abs(normalizedAttr.Length - normalizedHeader.Length);
-                results.Add((attr.LogicalName, score));
+                results.Add((attr.LogicalName, score, false));
             }
         }
 
         return results
-            .OrderBy(r => r.Score)
+            .OrderByDescending(r => r.PrefixMatch) // Prefix matches first
+            .ThenBy(r => r.Score)
             .Take(3)
             .Select(r => r.Name)
             .ToList();

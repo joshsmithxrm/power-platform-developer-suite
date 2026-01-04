@@ -82,7 +82,7 @@ public sealed class CsvDataLoader
         }
         else
         {
-            var autoMappingResult = await AutoMapColumnsAsync(csvPath, attributesByName, cancellationToken);
+            var autoMappingResult = await AutoMapColumnsAsync(csvPath, options.EntityLogicalName, attributesByName, cancellationToken);
             warnings.AddRange(autoMappingResult.Warnings);
 
             // Check if auto-mapping is incomplete
@@ -232,6 +232,7 @@ public sealed class CsvDataLoader
 
     private async Task<AutoMappingResult> AutoMapColumnsAsync(
         string csvPath,
+        string entityLogicalName,
         Dictionary<string, AttributeMetadata> attributesByName,
         CancellationToken cancellationToken)
     {
@@ -239,6 +240,9 @@ public sealed class CsvDataLoader
         var unmatchedColumns = new List<UnmatchedColumn>();
         var warnings = new List<string>();
         var matchedCount = 0;
+
+        // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
+        var prefix = ExtractPublisherPrefix(entityLogicalName);
 
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
@@ -264,7 +268,19 @@ public sealed class CsvDataLoader
                 mappings[header] = CreateAutoMapping(header, attr);
                 matchedCount++;
             }
-            // Try normalized match
+            // Try prefix + column (e.g., "city" → "ppds_city")
+            else if (prefix != null && attributesByName.TryGetValue(prefix + header, out attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr);
+                matchedCount++;
+            }
+            // Try normalized prefix + column
+            else if (prefix != null && TryFindAttribute(NormalizeForMatching(prefix + header), attributesByName, out attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr!);
+                matchedCount++;
+            }
+            // Try normalized match (existing)
             else if (TryFindAttribute(normalizedHeader, attributesByName, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
@@ -273,7 +289,7 @@ public sealed class CsvDataLoader
             else
             {
                 // Column could not be matched - collect suggestions
-                var suggestions = FindSimilarAttributes(header, attributesByName);
+                var suggestions = FindSimilarAttributes(header, attributesByName, prefix);
                 unmatchedColumns.Add(new UnmatchedColumn
                 {
                     ColumnName = header,
@@ -294,27 +310,48 @@ public sealed class CsvDataLoader
         };
     }
 
+    private static string? ExtractPublisherPrefix(string entityLogicalName)
+    {
+        // Standard Dataverse entity naming: <publisher>_<name>
+        // Extract the prefix including underscore: "ppds_city" → "ppds_"
+        var underscoreIndex = entityLogicalName.IndexOf('_');
+        if (underscoreIndex > 0)
+        {
+            return entityLogicalName[..(underscoreIndex + 1)];
+        }
+        return null;
+    }
+
     private static List<string> FindSimilarAttributes(
         string header,
-        Dictionary<string, AttributeMetadata> attributes)
+        Dictionary<string, AttributeMetadata> attributes,
+        string? prefix = null)
     {
         var normalizedHeader = NormalizeForMatching(header);
-        var results = new List<(string Name, int Score)>();
+        var normalizedPrefixedHeader = prefix != null ? NormalizeForMatching(prefix + header) : null;
+        var results = new List<(string Name, int Score, bool PrefixMatch)>();
 
         foreach (var (attrName, _) in attributes)
         {
             var normalizedAttr = NormalizeForMatching(attrName);
 
+            // Check for prefixed match first (higher priority)
+            if (normalizedPrefixedHeader != null && normalizedAttr.Contains(normalizedPrefixedHeader))
+            {
+                var score = Math.Abs(normalizedAttr.Length - normalizedPrefixedHeader.Length);
+                results.Add((attrName, score, true));
+            }
             // Check if one contains the other
-            if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
+            else if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
             {
                 var score = Math.Abs(normalizedAttr.Length - normalizedHeader.Length);
-                results.Add((attrName, score));
+                results.Add((attrName, score, false));
             }
         }
 
         return results
-            .OrderBy(r => r.Score)
+            .OrderByDescending(r => r.PrefixMatch) // Prefix matches first
+            .ThenBy(r => r.Score)
             .Take(3)
             .Select(r => r.Name)
             .ToList();
