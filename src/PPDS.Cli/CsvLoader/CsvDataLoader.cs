@@ -336,6 +336,7 @@ public sealed class CsvDataLoader
 
             var entity = new Entity(options.EntityLogicalName);
             var hasError = false;
+            var processedKeyFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Set alternate key if specified
             if (!string.IsNullOrEmpty(options.AlternateKeyFields))
@@ -354,28 +355,67 @@ public sealed class CsvDataLoader
                             // Coerce key value if we have metadata
                             if (attributesByName.TryGetValue(trimmedKey, out var keyAttr))
                             {
-                                var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
-                                if (coercedKey != null)
+                                // Check if this key field is a lookup
+                                if (IsLookupAttribute(keyAttr))
                                 {
-                                    entity.KeyAttributes[trimmedKey] = coercedKey;
+                                    var mapping = mappings.GetValueOrDefault(keyHeader);
+                                    if (mapping?.Lookup != null)
+                                    {
+                                        var entityRef = lookupResolver.Resolve(keyValue, mapping.Lookup, rowNumber, keyHeader);
+                                        if (entityRef != null)
+                                        {
+                                            entity.KeyAttributes[trimmedKey] = entityRef;
+                                            processedKeyFields.Add(trimmedKey);
+                                        }
+                                        else
+                                        {
+                                            // Lookup resolution failed - error already added by resolver
+                                            hasError = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Lookup key field without lookup configuration
+                                        errors.Add(new LoadError
+                                        {
+                                            RowNumber = rowNumber,
+                                            Column = keyHeader,
+                                            ErrorCode = LoadErrorCodes.LookupNotResolved,
+                                            Message = $"Alternate key field '{trimmedKey}' is a lookup but has no lookup configuration. " +
+                                                      "Use --generate-mapping to configure lookup resolution.",
+                                            Value = keyValue
+                                        });
+                                        hasError = true;
+                                    }
                                 }
                                 else
                                 {
-                                    // Key coercion failed - this is a critical error
-                                    errors.Add(new LoadError
+                                    // Non-lookup key field - use standard coercion
+                                    var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
+                                    if (coercedKey != null)
                                     {
-                                        RowNumber = rowNumber,
-                                        Column = keyHeader,
-                                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                                        Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
-                                        Value = keyValue
-                                    });
-                                    hasError = true;
+                                        entity.KeyAttributes[trimmedKey] = coercedKey;
+                                        processedKeyFields.Add(trimmedKey);
+                                    }
+                                    else
+                                    {
+                                        // Key coercion failed - this is a critical error
+                                        errors.Add(new LoadError
+                                        {
+                                            RowNumber = rowNumber,
+                                            Column = keyHeader,
+                                            ErrorCode = LoadErrorCodes.TypeCoercionFailed,
+                                            Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
+                                            Value = keyValue
+                                        });
+                                        hasError = true;
+                                    }
                                 }
                             }
                             else
                             {
                                 entity.KeyAttributes[trimmedKey] = keyValue;
+                                processedKeyFields.Add(trimmedKey);
                             }
                         }
                     }
@@ -391,6 +431,12 @@ public sealed class CsvDataLoader
 
                 var fieldName = mapping.Field;
                 if (string.IsNullOrEmpty(fieldName))
+                {
+                    continue;
+                }
+
+                // Skip fields already processed as alternate key attributes
+                if (processedKeyFields.Contains(fieldName))
                 {
                     continue;
                 }
