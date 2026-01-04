@@ -46,7 +46,7 @@
 | Use early-bound classes for generated entities | Type safety, IntelliSense, refactoring support |
 | Ask user before using late-bound for ambiguous cases | If unsure whether dynamic entity handling is needed, ask first |
 | Read ADRs 0002/0005 before Dataverse multi-record code | Pool patterns are non-obvious; see [ADR index](#architecture-decision-records) |
-| Compare against BulkOperationExecutor for parallel patterns | Reference implementation for correct pool usage |
+| Compare against `src/PPDS.Dataverse/BulkOperations/BulkOperationExecutor.cs` for parallel patterns | Reference implementation for correct pool usage |
 | Fix pattern issues immediately during pre-release | Don't defer; pre-release is the time to refactor |
 
 ---
@@ -422,7 +422,7 @@ See [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md) for details.
 | **0002** | Get client INSIDE parallel loops; each Application User has independent 6,000 req/5min quota | Hold single client for entire operation |
 | **0005** | Use `pool.GetTotalRecommendedParallelism()` as DOP ceiling | Hardcode parallelism values |
 
-**Reference implementation:** `BulkOperationExecutor` shows correct pool usage.
+**Reference implementation:** `src/PPDS.Dataverse/BulkOperations/BulkOperationExecutor.cs` shows correct pool usage.
 
 ### Architecture Decision Records
 
