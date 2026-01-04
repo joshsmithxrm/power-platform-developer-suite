@@ -1,0 +1,498 @@
+using System.Diagnostics;
+using System.Globalization;
+using CsvHelper;
+using CsvHelper.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
+using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Progress;
+
+namespace PPDS.Cli.CsvLoader;
+
+/// <summary>
+/// Loads CSV data into Dataverse entities.
+/// </summary>
+public sealed class CsvDataLoader
+{
+    private readonly IDataverseConnectionPool _pool;
+    private readonly IBulkOperationExecutor _bulkExecutor;
+    private readonly ILogger<CsvDataLoader>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CsvDataLoader"/> class.
+    /// </summary>
+    public CsvDataLoader(
+        IDataverseConnectionPool pool,
+        IBulkOperationExecutor bulkExecutor,
+        ILogger<CsvDataLoader>? logger = null)
+    {
+        _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _bulkExecutor = bulkExecutor ?? throw new ArgumentNullException(nameof(bulkExecutor));
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Loads CSV data into Dataverse.
+    /// </summary>
+    public async Task<LoadResult> LoadAsync(
+        string csvPath,
+        CsvLoadOptions options,
+        IProgress<ProgressSnapshot>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var errors = new List<LoadError>();
+        var warnings = new List<string>();
+
+        _logger?.LogInformation("Loading CSV file: {CsvPath}", csvPath);
+
+        // 1. Retrieve entity metadata
+        var entityMetadata = await RetrieveEntityMetadataAsync(
+            options.EntityLogicalName, cancellationToken);
+
+        // 2. Build attribute lookup
+        var attributesByName = BuildAttributeLookup(entityMetadata);
+
+        // 3. Determine column mappings
+        var mappings = options.Mapping?.Columns
+            ?? await AutoMapColumnsAsync(csvPath, attributesByName, warnings, cancellationToken);
+
+        // 4. Identify and preload lookup caches
+        var lookupResolver = new LookupResolver(_pool);
+        var lookupConfigs = GetLookupConfigs(mappings, attributesByName);
+
+        if (lookupConfigs.Any(l => l.Config.MatchBy == "field"))
+        {
+            _logger?.LogInformation("Preloading lookup caches...");
+            await lookupResolver.PreloadLookupsAsync(lookupConfigs, cancellationToken);
+        }
+
+        // 5. Parse CSV and build entities
+        var (entities, parseErrors) = await BuildEntitiesAsync(
+            csvPath,
+            options,
+            mappings,
+            attributesByName,
+            lookupResolver,
+            cancellationToken);
+
+        errors.AddRange(parseErrors);
+        errors.AddRange(lookupResolver.Errors);
+
+        _logger?.LogInformation("Built {Count} entities from CSV", entities.Count);
+
+        // 6. Dry-run mode - just return validation results
+        if (options.DryRun)
+        {
+            stopwatch.Stop();
+            return new LoadResult
+            {
+                TotalRows = entities.Count + errors.Count,
+                SuccessCount = entities.Count,
+                FailureCount = errors.Count,
+                SkippedCount = 0,
+                Duration = stopwatch.Elapsed,
+                Errors = errors,
+                Warnings = warnings
+            };
+        }
+
+        // 7. Execute bulk upsert
+        if (entities.Count == 0)
+        {
+            stopwatch.Stop();
+            return new LoadResult
+            {
+                TotalRows = errors.Count,
+                SuccessCount = 0,
+                FailureCount = errors.Count,
+                Duration = stopwatch.Elapsed,
+                Errors = errors,
+                Warnings = warnings
+            };
+        }
+
+        _logger?.LogInformation("Executing bulk upsert for {Count} records...", entities.Count);
+
+        var bulkResult = await _bulkExecutor.UpsertMultipleAsync(
+            options.EntityLogicalName,
+            entities,
+            new BulkOperationOptions
+            {
+                BatchSize = options.BatchSize,
+                BypassCustomLogic = options.BypassPlugins,
+                BypassPowerAutomateFlows = options.BypassFlows,
+                ContinueOnError = options.ContinueOnError
+            },
+            progress,
+            cancellationToken);
+
+        // 8. Map bulk operation errors
+        foreach (var bulkError in bulkResult.Errors)
+        {
+            errors.Add(new LoadError
+            {
+                RowNumber = bulkError.Index + 1, // 1-based row number
+                ErrorCode = LoadErrorCodes.DataverseError,
+                Message = bulkError.Message
+            });
+        }
+
+        stopwatch.Stop();
+
+        return new LoadResult
+        {
+            TotalRows = entities.Count + parseErrors.Count,
+            SuccessCount = bulkResult.SuccessCount,
+            FailureCount = bulkResult.FailureCount + parseErrors.Count,
+            CreatedCount = bulkResult.CreatedCount,
+            UpdatedCount = bulkResult.UpdatedCount,
+            SkippedCount = parseErrors.Count,
+            Duration = stopwatch.Elapsed,
+            Errors = errors,
+            Warnings = warnings
+        };
+    }
+
+    private async Task<EntityMetadata> RetrieveEntityMetadataAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        var request = new RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName,
+            EntityFilters = EntityFilters.Attributes
+        };
+
+        var response = (RetrieveEntityResponse)await client.ExecuteAsync(request, cancellationToken);
+        return response.EntityMetadata;
+    }
+
+    private static Dictionary<string, AttributeMetadata> BuildAttributeLookup(EntityMetadata entityMetadata)
+    {
+        var lookup = new Dictionary<string, AttributeMetadata>(StringComparer.OrdinalIgnoreCase);
+
+        if (entityMetadata.Attributes == null)
+        {
+            return lookup;
+        }
+
+        foreach (var attr in entityMetadata.Attributes)
+        {
+            if (attr.LogicalName != null)
+            {
+                lookup[attr.LogicalName] = attr;
+            }
+        }
+
+        return lookup;
+    }
+
+    private async Task<Dictionary<string, ColumnMappingEntry>> AutoMapColumnsAsync(
+        string csvPath,
+        Dictionary<string, AttributeMetadata> attributesByName,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
+
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        foreach (var header in headers)
+        {
+            var normalizedHeader = NormalizeForMatching(header);
+
+            // Try exact match first
+            if (attributesByName.TryGetValue(header, out var attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr);
+            }
+            // Try normalized match
+            else if (TryFindAttribute(normalizedHeader, attributesByName, out attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr!);
+            }
+            else
+            {
+                warnings.Add($"Column '{header}' does not match any attribute. It will be skipped.");
+                mappings[header] = new ColumnMappingEntry { Skip = true };
+            }
+        }
+
+        return mappings;
+    }
+
+    private static ColumnMappingEntry CreateAutoMapping(string header, AttributeMetadata attr)
+    {
+        var entry = new ColumnMappingEntry
+        {
+            Field = attr.LogicalName
+        };
+
+        // Auto-configure lookups with GUID-only matching
+        if (IsLookupAttribute(attr))
+        {
+            var lookupAttr = (LookupAttributeMetadata)attr;
+            entry.Lookup = new LookupConfig
+            {
+                Entity = lookupAttr.Targets?.FirstOrDefault() ?? "unknown",
+                MatchBy = "guid"
+            };
+        }
+
+        return entry;
+    }
+
+    private static bool TryFindAttribute(
+        string normalizedHeader,
+        Dictionary<string, AttributeMetadata> attributes,
+        out AttributeMetadata? found)
+    {
+        foreach (var kvp in attributes)
+        {
+            if (NormalizeForMatching(kvp.Key) == normalizedHeader)
+            {
+                found = kvp.Value;
+                return true;
+            }
+        }
+
+        found = null;
+        return false;
+    }
+
+    private static string NormalizeForMatching(string value)
+    {
+        return value
+            .Replace(" ", "")
+            .Replace("_", "")
+            .Replace("-", "")
+            .ToLowerInvariant();
+    }
+
+    private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
+        Dictionary<string, ColumnMappingEntry> mappings,
+        Dictionary<string, AttributeMetadata> attributes)
+    {
+        foreach (var (columnName, mapping) in mappings)
+        {
+            if (mapping.Skip || mapping.Lookup == null)
+            {
+                continue;
+            }
+
+            yield return (columnName, mapping.Lookup);
+        }
+    }
+
+    private async Task<(List<Entity> Entities, List<LoadError> Errors)> BuildEntitiesAsync(
+        string csvPath,
+        CsvLoadOptions options,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        Dictionary<string, AttributeMetadata> attributesByName,
+        LookupResolver lookupResolver,
+        CancellationToken cancellationToken)
+    {
+        var entities = new List<Entity>();
+        var errors = new List<LoadError>();
+        var parser = new CsvRecordParser();
+
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        var rowNumber = 0;
+        while (await csv.ReadAsync())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            rowNumber++;
+
+            var entity = new Entity(options.EntityLogicalName);
+            var hasError = false;
+
+            // Set alternate key if specified
+            if (!string.IsNullOrEmpty(options.AlternateKeyFields))
+            {
+                var keyFields = options.AlternateKeyFields.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var keyField in keyFields)
+                {
+                    var trimmedKey = keyField.Trim();
+                    // Find the header that maps to this key field
+                    var keyHeader = FindHeaderForField(headers, mappings, trimmedKey);
+                    if (keyHeader != null)
+                    {
+                        var keyValue = csv.GetField(keyHeader);
+                        if (!string.IsNullOrEmpty(keyValue))
+                        {
+                            // Coerce key value if we have metadata
+                            if (attributesByName.TryGetValue(trimmedKey, out var keyAttr))
+                            {
+                                var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
+                                if (coercedKey != null)
+                                {
+                                    entity.KeyAttributes[trimmedKey] = coercedKey;
+                                }
+                                else
+                                {
+                                    // Key coercion failed - this is a critical error
+                                    errors.Add(new LoadError
+                                    {
+                                        RowNumber = rowNumber,
+                                        Column = keyHeader,
+                                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
+                                        Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
+                                        Value = keyValue
+                                    });
+                                    hasError = true;
+                                }
+                            }
+                            else
+                            {
+                                entity.KeyAttributes[trimmedKey] = keyValue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            foreach (var header in headers)
+            {
+                if (!mappings.TryGetValue(header, out var mapping) || mapping.Skip)
+                {
+                    continue;
+                }
+
+                var fieldName = mapping.Field;
+                if (string.IsNullOrEmpty(fieldName))
+                {
+                    continue;
+                }
+
+                var rawValue = csv.GetField(header);
+
+                if (string.IsNullOrEmpty(rawValue))
+                {
+                    continue;
+                }
+
+                // Handle lookups
+                if (mapping.Lookup != null)
+                {
+                    var entityRef = lookupResolver.Resolve(rawValue, mapping.Lookup, rowNumber, header);
+                    if (entityRef != null)
+                    {
+                        entity[fieldName] = entityRef;
+                    }
+                    // Errors are collected in lookupResolver.Errors
+                    continue;
+                }
+
+                // Handle regular attributes
+                if (!attributesByName.TryGetValue(fieldName, out var attrMetadata))
+                {
+                    errors.Add(new LoadError
+                    {
+                        RowNumber = rowNumber,
+                        Column = header,
+                        ErrorCode = LoadErrorCodes.ColumnNotFound,
+                        Message = $"Attribute '{fieldName}' not found in entity",
+                        Value = rawValue
+                    });
+                    hasError = true;
+                    continue;
+                }
+
+                var (success, value, errorMessage) = parser.TryCoerceValue(rawValue, attrMetadata, mapping);
+
+                if (!success)
+                {
+                    errors.Add(new LoadError
+                    {
+                        RowNumber = rowNumber,
+                        Column = header,
+                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
+                        Message = errorMessage ?? $"Cannot convert value",
+                        Value = rawValue
+                    });
+                    hasError = true;
+                    continue;
+                }
+
+                if (value != null)
+                {
+                    entity[fieldName] = value;
+                }
+            }
+
+            // Only add entities without errors to the batch
+            // Errors are collected and reported; ContinueOnError controls whether
+            // we proceed with valid entities or abort entirely (checked by caller)
+            if (!hasError)
+            {
+                entities.Add(entity);
+            }
+        }
+
+        return (entities, errors);
+    }
+
+    private static string? FindHeaderForField(
+        string[] headers,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        string fieldName)
+    {
+        foreach (var header in headers)
+        {
+            if (mappings.TryGetValue(header, out var mapping) &&
+                string.Equals(mapping.Field, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                return header;
+            }
+        }
+
+        // Also check if header directly matches field name
+        foreach (var header in headers)
+        {
+            if (string.Equals(header, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                return header;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsLookupAttribute(AttributeMetadata attr)
+    {
+        return attr.AttributeType == AttributeTypeCode.Lookup ||
+               attr.AttributeType == AttributeTypeCode.Customer ||
+               attr.AttributeType == AttributeTypeCode.Owner;
+    }
+}

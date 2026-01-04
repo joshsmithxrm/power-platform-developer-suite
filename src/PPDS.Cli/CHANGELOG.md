@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ppds metadata keys <entity>` - List alternate keys for an entity
   - `ppds metadata optionsets` - List global option sets (supports `--filter`)
   - `ppds metadata optionset <name>` - Get option set values and metadata
+- **`ppds data load` command** - Load CSV data into Dataverse entities with auto-mapping, type coercion, lookup resolution, and bulk upsert operations ([#36](https://github.com/joshsmithxrm/ppds-sdk/issues/36))
+  - Auto-maps CSV headers to entity attributes by name matching
+  - `--generate-mapping` generates a mapping template with auto-matched columns and optionset values
+  - Supports GUID auto-detection for lookups; field-based matching via mapping file
+  - Type coercion for all Dataverse attribute types (strings, numbers, dates, booleans, optionsets, money, lookups)
+  - Multi-profile support for connection pooling (`--profile app1,app2,app3`)
+  - `--dry-run` mode for validation without writing
+  - `--key` option for alternate key upsert semantics
+  - JSON Schema for mapping files at `schemas/csv-mapping.schema.json`
 - **Structured error handling** - All errors now return hierarchical error codes (`Auth.ProfileNotFound`, `Connection.Failed`, etc.) for reliable programmatic handling ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
 - **Expanded exit codes** - New exit codes 4 (ConnectionError), 5 (AuthError), 6 (NotFoundError) for finer-grained status ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
 - **Global options** - `--quiet`/`-q`, `--verbose`/`-v`, `--debug`, `--correlation-id` flags available on all commands ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))

@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/csv-mapping.schema.json",
+  "title": "PPDS CSV Mapping Configuration",
+  "description": "Schema for CSV-to-Dataverse column mapping configuration files used by the ppds data load command.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON schema reference for validation."
+    },
+    "version": {
+      "type": "string",
+      "description": "Schema version for forward compatibility.",
+      "default": "1.0"
+    },
+    "entity": {
+      "type": "string",
+      "description": "Target entity logical name."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the mapping was generated (Zulu time format)."
+    },
+    "columns": {
+      "type": "object",
+      "description": "Column mappings keyed by CSV header name.",
+      "additionalProperties": {
+        "$ref": "#/$defs/columnMapping"
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default values applied to all rows. Keys are attribute logical names.",
+      "additionalProperties": true
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": true,
+  "$defs": {
+    "columnMapping": {
+      "type": "object",
+      "description": "Mapping configuration for a single CSV column.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Target attribute logical name."
+        },
+        "skip": {
+          "type": "boolean",
+          "description": "Skip this column during import.",
+          "default": false
+        },
+        "lookup": {
+          "$ref": "#/$defs/lookupConfig"
+        },
+        "dateFormat": {
+          "type": "string",
+          "description": "Custom date format string (e.g., 'MM/dd/yyyy'). Uses .NET DateTime format specifiers."
+        },
+        "optionsetMap": {
+          "type": "object",
+          "description": "Map CSV text labels to optionset integer values.",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "_status": {
+          "type": "string",
+          "enum": ["auto-matched", "needs-configuration", "no-match"],
+          "description": "Generated status indicator. Ignored at runtime."
+        },
+        "_note": {
+          "type": "string",
+          "description": "Generated note for user guidance. Ignored at runtime."
+        },
+        "_csvSample": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Sample values from CSV for reference. Ignored at runtime."
+        },
+        "_autoMatched": {
+          "type": "boolean",
+          "description": "Indicates column was auto-matched. Ignored at runtime."
+        },
+        "_needsConfiguration": {
+          "type": "boolean",
+          "description": "Indicates column needs user configuration. Ignored at runtime."
+        },
+        "_noMatch": {
+          "type": "boolean",
+          "description": "Indicates no matching attribute was found. Ignored at runtime."
+        },
+        "_similarAttributes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Suggested similar attribute names. Ignored at runtime."
+        },
+        "_optionsetValues": {
+          "type": "object",
+          "description": "Available optionset values for reference. Ignored at runtime.",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "lookupConfig": {
+      "type": "object",
+      "description": "Configuration for resolving lookup field values.",
+      "properties": {
+        "entity": {
+          "type": "string",
+          "description": "Target entity logical name for the lookup."
+        },
+        "matchBy": {
+          "type": "string",
+          "enum": ["guid", "field"],
+          "description": "Resolution strategy. 'guid' expects GUID values, 'field' queries by keyField.",
+          "default": "guid"
+        },
+        "keyField": {
+          "type": "string",
+          "description": "Attribute to match against when matchBy is 'field'."
+        },
+        "_options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Available matching options for reference. Ignored at runtime."
+        }
+      },
+      "required": ["entity"],
+      "additionalProperties": true
+    }
+  }
+}

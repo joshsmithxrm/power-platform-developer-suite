@@ -50,6 +50,7 @@
     <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
     <ProjectReference Include="..\PPDS.Plugins\PPDS.Plugins.csproj" />
+    <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
     <PackageReference Include="MinVer" Version="6.1.0" PrivateAssets="all" />

@@ -20,10 +20,30 @@ Look for comments from these `user.login` values:
 | Bot | Username |
 |-----|----------|
 | Gemini | `gemini-code-assist[bot]` |
-| Copilot | `Copilot` |
+| Copilot (line comments) | `Copilot` |
+| Copilot (PR review) | `copilot-pull-request-reviewer[bot]` |
 | CodeQL/GHAS | `github-advanced-security[bot]` |
 
 **Note:** CodeQL and Copilot frequently report **duplicate findings** (same file, same line, same issue). Group comments by file+line to identify duplicates before triaging.
+
+### 1b. Check Code Scanning Alerts with Copilot Autofix
+
+Copilot Autofix suggestions appear in the GitHub UI as "replyable" threads but are **not** traditional PR comments. They're accessed via the code scanning API:
+
+```bash
+# List open code scanning alerts for the PR branch (replace BRANCH with actual branch name)
+gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=BRANCH&state=open" \
+  --jq '.[] | {number, rule: .rule.description, path: .most_recent_instance.location.path, line: .most_recent_instance.location.start_line}'
+
+# Get Autofix suggestion for a specific alert (if available)
+gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{alert_number}/autofix
+```
+
+**Responding to Autofix suggestions:**
+- **Fix the code**: Alert auto-closes when CI runs on the fix
+- **Dismiss alert**: `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason=won\'t\ fix -f dismissed_comment="Reason here"`
+
+Valid `dismissed_reason` values: `false positive`, `won't fix`, `used in tests`
 
 ### 2. Triage Each Comment
 
