@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>PPDS.LiveTests.Fixtures</AssemblyName>
+    <RootNamespace>PPDS.LiveTests.Fixtures</RootNamespace>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\src\PPDS.Plugins\PPDS.Plugins.snk</AssemblyOriginatorKeyFile>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- For IPlugin interface -->
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.56" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- For [PluginStep] and [PluginImage] attributes -->
+    <ProjectReference Include="..\..\src\PPDS.Plugins\PPDS.Plugins.csproj" />
+  </ItemGroup>
+
+  <!-- Copy DLL and dependencies to TestData after build -->
+  <Target Name="CopyToTestData" AfterTargets="Build">
+    <MakeDir Directories="..\PPDS.LiveTests\TestData" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+          DestinationFolder="..\PPDS.LiveTests\TestData\" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).pdb"
+          DestinationFolder="..\PPDS.LiveTests\TestData\"
+          Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
+    <!-- Copy PPDS.Plugins.dll for MetadataLoadContext resolution -->
+    <Copy SourceFiles="$(OutputPath)PPDS.Plugins.dll"
+          DestinationFolder="..\PPDS.LiveTests\TestData\" />
+  </Target>
+
+</Project>

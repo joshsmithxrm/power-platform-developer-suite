@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "assemblies": [
+    {
+      "name": "PPDS.LiveTests.Fixtures",
+      "type": "Assembly",
+      "path": "PPDS.LiveTests.Fixtures.dll",
+      "allTypeNames": [
+        "PPDS.LiveTests.Fixtures.TestAccountCreatePlugin",
+        "PPDS.LiveTests.Fixtures.TestContactUpdatePlugin"
+      ],
+      "types": [
+        {
+          "typeName": "PPDS.LiveTests.Fixtures.TestAccountCreatePlugin",
+          "steps": [
+            {
+              "message": "Create",
+              "entity": "account",
+              "stage": "PreOperation",
+              "mode": "Synchronous",
+              "executionOrder": 1
+            }
+          ]
+        },
+        {
+          "typeName": "PPDS.LiveTests.Fixtures.TestContactUpdatePlugin",
+          "steps": [
+            {
+              "message": "Update",
+              "entity": "contact",
+              "stage": "PostOperation",
+              "mode": "Asynchronous",
+              "executionOrder": 1,
+              "images": [
+                {
+                  "name": "PreImage",
+                  "imageType": "PreImage",
+                  "attributes": "firstname,lastname"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
