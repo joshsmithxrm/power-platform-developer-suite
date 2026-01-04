@@ -90,7 +90,7 @@ public class RegisterDataverseServicesTests
     }
 
     [Fact]
-    public void RegisterDataverseServices_CanBeCalledMultipleTimes_WithoutDuplicates()
+    public void RegisterDataverseServices_CalledMultipleTimes_AllowsDuplicateRegistrations()
     {
         // Arrange
         var services = new ServiceCollection();
