@@ -359,6 +359,19 @@ public sealed class CsvDataLoader
                                 {
                                     entity.KeyAttributes[trimmedKey] = coercedKey;
                                 }
+                                else
+                                {
+                                    // Key coercion failed - this is a critical error
+                                    errors.Add(new LoadError
+                                    {
+                                        RowNumber = rowNumber,
+                                        Column = keyHeader,
+                                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
+                                        Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
+                                        Value = keyValue
+                                    });
+                                    hasError = true;
+                                }
                             }
                             else
                             {
@@ -438,7 +451,10 @@ public sealed class CsvDataLoader
                 }
             }
 
-            if (!hasError || options.ContinueOnError)
+            // Only add entities without errors to the batch
+            // Errors are collected and reported; ContinueOnError controls whether
+            // we proceed with valid entities or abort entirely (checked by caller)
+            if (!hasError)
             {
                 entities.Add(entity);
             }
