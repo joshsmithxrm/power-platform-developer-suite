@@ -67,6 +67,8 @@ public static class AnalyzeCommand
         bool debug,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+
         try
         {
             // File validation now handled by option validators (AcceptExistingOnly)
@@ -98,7 +100,6 @@ public static class AnalyzeCommand
         }
         catch (OperationCanceledException)
         {
-            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
             writer.WriteError(new StructuredError(
                 ErrorCodes.Operation.Cancelled,
                 "Analysis cancelled by user."));
@@ -106,7 +107,6 @@ public static class AnalyzeCommand
         }
         catch (Exception ex)
         {
-            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
             var error = ExceptionMapper.Map(ex, context: "analyzing schema", debug: debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);

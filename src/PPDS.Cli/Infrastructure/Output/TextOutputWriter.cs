@@ -30,13 +30,24 @@ public sealed class TextOutputWriter : IOutputWriter
     }
 
     /// <summary>
-    /// Whether color output should be used.
+    /// Whether color output should be used for the given writer.
     /// Respects NO_COLOR standard and detects redirected output.
     /// </summary>
-    private static bool UseColor =>
-        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR")) &&
-        !Console.IsOutputRedirected &&
-        !Console.IsErrorRedirected;
+    private static bool UseColorFor(TextWriter writer)
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR")))
+        {
+            return false;
+        }
+
+        // Check redirection based on which stream is being written to
+        if (writer == Console.Error)
+        {
+            return !Console.IsErrorRedirected;
+        }
+
+        return !Console.IsOutputRedirected;
+    }
 
     /// <inheritdoc />
     public void WriteResult<T>(CommandResult<T> result)
@@ -153,14 +164,16 @@ public sealed class TextOutputWriter : IOutputWriter
 
     private static void WriteWithColor(ConsoleColor color, TextWriter writer, string message)
     {
-        if (UseColor)
+        var useColor = UseColorFor(writer);
+
+        if (useColor)
         {
             Console.ForegroundColor = color;
         }
 
         writer.WriteLine(message);
 
-        if (UseColor)
+        if (useColor)
         {
             Console.ResetColor();
         }

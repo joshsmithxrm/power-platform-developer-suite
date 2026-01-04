@@ -120,6 +120,8 @@ public static class UsersCommand
         bool debug,
         CancellationToken cancellationToken)
     {
+        var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
+
         try
         {
             // Create service providers - factory handles environment resolution automatically
@@ -197,7 +199,6 @@ public static class UsersCommand
         }
         catch (OperationCanceledException)
         {
-            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
             writer.WriteError(new StructuredError(
                 ErrorCodes.Operation.Cancelled,
                 "Operation cancelled by user."));
@@ -205,7 +206,6 @@ public static class UsersCommand
         }
         catch (Exception ex)
         {
-            var writer = ServiceFactory.CreateOutputWriter(outputFormat, debug);
             var error = ExceptionMapper.Map(ex, context: "generating user mapping", debug: debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);

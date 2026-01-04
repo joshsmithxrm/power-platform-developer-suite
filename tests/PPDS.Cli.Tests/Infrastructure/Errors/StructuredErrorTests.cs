@@ -88,8 +88,8 @@ public class StructuredErrorTests
             debug: true);
 
         // Stack trace might be null for exceptions created without throwing
-        // but the Details property should be accessible
-        Assert.True(error.Details == null || error.Details.Length >= 0);
+        // Verify Details is either null or contains actual content
+        Assert.True(error.Details == null || error.Details.Length > 0);
     }
 
     [Fact]

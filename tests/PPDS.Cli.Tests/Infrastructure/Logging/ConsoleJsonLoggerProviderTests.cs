@@ -89,14 +89,11 @@ public class ConsoleJsonLoggerProviderTests
     {
         var options = new CliLoggerOptions { MinimumLevel = LogLevel.Information };
         var context = new LogContext();
-        var provider = new ConsoleJsonLoggerProvider(options, context);
+        using var provider = new ConsoleJsonLoggerProvider(options, context);
 
         var logger1 = provider.CreateLogger("TestCategory");
-        provider.Dispose();
 
-        // After dispose, creating a new logger should return a new instance
-        // (though the provider may not work correctly after dispose)
-        // This test just verifies Dispose doesn't throw
+        // This test verifies Dispose doesn't throw (using statement handles disposal)
         Assert.NotNull(logger1);
     }
 

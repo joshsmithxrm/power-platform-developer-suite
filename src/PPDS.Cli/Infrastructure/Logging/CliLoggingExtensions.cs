@@ -58,29 +58,4 @@ public static class CliLoggingExtensions
         configure(options);
         return services.AddCliLogging(options);
     }
-
-    /// <summary>
-    /// Creates CLI logger options from command-line flags.
-    /// </summary>
-    /// <param name="quiet">Whether --quiet flag was specified.</param>
-    /// <param name="verbose">Whether --verbose flag was specified.</param>
-    /// <param name="debug">Whether --debug flag was specified.</param>
-    /// <param name="jsonFormat">Whether JSON output format was requested.</param>
-    /// <param name="correlationId">Optional correlation ID from --correlation-id flag.</param>
-    /// <returns>Configured logger options.</returns>
-    public static CliLoggerOptions CreateLoggerOptions(
-        bool quiet = false,
-        bool verbose = false,
-        bool debug = false,
-        bool jsonFormat = false,
-        string? correlationId = null)
-    {
-        return new CliLoggerOptions
-        {
-            MinimumLevel = CliLoggerOptions.ResolveLogLevel(quiet, verbose, debug),
-            UseJsonFormat = jsonFormat,
-            CorrelationId = correlationId,
-            EnableColors = !jsonFormat
-        };
-    }
 }
