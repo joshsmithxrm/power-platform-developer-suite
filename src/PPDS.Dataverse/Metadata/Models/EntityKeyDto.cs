@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -8,6 +9,12 @@ namespace PPDS.Dataverse.Metadata.Models;
 /// </summary>
 public sealed class EntityKeyDto
 {
+    /// <summary>
+    /// Gets the unique metadata identifier.
+    /// </summary>
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; init; }
+
     /// <summary>
     /// Gets the schema name of the key.
     /// </summary>

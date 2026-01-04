@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
-using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling;
@@ -268,8 +267,12 @@ public static class ProfileServiceFactory
             DisableAffinityCookie = true
         };
 
-        services.AddSingleton<IThrottleTracker, ThrottleTracker>();
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService)
+        // This method is shared with PPDS.Dataverse to prevent DI registration divergence
+        services.RegisterDataverseServices();
 
+        // Connection pool - CLI uses factory delegate because it gets IConnectionSource[] from auth profiles
+        // (Library uses direct type registration from configuration)
         services.AddSingleton<IDataverseConnectionPool>(sp =>
             new DataverseConnectionPool(
                 sources,
@@ -277,7 +280,6 @@ public static class ProfileServiceFactory
                 poolOptions,
                 sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
 
-        services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
         services.AddDataverseMigration();
 
         return services.BuildServiceProvider();

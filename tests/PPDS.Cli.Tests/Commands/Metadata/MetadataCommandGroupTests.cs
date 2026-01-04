@@ -37,6 +37,7 @@ public class MetadataCommandGroupTests
         Assert.Contains("entity", subcommandNames);
         Assert.Contains("attributes", subcommandNames);
         Assert.Contains("relationships", subcommandNames);
+        Assert.Contains("keys", subcommandNames);
         Assert.Contains("optionsets", subcommandNames);
         Assert.Contains("optionset", subcommandNames);
     }
@@ -436,6 +437,56 @@ public class OptionSetCommandTests
 
     [Fact]
     public void Parse_WithoutNameArgument_HasErrors()
+    {
+        var result = _command.Parse("");
+        Assert.NotEmpty(result.Errors);
+    }
+}
+
+public class KeysCommandTests
+{
+    private readonly Command _command;
+
+    public KeysCommandTests()
+    {
+        _command = KeysCommand.Create();
+    }
+
+    [Fact]
+    public void Create_ReturnsCommandWithCorrectName()
+    {
+        Assert.Equal("keys", _command.Name);
+    }
+
+    [Fact]
+    public void Create_ReturnsCommandWithDescription()
+    {
+        Assert.Contains("key", _command.Description?.ToLowerInvariant());
+    }
+
+    [Fact]
+    public void Create_HasEntityArgument()
+    {
+        var argument = _command.Arguments.FirstOrDefault(a => a.Name == "entity");
+        Assert.NotNull(argument);
+    }
+
+    [Fact]
+    public void Parse_WithEntityArgument_Succeeds()
+    {
+        var result = _command.Parse("account");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithAllOptions_Succeeds()
+    {
+        var result = _command.Parse("account --profile dev");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithoutEntityArgument_HasErrors()
     {
         var result = _command.Parse("");
         Assert.NotEmpty(result.Errors);

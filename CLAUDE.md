@@ -49,6 +49,7 @@
 | Read ADRs 0002/0005 before Dataverse multi-record code | Pool patterns are non-obvious; see [ADR index](#architecture-decision-records) |
 | Compare against `src/PPDS.Dataverse/BulkOperations/BulkOperationExecutor.cs` for parallel patterns | Reference implementation for correct pool usage |
 | Fix pattern issues immediately during pre-release | Don't defer; pre-release is the time to refactor |
+| Add new services to `RegisterDataverseServices()` | Shared method ensures CLI and library stay in sync; see [DI Architecture](#-di-registration-architecture) |
 
 ---
 
@@ -540,6 +541,39 @@ Console.WriteLine("Connecting to environment...");
 This enables clean piping: `ppds data export -f json | jq '.data'`
 
 See [CLI README](src/PPDS.Cli/README.md) for full documentation.
+
+---
+
+## 🔌 DI Registration Architecture
+
+The library has two DI paths that must stay synchronized:
+
+| Path | Entry Point | Use Case |
+|------|-------------|----------|
+| **Library** | `AddDataverseConnectionPool(config)` | NuGet consumers with configuration files |
+| **CLI** | `ProfileServiceFactory.CreateFromProfileAsync()` | CLI with auth profiles |
+
+Both call `RegisterDataverseServices()` to register shared services:
+
+```csharp
+// In ServiceCollectionExtensions.cs (public, shared between library and CLI)
+public static IServiceCollection RegisterDataverseServices(this IServiceCollection services)
+{
+    services.AddSingleton<IThrottleTracker, ThrottleTracker>();
+    services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
+    services.AddTransient<IMetadataService, DataverseMetadataService>();
+    return services;
+}
+```
+
+**Why the split?** `IDataverseConnectionPool` is registered separately because:
+- **Library:** Direct type registration from `IOptions<DataverseOptions>`
+- **CLI:** Factory delegate with `IConnectionSource[]` from auth profiles
+
+**When adding a new service:**
+1. Add to `RegisterDataverseServices()` (NOT directly to either path)
+2. Run tests - `RegisterDataverseServicesTests` verifies the registration
+3. Both library and CLI automatically get the new service
 
 ---
 

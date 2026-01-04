@@ -83,4 +83,14 @@ public interface IMetadataService
     Task<OptionSetMetadataDto> GetOptionSetAsync(
         string name,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all alternate keys for an entity.
+    /// </summary>
+    /// <param name="entityLogicalName">The entity logical name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of entity key metadata.</returns>
+    Task<IReadOnlyList<EntityKeyDto>> GetKeysAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default);
 }

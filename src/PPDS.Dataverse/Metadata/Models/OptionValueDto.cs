@@ -54,4 +54,10 @@ public sealed class OptionValueDto
     /// </summary>
     [JsonPropertyName("isDefault")]
     public bool IsDefault { get; init; }
+
+    /// <summary>
+    /// Gets whether this option is part of a managed solution.
+    /// </summary>
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; init; }
 }

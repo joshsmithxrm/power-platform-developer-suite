@@ -14,8 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GetEntityAsync()` - Get full entity metadata including attributes, relationships, keys, and privileges
   - `GetAttributesAsync()` - List entity attributes with type filtering
   - `GetRelationshipsAsync()` - List 1:N, N:1, and N:N relationships
+  - `GetKeysAsync()` - List alternate keys for an entity
   - `GetGlobalOptionSetsAsync()` - List global option sets
   - `GetOptionSetAsync()` - Get option set details with values
+  ([#51](https://github.com/joshsmithxrm/ppds-sdk/issues/51))
+- **Comprehensive metadata DTOs** - All metadata DTOs now include complete properties for extension Metadata Browser support:
+  - `AttributeMetadataDto`: Added `metadataId`, `sourceType`, `isSecured`, `formulaDefinition`, `autoNumberFormat`, form/grid validity, security capabilities, and advanced properties
+  - `EntityMetadataDto`: Added `metadataId`, `pluralName`, `hasNotes`, `hasActivities`, `isValidForAdvancedFind`
+  - `RelationshipMetadataDto`: Added `metadataId`, `isHierarchical`, `securityTypes`
+  - `ManyToManyRelationshipDto`: Added `metadataId`, `securityTypes`
+  - `EntityKeyDto`, `OptionSetSummary`, `OptionSetMetadataDto`: Added `metadataId`
+  - `OptionValueDto`: Added `isManaged`
   ([#51](https://github.com/joshsmithxrm/ppds-sdk/issues/51))
 
 ### Changed

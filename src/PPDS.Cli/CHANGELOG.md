@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ppds metadata entity <name>` - Get full entity details (supports `--include` for specific sections)
   - `ppds metadata attributes <entity>` - List attributes (supports `--type` filtering by Lookup, String, etc.)
   - `ppds metadata relationships <entity>` - List 1:N, N:1, N:N relationships (supports `--type` filtering)
+  - `ppds metadata keys <entity>` - List alternate keys for an entity
   - `ppds metadata optionsets` - List global option sets (supports `--filter`)
   - `ppds metadata optionset <name>` - Get option set values and metadata
 - **Structured error handling** - All errors now return hierarchical error codes (`Auth.ProfileNotFound`, `Connection.Failed`, etc.) for reliable programmatic handling ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))

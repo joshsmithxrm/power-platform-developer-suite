@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 namespace PPDS.Dataverse.Metadata.Models;
@@ -7,6 +8,12 @@ namespace PPDS.Dataverse.Metadata.Models;
 /// </summary>
 public sealed class RelationshipMetadataDto
 {
+    /// <summary>
+    /// Gets the unique metadata identifier.
+    /// </summary>
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; init; }
+
     /// <summary>
     /// Gets the schema name of the relationship.
     /// </summary>
@@ -66,6 +73,18 @@ public sealed class RelationshipMetadataDto
     /// </summary>
     [JsonPropertyName("isManaged")]
     public bool IsManaged { get; init; }
+
+    /// <summary>
+    /// Gets whether this is a hierarchical relationship (1:N only).
+    /// </summary>
+    [JsonPropertyName("isHierarchical")]
+    public bool IsHierarchical { get; init; }
+
+    /// <summary>
+    /// Gets the security types for this relationship.
+    /// </summary>
+    [JsonPropertyName("securityTypes")]
+    public string? SecurityTypes { get; init; }
 
     /// <summary>
     /// Gets the cascade configuration for assign operations.

@@ -105,8 +105,10 @@ public class DataverseMetadataService : IMetadataService
 
         var result = new EntityMetadataDto
         {
+            MetadataId = metadata.MetadataId ?? Guid.Empty,
             LogicalName = metadata.LogicalName,
             DisplayName = GetLocalizedLabel(metadata.DisplayName),
+            PluralName = GetLocalizedLabel(metadata.DisplayCollectionName),
             SchemaName = metadata.SchemaName,
             EntitySetName = metadata.EntitySetName,
             PrimaryIdAttribute = metadata.PrimaryIdAttribute,
@@ -120,6 +122,9 @@ public class DataverseMetadataService : IMetadataService
             Description = GetLocalizedLabel(metadata.Description),
             IsActivity = metadata.IsActivity ?? false,
             IsActivityParty = metadata.IsActivityParty ?? false,
+            HasNotes = metadata.HasNotes ?? false,
+            HasActivities = metadata.HasActivities ?? false,
+            IsValidForAdvancedFind = metadata.IsValidForAdvancedFind ?? false,
             IsAuditEnabled = metadata.IsAuditEnabled?.Value ?? false,
             ChangeTrackingEnabled = metadata.ChangeTrackingEnabled ?? false,
             IsBusinessProcessEnabled = metadata.IsBusinessProcessEnabled ?? false,
@@ -284,6 +289,36 @@ public class DataverseMetadataService : IMetadataService
         return result;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EntityKeyDto>> GetKeysAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+
+        _logger?.LogInformation("Retrieving alternate keys for {Entity}", entityLogicalName);
+
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        var request = new RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName,
+            EntityFilters = EntityFilters.Entity,
+            RetrieveAsIfPublished = false
+        };
+
+        var response = (RetrieveEntityResponse)await client.ExecuteAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+
+        var metadata = response.EntityMetadata;
+        var keys = MapKeys(metadata).OrderBy(k => k.LogicalName).ToList();
+
+        _logger?.LogInformation("Found {Count} alternate keys for {Entity}", keys.Count, entityLogicalName);
+
+        return keys;
+    }
+
     #region Mapping Methods
 
     private static EntitySummary MapToEntitySummary(EntityMetadata e)
@@ -329,12 +364,14 @@ public class DataverseMetadataService : IMetadataService
         List<OptionValueDto>? options = null;
         string? dateTimeBehavior = null;
         string? format = null;
+        string? autoNumberFormat = null;
 
         switch (attr)
         {
             case StringAttributeMetadata stringAttr:
                 maxLength = stringAttr.MaxLength;
                 format = stringAttr.Format?.ToString();
+                autoNumberFormat = stringAttr.AutoNumberFormat;
                 break;
 
             case MemoAttributeMetadata memoAttr:
@@ -430,6 +467,7 @@ public class DataverseMetadataService : IMetadataService
 
         return new AttributeMetadataDto
         {
+            MetadataId = attr.MetadataId ?? Guid.Empty,
             LogicalName = attr.LogicalName,
             DisplayName = GetLocalizedLabel(attr.DisplayName),
             SchemaName = attr.SchemaName,
@@ -456,7 +494,24 @@ public class DataverseMetadataService : IMetadataService
             IsGlobalOptionSet = isGlobalOptionSet,
             Options = options,
             DateTimeBehavior = dateTimeBehavior,
-            Format = format
+            Format = format,
+            // Calculation and Security
+            SourceType = attr.SourceType,
+            IsSecured = attr.IsSecured ?? false,
+            FormulaDefinition = null, // Not available via SDK metadata API
+            AutoNumberFormat = autoNumberFormat,
+            // Form and Grid Behavior
+            IsValidForForm = attr.IsValidForForm ?? false,
+            IsValidForGrid = attr.IsValidForGrid ?? false,
+            // Security Capabilities
+            CanBeSecuredForRead = attr.CanBeSecuredForRead ?? false,
+            CanBeSecuredForCreate = attr.CanBeSecuredForCreate ?? false,
+            CanBeSecuredForUpdate = attr.CanBeSecuredForUpdate ?? false,
+            // Advanced Properties
+            IsRetrievable = attr.IsRetrievable ?? false,
+            AttributeOf = attr.AttributeOf,
+            IsLogical = attr.IsLogical ?? false,
+            IntroducedVersion = attr.IntroducedVersion
         };
     }
 
@@ -468,7 +523,8 @@ public class DataverseMetadataService : IMetadataService
             Label = GetLocalizedLabel(opt.Label),
             Description = GetLocalizedLabel(opt.Description),
             Color = opt.Color,
-            ExternalValue = opt.ExternalValue
+            ExternalValue = opt.ExternalValue,
+            IsManaged = opt.IsManaged ?? false
         };
     }
 
@@ -483,6 +539,7 @@ public class DataverseMetadataService : IMetadataService
         {
             yield return new RelationshipMetadataDto
             {
+                MetadataId = rel.MetadataId ?? Guid.Empty,
                 SchemaName = rel.SchemaName,
                 RelationshipType = "OneToMany",
                 ReferencedEntity = rel.ReferencedEntity,
@@ -493,6 +550,8 @@ public class DataverseMetadataService : IMetadataService
                 ReferencingAttribute = rel.ReferencingAttribute,
                 IsCustomRelationship = rel.IsCustomRelationship ?? false,
                 IsManaged = rel.IsManaged ?? false,
+                IsHierarchical = rel.IsHierarchical ?? false,
+                SecurityTypes = rel.SecurityTypes?.ToString(),
                 CascadeAssign = rel.CascadeConfiguration?.Assign?.ToString(),
                 CascadeDelete = rel.CascadeConfiguration?.Delete?.ToString(),
                 CascadeMerge = rel.CascadeConfiguration?.Merge?.ToString(),
@@ -514,6 +573,7 @@ public class DataverseMetadataService : IMetadataService
         {
             yield return new RelationshipMetadataDto
             {
+                MetadataId = rel.MetadataId ?? Guid.Empty,
                 SchemaName = rel.SchemaName,
                 RelationshipType = "ManyToOne",
                 ReferencedEntity = rel.ReferencedEntity,
@@ -524,6 +584,8 @@ public class DataverseMetadataService : IMetadataService
                 ReferencingAttribute = rel.ReferencingAttribute,
                 IsCustomRelationship = rel.IsCustomRelationship ?? false,
                 IsManaged = rel.IsManaged ?? false,
+                IsHierarchical = rel.IsHierarchical ?? false,
+                SecurityTypes = rel.SecurityTypes?.ToString(),
                 CascadeAssign = rel.CascadeConfiguration?.Assign?.ToString(),
                 CascadeDelete = rel.CascadeConfiguration?.Delete?.ToString(),
                 CascadeMerge = rel.CascadeConfiguration?.Merge?.ToString(),
@@ -547,6 +609,7 @@ public class DataverseMetadataService : IMetadataService
 
             yield return new ManyToManyRelationshipDto
             {
+                MetadataId = rel.MetadataId ?? Guid.Empty,
                 SchemaName = rel.SchemaName,
                 IntersectEntityName = rel.IntersectEntityName,
                 Entity1LogicalName = rel.Entity1LogicalName,
@@ -557,6 +620,7 @@ public class DataverseMetadataService : IMetadataService
                 Entity2NavigationPropertyName = rel.Entity2NavigationPropertyName,
                 IsCustomRelationship = rel.IsCustomRelationship ?? false,
                 IsManaged = rel.IsManaged ?? false,
+                SecurityTypes = rel.SecurityTypes?.ToString(),
                 IsReflexive = isReflexive
             };
         }
@@ -573,6 +637,7 @@ public class DataverseMetadataService : IMetadataService
         {
             yield return new EntityKeyDto
             {
+                MetadataId = key.MetadataId ?? Guid.Empty,
                 SchemaName = key.SchemaName,
                 LogicalName = key.LogicalName,
                 DisplayName = GetLocalizedLabel(key.DisplayName),
@@ -617,6 +682,7 @@ public class DataverseMetadataService : IMetadataService
 
         return new OptionSetSummary
         {
+            MetadataId = os.MetadataId ?? Guid.Empty,
             Name = os.Name,
             DisplayName = GetLocalizedLabel(os.DisplayName),
             OptionSetType = os.OptionSetType?.ToString() ?? "Unknown",
@@ -651,6 +717,7 @@ public class DataverseMetadataService : IMetadataService
 
         return new OptionSetMetadataDto
         {
+            MetadataId = os.MetadataId ?? Guid.Empty,
             Name = os.Name,
             DisplayName = GetLocalizedLabel(os.DisplayName),
             OptionSetType = os.OptionSetType?.ToString() ?? "Unknown",

@@ -210,17 +210,44 @@ namespace PPDS.Dataverse.DependencyInjection
 
         private static void RegisterServices(IServiceCollection services)
         {
-            // Throttle tracker (singleton - shared state)
-            services.AddSingleton<IThrottleTracker, ThrottleTracker>();
+            // Register shared services (used by both library and CLI)
+            services.RegisterDataverseServices();
 
             // Connection pool (singleton - long-lived, manages DOP tracking)
+            // Registered separately because CLI uses a factory delegate for IConnectionSource[]
             services.AddSingleton<IDataverseConnectionPool, DataverseConnectionPool>();
+        }
 
-            // Bulk operation executor (transient - stateless)
+        /// <summary>
+        /// Registers core Dataverse services including throttle tracking and pool-consuming services.
+        /// Called by both library registration and CLI ProfileServiceFactory.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This method exists to prevent DI registration divergence between library and CLI.
+        /// When adding a new service that should be available in CLI, add it here.
+        /// </para>
+        /// <para>
+        /// <strong>Note:</strong> <see cref="IDataverseConnectionPool"/> is NOT registered here because
+        /// the library and CLI use different construction patterns:
+        /// <list type="bullet">
+        /// <item>Library: Direct type registration from configuration</item>
+        /// <item>CLI: Factory delegate with <c>IConnectionSource[]</c> from auth profiles</item>
+        /// </list>
+        /// </para>
+        /// </remarks>
+        /// <param name="services">The service collection.</param>
+        /// <returns>The service collection for chaining.</returns>
+        public static IServiceCollection RegisterDataverseServices(this IServiceCollection services)
+        {
+            // Throttle tracker (singleton - shared state for throttle detection)
+            services.AddSingleton<IThrottleTracker, ThrottleTracker>();
+
+            // Pool-consuming services (transient - stateless, get pool connection per operation)
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
-
-            // Metadata service (transient - stateless, uses connection pool)
             services.AddTransient<IMetadataService, DataverseMetadataService>();
+
+            return services;
         }
     }
 }

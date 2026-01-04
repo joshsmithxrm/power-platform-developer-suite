@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 namespace PPDS.Dataverse.Metadata.Models;
@@ -7,6 +8,12 @@ namespace PPDS.Dataverse.Metadata.Models;
 /// </summary>
 public sealed class OptionSetSummary
 {
+    /// <summary>
+    /// Gets the unique metadata identifier.
+    /// </summary>
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; init; }
+
     /// <summary>
     /// Gets the option set name.
     /// </summary>

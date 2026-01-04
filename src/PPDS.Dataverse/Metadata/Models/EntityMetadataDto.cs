@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -9,6 +10,12 @@ namespace PPDS.Dataverse.Metadata.Models;
 public sealed class EntityMetadataDto
 {
     /// <summary>
+    /// Gets the unique metadata identifier.
+    /// </summary>
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; init; }
+
+    /// <summary>
     /// Gets the entity logical name.
     /// </summary>
     [JsonPropertyName("logicalName")]
@@ -19,6 +26,12 @@ public sealed class EntityMetadataDto
     /// </summary>
     [JsonPropertyName("displayName")]
     public required string DisplayName { get; init; }
+
+    /// <summary>
+    /// Gets the entity plural display name (collection name).
+    /// </summary>
+    [JsonPropertyName("pluralName")]
+    public string? PluralName { get; init; }
 
     /// <summary>
     /// Gets the entity schema name.
@@ -97,6 +110,24 @@ public sealed class EntityMetadataDto
     /// </summary>
     [JsonPropertyName("isActivityParty")]
     public bool IsActivityParty { get; init; }
+
+    /// <summary>
+    /// Gets whether the entity supports notes (annotations).
+    /// </summary>
+    [JsonPropertyName("hasNotes")]
+    public bool HasNotes { get; init; }
+
+    /// <summary>
+    /// Gets whether the entity supports activities.
+    /// </summary>
+    [JsonPropertyName("hasActivities")]
+    public bool HasActivities { get; init; }
+
+    /// <summary>
+    /// Gets whether the entity is valid for Advanced Find.
+    /// </summary>
+    [JsonPropertyName("isValidForAdvancedFind")]
+    public bool IsValidForAdvancedFind { get; init; }
 
     /// <summary>
     /// Gets whether audit is enabled.
