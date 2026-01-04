@@ -96,6 +96,12 @@ public class QueryExecutor : IQueryExecutor
         // Map results
         var records = MapRecords(entityCollection, columns, isAggregate);
 
+        // For all-attributes, infer columns from all records (attributes with null values are omitted from responses)
+        if (columns.Count == 0 && records.Count > 0)
+        {
+            columns = InferColumnsFromRecords(records);
+        }
+
         _logger?.LogInformation("Query returned {Count} records in {ElapsedMs}ms (moreRecords: {MoreRecords})",
             entityCollection.Entities.Count, stopwatch.ElapsedMilliseconds, entityCollection.MoreRecords);
 
@@ -211,6 +217,35 @@ public class QueryExecutor : IQueryExecutor
         ProcessLinkEntities(entityElement, columns, isAggregate);
 
         return columns;
+    }
+
+    /// <summary>
+    /// Infers column metadata from all records when using all-attributes.
+    /// Scans all records because Dataverse omits null attributes from responses.
+    /// </summary>
+    private static List<QueryColumn> InferColumnsFromRecords(
+        IReadOnlyList<IReadOnlyDictionary<string, QueryValue>> records)
+    {
+        // Collect all unique keys across all records
+        var allKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var record in records)
+        {
+            foreach (var key in record.Keys)
+            {
+                allKeys.Add(key);
+            }
+        }
+
+        // Sort alphabetically for consistent output, but put common ID columns first
+        return allKeys
+            .OrderBy(k => k.EndsWith("id", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .Select(key => new QueryColumn
+            {
+                LogicalName = key,
+                DataType = QueryColumnType.Unknown
+            })
+            .ToList();
     }
 
     /// <summary>
