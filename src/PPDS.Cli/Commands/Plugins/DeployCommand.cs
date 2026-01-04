@@ -305,7 +305,9 @@ public static class DeployCommand
                 // Deploy each step
                 foreach (var stepConfig in typeConfig.Steps)
                 {
-                    var stepName = stepConfig.Name ?? $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
+                    // Resolve auto-generated name if not specified
+                    stepConfig.Name ??= $"{typeConfig.TypeName}: {stepConfig.Message} of {stepConfig.Entity}";
+                    var stepName = stepConfig.Name;
                     configuredStepNames.Add(stepName);
 
                     // Lookup message and filter
