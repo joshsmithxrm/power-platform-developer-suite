@@ -5,6 +5,7 @@ using PPDS.Cli.Commands.Env;
 using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Commands.Query;
+using PPDS.Cli.Commands.Internal;
 using PPDS.Cli.Commands.Serve;
 using PPDS.Cli.Infrastructure;
 
@@ -28,6 +29,12 @@ public static class Program
         rootCommand.Subcommands.Add(MetadataCommandGroup.Create());
         rootCommand.Subcommands.Add(QueryCommandGroup.Create());
         rootCommand.Subcommands.Add(ServeCommand.Create());
+
+        // Internal/debug commands - only visible when PPDS_INTERNAL=1
+        if (Environment.GetEnvironmentVariable("PPDS_INTERNAL") == "1")
+        {
+            rootCommand.Subcommands.Add(InternalCommandGroup.Create());
+        }
 
         // Prepend [Required] to required option descriptions for scannability
         HelpCustomization.ApplyRequiredOptionStyle(rootCommand);

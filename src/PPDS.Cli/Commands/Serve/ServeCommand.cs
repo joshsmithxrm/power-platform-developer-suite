@@ -18,7 +18,10 @@ public static class ServeCommand
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("serve", "Start daemon for IDE integration (JSON-RPC over stdio)");
+        var command = new Command("serve", "Start daemon for IDE integration (JSON-RPC over stdio)")
+        {
+            Hidden = true // IDE-callable but not user-facing
+        };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
