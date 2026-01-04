@@ -51,8 +51,6 @@
 
 **Design Session:** 2026-01-04 - Completed
 
-**Session Prompt:** [SESSION_2_CONNREFS_PROMPT.md](design-sessions/SESSION_2_CONNREFS_PROMPT.md)
-
 ---
 
 ## Phase 3: Plugin Traces (Design Session 3)
@@ -79,24 +77,28 @@
 
 **Design Session:** 2026-01-04 - Completed
 
-**Session Prompt:** [SESSION_3_PLUGINTRACES_PROMPT.md](design-sessions/SESSION_3_PLUGINTRACES_PROMPT.md)
-
 ---
 
 ## Phase 4: Web Resources (Design Session 4)
 
-**Status:** Not Started
+**Status:** Design Complete
 
 | Feature | Command | Issue | Status |
 |---------|---------|-------|--------|
-| Web Resources | `ppds webresources` | [#141](https://github.com/joshsmithxrm/ppds-sdk/issues/141) | Planned |
+| Web Resources (Epic) | `ppds webresources` | [#141](https://github.com/joshsmithxrm/ppds-sdk/issues/141) | Planned |
+| Foundation | Service + Entity | [#159](https://github.com/joshsmithxrm/ppds-sdk/issues/159) | Planned |
+| List & Get | `list`, `get` | [#160](https://github.com/joshsmithxrm/ppds-sdk/issues/160) | Planned |
+| Pull | `pull` | [#161](https://github.com/joshsmithxrm/ppds-sdk/issues/161) | Planned |
+| Push | `push` | [#162](https://github.com/joshsmithxrm/ppds-sdk/issues/162) | Planned |
+| Diff/Publish/URL | `diff`, `publish`, `url` | [#163](https://github.com/joshsmithxrm/ppds-sdk/issues/163) | Planned |
 
 **Scope:**
-- Published vs unpublished content
-- Conflict detection on push
+- Published vs unpublished content (default: published per [ADR-0010](adr/0010_PUBLISHED_UNPUBLISHED_DEFAULT.md))
+- Conflict detection on push (timestamp-based with hash tracking)
 - Efficient filtering for 60K+ resources
+- Hierarchical pull with `--strip-prefix` option
 
-**Session Prompt:** [SESSION_4_WEBRESOURCES_PROMPT.md](design-sessions/SESSION_4_WEBRESOURCES_PROMPT.md)
+**Design Session:** 2026-01-04 - Completed
 
 ---
 
