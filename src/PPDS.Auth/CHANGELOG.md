@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SecureCredentialStore`** - Cross-platform encrypted credential storage using MSAL.Extensions.Msal. Credentials keyed by ApplicationId. ([#107](https://github.com/joshsmithxrm/ppds-sdk/issues/107))
 - **`CredentialProviderFactory.CreateAsync()`** - Async factory method that retrieves secrets from secure store. Supports `PPDS_SPN_SECRET` environment variable for CI/CD scenarios. ([#107](https://github.com/joshsmithxrm/ppds-sdk/issues/107))
 - **`AuthProfile.Authority`** - Stores full authority URL for authentication. ([#107](https://github.com/joshsmithxrm/ppds-sdk/issues/107))
+- **`EnvironmentResolutionService`** - Multi-layer environment resolution that tries direct Dataverse connection first (works for service principals), then falls back to Global Discovery for user authentication. Returns full org metadata. ([#89](https://github.com/joshsmithxrm/ppds-sdk/issues/89), [#88](https://github.com/joshsmithxrm/ppds-sdk/issues/88))
+- **`TokenCacheManager.ClearAllCachesAsync()`** - Public method to clear all MSAL token caches including file-based cache and platform-specific secure storage (macOS Keychain, Linux keyring). ([#90](https://github.com/joshsmithxrm/ppds-sdk/issues/90))
+- **Integration tests for credential providers** - Live tests for `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, and `GitHubFederatedCredentialProvider` ([#55](https://github.com/joshsmithxrm/ppds-sdk/issues/55))
+- Manual test procedures documentation for interactive browser and device code authentication
 
 ### Removed
 
@@ -35,14 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ServiceClient org metadata not populated** - Credential providers now force eager org metadata discovery by accessing `ConnectedOrgFriendlyName` immediately after creating the ServiceClient. Discovery is lazy by default, and the connection pool clones clients before properties are accessed, resulting in empty metadata. This fix ensures `ConnectedOrgFriendlyName`, `ConnectedOrgUniqueName`, and `ConnectedOrgId` are populated. ([#86](https://github.com/joshsmithxrm/ppds-sdk/issues/86))
 - **Service principal identity display truncated** - Credential providers now return full Application ID (GUID) instead of truncated `app:xxxxxxxx...` format. Affects `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, `CertificateStoreCredentialProvider`, `GitHubFederatedCredentialProvider`, `AzureDevOpsFederatedCredentialProvider`, and `ManagedIdentityCredentialProvider`. ([#100](https://github.com/joshsmithxrm/ppds-sdk/issues/100))
 - **Missing Environment ID for direct connections** - `EnvironmentResolutionService.TryDirectConnectionAsync` now populates `EnvironmentId` from `ServiceClient.EnvironmentId` property. Previously only Global Discovery paths returned this value. ([#101](https://github.com/joshsmithxrm/ppds-sdk/issues/101))
-
-### Added
-
-- **`EnvironmentResolutionService`** - Multi-layer environment resolution that tries direct Dataverse connection first (works for service principals), then falls back to Global Discovery for user authentication. Returns full org metadata. ([#89](https://github.com/joshsmithxrm/ppds-sdk/issues/89), [#88](https://github.com/joshsmithxrm/ppds-sdk/issues/88))
-- **`TokenCacheManager.ClearAllCachesAsync()`** - Public method to clear all MSAL token caches including file-based cache and platform-specific secure storage (macOS Keychain, Linux keyring). ([#90](https://github.com/joshsmithxrm/ppds-sdk/issues/90))
-- **Integration tests for credential providers** - Live tests for `ClientSecretCredentialProvider`, `CertificateFileCredentialProvider`, and `GitHubFederatedCredentialProvider` ([#55](https://github.com/joshsmithxrm/ppds-sdk/issues/55))
-- Manual test procedures documentation for interactive browser and device code authentication
-
 
 ## [1.0.0-beta.3] - 2026-01-02
 

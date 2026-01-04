@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-01-04
+
 ### Added
 
 - **SQL parser and FetchXML transpiler** - Full SQL-to-FetchXML translation for querying Dataverse ([#52](https://github.com/joshsmithxrm/ppds-sdk/issues/52)):
@@ -82,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed rate control presets (`Conservative`, `Balanced`, `Aggressive`) in favor of DOP-based parallelism
 - Removed adaptive rate control in favor of server-recommended limits
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Dataverse-v1.0.0-beta.2...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Dataverse-v1.0.0-beta.3...HEAD
+[1.0.0-beta.3]: https://github.com/joshsmithxrm/ppds-sdk/compare/Dataverse-v1.0.0-beta.2...Dataverse-v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/joshsmithxrm/ppds-sdk/compare/Dataverse-v1.0.0-beta.1...Dataverse-v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Dataverse-v1.0.0-beta.1
