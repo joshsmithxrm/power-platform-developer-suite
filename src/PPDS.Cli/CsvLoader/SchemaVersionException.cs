@@ -20,15 +20,9 @@ public sealed class SchemaVersionException : Exception
     /// </summary>
     public SchemaVersionException(string fileVersion, string cliVersion)
         : base($"Mapping file version {fileVersion} is not compatible with CLI version {cliVersion}. " +
-               $"Please upgrade to CLI v{GetMajorVersion(fileVersion)}.x or regenerate the mapping file.")
+               "Please regenerate the mapping file using this CLI version.")
     {
         FileVersion = fileVersion;
         CliVersion = cliVersion;
-    }
-
-    private static string GetMajorVersion(string version)
-    {
-        var dotIndex = version.IndexOf('.');
-        return dotIndex > 0 ? version[..dotIndex] : version;
     }
 }

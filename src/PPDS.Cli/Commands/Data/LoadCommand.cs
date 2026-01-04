@@ -255,8 +255,9 @@ public static class LoadCommand
             // Handle --analyze mode
             if (analyze)
             {
+                var analyzeLogger = serviceProvider.GetService<ILogger<CsvDataLoader>>();
                 return await AnalyzeMappingAsync(
-                    pool, entity, file.FullName, outputFormat, cancellationToken);
+                    pool, entity, file.FullName, outputFormat, analyzeLogger, cancellationToken);
             }
 
             // Load mapping file if provided
@@ -446,11 +447,12 @@ public static class LoadCommand
         string entityName,
         string csvPath,
         OutputFormat outputFormat,
+        ILogger<CsvDataLoader>? logger,
         CancellationToken cancellationToken)
     {
         Console.Error.WriteLine($"Analyzing mapping for '{entityName}'...");
 
-        var loader = new CsvDataLoader(pool, null, null);
+        var loader = new CsvDataLoader(pool, null, logger);
         var analysis = await loader.AnalyzeAsync(csvPath, entityName, cancellationToken);
 
         Console.Error.WriteLine();

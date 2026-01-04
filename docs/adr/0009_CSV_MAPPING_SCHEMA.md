@@ -78,7 +78,7 @@ The `CsvMappingConfig` class uses `[JsonExtensionData]` to capture unknown prope
 
 ```csharp
 [JsonExtensionData]
-public Dictionary<string, JsonElement>? Extensions { get; set; }
+public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 ```
 
 This means:

@@ -89,7 +89,7 @@ public sealed class CsvDataLoader
 
         if (unmatchedCount == 0 && lookupCount == 0)
         {
-            recommendations.Add("All columns matched. Ready to load with: ppds data load --entity " + entityLogicalName + " --file " + Path.GetFileName(csvPath));
+            recommendations.Add($"All columns matched. Ready to load with: ppds data load --entity {entityLogicalName} --file {Path.GetFileName(csvPath)}");
         }
 
         return new MappingAnalysis
@@ -107,7 +107,7 @@ public sealed class CsvDataLoader
         string csvPath,
         CancellationToken cancellationToken)
     {
-        const int maxSampleValues = 3;
+        var maxSampleValues = ColumnMatcher.MaxSampleValues;
 
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
