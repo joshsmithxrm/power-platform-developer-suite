@@ -50,12 +50,11 @@ public static class ExtractCommand
             inputOption,
             outputOption,
             solutionOption,
-            forceOption,
-            PluginsCommandGroup.OutputFormatOption
+            forceOption
         };
 
-        // Add global options for verbosity and correlation
-        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+        // Add global options including output format
+        GlobalOptions.AddToCommand(command);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {

@@ -40,12 +40,11 @@ public static class DiffCommand
         {
             configOption,
             PluginsCommandGroup.ProfileOption,
-            PluginsCommandGroup.EnvironmentOption,
-            PluginsCommandGroup.OutputFormatOption
+            PluginsCommandGroup.EnvironmentOption
         };
 
-        // Add global options for verbosity and correlation
-        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+        // Add global options including output format
+        GlobalOptions.AddToCommand(command);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {

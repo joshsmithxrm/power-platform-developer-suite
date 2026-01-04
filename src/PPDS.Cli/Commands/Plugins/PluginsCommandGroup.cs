@@ -32,15 +32,6 @@ public static class PluginsCommandGroup
     };
 
     /// <summary>
-    /// Output format option for tool integration.
-    /// </summary>
-    public static readonly Option<OutputFormat> OutputFormatOption = new("--output-format", "-f")
-    {
-        Description = "Output format",
-        DefaultValueFactory = _ => OutputFormat.Text
-    };
-
-    /// <summary>
     /// Creates the 'plugins' command group with all subcommands.
     /// </summary>
     public static Command Create()

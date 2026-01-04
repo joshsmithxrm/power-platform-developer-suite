@@ -57,12 +57,11 @@ public static class DeployCommand
             PluginsCommandGroup.EnvironmentOption,
             PluginsCommandGroup.SolutionOption,
             cleanOption,
-            whatIfOption,
-            PluginsCommandGroup.OutputFormatOption
+            whatIfOption
         };
 
-        // Add global options for verbosity and correlation
-        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+        // Add global options including output format
+        GlobalOptions.AddToCommand(command);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {

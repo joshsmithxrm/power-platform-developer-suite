@@ -108,17 +108,7 @@ public class PluginsCommandGroupTests
         Assert.Contains("-s", PluginsCommandGroup.SolutionOption.Aliases);
     }
 
-    [Fact]
-    public void OutputFormatOption_HasCorrectName()
-    {
-        Assert.Equal("--output-format", PluginsCommandGroup.OutputFormatOption.Name);
-    }
-
-    [Fact]
-    public void OutputFormatOption_HasShortAlias()
-    {
-        Assert.Contains("-f", PluginsCommandGroup.OutputFormatOption.Aliases);
-    }
+    // Note: OutputFormatOption tests removed - option is now provided by GlobalOptions
 
     #endregion
 }

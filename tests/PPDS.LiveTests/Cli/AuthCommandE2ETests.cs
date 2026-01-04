@@ -1,5 +1,6 @@
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
+using Xunit;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -219,6 +220,7 @@ public class AuthCommandE2ETests : CliE2ETestBase
     }
 
     [CliE2EWithCredentials]
+    [Trait("Category", "SecureStorage")]
     public async Task AuthClear_ClearsStoredCredentials()
     {
         var profileName = GenerateTestProfileName();
@@ -259,6 +261,7 @@ public class AuthCommandE2ETests : CliE2ETestBase
     #region auth delete credential cleanup
 
     [CliE2EWithCredentials]
+    [Trait("Category", "SecureStorage")]
     public async Task AuthDelete_RemovesStoredCredentials()
     {
         var profileName = GenerateTestProfileName();
@@ -303,6 +306,7 @@ public class AuthCommandE2ETests : CliE2ETestBase
     }
 
     [CliE2EWithCredentials]
+    [Trait("Category", "SecureStorage")]
     public async Task AuthDelete_WithSharedCredentials_PreservesCredentialsForOtherProfiles()
     {
         // Bug test: When two profiles share the same ApplicationId (service principal),

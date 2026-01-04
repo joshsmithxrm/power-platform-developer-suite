@@ -47,12 +47,11 @@ public static class CleanCommand
             configOption,
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption,
-            whatIfOption,
-            PluginsCommandGroup.OutputFormatOption
+            whatIfOption
         };
 
-        // Add global options for verbosity and correlation
-        GlobalOptions.AddToCommand(command, includeOutputFormat: false);
+        // Add global options including output format
+        GlobalOptions.AddToCommand(command);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {

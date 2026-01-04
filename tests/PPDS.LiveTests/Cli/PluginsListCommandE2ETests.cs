@@ -1,5 +1,6 @@
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
+using Xunit;
 
 namespace PPDS.LiveTests.Cli;
 
@@ -12,7 +13,13 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
 {
     #region List plugins
 
+    /// <summary>
+    /// Tests unfiltered plugin list. Skipped in CI because stock Dataverse has ~60k plugins
+    /// and listing all with nested types/steps/images takes 100+ seconds.
+    /// Filter tests below verify the same code paths with fast queries.
+    /// </summary>
     [CliE2EWithCredentials]
+    [Trait("Category", "SlowIntegration")]
     public async Task List_ReturnsSuccess()
     {
         var profileName = GenerateTestProfileName();
@@ -32,7 +39,12 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
         result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
     }
 
+    /// <summary>
+    /// Tests unfiltered plugin list with JSON output. Skipped in CI because stock Dataverse
+    /// has ~60k plugins. JSON formatting is verified by unit tests; connectivity by filter tests.
+    /// </summary>
     [CliE2EWithCredentials]
+    [Trait("Category", "SlowIntegration")]
     public async Task List_JsonFormat_ReturnsValidJson()
     {
         var profileName = GenerateTestProfileName();
