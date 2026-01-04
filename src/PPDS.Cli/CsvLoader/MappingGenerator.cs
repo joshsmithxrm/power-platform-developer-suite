@@ -107,13 +107,11 @@ public sealed class MappingGenerator
             foreach (var header in headers)
             {
                 var value = csv.GetField(header);
-                if (!string.IsNullOrEmpty(value) && sampleValues[header].Count < MaxSampleValues)
+                if (!string.IsNullOrEmpty(value)
+                    && sampleValues[header].Count < MaxSampleValues
+                    && !sampleValues[header].Contains(value))
                 {
-                    // Avoid duplicate samples
-                    if (!sampleValues[header].Contains(value))
-                    {
-                        sampleValues[header].Add(value);
-                    }
+                    sampleValues[header].Add(value);
                 }
             }
             rowCount++;

@@ -86,7 +86,7 @@ public sealed class CsvRecordParser
         {
             var result = attributeMetadata.AttributeType switch
             {
-                AttributeTypeCode.String or AttributeTypeCode.Memo => (true, (object?)csvValue, (string?)null),
+                AttributeTypeCode.String or AttributeTypeCode.Memo => (true, csvValue, null),
 
                 AttributeTypeCode.Integer => TryCoerceInteger(csvValue),
 

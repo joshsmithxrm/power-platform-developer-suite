@@ -241,12 +241,17 @@ public sealed class LookupResolver
         }
 
         var value = entity[keyField];
+        if (value is null)
+        {
+            return null;
+        }
+
         return value switch
         {
             string s => s,
             EntityReference er => er.Id.ToString(),
             Guid g => g.ToString(),
-            _ => value?.ToString()
+            _ => value.ToString()
         };
     }
 
