@@ -124,6 +124,12 @@ public static class LoadCommand
             DefaultValueFactory = _ => false
         };
 
+        var analyzeOption = new Option<bool>("--analyze")
+        {
+            Description = "Analyze mapping without loading data (preview which columns match)",
+            DefaultValueFactory = _ => false
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-o")
         {
             Description = "Output format",
@@ -155,6 +161,7 @@ public static class LoadCommand
             bypassFlowsOption,
             continueOnErrorOption,
             forceOption,
+            analyzeOption,
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
             outputFormatOption,
@@ -175,6 +182,7 @@ public static class LoadCommand
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
             var force = parseResult.GetValue(forceOption);
+            var analyze = parseResult.GetValue(analyzeOption);
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
@@ -185,7 +193,7 @@ public static class LoadCommand
 
             return await ExecuteAsync(
                 entity, file, key, mappingFile, generateMappingFile,
-                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError, force,
+                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError, force, analyze,
                 profile, environment, outputFormat, verbose, debug,
                 cancellationToken);
         });
@@ -205,6 +213,7 @@ public static class LoadCommand
         bool bypassFlows,
         bool continueOnError,
         bool force,
+        bool analyze,
         string? profileName,
         string? environment,
         OutputFormat outputFormat,
@@ -240,6 +249,13 @@ public static class LoadCommand
                 return await GenerateMappingAsync(
                     pool, entity, file.FullName, generateMappingFile.FullName,
                     outputFormat, cancellationToken);
+            }
+
+            // Handle --analyze mode
+            if (analyze)
+            {
+                return await AnalyzeMappingAsync(
+                    pool, entity, file.FullName, outputFormat, cancellationToken);
             }
 
             // Load mapping file if provided
@@ -399,6 +415,108 @@ public static class LoadCommand
         Console.Error.WriteLine($"  2. Run: ppds data load --entity {entityName} --file {Path.GetFileName(csvPath)} --mapping {Path.GetFileName(outputPath)}");
 
         return ExitCodes.Success;
+    }
+
+    private static async Task<int> AnalyzeMappingAsync(
+        IDataverseConnectionPool pool,
+        string entityName,
+        string csvPath,
+        OutputFormat outputFormat,
+        CancellationToken cancellationToken)
+    {
+        Console.Error.WriteLine($"Analyzing mapping for '{entityName}'...");
+
+        var loader = new CsvDataLoader(pool, null!, null);
+        var analysis = await loader.AnalyzeAsync(csvPath, entityName, cancellationToken);
+
+        Console.Error.WriteLine();
+
+        if (outputFormat == OutputFormat.Json)
+        {
+            WriteJsonAnalysis(analysis);
+        }
+        else
+        {
+            WriteTextAnalysis(analysis);
+        }
+
+        return ExitCodes.Success;
+    }
+
+    private static void WriteTextAnalysis(MappingAnalysis analysis)
+    {
+        Console.Error.WriteLine($"Mapping Analysis for '{analysis.Entity}'");
+        Console.Error.WriteLine($"  Match rate: {analysis.MatchRate:P0} ({analysis.MatchedColumns}/{analysis.TotalColumns} columns)");
+        if (analysis.Prefix != null)
+        {
+            Console.Error.WriteLine($"  Publisher prefix: {analysis.Prefix}");
+        }
+        Console.Error.WriteLine();
+
+        // Show matched columns
+        var matched = analysis.Columns.Where(c => c.IsMatched).ToList();
+        if (matched.Count > 0)
+        {
+            Console.Error.WriteLine("Matched columns:");
+            foreach (var col in matched)
+            {
+                var lookupIndicator = col.IsLookup ? " [Lookup]" : "";
+                Console.Error.WriteLine($"  + {col.CsvColumn} → {col.TargetAttribute} ({col.MatchType}){lookupIndicator}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        // Show unmatched columns
+        var unmatched = analysis.Columns.Where(c => !c.IsMatched).ToList();
+        if (unmatched.Count > 0)
+        {
+            Console.Error.WriteLine("Unmatched columns:");
+            foreach (var col in unmatched)
+            {
+                var suggestions = col.Suggestions != null && col.Suggestions.Count > 0
+                    ? $" (did you mean: {string.Join(", ", col.Suggestions)}?)"
+                    : "";
+                Console.Error.WriteLine($"  - {col.CsvColumn}{suggestions}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        // Show recommendations
+        if (analysis.Recommendations.Count > 0)
+        {
+            Console.Error.WriteLine("Recommendations:");
+            foreach (var rec in analysis.Recommendations)
+            {
+                Console.Error.WriteLine($"  * {rec}");
+            }
+        }
+    }
+
+    private static void WriteJsonAnalysis(MappingAnalysis analysis)
+    {
+        var output = new
+        {
+            entity = analysis.Entity,
+            matchRate = analysis.MatchRate,
+            totalColumns = analysis.TotalColumns,
+            matchedColumns = analysis.MatchedColumns,
+            isComplete = analysis.IsComplete,
+            prefix = analysis.Prefix,
+            columns = analysis.Columns.Select(c => new
+            {
+                csvColumn = c.CsvColumn,
+                isMatched = c.IsMatched,
+                targetAttribute = c.TargetAttribute,
+                matchType = c.MatchType,
+                attributeType = c.AttributeType,
+                isLookup = c.IsLookup,
+                suggestions = c.Suggestions,
+                sampleValues = c.SampleValues
+            }),
+            recommendations = analysis.Recommendations
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
     }
 
     private static void WriteTextResult(LoadResult result, bool dryRun)

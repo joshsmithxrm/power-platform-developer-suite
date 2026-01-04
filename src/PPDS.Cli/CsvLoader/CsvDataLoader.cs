@@ -35,6 +35,179 @@ public sealed class CsvDataLoader
     }
 
     /// <summary>
+    /// Analyzes CSV-to-entity mapping without loading data.
+    /// </summary>
+    public async Task<MappingAnalysis> AnalyzeAsync(
+        string csvPath,
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        _logger?.LogInformation("Analyzing CSV file: {CsvPath}", csvPath);
+
+        // Retrieve entity metadata
+        var entityMetadata = await RetrieveEntityMetadataAsync(entityLogicalName, cancellationToken);
+        var attributesByName = BuildAttributeLookup(entityMetadata);
+
+        // Extract publisher prefix
+        var prefix = ExtractPublisherPrefix(entityLogicalName);
+
+        // Read headers and sample values
+        var (headers, sampleValues) = await ReadCsvHeadersAndSamplesAsync(csvPath, cancellationToken);
+
+        var columns = new List<ColumnAnalysis>();
+        var matchedCount = 0;
+        var recommendations = new List<string>();
+
+        foreach (var header in headers)
+        {
+            var samples = sampleValues.GetValueOrDefault(header);
+            var analysis = AnalyzeColumn(header, attributesByName, prefix, samples);
+            columns.Add(analysis);
+
+            if (analysis.IsMatched)
+            {
+                matchedCount++;
+            }
+        }
+
+        // Generate recommendations
+        var unmatchedCount = headers.Length - matchedCount;
+        var lookupCount = columns.Count(c => c.IsLookup);
+
+        if (unmatchedCount > 0)
+        {
+            recommendations.Add($"Use --generate-mapping to create a mapping file for the {unmatchedCount} unmatched column(s).");
+        }
+
+        if (lookupCount > 0)
+        {
+            recommendations.Add($"{lookupCount} lookup field(s) detected. Review generated mapping to configure resolution.");
+        }
+
+        if (unmatchedCount == 0 && lookupCount == 0)
+        {
+            recommendations.Add("All columns matched. Ready to load with: ppds data load --entity " + entityLogicalName + " --file " + Path.GetFileName(csvPath));
+        }
+
+        return new MappingAnalysis
+        {
+            Entity = entityLogicalName,
+            TotalColumns = headers.Length,
+            MatchedColumns = matchedCount,
+            Prefix = prefix,
+            Columns = columns,
+            Recommendations = recommendations
+        };
+    }
+
+    private async Task<(string[] Headers, Dictionary<string, List<string>> SampleValues)> ReadCsvHeadersAndSamplesAsync(
+        string csvPath,
+        CancellationToken cancellationToken)
+    {
+        const int maxSampleValues = 3;
+
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        // Collect sample values
+        var sampleValues = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            sampleValues[header] = new List<string>();
+        }
+
+        var rowCount = 0;
+        while (await csv.ReadAsync() && rowCount < maxSampleValues)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var header in headers)
+            {
+                var value = csv.GetField(header);
+                if (!string.IsNullOrEmpty(value)
+                    && sampleValues[header].Count < maxSampleValues
+                    && !sampleValues[header].Contains(value))
+                {
+                    sampleValues[header].Add(value);
+                }
+            }
+            rowCount++;
+        }
+
+        return (headers, sampleValues);
+    }
+
+    private ColumnAnalysis AnalyzeColumn(
+        string header,
+        Dictionary<string, AttributeMetadata> attributesByName,
+        string? prefix,
+        List<string>? samples)
+    {
+        // Try exact match first
+        if (attributesByName.TryGetValue(header, out var attr))
+        {
+            return CreateMatchedAnalysis(header, attr, "exact", samples);
+        }
+
+        // Try prefix + column
+        if (prefix != null && attributesByName.TryGetValue(prefix + header, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr, "prefix", samples);
+        }
+
+        // Try normalized prefix + column
+        if (prefix != null && TryFindAttribute(NormalizeForMatching(prefix + header), attributesByName, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr!, "normalized-prefix", samples);
+        }
+
+        // Try normalized match
+        if (TryFindAttribute(NormalizeForMatching(header), attributesByName, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr!, "normalized", samples);
+        }
+
+        // No match
+        var suggestions = FindSimilarAttributes(header, attributesByName, prefix);
+        return new ColumnAnalysis
+        {
+            CsvColumn = header,
+            IsMatched = false,
+            Suggestions = suggestions.Count > 0 ? suggestions : null,
+            SampleValues = samples?.Count > 0 ? samples : null
+        };
+    }
+
+    private static ColumnAnalysis CreateMatchedAnalysis(
+        string header,
+        AttributeMetadata attr,
+        string matchType,
+        List<string>? samples)
+    {
+        var isLookup = IsLookupAttribute(attr);
+        return new ColumnAnalysis
+        {
+            CsvColumn = header,
+            IsMatched = true,
+            TargetAttribute = attr.LogicalName,
+            MatchType = matchType,
+            AttributeType = attr.AttributeType?.ToString(),
+            IsLookup = isLookup,
+            SampleValues = samples?.Count > 0 ? samples : null
+        };
+    }
+
+    /// <summary>
     /// Loads CSV data into Dataverse.
     /// </summary>
     public async Task<LoadResult> LoadAsync(
