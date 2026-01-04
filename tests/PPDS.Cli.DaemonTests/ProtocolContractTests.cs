@@ -81,12 +81,23 @@ public class ProtocolContractTests : IClassFixture<DaemonTestFixture>
             ex.Message.Should().NotBeNullOrEmpty();
             ex.Message.Should().Contain("No active profile");
 
-            // ErrorData may contain structured error code
-            if (ex.ErrorData != null)
+            // ErrorData contains the structured error from LocalRpcException.ErrorData
+            // With StreamJsonRpc's System.Text.Json formatter, this comes back as a JsonElement
+            if (ex.ErrorData is JsonElement jsonElement)
             {
+                // The JsonElement should contain our RpcErrorData structure
+                jsonElement.ValueKind.Should().Be(JsonValueKind.Object, "error data should be an object");
+
+                // Verify the Code property exists and contains our error code
+                jsonElement.TryGetProperty("Code", out var codeElement).Should().BeTrue(
+                    "error data should have a 'Code' property (PascalCase from server)");
+                codeElement.GetString().Should().Contain("Auth", "error code should indicate auth error");
+            }
+            else if (ex.ErrorData != null)
+            {
+                // Fallback for other formatter types - just verify it serializes with error info
                 var errorJson = JsonSerializer.Serialize(ex.ErrorData, JsonOptions);
-                // The error data should contain the structured error code
-                errorJson.Should().Contain("code");
+                errorJson.Should().ContainAny("Code", "code", "Auth");
             }
         }
     }

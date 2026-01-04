@@ -730,6 +730,8 @@ public class RpcMethodHandler
         return value.Value;
     }
 
+    #endregion
+
     #region Profile Invalidation
 
     /// <summary>
