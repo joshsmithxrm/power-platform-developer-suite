@@ -98,7 +98,7 @@ public sealed class PluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
@@ -142,7 +142,7 @@ public sealed class PluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginPackageInfo
         {
@@ -182,7 +182,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
@@ -241,7 +241,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginTypeInfo
         {
@@ -303,7 +303,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e =>
         {
@@ -360,7 +360,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginImageInfo
         {
@@ -424,7 +424,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         return results.Entities.FirstOrDefault()?.Id;
     }
 
@@ -460,7 +460,7 @@ public sealed class PluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         return results.Entities.FirstOrDefault()?.Id;
     }
 
@@ -496,7 +496,7 @@ public sealed class PluginRegistrationService
         {
             entity.Id = existing.Id;
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await UpdateAsync(entity, client);
+            await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
             if (!string.IsNullOrEmpty(solutionName))
@@ -546,7 +546,7 @@ public sealed class PluginRegistrationService
                 request.Parameters["SolutionUniqueName"] = solutionName;
             }
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await ExecuteAsync(request, client);
+            await ExecuteAsync(request, client, cancellationToken);
 
             return existing.Id;
         }
@@ -604,7 +604,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         if (existing != null)
@@ -655,7 +655,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         var entity = new SdkMessageProcessingStep
@@ -709,7 +709,7 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity, client);
+            await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
             if (!string.IsNullOrEmpty(solutionName))
@@ -751,7 +751,7 @@ public sealed class PluginRegistrationService
         };
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var results = await RetrieveMultipleAsync(query, client);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         var entity = new SdkMessageProcessingStepImage
@@ -771,12 +771,12 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity, client);
+            await UpdateAsync(entity, client, cancellationToken);
             return existing.Id;
         }
         else
         {
-            return await CreateAsync(entity, client);
+            return await CreateAsync(entity, client, cancellationToken);
         }
     }
 
@@ -792,7 +792,7 @@ public sealed class PluginRegistrationService
     public async Task DeleteImageAsync(Guid imageId, CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client);
+        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
     }
 
     /// <summary>
@@ -814,12 +814,12 @@ public sealed class PluginRegistrationService
                 async (image, ct) =>
                 {
                     await using var client = await _pool.GetClientAsync(cancellationToken: ct);
-                    await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, image.Id, client);
+                    await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, image.Id, client, ct);
                 });
         }
 
         await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient);
+        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
     }
 
     /// <summary>
@@ -830,7 +830,7 @@ public sealed class PluginRegistrationService
     public async Task DeletePluginTypeAsync(Guid pluginTypeId, CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId, client);
+        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId, client, cancellationToken);
     }
 
     #endregion
@@ -861,7 +861,7 @@ public sealed class PluginRegistrationService
         try
         {
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await ExecuteAsync(request, client);
+            await ExecuteAsync(request, client, cancellationToken);
         }
         catch (Exception ex) when (ex.Message.Contains("already exists"))
         {
@@ -879,7 +879,8 @@ public sealed class PluginRegistrationService
     /// </summary>
     private async Task<int> GetComponentTypeAsync(
         string entityLogicalName,
-        IOrganizationService client)
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         // Check well-known types first (no API call needed)
         if (WellKnownComponentTypes.TryGetValue(entityLogicalName, out var wellKnownType))
@@ -902,7 +903,7 @@ public sealed class PluginRegistrationService
 
         try
         {
-            var response = (RetrieveEntityResponse)await ExecuteAsync(request, client);
+            var response = (RetrieveEntityResponse)await ExecuteAsync(request, client, cancellationToken);
             var objectTypeCode = response.EntityMetadata.ObjectTypeCode ?? 0;
             _entityTypeCodeCache[entityLogicalName] = objectTypeCode;
             return objectTypeCode;
@@ -934,11 +935,11 @@ public sealed class PluginRegistrationService
         IOrganizationService client,
         CancellationToken cancellationToken)
     {
-        var id = await CreateAsync(entity, client);
+        var id = await CreateAsync(entity, client, cancellationToken);
 
         if (!string.IsNullOrEmpty(solutionName))
         {
-            var componentType = await GetComponentTypeAsync(entity.LogicalName, client);
+            var componentType = await GetComponentTypeAsync(entity.LogicalName, client, cancellationToken);
 
             if (componentType > 0)
             {
@@ -966,7 +967,7 @@ public sealed class PluginRegistrationService
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        var response = (CreateResponse)await ExecuteAsync(request, client);
+        var response = (CreateResponse)await ExecuteAsync(request, client, cancellationToken);
         return response.id;
     }
 
@@ -1035,41 +1036,57 @@ public sealed class PluginRegistrationService
     };
 
     // Native async helpers - use async SDK when available, otherwise fall back to Task.Run
-    private static async Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, IOrganizationService client)
+    private static async Task<EntityCollection> RetrieveMultipleAsync(
+        QueryExpression query,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         if (client is IOrganizationServiceAsync2 asyncService)
-            return await asyncService.RetrieveMultipleAsync(query);
-        return await Task.Run(() => client.RetrieveMultiple(query));
+            return await asyncService.RetrieveMultipleAsync(query, cancellationToken);
+        return await Task.Run(() => client.RetrieveMultiple(query), cancellationToken);
     }
 
-    private static async Task<Guid> CreateAsync(Entity entity, IOrganizationService client)
+    private static async Task<Guid> CreateAsync(
+        Entity entity,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         if (client is IOrganizationServiceAsync2 asyncService)
-            return await asyncService.CreateAsync(entity);
-        return await Task.Run(() => client.Create(entity));
+            return await asyncService.CreateAsync(entity, cancellationToken);
+        return await Task.Run(() => client.Create(entity), cancellationToken);
     }
 
-    private static async Task UpdateAsync(Entity entity, IOrganizationService client)
+    private static async Task UpdateAsync(
+        Entity entity,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         if (client is IOrganizationServiceAsync2 asyncService)
-            await asyncService.UpdateAsync(entity);
+            await asyncService.UpdateAsync(entity, cancellationToken);
         else
-            await Task.Run(() => client.Update(entity));
+            await Task.Run(() => client.Update(entity), cancellationToken);
     }
 
-    private static async Task DeleteAsync(string entityName, Guid id, IOrganizationService client)
+    private static async Task DeleteAsync(
+        string entityName,
+        Guid id,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         if (client is IOrganizationServiceAsync2 asyncService)
-            await asyncService.DeleteAsync(entityName, id);
+            await asyncService.DeleteAsync(entityName, id, cancellationToken);
         else
-            await Task.Run(() => client.Delete(entityName, id));
+            await Task.Run(() => client.Delete(entityName, id), cancellationToken);
     }
 
-    private static async Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, IOrganizationService client)
+    private static async Task<OrganizationResponse> ExecuteAsync(
+        OrganizationRequest request,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         if (client is IOrganizationServiceAsync2 asyncService)
-            return await asyncService.ExecuteAsync(request);
-        return await Task.Run(() => client.Execute(request));
+            return await asyncService.ExecuteAsync(request, cancellationToken);
+        return await Task.Run(() => client.Execute(request), cancellationToken);
     }
 
     #endregion

@@ -24,7 +24,7 @@ public class PluginRegistrationServiceTests
     private Guid _createResult = Guid.Empty;
     private Entity? _updatedEntity;
     private OrganizationRequest? _executedRequest;
-    private OrganizationResponse _executeResult = new();
+    private readonly OrganizationResponse _executeResult = new();
 
     public PluginRegistrationServiceTests()
     {
@@ -143,8 +143,8 @@ public class PluginRegistrationServiceTests
 
         // Assert
         Assert.Equal(expectedId, result);
-        // Verify CreateAsync was called (method uses async helper which calls CreateAsync(entity) without token)
-        _mockPooledClient.Verify(s => s.CreateAsync(It.Is<Entity>(e => e.LogicalName == PluginAssembly.EntityLogicalName)), Times.Once);
+        // Verify CreateAsync was called with CancellationToken
+        _mockPooledClient.Verify(s => s.CreateAsync(It.Is<Entity>(e => e.LogicalName == PluginAssembly.EntityLogicalName), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -221,9 +221,8 @@ public class PluginRegistrationServiceTests
         _createResult = expectedId;
 
         // RetrieveEntityRequest throws FaultException (entity metadata not found)
-        // Need to set up the overload without CancellationToken since that's what helper calls
         _mockPooledClient
-            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaultException("Entity does not exist"));
 
         // Act - Should succeed despite the FaultException (graceful degradation)
@@ -258,7 +257,7 @@ public class PluginRegistrationServiceTests
         // RetrieveEntityRequest throws FaultException<OrganizationServiceFault>
         var fault = new OrganizationServiceFault { Message = "Entity not found", ErrorCode = -2147220969 };
         _mockPooledClient
-            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaultException<OrganizationServiceFault>(fault, new FaultReason("Entity not found")));
 
         // Act - Should succeed despite the FaultException (graceful degradation)
@@ -293,13 +292,13 @@ public class PluginRegistrationServiceTests
 
         // RetrieveEntityRequest throws (so GetComponentTypeAsync returns 0)
         _mockPooledClient
-            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaultException("Entity does not exist"));
 
         // Track if AddSolutionComponent is called
         _mockPooledClient
-            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "AddSolutionComponent")))
-            .Callback<OrganizationRequest>(_ => addSolutionComponentCalled = true)
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "AddSolutionComponent"), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((_, _) => addSolutionComponentCalled = true)
             .ReturnsAsync(new OrganizationResponse());
 
         // Act

@@ -394,16 +394,6 @@ public class RpcMethodHandler
         // Collect all steps for image fetching
         var allSteps = stepsPerType.SelectMany(s => s).ToList();
 
-        // Build step-to-type index for later mapping
-        var stepToTypeIndex = new Dictionary<Guid, int>();
-        for (var i = 0; i < types.Count; i++)
-        {
-            foreach (var step in stepsPerType[i])
-            {
-                stepToTypeIndex[step.Id] = i;
-            }
-        }
-
         // Fetch all images in parallel if there are steps
         Dictionary<Guid, List<PluginImageInfoModel>> imagesByStepId = [];
         if (allSteps.Count > 0)
