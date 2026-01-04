@@ -121,7 +121,7 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
     }
 
     /// <inheritdoc />
-    public Task<ServiceClient> CreateServiceClientAsync(
+    public async Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
         CancellationToken cancellationToken = default,
         bool forceInteractive = false) // Ignored for service principals
@@ -135,11 +135,20 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
         // Build connection string
         var connectionString = BuildConnectionString(environmentUrl);
 
-        // Create ServiceClient
+        // Create ServiceClient - wrap in Task.Run since constructor is sync and can block.
+        // Use WaitAsync to enforce the cancellation token even if constructor ignores it.
         ServiceClient client;
         try
         {
-            client = new ServiceClient(connectionString);
+            client = await Task.Run(() => new ServiceClient(connectionString), cancellationToken)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new AuthenticationException(
+                $"Connection to Dataverse timed out or was cancelled for {environmentUrl}. " +
+                "Check network connectivity and environment URL.");
         }
         catch (Exception ex)
         {
@@ -156,7 +165,7 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
         // Estimate token expiration (typically 1 hour for client credentials)
         _tokenExpiresAt = DateTimeOffset.UtcNow.AddHours(1);
 
-        return Task.FromResult(client);
+        return client;
     }
 
     /// <summary>

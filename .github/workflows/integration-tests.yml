@@ -64,4 +64,6 @@ jobs:
         PPDS_TEST_CLIENT_SECRET: ${{ secrets.PPDS_TEST_CLIENT_SECRET }}
         PPDS_TEST_CERT_BASE64: ${{ secrets.PPDS_TEST_CERT_BASE64 }}
         PPDS_TEST_CERT_PASSWORD: ${{ secrets.PPDS_TEST_CERT_PASSWORD }}
-      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category=Integration"
+      # Run integration tests, but exclude SecureStorage tests which require working OS-level
+      # secure storage (DPAPI/Keychain) that is often unavailable in CI environments
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category=Integration&Category!=SecureStorage"

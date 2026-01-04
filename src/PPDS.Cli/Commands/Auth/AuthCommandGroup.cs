@@ -207,6 +207,16 @@ public static class AuthCommandGroup
 
     private static async Task<int> ExecuteCreateAsync(CreateOptions options, CancellationToken cancellationToken)
     {
+        // Check if secret is provided via environment variable (CI/automation scenario).
+        // If so, skip secure credential store entirely - secrets will be provided at runtime.
+        var envSpnSecret = Environment.GetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar);
+        var bypassCredentialStore = !string.IsNullOrWhiteSpace(envSpnSecret);
+
+        // Store secrets in secure credential store (not in profile), unless bypassed
+        // Declared outside try block so finally can dispose it
+        SecureCredentialStore? credentialStore = null;
+        string? storedCredentialKey = null;
+
         try
         {
             var authMethod = DetermineAuthMethod(options);
@@ -237,49 +247,48 @@ public static class AuthCommandGroup
                 CertificateThumbprint = options.CertificateThumbprint
             };
 
-            // Store secrets in secure credential store (not in profile)
-            using var credentialStore = new SecureCredentialStore(allowCleartextFallback: options.AcceptCleartextCaching);
-
-            // Warn if using cleartext storage on Linux
-            if (credentialStore.IsCleartextCachingEnabled)
+            if (!bypassCredentialStore)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.Error.WriteLine("Warning: Secure storage (libsecret) is unavailable. Credentials will be stored in cleartext.");
-                Console.Error.WriteLine("         Install libsecret and a keyring (gnome-keyring or kwallet) for secure storage.");
-                Console.ResetColor();
-            }
+                credentialStore = new SecureCredentialStore(allowCleartextFallback: options.AcceptCleartextCaching);
 
-            // Track stored credential key for cleanup on failure
-            string? storedCredentialKey = null;
-
-            if (!string.IsNullOrWhiteSpace(options.ApplicationId))
-            {
-                var storedCredential = new StoredCredential
+                // Warn if using cleartext storage on Linux
+                if (credentialStore.IsCleartextCachingEnabled)
                 {
-                    ApplicationId = options.ApplicationId,
-                    ClientSecret = options.ClientSecret,
-                    CertificatePath = options.CertificatePath,
-                    CertificatePassword = options.CertificatePassword
-                };
-                await credentialStore.StoreAsync(storedCredential, cancellationToken);
-                storedCredentialKey = options.ApplicationId;
-            }
-            else if (!string.IsNullOrWhiteSpace(options.Username) && !string.IsNullOrWhiteSpace(options.Password))
-            {
-                // For username/password auth, key by username
-                var storedCredential = new StoredCredential
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.Error.WriteLine("Warning: Secure storage (libsecret) is unavailable. Credentials will be stored in cleartext.");
+                    Console.Error.WriteLine("         Install libsecret and a keyring (gnome-keyring or kwallet) for secure storage.");
+                    Console.ResetColor();
+                }
+
+                if (!string.IsNullOrWhiteSpace(options.ApplicationId))
                 {
-                    ApplicationId = options.Username,
-                    Password = options.Password
-                };
-                await credentialStore.StoreAsync(storedCredential, cancellationToken);
-                storedCredentialKey = options.Username;
+                    var storedCredential = new StoredCredential
+                    {
+                        ApplicationId = options.ApplicationId,
+                        ClientSecret = options.ClientSecret,
+                        CertificatePath = options.CertificatePath,
+                        CertificatePassword = options.CertificatePassword
+                    };
+                    await credentialStore.StoreAsync(storedCredential, cancellationToken);
+                    storedCredentialKey = options.ApplicationId;
+                }
+                else if (!string.IsNullOrWhiteSpace(options.Username) && !string.IsNullOrWhiteSpace(options.Password))
+                {
+                    // For username/password auth, key by username
+                    var storedCredential = new StoredCredential
+                    {
+                        ApplicationId = options.Username,
+                        Password = options.Password
+                    };
+                    await credentialStore.StoreAsync(storedCredential, cancellationToken);
+                    storedCredentialKey = options.Username;
+                }
             }
 
             // Helper to clean up stored credentials on failure
             async Task CleanupCredentialsAsync()
             {
-                if (storedCredentialKey != null)
+                if (storedCredentialKey != null && credentialStore != null)
                 {
                     await credentialStore.RemoveAsync(storedCredentialKey, cancellationToken);
                 }
@@ -499,6 +508,10 @@ public static class AuthCommandGroup
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return ExitCodes.Failure;
+        }
+        finally
+        {
+            credentialStore?.Dispose();
         }
     }
 
