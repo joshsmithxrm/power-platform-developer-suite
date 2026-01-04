@@ -18,20 +18,196 @@ namespace PPDS.Cli.CsvLoader;
 public sealed class CsvDataLoader
 {
     private readonly IDataverseConnectionPool _pool;
-    private readonly IBulkOperationExecutor _bulkExecutor;
+    private readonly IBulkOperationExecutor? _bulkExecutor;
     private readonly ILogger<CsvDataLoader>? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CsvDataLoader"/> class.
     /// </summary>
+    /// <param name="pool">Connection pool for Dataverse operations.</param>
+    /// <param name="bulkExecutor">Bulk operation executor. Required for LoadAsync, optional for AnalyzeAsync.</param>
+    /// <param name="logger">Optional logger.</param>
     public CsvDataLoader(
         IDataverseConnectionPool pool,
-        IBulkOperationExecutor bulkExecutor,
+        IBulkOperationExecutor? bulkExecutor,
         ILogger<CsvDataLoader>? logger = null)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
-        _bulkExecutor = bulkExecutor ?? throw new ArgumentNullException(nameof(bulkExecutor));
+        _bulkExecutor = bulkExecutor;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Analyzes CSV-to-entity mapping without loading data.
+    /// </summary>
+    public async Task<MappingAnalysis> AnalyzeAsync(
+        string csvPath,
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        _logger?.LogInformation("Analyzing CSV file: {CsvPath}", csvPath);
+
+        // Retrieve entity metadata
+        var entityMetadata = await RetrieveEntityMetadataAsync(entityLogicalName, cancellationToken);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(entityMetadata);
+
+        // Extract publisher prefix
+        var prefix = ColumnMatcher.ExtractPublisherPrefix(entityLogicalName);
+
+        // Read headers and sample values
+        var (headers, sampleValues) = await ReadCsvHeadersAndSamplesAsync(csvPath, cancellationToken);
+
+        var columns = new List<ColumnAnalysis>();
+        var matchedCount = 0;
+        var recommendations = new List<string>();
+
+        foreach (var header in headers)
+        {
+            var samples = sampleValues.GetValueOrDefault(header);
+            var analysis = AnalyzeColumn(header, attributesByName, prefix, samples);
+            columns.Add(analysis);
+
+            if (analysis.IsMatched)
+            {
+                matchedCount++;
+            }
+        }
+
+        // Generate recommendations
+        var unmatchedCount = headers.Length - matchedCount;
+        var lookupCount = columns.Count(c => c.IsLookup);
+
+        if (unmatchedCount > 0)
+        {
+            recommendations.Add($"Use --generate-mapping to create a mapping file for the {unmatchedCount} unmatched column(s).");
+        }
+
+        if (lookupCount > 0)
+        {
+            recommendations.Add($"{lookupCount} lookup field(s) detected. Review generated mapping to configure resolution.");
+        }
+
+        if (unmatchedCount == 0 && lookupCount == 0)
+        {
+            recommendations.Add($"All columns matched. Ready to load with: ppds data load --entity {entityLogicalName} --file {Path.GetFileName(csvPath)}");
+        }
+
+        return new MappingAnalysis
+        {
+            Entity = entityLogicalName,
+            TotalColumns = headers.Length,
+            MatchedColumns = matchedCount,
+            Prefix = prefix,
+            Columns = columns,
+            Recommendations = recommendations
+        };
+    }
+
+    private async Task<(string[] Headers, Dictionary<string, List<string>> SampleValues)> ReadCsvHeadersAndSamplesAsync(
+        string csvPath,
+        CancellationToken cancellationToken)
+    {
+        var maxSampleValues = ColumnMatcher.MaxSampleValues;
+
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        // Collect sample values
+        var sampleValues = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            sampleValues[header] = new List<string>();
+        }
+
+        var rowCount = 0;
+        while (await csv.ReadAsync() && rowCount < maxSampleValues)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var header in headers)
+            {
+                var value = csv.GetField(header);
+                if (!string.IsNullOrEmpty(value)
+                    && sampleValues[header].Count < maxSampleValues
+                    && !sampleValues[header].Contains(value))
+                {
+                    sampleValues[header].Add(value);
+                }
+            }
+            rowCount++;
+        }
+
+        return (headers, sampleValues);
+    }
+
+    private ColumnAnalysis AnalyzeColumn(
+        string header,
+        Dictionary<string, AttributeMetadata> attributesByName,
+        string? prefix,
+        List<string>? samples)
+    {
+        // Try exact match first
+        if (attributesByName.TryGetValue(header, out var attr))
+        {
+            return CreateMatchedAnalysis(header, attr, "exact", samples);
+        }
+
+        // Try prefix + column
+        if (prefix != null && attributesByName.TryGetValue(prefix + header, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr, "prefix", samples);
+        }
+
+        // Try normalized prefix + column
+        if (prefix != null && ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(prefix + header), attributesByName, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr!, "normalized-prefix", samples);
+        }
+
+        // Try normalized match
+        if (ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(header), attributesByName, out attr))
+        {
+            return CreateMatchedAnalysis(header, attr!, "normalized", samples);
+        }
+
+        // No match
+        var suggestions = ColumnMatcher.FindSimilarAttributes(header, attributesByName, prefix);
+        return new ColumnAnalysis
+        {
+            CsvColumn = header,
+            IsMatched = false,
+            Suggestions = suggestions.Count > 0 ? suggestions : null,
+            SampleValues = samples?.Count > 0 ? samples : null
+        };
+    }
+
+    private static ColumnAnalysis CreateMatchedAnalysis(
+        string header,
+        AttributeMetadata attr,
+        string matchType,
+        List<string>? samples)
+    {
+        var isLookup = ColumnMatcher.IsLookupAttribute(attr);
+        return new ColumnAnalysis
+        {
+            CsvColumn = header,
+            IsMatched = true,
+            TargetAttribute = attr.LogicalName,
+            MatchType = matchType,
+            AttributeType = attr.AttributeType?.ToString(),
+            IsLookup = isLookup,
+            SampleValues = samples?.Count > 0 ? samples : null
+        };
     }
 
     /// <summary>
@@ -43,6 +219,12 @@ public sealed class CsvDataLoader
         IProgress<ProgressSnapshot>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (_bulkExecutor == null)
+        {
+            throw new InvalidOperationException(
+                "BulkExecutor is required for LoadAsync. Use the constructor overload that provides IBulkOperationExecutor.");
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var errors = new List<LoadError>();
         var warnings = new List<string>();
@@ -54,11 +236,48 @@ public sealed class CsvDataLoader
             options.EntityLogicalName, cancellationToken);
 
         // 2. Build attribute lookup
-        var attributesByName = BuildAttributeLookup(entityMetadata);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(entityMetadata);
 
         // 3. Determine column mappings
-        var mappings = options.Mapping?.Columns
-            ?? await AutoMapColumnsAsync(csvPath, attributesByName, warnings, cancellationToken);
+        Dictionary<string, ColumnMappingEntry> mappings;
+        if (options.Mapping?.Columns != null)
+        {
+            mappings = options.Mapping.Columns;
+
+            // Validate the mapping file against the CSV
+            var validationResult = await ValidateMappingFileAsync(csvPath, mappings, cancellationToken);
+
+            // Add stale mapping warnings
+            foreach (var stale in validationResult.StaleMappings)
+            {
+                warnings.Add($"Mapping column '{stale}' not found in CSV (stale mapping entry).");
+            }
+
+            // Throw if there are validation errors (unconfigured or missing mappings)
+            if (validationResult.UnconfiguredColumns.Count > 0 || validationResult.MissingMappings.Count > 0)
+            {
+                throw new MappingValidationException(
+                    validationResult.UnconfiguredColumns,
+                    validationResult.MissingMappings,
+                    validationResult.StaleMappings);
+            }
+        }
+        else
+        {
+            var autoMappingResult = await AutoMapColumnsAsync(csvPath, options.EntityLogicalName, attributesByName, cancellationToken);
+            warnings.AddRange(autoMappingResult.Warnings);
+
+            // Check if auto-mapping is incomplete
+            if (!autoMappingResult.IsComplete && !options.Force)
+            {
+                throw new MappingIncompleteException(
+                    autoMappingResult.MatchedColumns,
+                    autoMappingResult.TotalColumns,
+                    autoMappingResult.UnmatchedColumns);
+            }
+
+            mappings = autoMappingResult.Mappings;
+        }
 
         // 4. Identify and preload lookup caches
         var lookupResolver = new LookupResolver(_pool);
@@ -173,33 +392,20 @@ public sealed class CsvDataLoader
         return response.EntityMetadata;
     }
 
-    private static Dictionary<string, AttributeMetadata> BuildAttributeLookup(EntityMetadata entityMetadata)
-    {
-        var lookup = new Dictionary<string, AttributeMetadata>(StringComparer.OrdinalIgnoreCase);
 
-        if (entityMetadata.Attributes == null)
-        {
-            return lookup;
-        }
-
-        foreach (var attr in entityMetadata.Attributes)
-        {
-            if (attr.LogicalName != null)
-            {
-                lookup[attr.LogicalName] = attr;
-            }
-        }
-
-        return lookup;
-    }
-
-    private async Task<Dictionary<string, ColumnMappingEntry>> AutoMapColumnsAsync(
+    private async Task<AutoMappingResult> AutoMapColumnsAsync(
         string csvPath,
+        string entityLogicalName,
         Dictionary<string, AttributeMetadata> attributesByName,
-        List<string> warnings,
         CancellationToken cancellationToken)
     {
         var mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
+        var unmatchedColumns = new List<UnmatchedColumn>();
+        var warnings = new List<string>();
+        var matchedCount = 0;
+
+        // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
+        var prefix = ColumnMatcher.ExtractPublisherPrefix(entityLogicalName);
 
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
@@ -217,26 +423,54 @@ public sealed class CsvDataLoader
 
         foreach (var header in headers)
         {
-            var normalizedHeader = NormalizeForMatching(header);
+            var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
 
             // Try exact match first
             if (attributesByName.TryGetValue(header, out var attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr);
+                matchedCount++;
             }
-            // Try normalized match
-            else if (TryFindAttribute(normalizedHeader, attributesByName, out attr))
+            // Try prefix + column (e.g., "city" → "ppds_city")
+            else if (prefix != null && attributesByName.TryGetValue(prefix + header, out attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr);
+                matchedCount++;
+            }
+            // Try normalized prefix + column
+            else if (prefix != null && ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(prefix + header), attributesByName, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
+                matchedCount++;
+            }
+            // Try normalized match (existing)
+            else if (ColumnMatcher.TryFindAttribute(normalizedHeader, attributesByName, out attr))
+            {
+                mappings[header] = CreateAutoMapping(header, attr!);
+                matchedCount++;
             }
             else
             {
-                warnings.Add($"Column '{header}' does not match any attribute. It will be skipped.");
+                // Column could not be matched - collect suggestions
+                var suggestions = ColumnMatcher.FindSimilarAttributes(header, attributesByName, prefix);
+                unmatchedColumns.Add(new UnmatchedColumn
+                {
+                    ColumnName = header,
+                    Suggestions = suggestions.Count > 0 ? suggestions : null
+                });
+                warnings.Add($"Column '{header}' does not match any attribute.");
                 mappings[header] = new ColumnMappingEntry { Skip = true };
             }
         }
 
-        return mappings;
+        return new AutoMappingResult
+        {
+            Mappings = mappings,
+            TotalColumns = headers.Length,
+            MatchedColumns = matchedCount,
+            UnmatchedColumns = unmatchedColumns,
+            Warnings = warnings
+        };
     }
 
     private static ColumnMappingEntry CreateAutoMapping(string header, AttributeMetadata attr)
@@ -247,7 +481,7 @@ public sealed class CsvDataLoader
         };
 
         // Auto-configure lookups with GUID-only matching
-        if (IsLookupAttribute(attr))
+        if (ColumnMatcher.IsLookupAttribute(attr))
         {
             var lookupAttr = (LookupAttributeMetadata)attr;
             entry.Lookup = new LookupConfig
@@ -258,33 +492,6 @@ public sealed class CsvDataLoader
         }
 
         return entry;
-    }
-
-    private static bool TryFindAttribute(
-        string normalizedHeader,
-        Dictionary<string, AttributeMetadata> attributes,
-        out AttributeMetadata? found)
-    {
-        foreach (var kvp in attributes)
-        {
-            if (NormalizeForMatching(kvp.Key) == normalizedHeader)
-            {
-                found = kvp.Value;
-                return true;
-            }
-        }
-
-        found = null;
-        return false;
-    }
-
-    private static string NormalizeForMatching(string value)
-    {
-        return value
-            .Replace(" ", "")
-            .Replace("_", "")
-            .Replace("-", "")
-            .ToLowerInvariant();
     }
 
     private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
@@ -336,6 +543,7 @@ public sealed class CsvDataLoader
 
             var entity = new Entity(options.EntityLogicalName);
             var hasError = false;
+            var processedKeyFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Set alternate key if specified
             if (!string.IsNullOrEmpty(options.AlternateKeyFields))
@@ -354,28 +562,67 @@ public sealed class CsvDataLoader
                             // Coerce key value if we have metadata
                             if (attributesByName.TryGetValue(trimmedKey, out var keyAttr))
                             {
-                                var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
-                                if (coercedKey != null)
+                                // Check if this key field is a lookup
+                                if (ColumnMatcher.IsLookupAttribute(keyAttr))
                                 {
-                                    entity.KeyAttributes[trimmedKey] = coercedKey;
+                                    var mapping = mappings.GetValueOrDefault(keyHeader);
+                                    if (mapping?.Lookup != null)
+                                    {
+                                        var entityRef = lookupResolver.Resolve(keyValue, mapping.Lookup, rowNumber, keyHeader);
+                                        if (entityRef != null)
+                                        {
+                                            entity.KeyAttributes[trimmedKey] = entityRef;
+                                            processedKeyFields.Add(trimmedKey);
+                                        }
+                                        else
+                                        {
+                                            // Lookup resolution failed - error already added by resolver
+                                            hasError = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Lookup key field without lookup configuration
+                                        errors.Add(new LoadError
+                                        {
+                                            RowNumber = rowNumber,
+                                            Column = keyHeader,
+                                            ErrorCode = LoadErrorCodes.LookupNotResolved,
+                                            Message = $"Alternate key field '{trimmedKey}' is a lookup but has no lookup configuration. " +
+                                                      "Use --generate-mapping to configure lookup resolution.",
+                                            Value = keyValue
+                                        });
+                                        hasError = true;
+                                    }
                                 }
                                 else
                                 {
-                                    // Key coercion failed - this is a critical error
-                                    errors.Add(new LoadError
+                                    // Non-lookup key field - use standard coercion
+                                    var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
+                                    if (coercedKey != null)
                                     {
-                                        RowNumber = rowNumber,
-                                        Column = keyHeader,
-                                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                                        Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
-                                        Value = keyValue
-                                    });
-                                    hasError = true;
+                                        entity.KeyAttributes[trimmedKey] = coercedKey;
+                                        processedKeyFields.Add(trimmedKey);
+                                    }
+                                    else
+                                    {
+                                        // Key coercion failed - this is a critical error
+                                        errors.Add(new LoadError
+                                        {
+                                            RowNumber = rowNumber,
+                                            Column = keyHeader,
+                                            ErrorCode = LoadErrorCodes.TypeCoercionFailed,
+                                            Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
+                                            Value = keyValue
+                                        });
+                                        hasError = true;
+                                    }
                                 }
                             }
                             else
                             {
                                 entity.KeyAttributes[trimmedKey] = keyValue;
+                                processedKeyFields.Add(trimmedKey);
                             }
                         }
                     }
@@ -391,6 +638,12 @@ public sealed class CsvDataLoader
 
                 var fieldName = mapping.Field;
                 if (string.IsNullOrEmpty(fieldName))
+                {
+                    continue;
+                }
+
+                // Skip fields already processed as alternate key attributes
+                if (processedKeyFields.Contains(fieldName))
                 {
                     continue;
                 }
@@ -489,10 +742,86 @@ public sealed class CsvDataLoader
         return null;
     }
 
-    private static bool IsLookupAttribute(AttributeMetadata attr)
+    private async Task<MappingValidationResult> ValidateMappingFileAsync(
+        string csvPath,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        CancellationToken cancellationToken)
     {
-        return attr.AttributeType == AttributeTypeCode.Lookup ||
-               attr.AttributeType == AttributeTypeCode.Customer ||
-               attr.AttributeType == AttributeTypeCode.Owner;
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        var csvColumns = new HashSet<string>(headers, StringComparer.OrdinalIgnoreCase);
+        var mappingColumns = new HashSet<string>(mappings.Keys, StringComparer.OrdinalIgnoreCase);
+
+        var unconfiguredColumns = new List<string>();
+        var missingMappings = new List<string>();
+        var staleMappings = new List<string>();
+
+        // Check for unconfigured columns (field: null without skip: true)
+        foreach (var (columnName, mapping) in mappings)
+        {
+            if (string.IsNullOrEmpty(mapping.Field) && !mapping.Skip)
+            {
+                unconfiguredColumns.Add(columnName);
+            }
+        }
+
+        // Check for CSV columns not in mapping
+        foreach (var csvColumn in csvColumns)
+        {
+            if (!mappingColumns.Contains(csvColumn))
+            {
+                missingMappings.Add(csvColumn);
+            }
+        }
+
+        // Check for mapping columns not in CSV (stale entries - warning only)
+        foreach (var mappingColumn in mappingColumns)
+        {
+            if (!csvColumns.Contains(mappingColumn))
+            {
+                staleMappings.Add(mappingColumn);
+            }
+        }
+
+        return new MappingValidationResult
+        {
+            UnconfiguredColumns = unconfiguredColumns,
+            MissingMappings = missingMappings,
+            StaleMappings = staleMappings
+        };
     }
+
+}
+
+/// <summary>
+/// Result of validating a mapping file against a CSV.
+/// </summary>
+internal sealed record MappingValidationResult
+{
+    /// <summary>
+    /// Columns that have no field configured and are not marked as skip.
+    /// </summary>
+    public required List<string> UnconfiguredColumns { get; init; }
+
+    /// <summary>
+    /// CSV columns that are not present in the mapping file.
+    /// </summary>
+    public required List<string> MissingMappings { get; init; }
+
+    /// <summary>
+    /// Mapping columns that are not present in the CSV (stale entries).
+    /// </summary>
+    public required List<string> StaleMappings { get; init; }
 }

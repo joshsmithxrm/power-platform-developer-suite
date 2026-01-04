@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -118,6 +119,18 @@ public static class LoadCommand
             DefaultValueFactory = _ => true
         };
 
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Force loading even when auto-mapping is incomplete (unmatched columns will be skipped)",
+            DefaultValueFactory = _ => false
+        };
+
+        var analyzeOption = new Option<bool>("--analyze")
+        {
+            Description = "Analyze mapping without loading data (preview which columns match)",
+            DefaultValueFactory = _ => false
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-o")
         {
             Description = "Output format",
@@ -148,6 +161,8 @@ public static class LoadCommand
             bypassPluginsOption,
             bypassFlowsOption,
             continueOnErrorOption,
+            forceOption,
+            analyzeOption,
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
             outputFormatOption,
@@ -167,6 +182,8 @@ public static class LoadCommand
             var bypassPluginsValue = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
+            var force = parseResult.GetValue(forceOption);
+            var analyze = parseResult.GetValue(analyzeOption);
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
@@ -177,7 +194,7 @@ public static class LoadCommand
 
             return await ExecuteAsync(
                 entity, file, key, mappingFile, generateMappingFile,
-                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError,
+                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError, force, analyze,
                 profile, environment, outputFormat, verbose, debug,
                 cancellationToken);
         });
@@ -196,6 +213,8 @@ public static class LoadCommand
         CustomLogicBypass bypassPlugins,
         bool bypassFlows,
         bool continueOnError,
+        bool force,
+        bool analyze,
         string? profileName,
         string? environment,
         OutputFormat outputFormat,
@@ -233,6 +252,14 @@ public static class LoadCommand
                     outputFormat, cancellationToken);
             }
 
+            // Handle --analyze mode
+            if (analyze)
+            {
+                var analyzeLogger = serviceProvider.GetService<ILogger<CsvDataLoader>>();
+                return await AnalyzeMappingAsync(
+                    pool, entity, file.FullName, outputFormat, analyzeLogger, cancellationToken);
+            }
+
             // Load mapping file if provided
             CsvMappingConfig? mapping = null;
             if (mappingFile != null)
@@ -240,6 +267,16 @@ public static class LoadCommand
                 Console.Error.WriteLine($"Loading mapping from {mappingFile.Name}...");
                 var mappingJson = await File.ReadAllTextAsync(mappingFile.FullName, cancellationToken);
                 mapping = JsonSerializer.Deserialize<CsvMappingConfig>(mappingJson, JsonOptions);
+
+                // Validate schema version
+                if (mapping != null)
+                {
+                    CsvMappingSchema.ValidateVersion(
+                        mapping.Version,
+                        outputFormat != OutputFormat.Json
+                            ? warning => Console.Error.WriteLine(warning)
+                            : null);
+                }
             }
 
             // Create load options
@@ -252,7 +289,8 @@ public static class LoadCommand
                 BypassPlugins = bypassPlugins,
                 BypassFlows = bypassFlows,
                 ContinueOnError = continueOnError,
-                DryRun = dryRun
+                DryRun = dryRun,
+                Force = force
             };
 
             // Execute load
@@ -289,6 +327,45 @@ public static class LoadCommand
             }
 
             return result.Success ? ExitCodes.Success : ExitCodes.PartialSuccess;
+        }
+        catch (MappingIncompleteException ex)
+        {
+            Console.Error.WriteLine();
+            if (outputFormat == OutputFormat.Json)
+            {
+                WriteJsonMappingError(ex);
+            }
+            else
+            {
+                WriteTextMappingError(ex);
+            }
+            return ExitCodes.MappingRequired;
+        }
+        catch (MappingValidationException ex)
+        {
+            Console.Error.WriteLine();
+            if (outputFormat == OutputFormat.Json)
+            {
+                WriteJsonValidationError(ex);
+            }
+            else
+            {
+                WriteTextValidationError(ex);
+            }
+            return ExitCodes.ValidationError;
+        }
+        catch (SchemaVersionException ex)
+        {
+            Console.Error.WriteLine();
+            if (outputFormat == OutputFormat.Json)
+            {
+                WriteJsonSchemaVersionError(ex);
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+            }
+            return ExitCodes.ValidationError;
         }
         catch (OperationCanceledException)
         {
@@ -363,6 +440,109 @@ public static class LoadCommand
         Console.Error.WriteLine($"  2. Run: ppds data load --entity {entityName} --file {Path.GetFileName(csvPath)} --mapping {Path.GetFileName(outputPath)}");
 
         return ExitCodes.Success;
+    }
+
+    private static async Task<int> AnalyzeMappingAsync(
+        IDataverseConnectionPool pool,
+        string entityName,
+        string csvPath,
+        OutputFormat outputFormat,
+        ILogger<CsvDataLoader>? logger,
+        CancellationToken cancellationToken)
+    {
+        Console.Error.WriteLine($"Analyzing mapping for '{entityName}'...");
+
+        var loader = new CsvDataLoader(pool, null, logger);
+        var analysis = await loader.AnalyzeAsync(csvPath, entityName, cancellationToken);
+
+        Console.Error.WriteLine();
+
+        if (outputFormat == OutputFormat.Json)
+        {
+            WriteJsonAnalysis(analysis);
+        }
+        else
+        {
+            WriteTextAnalysis(analysis);
+        }
+
+        return ExitCodes.Success;
+    }
+
+    private static void WriteTextAnalysis(MappingAnalysis analysis)
+    {
+        Console.Error.WriteLine($"Mapping Analysis for '{analysis.Entity}'");
+        Console.Error.WriteLine($"  Match rate: {analysis.MatchRate:P0} ({analysis.MatchedColumns}/{analysis.TotalColumns} columns)");
+        if (analysis.Prefix != null)
+        {
+            Console.Error.WriteLine($"  Publisher prefix: {analysis.Prefix}");
+        }
+        Console.Error.WriteLine();
+
+        // Show matched columns
+        var matched = analysis.Columns.Where(c => c.IsMatched).ToList();
+        if (matched.Count > 0)
+        {
+            Console.Error.WriteLine("Matched columns:");
+            foreach (var col in matched)
+            {
+                var lookupIndicator = col.IsLookup ? " [Lookup]" : "";
+                Console.Error.WriteLine($"  + {col.CsvColumn} → {col.TargetAttribute} ({col.MatchType}){lookupIndicator}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        // Show unmatched columns
+        var unmatched = analysis.Columns.Where(c => !c.IsMatched).ToList();
+        if (unmatched.Count > 0)
+        {
+            Console.Error.WriteLine("Unmatched columns:");
+            foreach (var col in unmatched)
+            {
+                var suggestions = col.Suggestions != null && col.Suggestions.Count > 0
+                    ? $" (did you mean: {string.Join(", ", col.Suggestions)}?)"
+                    : "";
+                Console.Error.WriteLine($"  - {col.CsvColumn}{suggestions}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        // Show recommendations
+        if (analysis.Recommendations.Count > 0)
+        {
+            Console.Error.WriteLine("Recommendations:");
+            foreach (var rec in analysis.Recommendations)
+            {
+                Console.Error.WriteLine($"  * {rec}");
+            }
+        }
+    }
+
+    private static void WriteJsonAnalysis(MappingAnalysis analysis)
+    {
+        var output = new
+        {
+            entity = analysis.Entity,
+            matchRate = analysis.MatchRate,
+            totalColumns = analysis.TotalColumns,
+            matchedColumns = analysis.MatchedColumns,
+            isComplete = analysis.IsComplete,
+            prefix = analysis.Prefix,
+            columns = analysis.Columns.Select(c => new
+            {
+                csvColumn = c.CsvColumn,
+                isMatched = c.IsMatched,
+                targetAttribute = c.TargetAttribute,
+                matchType = c.MatchType,
+                attributeType = c.AttributeType,
+                isLookup = c.IsLookup,
+                suggestions = c.Suggestions,
+                sampleValues = c.SampleValues
+            }),
+            recommendations = analysis.Recommendations
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
     }
 
     private static void WriteTextResult(LoadResult result, bool dryRun)
@@ -465,6 +645,122 @@ public static class LoadCommand
                 message = e.Message,
                 value = e.Value
             })
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+    }
+
+    private static void WriteTextMappingError(MappingIncompleteException ex)
+    {
+        Console.Error.WriteLine($"Auto-mapping incomplete: {ex.MatchedColumns}/{ex.TotalColumns} columns matched");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Unmatched columns:");
+        foreach (var col in ex.UnmatchedColumns)
+        {
+            var suggestions = col.Suggestions != null && col.Suggestions.Count > 0
+                ? $" → did you mean: {string.Join(", ", col.Suggestions)}?"
+                : " → no similar attributes found";
+            Console.Error.WriteLine($"  • {col.ColumnName}{suggestions}");
+        }
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Options:");
+        Console.Error.WriteLine("  1. Run with --generate-mapping to create a mapping file for review");
+        Console.Error.WriteLine("  2. Run with --force to skip unmatched columns");
+    }
+
+    private static void WriteJsonMappingError(MappingIncompleteException ex)
+    {
+        var output = new
+        {
+            success = false,
+            error = new
+            {
+                code = "MAPPING_INCOMPLETE",
+                message = $"{ex.UnmatchedColumns.Count} column(s) could not be auto-mapped",
+                matchedColumns = ex.MatchedColumns,
+                totalColumns = ex.TotalColumns,
+                unmatchedColumns = ex.UnmatchedColumns.Select(c => new
+                {
+                    column = c.ColumnName,
+                    suggestions = c.Suggestions ?? []
+                }),
+                suggestion = "Use --generate-mapping to create a mapping file, or --force to skip unmatched columns"
+            }
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+    }
+
+    private static void WriteTextValidationError(MappingValidationException ex)
+    {
+        Console.Error.WriteLine("Mapping file validation failed");
+        Console.Error.WriteLine();
+
+        if (ex.UnconfiguredColumns.Count > 0)
+        {
+            Console.Error.WriteLine("Columns with no field configured (set 'field' or 'skip: true'):");
+            foreach (var col in ex.UnconfiguredColumns)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        if (ex.MissingMappings.Count > 0)
+        {
+            Console.Error.WriteLine("CSV columns not found in mapping file:");
+            foreach (var col in ex.MissingMappings)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        if (ex.StaleMappings.Count > 0)
+        {
+            Console.Error.WriteLine("Warning: Mapping entries not found in CSV (stale entries):");
+            foreach (var col in ex.StaleMappings)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        Console.Error.WriteLine("Update the mapping file to configure all columns, then retry.");
+    }
+
+    private static void WriteJsonValidationError(MappingValidationException ex)
+    {
+        var output = new
+        {
+            success = false,
+            error = new
+            {
+                code = "MAPPING_VALIDATION_FAILED",
+                message = ex.Message,
+                unconfiguredColumns = ex.UnconfiguredColumns,
+                missingMappings = ex.MissingMappings,
+                staleMappings = ex.StaleMappings,
+                suggestion = "Update the mapping file to configure all columns (set 'field' or 'skip: true')"
+            }
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+    }
+
+    private static void WriteJsonSchemaVersionError(SchemaVersionException ex)
+    {
+        var output = new
+        {
+            success = false,
+            error = new
+            {
+                code = "SCHEMA_VERSION_INCOMPATIBLE",
+                message = ex.Message,
+                fileVersion = ex.FileVersion,
+                cliVersion = ex.CliVersion,
+                suggestion = $"Upgrade to CLI v{CsvMappingSchema.ParseVersion(ex.FileVersion).Major}.x or regenerate the mapping file"
+            }
         };
 
         Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));

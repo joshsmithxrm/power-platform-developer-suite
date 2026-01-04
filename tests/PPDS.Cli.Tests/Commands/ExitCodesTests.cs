@@ -1,4 +1,4 @@
-using PPDS.Cli.Commands;
+using PPDS.Cli.Infrastructure.Errors;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands;

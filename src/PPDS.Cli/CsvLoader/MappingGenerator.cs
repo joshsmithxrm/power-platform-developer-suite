@@ -10,8 +10,6 @@ namespace PPDS.Cli.CsvLoader;
 /// </summary>
 public sealed class MappingGenerator
 {
-    private const int MaxSampleValues = 3;
-
     /// <summary>
     /// Generates a mapping configuration from CSV headers and entity metadata.
     /// </summary>
@@ -26,12 +24,13 @@ public sealed class MappingGenerator
     {
         var (headers, sampleValues) = await ReadCsvHeadersAndSamplesAsync(csvPath, cancellationToken);
 
-        var attributesByName = BuildAttributeLookup(entityMetadata);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(
+            entityMetadata, includeDisplayNames: true, filterValidForUpdate: true);
 
         var config = new CsvMappingConfig
         {
-            Schema = CsvMappingConfig.SchemaUrl,
-            Version = "1.0",
+            Schema = CsvMappingSchema.SchemaUrl,
+            Version = CsvMappingSchema.CurrentVersion,
             Entity = entityMetadata.LogicalName,
             GeneratedAt = DateTimeOffset.UtcNow,
             Columns = new Dictionary<string, ColumnMappingEntry>()
@@ -58,12 +57,13 @@ public sealed class MappingGenerator
         IEnumerable<string> headers,
         EntityMetadata entityMetadata)
     {
-        var attributesByName = BuildAttributeLookup(entityMetadata);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(
+            entityMetadata, includeDisplayNames: true, filterValidForUpdate: true);
         var result = new Dictionary<string, AttributeMetadata>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var header in headers)
         {
-            var normalizedHeader = NormalizeForMatching(header);
+            var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
 
             if (attributesByName.TryGetValue(normalizedHeader, out var attr))
             {
@@ -100,7 +100,7 @@ public sealed class MappingGenerator
         }
 
         var rowCount = 0;
-        while (await csv.ReadAsync() && rowCount < MaxSampleValues)
+        while (await csv.ReadAsync() && rowCount < ColumnMatcher.MaxSampleValues)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -108,7 +108,7 @@ public sealed class MappingGenerator
             {
                 var value = csv.GetField(header);
                 if (!string.IsNullOrEmpty(value)
-                    && sampleValues[header].Count < MaxSampleValues
+                    && sampleValues[header].Count < ColumnMatcher.MaxSampleValues
                     && !sampleValues[header].Contains(value))
                 {
                     sampleValues[header].Add(value);
@@ -120,73 +120,51 @@ public sealed class MappingGenerator
         return (headers, sampleValues);
     }
 
-    private static Dictionary<string, AttributeMetadata> BuildAttributeLookup(EntityMetadata entityMetadata)
-    {
-        var lookup = new Dictionary<string, AttributeMetadata>(StringComparer.OrdinalIgnoreCase);
-
-        if (entityMetadata.Attributes == null)
-        {
-            return lookup;
-        }
-
-        foreach (var attr in entityMetadata.Attributes)
-        {
-            if (attr.LogicalName == null || !attr.IsValidForUpdate.GetValueOrDefault())
-            {
-                continue;
-            }
-
-            // Index by logical name
-            lookup[attr.LogicalName] = attr;
-
-            // Also index by display name if different
-            var displayName = attr.DisplayName?.UserLocalizedLabel?.Label;
-            if (!string.IsNullOrEmpty(displayName))
-            {
-                var normalizedDisplay = NormalizeForMatching(displayName);
-                if (!lookup.ContainsKey(normalizedDisplay))
-                {
-                    lookup[normalizedDisplay] = attr;
-                }
-            }
-        }
-
-        return lookup;
-    }
-
-    private static string NormalizeForMatching(string value)
-    {
-        // Remove spaces, underscores, and convert to lowercase for matching
-        return value
-            .Replace(" ", "")
-            .Replace("_", "")
-            .Replace("-", "")
-            .ToLowerInvariant();
-    }
-
     private ColumnMappingEntry CreateMappingEntry(
         string header,
         Dictionary<string, AttributeMetadata> attributesByName,
         EntityMetadata entityMetadata,
         List<string>? sampleValues)
     {
-        var normalizedHeader = NormalizeForMatching(header);
-        var samples = sampleValues?.Take(MaxSampleValues).ToList();
+        var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
+        var samples = sampleValues?.Take(ColumnMatcher.MaxSampleValues).ToList();
 
-        // Try to find matching attribute
-        if (attributesByName.TryGetValue(normalizedHeader, out var matchedAttr))
+        // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
+        var prefix = ColumnMatcher.ExtractPublisherPrefix(entityMetadata.LogicalName ?? "");
+
+        // Try exact match first
+        if (attributesByName.TryGetValue(header, out var matchedAttr))
         {
             return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
         }
 
-        // Also try direct logical name match
-        if (attributesByName.TryGetValue(header, out matchedAttr))
+        // Try prefix + column (e.g., "city" → "ppds_city")
+        if (prefix != null && attributesByName.TryGetValue(prefix + header, out matchedAttr))
         {
             return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
+        }
+
+        // Try normalized match
+        if (attributesByName.TryGetValue(normalizedHeader, out matchedAttr))
+        {
+            return CreateMatchedEntry(matchedAttr, samples, entityMetadata);
+        }
+
+        // Try normalized prefix + column
+        if (prefix != null)
+        {
+            var normalizedPrefixedHeader = ColumnMatcher.NormalizeForMatching(prefix + header);
+            foreach (var (attrName, attr) in attributesByName)
+            {
+                if (ColumnMatcher.NormalizeForMatching(attrName) == normalizedPrefixedHeader)
+                {
+                    return CreateMatchedEntry(attr, samples, entityMetadata);
+                }
+            }
         }
 
         // No match found
-        return CreateUnmatchedEntry(header, entityMetadata, samples);
+        return CreateUnmatchedEntry(header, entityMetadata, samples, prefix);
     }
 
     private ColumnMappingEntry CreateMatchedEntry(
@@ -203,7 +181,7 @@ public sealed class MappingGenerator
         };
 
         // Add lookup configuration if this is a lookup field
-        if (IsLookupAttribute(attr))
+        if (ColumnMatcher.IsLookupAttribute(attr))
         {
             var lookupAttr = (LookupAttributeMetadata)attr;
             var targetEntity = lookupAttr.Targets?.FirstOrDefault() ?? "unknown";
@@ -231,7 +209,7 @@ public sealed class MappingGenerator
         }
 
         // Add optionset values if this is an optionset field
-        if (IsOptionSetAttribute(attr))
+        if (ColumnMatcher.IsOptionSetAttribute(attr))
         {
             var optionSetValues = GetOptionSetValues(attr);
             if (optionSetValues.Count > 0)
@@ -247,32 +225,19 @@ public sealed class MappingGenerator
     private ColumnMappingEntry CreateUnmatchedEntry(
         string header,
         EntityMetadata entityMetadata,
-        List<string>? samples)
+        List<string>? samples,
+        string? prefix)
     {
-        var similarAttributes = FindSimilarAttributes(header, entityMetadata);
+        var similarAttributes = ColumnMatcher.FindSimilarAttributes(header, entityMetadata, prefix);
 
         return new ColumnMappingEntry
         {
-            Skip = true,
-            Status = "no-match",
-            Note = "No matching attribute found. Set 'field' to map, or keep 'skip' to ignore.",
+            Field = null, // Forces explicit decision
+            Status = "needs-configuration",
+            Note = "No matching attribute found. Set 'field' to map to an attribute, or set 'skip: true' to ignore this column.",
             SimilarAttributes = similarAttributes.Count > 0 ? similarAttributes : null,
             CsvSample = samples?.Count > 0 ? samples : null
         };
-    }
-
-    private static bool IsLookupAttribute(AttributeMetadata attr)
-    {
-        return attr.AttributeType == AttributeTypeCode.Lookup ||
-               attr.AttributeType == AttributeTypeCode.Customer ||
-               attr.AttributeType == AttributeTypeCode.Owner;
-    }
-
-    private static bool IsOptionSetAttribute(AttributeMetadata attr)
-    {
-        return attr.AttributeType == AttributeTypeCode.Picklist ||
-               attr.AttributeType == AttributeTypeCode.State ||
-               attr.AttributeType == AttributeTypeCode.Status;
     }
 
     private static Dictionary<string, int> GetOptionSetValues(AttributeMetadata attr)
@@ -304,37 +269,4 @@ public sealed class MappingGenerator
         return result;
     }
 
-    private static List<string> FindSimilarAttributes(string header, EntityMetadata entityMetadata)
-    {
-        if (entityMetadata.Attributes == null)
-        {
-            return new List<string>();
-        }
-
-        var normalizedHeader = NormalizeForMatching(header);
-        var results = new List<(string Name, int Score)>();
-
-        foreach (var attr in entityMetadata.Attributes)
-        {
-            if (attr.LogicalName == null || !attr.IsValidForUpdate.GetValueOrDefault())
-            {
-                continue;
-            }
-
-            var normalizedAttr = NormalizeForMatching(attr.LogicalName);
-
-            // Simple similarity: check if one contains the other
-            if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
-            {
-                var score = Math.Abs(normalizedAttr.Length - normalizedHeader.Length);
-                results.Add((attr.LogicalName, score));
-            }
-        }
-
-        return results
-            .OrderBy(r => r.Score)
-            .Take(3)
-            .Select(r => r.Name)
-            .ToList();
-    }
 }

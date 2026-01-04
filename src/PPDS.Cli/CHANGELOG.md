@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Progress output to stderr** - Progress messages now write to stderr, enabling clean piping: `ppds data export -f json | jq` ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
 - **Status messages to stderr** - Operational messages (connecting, authenticating, etc.) now write to stderr, keeping stdout for data only ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
+- **Centralized CSV column matching** - Extracted shared column-to-attribute matching logic to `ColumnMatcher` class for code reuse between data loading and mapping generation
+- **Centralized schema versioning** - Schema version constants centralized in `CsvMappingSchema` class (single source of truth)
+- **ADR-0009** - Architecture decision record documenting CSV mapping schema versioning and underscore prefix convention
 
 ## [1.0.0-beta.6] - 2026-01-03
 
