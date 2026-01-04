@@ -6,8 +6,8 @@ namespace PPDS.LiveTests.Cli;
 
 /// <summary>
 /// E2E tests that specifically exercise the SecureCredentialStore path.
-/// These tests do NOT use the PPDS_SPN_SECRET bypass and require a working
-/// OS-level secure storage (DPAPI on Windows, Keychain on macOS, libsecret on Linux).
+/// These tests do NOT use the env var bypass (PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET)
+/// and require a working OS-level secure storage (DPAPI on Windows, Keychain on macOS, libsecret on Linux).
 ///
 /// These tests are skipped in CI (where secure storage is often unavailable/broken)
 /// and should be run locally on developer workstations.
@@ -23,7 +23,7 @@ public class SecureStorageE2ETests : CliE2ETestBase
 {
     /// <summary>
     /// Tests that auth create can store credentials in SecureCredentialStore
-    /// and plugins list can retrieve them without the PPDS_SPN_SECRET bypass.
+    /// and plugins list can retrieve them without the env var bypass.
     /// </summary>
     [CliE2EWithCredentials]
     public async Task AuthCreate_StoresCredentials_PluginsList_RetrievesThem()

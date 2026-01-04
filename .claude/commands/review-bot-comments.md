@@ -8,42 +8,46 @@ Systematically address PR review comments from Copilot, Gemini, and CodeQL.
 
 ## Process
 
-### 1. Fetch Comments
-```bash
-gh api repos/joshsmithxrm/ppds-sdk/pulls/[PR]/comments
-```
+### 1. Fetch All Bot Findings
 
-### Bot Usernames
-
-Look for comments from these `user.login` values:
-
-| Bot | Username |
-|-----|----------|
-| Gemini | `gemini-code-assist[bot]` |
-| Copilot (line comments) | `Copilot` |
-| Copilot (PR review) | `copilot-pull-request-reviewer[bot]` |
-| CodeQL/GHAS | `github-advanced-security[bot]` |
-
-**Note:** CodeQL and Copilot frequently report **duplicate findings** (same file, same line, same issue). Group comments by file+line to identify duplicates before triaging.
-
-### 1b. Check Code Scanning Alerts with Copilot Autofix
-
-Copilot Autofix suggestions appear in the GitHub UI as "replyable" threads but are **not** traditional PR comments. They're accessed via the code scanning API:
+Fetch BOTH PR comments AND code scanning alerts:
 
 ```bash
-# List open code scanning alerts for the PR branch (replace BRANCH with actual branch name)
-gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=BRANCH&state=open" \
-  --jq '.[] | {number, rule: .rule.description, path: .most_recent_instance.location.path, line: .most_recent_instance.location.start_line}'
+# 1a. PR comments from bots
+gh api repos/joshsmithxrm/ppds-sdk/pulls/[PR]/comments \
+  --jq '.[] | select(.user.login | test("gemini|Copilot|copilot|github-advanced")) | {id, user: .user.login, body: .body[:100], path, line}'
 
-# Get Autofix suggestion for a specific alert (if available)
-gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{alert_number}/autofix
+# 1b. Code scanning alerts (includes Copilot Autofix)
+# First get the PR branch name
+gh pr view [PR] --repo joshsmithxrm/ppds-sdk --json headRefName --jq '.headRefName'
+
+# Then fetch alerts for that branch
+gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=[BRANCH]&state=open" \
+  --jq '.[] | {number, rule: .rule.description, path: .most_recent_instance.location.path, line: .most_recent_instance.location.start_line, severity: .rule.severity}'
 ```
 
-**Responding to Autofix suggestions:**
-- **Fix the code**: Alert auto-closes when CI runs on the fix
-- **Dismiss alert**: `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason=won\'t\ fix -f dismissed_comment="Reason here"`
+### Bot Sources
 
-Valid `dismissed_reason` values: `false positive`, `won't fix`, `used in tests`
+| Source | Type | How to Identify |
+|--------|------|-----------------|
+| Gemini | PR comment | `user.login = gemini-code-assist[bot]` |
+| Copilot (line) | PR comment | `user.login = Copilot` |
+| Copilot (review) | PR comment | `user.login = copilot-pull-request-reviewer[bot]` |
+| CodeQL/GHAS | PR comment | `user.login = github-advanced-security[bot]` |
+| Copilot Autofix | Code scanning alert | Via code-scanning API (not PR comments) |
+
+**Note:** CodeQL and Copilot frequently report **duplicate findings** (same file, same line, same issue). Group by file+line to identify duplicates before triaging.
+
+### Responding to Autofix Alerts
+
+Autofix suggestions are NOT PR comments - they require different handling:
+
+| Action | Command |
+|--------|---------|
+| **Fix the code** | Alert auto-closes when CI runs on the fix |
+| **Dismiss as false positive** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="false positive" -f dismissed_comment="Reason"` |
+| **Dismiss as won't fix** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="won't fix" -f dismissed_comment="Reason"` |
+| **Dismiss as test code** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="used in tests" -f dismissed_comment="Test code"` |
 
 ### 2. Triage Each Comment
 
@@ -62,15 +66,24 @@ For each bot comment, determine verdict and rationale:
 
 **CRITICAL: Do NOT implement fixes automatically.**
 
-Present a summary table to the user:
+Present a unified summary table including BOTH PR comments AND code scanning alerts:
 
 ```markdown
 ## Bot Review Triage - PR #XX
 
-| # | Bot | Finding | Verdict | Recommendation | Rationale |
-|---|-----|---------|---------|----------------|-----------|
-| 1 | Gemini | Missing Dispose | Valid | Add dispose call | Prevents resource leak |
-| 2 | Copilot | Use .Where() | False Positive | Decline | Style preference |
+### PR Comments
+
+| # | Bot | File:Line | Finding | Verdict | Action |
+|---|-----|-----------|---------|---------|--------|
+| 1 | Gemini | Foo.cs:42 | Missing Dispose | Valid | Fix |
+| 2 | Copilot | Bar.cs:10 | Use .Where() | False Positive | Decline |
+
+### Code Scanning Alerts (Autofix)
+
+| Alert # | Severity | File:Line | Rule | Verdict | Action |
+|---------|----------|-----------|------|---------|--------|
+| 15 | warning | Baz.cs:25 | Generic catch clause | Valid | Fix code |
+| 16 | note | Test.cs:50 | Path.Combine call | False Positive | Dismiss |
 ```
 
 **STOP HERE. Wait for user to review and approve before making ANY changes.**
@@ -81,10 +94,16 @@ Always get user approval, then verify changes compile before committing.
 ### 4. Implement Approved Changes
 
 After user approval:
+
+**For PR comments (fix in code):**
 1. Make the approved code changes
 2. **Build and verify** - `dotnet build` must succeed
 3. Run tests to confirm no regressions
 4. Commit with descriptive message
+
+**For code scanning alerts:**
+- **If fixing:** Make code change, alert auto-closes on next CI run
+- **If dismissing:** Use the dismiss command from step 1 with appropriate reason
 
 ### 5. Reply to Each Comment Individually
 
@@ -125,16 +144,24 @@ gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments/{comment_id}/replies \
 | Resource not disposed | Yes - but verify interface first |
 | Generic catch clause | Context-dependent |
 
-### 6. Verify All Comments Addressed
+### 6. Verify All Findings Addressed
 
-Before completing, verify every comment has a reply:
+Before completing, verify:
 
+**PR comments** - Every comment has a reply:
 ```bash
-# Count original comments vs replies
 gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments --jq "length"
 ```
 
-If any comments are missing replies, address them before marking complete.
+**Code scanning alerts** - All are fixed or dismissed:
+```bash
+gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=[BRANCH]&state=open" --jq "length"
+# Should return 0
+```
+
+If any PR comments are missing replies or alerts remain open, address them before marking complete.
+
+**Note:** Code scanning alerts don't need replies - they're resolved by fixing code or dismissing via API.
 
 ## When to Use
 

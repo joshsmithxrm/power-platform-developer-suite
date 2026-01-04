@@ -336,7 +336,7 @@ public sealed class SecureCredentialStore : ISecureCredentialStore, IDisposable
             throw new TimeoutException(
                 $"Credential store initialization timed out after {CacheHelperTimeout.TotalSeconds}s. " +
                 "This may indicate DPAPI issues on Windows or Keychain issues on macOS. " +
-                "Set PPDS_SPN_SECRET environment variable to bypass credential store lookup.");
+                "Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass credential store lookup.");
         }
 
         // Register the cache helper to protect the file

@@ -23,7 +23,7 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
     public async Task List_ReturnsSuccess()
     {
         var profileName = GenerateTestProfileName();
-        // PPDS_SPN_SECRET is automatically set by RunCliAsync to bypass SecureCredentialStore
+        // PPDS_TEST_CLIENT_SECRET is inherited from parent process; CredentialProviderFactory uses it as fallback
         await RunCliAsync(
             "auth", "create",
             "--name", profileName,

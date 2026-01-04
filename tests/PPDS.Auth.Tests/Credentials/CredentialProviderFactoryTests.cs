@@ -176,4 +176,10 @@ public class CredentialProviderFactoryTests
     {
         CredentialProviderFactory.SpnSecretEnvVar.Should().Be("PPDS_SPN_SECRET");
     }
+
+    [Fact]
+    public void TestClientSecretEnvVar_HasExpectedName()
+    {
+        CredentialProviderFactory.TestClientSecretEnvVar.Should().Be("PPDS_TEST_CLIENT_SECRET");
+    }
 }

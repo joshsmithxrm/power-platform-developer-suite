@@ -82,40 +82,34 @@ public abstract class CliE2ETestBase : IAsyncLifetime
     }
 
     /// <summary>
-    /// Gets standard environment variables to bypass SecureCredentialStore in CI.
-    /// When PPDS_SPN_SECRET is set, both auth create and credential lookup will bypass
-    /// the secure credential store, avoiding MsalCacheHelper initialization issues.
-    /// </summary>
-    protected Dictionary<string, string>? GetBypassEnvVars()
-    {
-        if (string.IsNullOrWhiteSpace(Configuration.ClientSecret))
-            return null;
-
-        return new Dictionary<string, string>
-        {
-            ["PPDS_SPN_SECRET"] = Configuration.ClientSecret
-        };
-    }
-
-    /// <summary>
     /// Runs a CLI command and captures the result.
-    /// Automatically sets PPDS_SPN_SECRET when client secret is available to bypass
-    /// SecureCredentialStore issues on CI.
+    /// The PPDS_TEST_CLIENT_SECRET env var is inherited from the parent process,
+    /// and CredentialProviderFactory uses it as a fallback to bypass SecureCredentialStore.
     /// </summary>
     /// <param name="args">Command arguments (e.g., "auth", "list").</param>
     /// <returns>The CLI execution result.</returns>
     protected Task<CliResult> RunCliAsync(params string[] args)
-        => RunCliWithEnvAsync(GetBypassEnvVars(), args);
+        => RunCliWithEnvAsync(null, args);
 
     /// <summary>
-    /// Runs a CLI command WITHOUT the PPDS_SPN_SECRET bypass.
+    /// Runs a CLI command WITHOUT the credential bypass.
+    /// Explicitly clears PPDS_SPN_SECRET and PPDS_TEST_CLIENT_SECRET to force SecureCredentialStore usage.
     /// Use this for tests that specifically need to exercise the SecureCredentialStore path.
     /// These tests should be marked with [Trait("Category", "SecureStorage")] and skipped in CI.
     /// </summary>
     /// <param name="args">Command arguments (e.g., "auth", "list").</param>
     /// <returns>The CLI execution result.</returns>
     protected Task<CliResult> RunCliWithoutBypassAsync(params string[] args)
-        => RunCliWithEnvAsync(null, args);
+    {
+        // Remove both env vars to force SecureCredentialStore path
+        // Using null signals RunCliWithEnvAsync to remove the key entirely
+        var clearVars = new Dictionary<string, string?>
+        {
+            ["PPDS_SPN_SECRET"] = null,
+            ["PPDS_TEST_CLIENT_SECRET"] = null
+        };
+        return RunCliWithEnvAsync(clearVars!, args);
+    }
 
     /// <summary>
     /// Runs a CLI command with additional environment variables.
@@ -140,12 +134,15 @@ public abstract class CliE2ETestBase : IAsyncLifetime
         // Set isolated config directory to avoid race conditions between parallel test runs
         startInfo.Environment["PPDS_CONFIG_DIR"] = IsolatedConfigDir;
 
-        // Set additional environment variables
+        // Set or remove environment variables
         if (envVars != null)
         {
             foreach (var (key, value) in envVars)
             {
-                startInfo.Environment[key] = value;
+                if (value == null)
+                    startInfo.Environment.Remove(key);
+                else
+                    startInfo.Environment[key] = value;
             }
         }
 

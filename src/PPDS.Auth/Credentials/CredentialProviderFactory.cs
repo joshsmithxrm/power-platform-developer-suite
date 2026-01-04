@@ -17,6 +17,12 @@ public static class CredentialProviderFactory
     public const string SpnSecretEnvVar = "PPDS_SPN_SECRET";
 
     /// <summary>
+    /// Fallback environment variable for test scenarios.
+    /// Checked when <see cref="SpnSecretEnvVar"/> is not set.
+    /// </summary>
+    public const string TestClientSecretEnvVar = "PPDS_TEST_CLIENT_SECRET";
+
+    /// <summary>
     /// Creates a credential provider for the specified auth profile.
     /// </summary>
     /// <param name="profile">The auth profile.</param>
@@ -34,7 +40,9 @@ public static class CredentialProviderFactory
             throw new ArgumentNullException(nameof(profile));
 
         // Check for environment variable override for SPN secret
-        var envSecret = Environment.GetEnvironmentVariable(SpnSecretEnvVar);
+        // PPDS_SPN_SECRET takes precedence, PPDS_TEST_CLIENT_SECRET is fallback for test scenarios
+        var envSecret = Environment.GetEnvironmentVariable(SpnSecretEnvVar)
+            ?? Environment.GetEnvironmentVariable(TestClientSecretEnvVar);
 
         return profile.AuthMethod switch
         {
@@ -75,7 +83,9 @@ public static class CredentialProviderFactory
             throw new ArgumentNullException(nameof(profile));
 
         // Check for environment variable override for SPN secret
-        var envSecret = Environment.GetEnvironmentVariable(SpnSecretEnvVar);
+        // PPDS_SPN_SECRET takes precedence, PPDS_TEST_CLIENT_SECRET is fallback for test scenarios
+        var envSecret = Environment.GetEnvironmentVariable(SpnSecretEnvVar)
+            ?? Environment.GetEnvironmentVariable(TestClientSecretEnvVar);
 
         return profile.AuthMethod switch
         {

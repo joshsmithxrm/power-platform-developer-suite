@@ -163,7 +163,7 @@ public sealed class ProfileConnectionSource : IDisposable
             {
                 throw new TimeoutException(
                     $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
-                    "This may indicate credential store issues. Set PPDS_SPN_SECRET environment variable to bypass.");
+                    "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
             }
 
             try
@@ -236,7 +236,7 @@ public sealed class ProfileConnectionSource : IDisposable
             {
                 throw new TimeoutException(
                     $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
-                    "This may indicate credential store issues. Set PPDS_SPN_SECRET environment variable to bypass.");
+                    "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
             }
 
             try

@@ -603,6 +603,21 @@ Live integration tests against real Dataverse environment:
 - New public method → must have test coverage
 - Mark integration tests with `[Trait("Category", "Integration")]`
 
+### Test Categories Quick Reference
+
+| Category/Attribute | Purpose | CI Behavior |
+|--------------------|---------|-------------|
+| `Integration` | Live Dataverse tests | Runs in integration-tests.yml |
+| `SecureStorage` | DPAPI/credential store tests | **Excluded** - DPAPI unavailable |
+| `SlowIntegration` | 60+ second queries | **Excluded** - keeps CI fast |
+| `DestructiveE2E` | Modifies Dataverse data | Runs (with cleanup) |
+| `[CliE2EFact]` | CLI tests, .NET 8.0 only | Runs |
+| `[CliE2EWithCredentials]` | CLI tests + auth | Runs if credentials available |
+
+**CI constraint:** DPAPI unavailable on GitHub runners. Use `PPDS_SPN_SECRET` env var to bypass `SecureCredentialStore`.
+
+See [docs/INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) for full guide.
+
 **Test filtering:**
 - **Commits:** Unit tests only (`--filter Category!=Integration`)
 - **PRs:** All tests including integration
@@ -656,7 +671,9 @@ PRs get reviewed by Copilot, Gemini, and CodeQL. **Not all findings are valid.**
 |---------|---------|
 | `/plan-work <issues...>` | Triage issues, create worktrees, generate session prompts |
 | `/pre-pr` | Validate before PR (build, test, changelog) |
-| `/review-bot-comments [PR#]` | Triage bot review findings |
+| `/review-bot-comments [PR#]` | Triage bot review findings (PR comments + Autofix) |
+| `/run-integration-local [filter]` | Load .env.local and run integration tests |
+| `/debug-ci-failure [run-id]` | Analyze CI workflow failure logs |
 | `/handoff` | Session summary (workspace) |
 | `/create-issue [repo]` | Create issue (workspace) |
 

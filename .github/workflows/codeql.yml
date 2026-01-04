@@ -56,8 +56,8 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: csharp
-          # Use security-and-quality for comprehensive analysis
-          queries: security-and-quality
+          # Config file excludes test code and uses security-and-quality queries
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
