@@ -46,6 +46,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="PPDS.Cli.Tests" />
+    <InternalsVisibleTo Include="PPDS.Cli.DaemonTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
     <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
