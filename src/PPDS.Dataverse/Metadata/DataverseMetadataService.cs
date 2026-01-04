@@ -320,8 +320,8 @@ public class DataverseMetadataService : IMetadataService
     {
         // Extract type-specific properties first
         int? maxLength = null;
-        double? minValue = null;
-        double? maxValue = null;
+        decimal? minValue = null;
+        decimal? maxValue = null;
         int? precision = null;
         List<string>? targets = null;
         string? optionSetName = null;
@@ -347,20 +347,20 @@ public class DataverseMetadataService : IMetadataService
                 break;
 
             case DecimalAttributeMetadata decAttr:
-                minValue = (double?)decAttr.MinValue;
-                maxValue = (double?)decAttr.MaxValue;
+                minValue = decAttr.MinValue;
+                maxValue = decAttr.MaxValue;
                 precision = decAttr.Precision;
                 break;
 
             case DoubleAttributeMetadata dblAttr:
-                minValue = dblAttr.MinValue;
-                maxValue = dblAttr.MaxValue;
+                minValue = (decimal?)dblAttr.MinValue;
+                maxValue = (decimal?)dblAttr.MaxValue;
                 precision = dblAttr.Precision;
                 break;
 
             case MoneyAttributeMetadata moneyAttr:
-                minValue = (double?)moneyAttr.MinValue;
-                maxValue = (double?)moneyAttr.MaxValue;
+                minValue = (decimal?)moneyAttr.MinValue;
+                maxValue = (decimal?)moneyAttr.MaxValue;
                 precision = moneyAttr.Precision;
                 break;
 

@@ -114,13 +114,13 @@ public sealed class AttributeMetadataDto
     /// Gets the minimum value for numeric attributes.
     /// </summary>
     [JsonPropertyName("minValue")]
-    public double? MinValue { get; init; }
+    public decimal? MinValue { get; init; }
 
     /// <summary>
     /// Gets the maximum value for numeric attributes.
     /// </summary>
     [JsonPropertyName("maxValue")]
-    public double? MaxValue { get; init; }
+    public decimal? MaxValue { get; init; }
 
     /// <summary>
     /// Gets the precision for decimal/money attributes.
