@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ppds metadata` command group** - Browse Dataverse entity metadata without exporting data ([#51](https://github.com/joshsmithxrm/ppds-sdk/issues/51)):
+  - `ppds metadata entities` - List all entities (supports `--custom-only`, `--filter` for wildcard matching)
+  - `ppds metadata entity <name>` - Get full entity details (supports `--include` for specific sections)
+  - `ppds metadata attributes <entity>` - List attributes (supports `--type` filtering by Lookup, String, etc.)
+  - `ppds metadata relationships <entity>` - List 1:N, N:1, N:N relationships (supports `--type` filtering)
+  - `ppds metadata optionsets` - List global option sets (supports `--filter`)
+  - `ppds metadata optionset <name>` - Get option set values and metadata
 - **Structured error handling** - All errors now return hierarchical error codes (`Auth.ProfileNotFound`, `Connection.Failed`, etc.) for reliable programmatic handling ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
 - **Expanded exit codes** - New exit codes 4 (ConnectionError), 5 (AuthError), 6 (NotFoundError) for finer-grained status ([#77](https://github.com/joshsmithxrm/ppds-sdk/issues/77))
 - **Global options** - `--quiet`/`-q`, `--verbose`/`-v`, `--debug`, `--correlation-id` flags available on all commands ([#76](https://github.com/joshsmithxrm/ppds-sdk/issues/76))
