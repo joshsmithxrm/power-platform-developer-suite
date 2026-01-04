@@ -79,6 +79,20 @@ public void Add_FirstProfile_SetsAsActive()
 - File is already covered by integration tests in PPDS.LiveTests
 - User explicitly confirms "this doesn't need unit tests because [reason]"
 
+### 6. Push Check
+
+Before creating PR, ensure changes are pushed:
+
+```bash
+# Check if ahead of remote
+git status
+
+# If ahead, push
+git push -u origin $(git branch --show-current)
+```
+
+**The PR cannot be created if commits aren't pushed.** This is a common oversight.
+
 ## Output
 
 ```
@@ -101,20 +115,6 @@ Missing tests is a blocker. Writing tests now...
 4. If unable to write tests, explain why and get user confirmation to skip
 5. Run tests again after writing new ones
 6. Only proceed to PR when all checks pass
-
-### 6. Push Check
-
-Before creating PR, ensure changes are pushed:
-
-```bash
-# Check if ahead of remote
-git status
-
-# If ahead, push
-git push -u origin <branch-name>
-```
-
-**The PR cannot be created if commits aren't pushed.** This is a common oversight.
 
 ## When to Use
 
