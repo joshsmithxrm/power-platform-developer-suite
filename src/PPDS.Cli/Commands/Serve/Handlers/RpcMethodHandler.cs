@@ -1,6 +1,4 @@
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
@@ -26,6 +24,28 @@ namespace PPDS.Cli.Commands.Serve.Handlers;
 /// </summary>
 public class RpcMethodHandler
 {
+    private readonly IDaemonConnectionPoolManager _poolManager;
+    private JsonRpc? _rpc;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RpcMethodHandler"/> class.
+    /// </summary>
+    /// <param name="poolManager">The connection pool manager for caching Dataverse pools.</param>
+    public RpcMethodHandler(IDaemonConnectionPoolManager poolManager)
+    {
+        _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
+    }
+
+    /// <summary>
+    /// Sets the JSON-RPC context for sending notifications (e.g., device code flow).
+    /// Must be called after JsonRpc.Attach.
+    /// </summary>
+    /// <param name="rpc">The JSON-RPC connection.</param>
+    public void SetRpcContext(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
     #region Auth Methods
 
     /// <summary>
@@ -309,15 +329,16 @@ public class RpcMethodHandler
                 "No environment selected. Use env/select first.");
         }
 
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
+        var pool = await _poolManager.GetOrCreatePoolAsync(
+            new[] { profile.Name ?? profile.DisplayIdentifier },
             profile.Environment.Url,
-            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
             cancellationToken: cancellationToken);
 
-        var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
-        var logger = serviceProvider.GetRequiredService<ILogger<PluginRegistrationService>>();
-        var registrationService = new PluginRegistrationService(pool, logger);
+        // Create registration service with pool (use NullLogger for daemon context)
+        var registrationService = new PluginRegistrationService(
+            pool,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
 
         var response = new PluginsListResponse();
 
@@ -701,6 +722,31 @@ public class RpcMethodHandler
 
         // Simple value
         return value.Value;
+    }
+
+    #region Profile Invalidation
+
+    /// <summary>
+    /// Invalidates cached pools that use the specified profile.
+    /// Called by VS Code extension after auth profile changes.
+    /// </summary>
+    [JsonRpcMethod("profiles/invalidate")]
+    public ProfilesInvalidateResponse ProfilesInvalidate(string profileName)
+    {
+        if (string.IsNullOrWhiteSpace(profileName))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'profileName' parameter is required");
+        }
+
+        _poolManager.InvalidateProfile(profileName);
+
+        return new ProfilesInvalidateResponse
+        {
+            ProfileName = profileName,
+            Invalidated = true
+        };
     }
 
     #endregion
@@ -1192,6 +1238,24 @@ public class QueryColumnInfo
     [JsonPropertyName("linkedEntityAlias")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LinkedEntityAlias { get; set; }
+}
+
+/// <summary>
+/// Response for profiles/invalidate method.
+/// </summary>
+public class ProfilesInvalidateResponse
+{
+    /// <summary>
+    /// Gets or sets the profile name that was invalidated.
+    /// </summary>
+    [JsonPropertyName("profileName")]
+    public string ProfileName { get; set; } = "";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether invalidation was successful.
+    /// </summary>
+    [JsonPropertyName("invalidated")]
+    public bool Invalidated { get; set; }
 }
 
 #endregion

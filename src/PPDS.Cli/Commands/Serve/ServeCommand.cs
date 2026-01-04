@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Nerdbank.Streams;
 using PPDS.Cli.Commands.Serve.Handlers;
+using PPDS.Cli.Infrastructure;
 using StreamJsonRpc;
 
 namespace PPDS.Cli.Commands.Serve;
@@ -36,11 +37,17 @@ public static class ServeCommand
         // Splice the two simplex streams into a single duplex stream
         var duplexStream = FullDuplexStream.Splice(stdin, stdout);
 
+        // Create the pool manager with daemon lifetime - caches connection pools across RPC calls
+        await using var poolManager = new DaemonConnectionPoolManager();
+
         // Create the RPC target that handles method calls
-        var handler = new RpcMethodHandler();
+        var handler = new RpcMethodHandler(poolManager);
 
         // Attach JSON-RPC to the duplex stream with our handler
         using var rpc = JsonRpc.Attach(duplexStream, handler);
+
+        // Set RPC context for device code notifications
+        handler.SetRpcContext(rpc);
 
         // Register for cancellation to allow graceful shutdown
         using var registration = cancellationToken.Register(() => rpc.Dispose());
