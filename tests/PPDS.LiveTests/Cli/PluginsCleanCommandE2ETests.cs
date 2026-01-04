@@ -108,7 +108,7 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
 
     #region Tier 2: Destructive tests (actual clean)
 
-    [DestructiveE2EWithCredentials]
+    [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
     public async Task Clean_ActualClean_RemovesOrphans()
     {
@@ -161,7 +161,7 @@ public class PluginsCleanCommandE2ETests : CliE2ETestBase
         }
     }
 
-    [DestructiveE2EWithCredentials]
+    [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
     public async Task Clean_AfterDeploy_NoOrphans()
     {

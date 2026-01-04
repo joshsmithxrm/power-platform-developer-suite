@@ -87,7 +87,7 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
 
     #region Tier 2: Destructive tests (requires deploy first)
 
-    [DestructiveE2EWithCredentials]
+    [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
     public async Task Diff_AfterDeploy_ShowsNoDrift()
     {

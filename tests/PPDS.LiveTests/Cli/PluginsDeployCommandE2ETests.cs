@@ -118,7 +118,7 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
 
     #region Tier 2: Destructive tests (actual deploy)
 
-    [DestructiveE2EWithCredentials]
+    [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
     public async Task Deploy_ActualDeploy_RegistersPlugin()
     {
@@ -160,7 +160,7 @@ public class PluginsDeployCommandE2ETests : CliE2ETestBase
         }
     }
 
-    [DestructiveE2EWithCredentials]
+    [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
     public async Task Deploy_ActualDeploy_ThenClean_RemovesPlugin()
     {
