@@ -89,10 +89,10 @@
 
 | Feature | Issue | Status |
 |---------|-------|--------|
-| CLI binary bundling | Extension #51 | Blocked |
-| DaemonCliService | Extension #52 | Blocked |
-| Feature migration | Extension #53 | Blocked |
-| TypeScript cleanup | Extension #54 | Blocked |
+| CLI binary bundling | [Extension #51](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/51) | Blocked |
+| DaemonCliService | [Extension #52](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/52) | Blocked |
+| Feature migration | [Extension #53](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/53) | Blocked |
+| TypeScript cleanup | [Extension #54](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/54) | Blocked |
 
 ---
 

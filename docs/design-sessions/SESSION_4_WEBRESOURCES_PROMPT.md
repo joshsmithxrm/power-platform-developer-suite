@@ -45,7 +45,7 @@ The extension has a comprehensive Web Resources panel with editing, conflict det
 # List (excludes content field, default: published)
 ppds webresources list [--solution <name>]
                        [--type js|css|html|xml|png|jpg|gif|ico|svg|xsl|xslt|resx]
-                       [--type text]           # Shorthand for js|css|html|xml
+                       [--type text]           # Shorthand for js|css|html|xml|xsl|xslt
                        [--unpublished]
                        [--name <pattern>]
                        [--top <n>]
@@ -68,7 +68,7 @@ ppds webresources diff <local-path> [--unpublished]
 ppds webresources publish [--all | --name <name>]
 
 # Maker URL
-ppds webresources url
+ppds webresources url [<name>]
 ```
 
 ## Conflict Detection Schema
@@ -82,8 +82,8 @@ ppds webresources url
     "new_/scripts/myfile.js": {
       "id": "guid",
       "hash": "sha256:abc123...",
-      "pulledAt": "2024-01-04T12:00:00Z",
-      "modifiedOn": "2024-01-04T11:00:00Z"
+      "pulledAt": "2026-01-04T12:00:00Z",
+      "modifiedOn": "2026-01-04T11:00:00Z"
     }
   }
 }
@@ -91,11 +91,11 @@ ppds webresources url
 
 ## Published vs Unpublished Query
 
-Web resources store content in two places:
-- `content` - Published version
-- `content` with unpublished layer - Draft version
+Web resources have two content states:
+- **Published:** The `content` column contains the live version users see
+- **Unpublished:** Pending changes stored in the customization layer (requires `RetrieveUnpublishedMultiple` or solution export)
 
-Need to determine the correct Dataverse query pattern for each.
+To query unpublished content, use `RetrieveUnpublished` request or check `ismanaged`/`iscustomizable` flags. The exact Dataverse query pattern needs to be determined during implementation.
 
 ## References
 
