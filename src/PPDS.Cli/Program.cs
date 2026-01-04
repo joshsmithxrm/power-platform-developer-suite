@@ -4,6 +4,7 @@ using PPDS.Cli.Commands.Data;
 using PPDS.Cli.Commands.Env;
 using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Commands.Plugins;
+using PPDS.Cli.Commands.Serve;
 using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli;
@@ -24,6 +25,7 @@ public static class Program
         rootCommand.Subcommands.Add(DataCommandGroup.Create());
         rootCommand.Subcommands.Add(PluginsCommandGroup.Create());
         rootCommand.Subcommands.Add(MetadataCommandGroup.Create());
+        rootCommand.Subcommands.Add(ServeCommand.Create());
 
         // Prepend [Required] to required option descriptions for scannability
         HelpCustomization.ApplyRequiredOptionStyle(rootCommand);
