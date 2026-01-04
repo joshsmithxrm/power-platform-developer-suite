@@ -12,6 +12,12 @@ namespace PPDS.Auth.Credentials;
 /// </summary>
 public sealed class ClientSecretCredentialProvider : ICredentialProvider
 {
+    /// <summary>
+    /// Timeout for ServiceClient connection.
+    /// Must fail fast so callers see actionable errors instead of hanging.
+    /// </summary>
+    private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
+
     private readonly string _applicationId;
     private readonly string _clientSecret;
     private readonly string _tenantId;
@@ -136,19 +142,30 @@ public sealed class ClientSecretCredentialProvider : ICredentialProvider
         var connectionString = BuildConnectionString(environmentUrl);
 
         // Create ServiceClient - wrap in Task.Run since constructor is sync and can block.
-        // Use WaitAsync to enforce the cancellation token even if constructor ignores it.
+        // Use internal timeout combined with caller's token to ensure we fail fast.
+        // WaitAsync enforces the timeout even if ServiceClient constructor ignores cancellation.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ConnectionTimeout);
+
         ServiceClient client;
         try
         {
-            client = await Task.Run(() => new ServiceClient(connectionString), cancellationToken)
-                .WaitAsync(cancellationToken)
+            client = await Task.Run(() => new ServiceClient(connectionString), timeoutCts.Token)
+                .WaitAsync(timeoutCts.Token)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Internal timeout expired - caller didn't cancel
+            throw new AuthenticationException(
+                $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for {environmentUrl}. " +
+                "Check network connectivity and environment URL.");
         }
         catch (OperationCanceledException)
         {
+            // Caller cancelled
             throw new AuthenticationException(
-                $"Connection to Dataverse timed out or was cancelled for {environmentUrl}. " +
-                "Check network connectivity and environment URL.");
+                $"Connection to Dataverse was cancelled for {environmentUrl}.");
         }
         catch (Exception ex)
         {
