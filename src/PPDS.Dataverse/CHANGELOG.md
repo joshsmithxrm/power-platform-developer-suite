@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SQL parser and FetchXML transpiler** - Full SQL-to-FetchXML translation for querying Dataverse ([#52](https://github.com/joshsmithxrm/ppds-sdk/issues/52)):
+  - `SqlLexer` - SQL tokenizer with keyword/operator/literal recognition
+  - `SqlParser` - Recursive descent parser producing typed AST
+  - `SqlToFetchXmlTranspiler` - AST to FetchXML conversion
+  - Supports: SELECT (columns, *, aliases), WHERE (=, <>, !=, <, >, <=, >=, LIKE, IS NULL, IN, AND, OR, parentheses), JOIN (INNER, LEFT, RIGHT), ORDER BY, GROUP BY, TOP, DISTINCT, aggregates (COUNT, SUM, AVG, MIN, MAX, COUNT DISTINCT)
+  - Comment preservation for round-trip scenarios
+  - Position-aware error messages with context snippets
+- **Query execution service** - New `IQueryExecutor` interface and `QueryExecutor` implementation:
+  - Execute FetchXML queries via SDK's `RetrieveMultiple`
+  - Proper XML parsing with `System.Xml.Linq` (replaces regex-based extraction)
+  - Paging support with cookies
+  - Total record count via `returntotalrecordcount` preference header
+  - Result mapping to typed `QueryResult` with column metadata
 - **Metadata service for entity browsing** - New `IMetadataService` interface and `DataverseMetadataService` implementation providing:
   - `GetEntitiesAsync()` - List all entities with optional filtering
   - `GetEntityAsync()` - Get full entity metadata including attributes, relationships, keys, and privileges

@@ -32,7 +32,8 @@ ppds
 ├── auth      Authentication profile management
 ├── env       Environment discovery and selection
 ├── data      Data operations (export, import, copy, analyze, schema, users)
-└── plugins   Plugin registration management
+├── plugins   Plugin registration management
+└── query     Execute FetchXML and SQL queries
 ```
 
 ---
@@ -239,6 +240,113 @@ Use the mapping file with import:
 ppds data import --data data.zip --user-mapping user-mapping.xml
 ```
 
+### `ppds query`
+
+Execute FetchXML and SQL queries against Dataverse.
+
+| Command | Description |
+|---------|-------------|
+| `ppds query fetch` | Execute a FetchXML query |
+| `ppds query sql` | Execute a SQL query (transpiled to FetchXML) |
+
+#### Fetch (FetchXML)
+
+Execute FetchXML queries directly:
+
+```bash
+# From argument
+ppds query fetch '<fetch top="10"><entity name="account"><attribute name="name"/></entity></fetch>'
+
+# From file
+ppds query fetch --file queries/active-accounts.xml
+
+# From stdin
+cat query.xml | ppds query fetch --stdin
+```
+
+Options:
+- `--file`, `-f` - Read FetchXML from file
+- `--stdin` - Read FetchXML from stdin
+- `--profile`, `-p` - Profile name
+- `--environment`, `-env` - Override environment URL
+- `--top`, `-t` - Limit number of results
+- `--page` - Page number (1-based)
+- `--paging-cookie` - Paging cookie for continuation
+- `--count`, `-c` - Include total record count
+- `--output-format` - Output format (Text or Json)
+
+#### SQL
+
+Execute SQL queries (automatically transpiled to FetchXML):
+
+```bash
+# Basic query
+ppds query sql "SELECT name, revenue FROM account WHERE statecode = 0"
+
+# With limit and ordering
+ppds query sql "SELECT name FROM account ORDER BY revenue DESC" --top 10
+
+# Show the generated FetchXML
+ppds query sql "SELECT name FROM account" --show-fetchxml
+
+# Aggregates with GROUP BY
+ppds query sql "SELECT statecode, COUNT(*) AS cnt FROM account GROUP BY statecode"
+
+# JOIN queries
+ppds query sql "SELECT a.name, c.fullname FROM account a INNER JOIN contact c ON a.primarycontactid = c.contactid"
+```
+
+Options:
+- `--file`, `-f` - Read SQL from file
+- `--stdin` - Read SQL from stdin
+- `--show-fetchxml` - Output the transpiled FetchXML instead of executing
+- `--profile`, `-p` - Profile name
+- `--environment`, `-env` - Override environment URL
+- `--top`, `-t` - Limit number of results (applies if no TOP in query)
+- `--page` - Page number (1-based)
+- `--paging-cookie` - Paging cookie for continuation
+- `--count`, `-c` - Include total record count
+- `--output-format` - Output format (Text or Json)
+
+#### Supported SQL Syntax
+
+| Feature | Example |
+|---------|---------|
+| SELECT columns | `SELECT name, accountid FROM account` |
+| SELECT * | `SELECT * FROM account` |
+| Column aliases | `SELECT name AS accountname FROM account` |
+| Table aliases | `SELECT a.name FROM account a` |
+| TOP N | `SELECT TOP 10 name FROM account` |
+| DISTINCT | `SELECT DISTINCT name FROM account` |
+| WHERE | `SELECT name FROM account WHERE statecode = 0` |
+| Operators | `=`, `<>`, `!=`, `<`, `>`, `<=`, `>=` |
+| LIKE | `WHERE name LIKE '%contoso%'` |
+| IS NULL | `WHERE parentaccountid IS NULL` |
+| IS NOT NULL | `WHERE parentaccountid IS NOT NULL` |
+| IN | `WHERE statecode IN (0, 1, 2)` |
+| AND / OR | `WHERE statecode = 0 AND revenue > 1000` |
+| Parentheses | `WHERE (a = 1 OR b = 2) AND c = 3` |
+| ORDER BY | `ORDER BY name ASC, revenue DESC` |
+| INNER JOIN | `INNER JOIN contact c ON a.contactid = c.contactid` |
+| LEFT JOIN | `LEFT JOIN contact c ON a.contactid = c.contactid` |
+| COUNT(*) | `SELECT COUNT(*) FROM account` |
+| COUNT(column) | `SELECT COUNT(accountid) FROM account` |
+| COUNT(DISTINCT) | `SELECT COUNT(DISTINCT ownerid) FROM account` |
+| SUM/AVG/MIN/MAX | `SELECT SUM(revenue) FROM account` |
+| GROUP BY | `SELECT statecode, COUNT(*) FROM account GROUP BY statecode` |
+
+#### Paging
+
+For large result sets, use paging:
+
+```bash
+# First page
+ppds query sql "SELECT name FROM account" --top 100
+
+# Get the paging cookie from the result, then:
+ppds query sql "SELECT name FROM account" --page 2 --paging-cookie "..."
+```
+
 ---
 
 ## High-Throughput Pooling
@@ -334,6 +442,7 @@ Structured errors include a hierarchical code for programmatic handling:
 | `Connection.*` | Failed, Throttled, Timeout, EnvironmentNotFound, AmbiguousEnvironment, InvalidEnvironmentUrl |
 | `Validation.*` | RequiredField, InvalidValue, FileNotFound, DirectoryNotFound, SchemaInvalid, InvalidArguments |
 | `Operation.*` | NotFound, Duplicate, Dependency, PartialFailure, Cancelled, Internal, NotSupported |
+| `Query.*` | ParseError, InvalidFetchXml, ExecutionFailed |
 
 ---
 
