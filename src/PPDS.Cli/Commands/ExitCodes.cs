@@ -16,4 +16,19 @@ public static class ExitCodes
 
     /// <summary>Invalid arguments provided.</summary>
     public const int InvalidArguments = 3;
+
+    /// <summary>Connection to Dataverse failed.</summary>
+    public const int ConnectionError = 4;
+
+    /// <summary>Authentication failed.</summary>
+    public const int AuthError = 5;
+
+    /// <summary>Resource not found (profile, environment, file).</summary>
+    public const int NotFoundError = 6;
+
+    /// <summary>Mapping required - auto-mapping incomplete, need --generate-mapping or --force.</summary>
+    public const int MappingRequired = 7;
+
+    /// <summary>Validation error - incomplete mapping file, schema mismatch, etc.</summary>
+    public const int ValidationError = 8;
 }

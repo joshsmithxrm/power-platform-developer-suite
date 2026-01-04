@@ -57,8 +57,27 @@ public sealed class CsvDataLoader
         var attributesByName = BuildAttributeLookup(entityMetadata);
 
         // 3. Determine column mappings
-        var mappings = options.Mapping?.Columns
-            ?? await AutoMapColumnsAsync(csvPath, attributesByName, warnings, cancellationToken);
+        Dictionary<string, ColumnMappingEntry> mappings;
+        if (options.Mapping?.Columns != null)
+        {
+            mappings = options.Mapping.Columns;
+        }
+        else
+        {
+            var autoMappingResult = await AutoMapColumnsAsync(csvPath, attributesByName, cancellationToken);
+            warnings.AddRange(autoMappingResult.Warnings);
+
+            // Check if auto-mapping is incomplete
+            if (!autoMappingResult.IsComplete && !options.Force)
+            {
+                throw new MappingIncompleteException(
+                    autoMappingResult.MatchedColumns,
+                    autoMappingResult.TotalColumns,
+                    autoMappingResult.UnmatchedColumns);
+            }
+
+            mappings = autoMappingResult.Mappings;
+        }
 
         // 4. Identify and preload lookup caches
         var lookupResolver = new LookupResolver(_pool);
@@ -193,13 +212,15 @@ public sealed class CsvDataLoader
         return lookup;
     }
 
-    private async Task<Dictionary<string, ColumnMappingEntry>> AutoMapColumnsAsync(
+    private async Task<AutoMappingResult> AutoMapColumnsAsync(
         string csvPath,
         Dictionary<string, AttributeMetadata> attributesByName,
-        List<string> warnings,
         CancellationToken cancellationToken)
     {
         var mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
+        var unmatchedColumns = new List<UnmatchedColumn>();
+        var warnings = new List<string>();
+        var matchedCount = 0;
 
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
@@ -223,20 +244,62 @@ public sealed class CsvDataLoader
             if (attributesByName.TryGetValue(header, out var attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr);
+                matchedCount++;
             }
             // Try normalized match
             else if (TryFindAttribute(normalizedHeader, attributesByName, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
+                matchedCount++;
             }
             else
             {
-                warnings.Add($"Column '{header}' does not match any attribute. It will be skipped.");
+                // Column could not be matched - collect suggestions
+                var suggestions = FindSimilarAttributes(header, attributesByName);
+                unmatchedColumns.Add(new UnmatchedColumn
+                {
+                    ColumnName = header,
+                    Suggestions = suggestions.Count > 0 ? suggestions : null
+                });
+                warnings.Add($"Column '{header}' does not match any attribute.");
                 mappings[header] = new ColumnMappingEntry { Skip = true };
             }
         }
 
-        return mappings;
+        return new AutoMappingResult
+        {
+            Mappings = mappings,
+            TotalColumns = headers.Length,
+            MatchedColumns = matchedCount,
+            UnmatchedColumns = unmatchedColumns,
+            Warnings = warnings
+        };
+    }
+
+    private static List<string> FindSimilarAttributes(
+        string header,
+        Dictionary<string, AttributeMetadata> attributes)
+    {
+        var normalizedHeader = NormalizeForMatching(header);
+        var results = new List<(string Name, int Score)>();
+
+        foreach (var (attrName, _) in attributes)
+        {
+            var normalizedAttr = NormalizeForMatching(attrName);
+
+            // Check if one contains the other
+            if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
+            {
+                var score = Math.Abs(normalizedAttr.Length - normalizedHeader.Length);
+                results.Add((attrName, score));
+            }
+        }
+
+        return results
+            .OrderBy(r => r.Score)
+            .Take(3)
+            .Select(r => r.Name)
+            .ToList();
     }
 
     private static ColumnMappingEntry CreateAutoMapping(string header, AttributeMetadata attr)

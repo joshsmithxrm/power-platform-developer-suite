@@ -118,6 +118,12 @@ public static class LoadCommand
             DefaultValueFactory = _ => true
         };
 
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Force loading even when auto-mapping is incomplete (unmatched columns will be skipped)",
+            DefaultValueFactory = _ => false
+        };
+
         var outputFormatOption = new Option<OutputFormat>("--output-format", "-o")
         {
             Description = "Output format",
@@ -148,6 +154,7 @@ public static class LoadCommand
             bypassPluginsOption,
             bypassFlowsOption,
             continueOnErrorOption,
+            forceOption,
             DataCommandGroup.ProfileOption,
             DataCommandGroup.EnvironmentOption,
             outputFormatOption,
@@ -167,6 +174,7 @@ public static class LoadCommand
             var bypassPluginsValue = parseResult.GetValue(bypassPluginsOption);
             var bypassFlows = parseResult.GetValue(bypassFlowsOption);
             var continueOnError = parseResult.GetValue(continueOnErrorOption);
+            var force = parseResult.GetValue(forceOption);
             var profile = parseResult.GetValue(DataCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataCommandGroup.EnvironmentOption);
             var outputFormat = parseResult.GetValue(outputFormatOption);
@@ -177,7 +185,7 @@ public static class LoadCommand
 
             return await ExecuteAsync(
                 entity, file, key, mappingFile, generateMappingFile,
-                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError,
+                dryRun, batchSize, bypassPlugins, bypassFlows, continueOnError, force,
                 profile, environment, outputFormat, verbose, debug,
                 cancellationToken);
         });
@@ -196,6 +204,7 @@ public static class LoadCommand
         CustomLogicBypass bypassPlugins,
         bool bypassFlows,
         bool continueOnError,
+        bool force,
         string? profileName,
         string? environment,
         OutputFormat outputFormat,
@@ -252,7 +261,8 @@ public static class LoadCommand
                 BypassPlugins = bypassPlugins,
                 BypassFlows = bypassFlows,
                 ContinueOnError = continueOnError,
-                DryRun = dryRun
+                DryRun = dryRun,
+                Force = force
             };
 
             // Execute load
@@ -289,6 +299,19 @@ public static class LoadCommand
             }
 
             return result.Success ? ExitCodes.Success : ExitCodes.PartialSuccess;
+        }
+        catch (MappingIncompleteException ex)
+        {
+            Console.Error.WriteLine();
+            if (outputFormat == OutputFormat.Json)
+            {
+                WriteJsonMappingError(ex);
+            }
+            else
+            {
+                WriteTextMappingError(ex);
+            }
+            return ExitCodes.MappingRequired;
         }
         catch (OperationCanceledException)
         {
@@ -465,6 +488,47 @@ public static class LoadCommand
                 message = e.Message,
                 value = e.Value
             })
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+    }
+
+    private static void WriteTextMappingError(MappingIncompleteException ex)
+    {
+        Console.Error.WriteLine($"Auto-mapping incomplete: {ex.MatchedColumns}/{ex.TotalColumns} columns matched");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Unmatched columns:");
+        foreach (var col in ex.UnmatchedColumns)
+        {
+            var suggestions = col.Suggestions != null && col.Suggestions.Count > 0
+                ? $" → did you mean: {string.Join(", ", col.Suggestions)}?"
+                : " → no similar attributes found";
+            Console.Error.WriteLine($"  • {col.ColumnName}{suggestions}");
+        }
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Options:");
+        Console.Error.WriteLine("  1. Run with --generate-mapping to create a mapping file for review");
+        Console.Error.WriteLine("  2. Run with --force to skip unmatched columns");
+    }
+
+    private static void WriteJsonMappingError(MappingIncompleteException ex)
+    {
+        var output = new
+        {
+            success = false,
+            error = new
+            {
+                code = "MAPPING_INCOMPLETE",
+                message = $"{ex.UnmatchedColumns.Count} column(s) could not be auto-mapped",
+                matchedColumns = ex.MatchedColumns,
+                totalColumns = ex.TotalColumns,
+                unmatchedColumns = ex.UnmatchedColumns.Select(c => new
+                {
+                    column = c.ColumnName,
+                    suggestions = c.Suggestions ?? []
+                }),
+                suggestion = "Use --generate-mapping to create a mapping file, or --force to skip unmatched columns"
+            }
         };
 
         Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));

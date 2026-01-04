@@ -46,4 +46,9 @@ public sealed class CsvLoadOptions
     /// Validate without writing to Dataverse.
     /// </summary>
     public bool DryRun { get; init; }
+
+    /// <summary>
+    /// Force loading even when auto-mapping is incomplete (unmatched columns will be skipped).
+    /// </summary>
+    public bool Force { get; init; }
 }
