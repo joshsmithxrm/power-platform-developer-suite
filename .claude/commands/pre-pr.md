@@ -102,8 +102,22 @@ Missing tests is a blocker. Writing tests now...
 5. Run tests again after writing new ones
 6. Only proceed to PR when all checks pass
 
+### 6. Push Check
+
+Before creating PR, ensure changes are pushed:
+
+```bash
+# Check if ahead of remote
+git status
+
+# If ahead, push
+git push -u origin <branch-name>
+```
+
+**The PR cannot be created if commits aren't pushed.** This is a common oversight.
+
 ## When to Use
 
 - Before `git commit` for significant changes
-- Before `gh pr create`
+- Before `gh pr create` (includes push verification)
 - After addressing bot review comments

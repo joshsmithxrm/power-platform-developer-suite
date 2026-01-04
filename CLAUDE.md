@@ -12,6 +12,7 @@
 
 | Rule | Why |
 |------|-----|
+| Commit directly to `main` | Branch is protected; all changes require PR |
 | Regenerate `PPDS.Plugins.snk` | Breaks strong naming; existing assemblies won't load |
 | Remove nullable reference types | Type safety prevents runtime errors |
 | Skip XML documentation on public APIs | Consumers need IntelliSense documentation |
