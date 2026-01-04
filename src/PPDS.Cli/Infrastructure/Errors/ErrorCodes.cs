@@ -112,4 +112,19 @@ public static class ErrorCodes
         /// <summary>The operation is not supported.</summary>
         public const string NotSupported = "Operation.NotSupported";
     }
+
+    /// <summary>
+    /// Query-related errors.
+    /// </summary>
+    public static class Query
+    {
+        /// <summary>SQL parse error.</summary>
+        public const string ParseError = "Query.ParseError";
+
+        /// <summary>Invalid FetchXML syntax.</summary>
+        public const string InvalidFetchXml = "Query.InvalidFetchXml";
+
+        /// <summary>Query execution failed.</summary>
+        public const string ExecutionFailed = "Query.ExecutionFailed";
+    }
 }

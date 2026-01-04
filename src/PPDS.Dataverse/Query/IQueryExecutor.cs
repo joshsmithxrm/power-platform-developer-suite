@@ -1,0 +1,39 @@
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace PPDS.Dataverse.Query;
+
+/// <summary>
+/// Executes FetchXML queries against Dataverse and returns structured results.
+/// </summary>
+public interface IQueryExecutor
+{
+    /// <summary>
+    /// Executes a FetchXML query and returns the results.
+    /// </summary>
+    /// <param name="fetchXml">The FetchXML query to execute.</param>
+    /// <param name="pageNumber">Optional page number for paging (1-based). If null, uses page 1.</param>
+    /// <param name="pagingCookie">Optional paging cookie from a previous query result for continuation.</param>
+    /// <param name="includeCount">Whether to include the total record count in the result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The query result containing records, columns, and paging information.</returns>
+    Task<QueryResult> ExecuteFetchXmlAsync(
+        string fetchXml,
+        int? pageNumber = null,
+        string? pagingCookie = null,
+        bool includeCount = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes a FetchXML query with automatic paging, returning all results.
+    /// Use with caution for large result sets.
+    /// </summary>
+    /// <param name="fetchXml">The FetchXML query to execute.</param>
+    /// <param name="maxRecords">Maximum total records to retrieve. Default is 5000.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The query result containing all records up to maxRecords.</returns>
+    Task<QueryResult> ExecuteFetchXmlAllPagesAsync(
+        string fetchXml,
+        int maxRecords = 5000,
+        CancellationToken cancellationToken = default);
+}

@@ -9,5 +9,8 @@ public enum OutputFormat
     Text,
 
     /// <summary>JSON output for programmatic consumption.</summary>
-    Json
+    Json,
+
+    /// <summary>CSV output for Excel and spreadsheet tools.</summary>
+    Csv
 }
