@@ -1,33 +1,102 @@
 using System.ServiceModel;
 using Microsoft.Extensions.Logging;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Pooling;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Registration;
 
 public class PluginRegistrationServiceTests
 {
-    private readonly Mock<IOrganizationService> _mockService;
+    private readonly Mock<IDataverseConnectionPool> _mockPool;
+    private readonly Mock<IPooledClient> _mockPooledClient;
     private readonly Mock<ILogger<PluginRegistrationService>> _mockLogger;
     private readonly PluginRegistrationService _sut;
 
+    // Track expected results for verification
+    private EntityCollection _retrieveMultipleResult = new();
+    private Guid _createResult = Guid.Empty;
+    private Entity? _updatedEntity;
+    private OrganizationRequest? _executedRequest;
+    private readonly OrganizationResponse _executeResult = new();
+
     public PluginRegistrationServiceTests()
     {
-        _mockService = new Mock<IOrganizationService>();
+        // Use Mock with CallBase=false to ensure we control all behavior
+        _mockPooledClient = new Mock<IPooledClient>(MockBehavior.Loose);
+        _mockPool = new Mock<IDataverseConnectionPool>(MockBehavior.Loose);
         _mockLogger = new Mock<ILogger<PluginRegistrationService>>();
-        _sut = new PluginRegistrationService(_mockService.Object, _mockLogger.Object);
+
+        // The service's helper methods check "if (client is IOrganizationServiceAsync2)"
+        // Since IPooledClient : IDataverseClient : IOrganizationServiceAsync2, this should pass
+        // We set up methods on both the base type and derived to ensure matching
+
+        // For IOrganizationServiceAsync2 methods - these are what the helper methods actually call
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
+            .ReturnsAsync(() => _retrieveMultipleResult);
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _retrieveMultipleResult);
+        _mockPooledClient
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>()))
+            .ReturnsAsync(() => _createResult);
+        _mockPooledClient
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _createResult);
+        _mockPooledClient
+            .Setup(s => s.UpdateAsync(It.IsAny<Entity>()))
+            .Callback<Entity>((e) => _updatedEntity = e)
+            .Returns(Task.CompletedTask);
+        _mockPooledClient
+            .Setup(s => s.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => _updatedEntity = e)
+            .Returns(Task.CompletedTask);
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>()))
+            .Callback<OrganizationRequest>((r) => _executedRequest = r)
+            .ReturnsAsync(() => _executeResult);
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((r, _) => _executedRequest = r)
+            .ReturnsAsync(() => _executeResult);
+
+        // Also setup sync methods through IOrganizationService as fallback
+        _mockPooledClient
+            .Setup(s => s.RetrieveMultiple(It.IsAny<QueryBase>()))
+            .Returns(() => _retrieveMultipleResult);
+        _mockPooledClient
+            .Setup(s => s.Create(It.IsAny<Entity>()))
+            .Returns(() => _createResult);
+        _mockPooledClient
+            .Setup(s => s.Update(It.IsAny<Entity>()))
+            .Callback<Entity>(e => _updatedEntity = e);
+        _mockPooledClient
+            .Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+            .Callback<OrganizationRequest>(r => _executedRequest = r)
+            .Returns(() => _executeResult);
+
+        // Setup pool to return our mock pooled client
+        _mockPool.Setup(p => p.GetClientAsync(
+                It.IsAny<DataverseClientOptions?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_mockPooledClient.Object);
+
+        _sut = new PluginRegistrationService(_mockPool.Object, _mockLogger.Object);
     }
 
     [Fact]
     public async Task ListAssembliesAsync_ReturnsEmptyList_WhenNoAssembliesExist()
     {
         // Arrange
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
+        _retrieveMultipleResult = new EntityCollection();
 
         // Act
         var result = await _sut.ListAssembliesAsync();
@@ -50,10 +119,7 @@ public class PluginRegistrationServiceTests
             IsolationMode = pluginassembly_isolationmode.Sandbox
         };
         entities.Entities.Add(assembly);
-
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(entities);
+        _retrieveMultipleResult = entities;
 
         // Act
         var result = await _sut.ListAssembliesAsync();
@@ -69,19 +135,16 @@ public class PluginRegistrationServiceTests
     {
         // Arrange
         var expectedId = Guid.NewGuid();
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
-        _mockService
-            .Setup(s => s.Create(It.IsAny<Entity>()))
-            .Returns(expectedId);
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedId;
 
         // Act
         var result = await _sut.UpsertAssemblyAsync("TestAssembly", new byte[] { 1, 2, 3 });
 
         // Assert
         Assert.Equal(expectedId, result);
-        _mockService.Verify(s => s.Create(It.Is<Entity>(e => e.LogicalName == PluginAssembly.EntityLogicalName)), Times.Once);
+        // Verify CreateAsync was called with CancellationToken
+        _mockPooledClient.Verify(s => s.CreateAsync(It.Is<Entity>(e => e.LogicalName == PluginAssembly.EntityLogicalName), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -97,27 +160,22 @@ public class PluginRegistrationServiceTests
             Version = "1.0.0.0"
         };
         entities.Entities.Add(existingAssembly);
-
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(entities);
+        _retrieveMultipleResult = entities;
 
         // Act
         var result = await _sut.UpsertAssemblyAsync("TestAssembly", new byte[] { 1, 2, 3 });
 
         // Assert
         Assert.Equal(existingId, result);
-        _mockService.Verify(s => s.Update(It.Is<Entity>(e => e.Id == existingId)), Times.Once);
-        _mockService.Verify(s => s.Create(It.IsAny<Entity>()), Times.Never);
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(existingId, _updatedEntity!.Id);
     }
 
     [Fact]
     public async Task GetSdkMessageIdAsync_ReturnsNull_WhenMessageNotFound()
     {
         // Arrange
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
+        _retrieveMultipleResult = new EntityCollection();
 
         // Act
         var result = await _sut.GetSdkMessageIdAsync("NonExistentMessage");
@@ -134,10 +192,7 @@ public class PluginRegistrationServiceTests
         var entities = new EntityCollection();
         var message = new SdkMessage { Id = messageId };
         entities.Entities.Add(message);
-
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(entities);
+        _retrieveMultipleResult = entities;
 
         // Act
         var result = await _sut.GetSdkMessageIdAsync("Create");
@@ -160,19 +215,15 @@ public class PluginRegistrationServiceTests
         var expectedId = Guid.NewGuid();
 
         // No existing plugin type
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
+        _retrieveMultipleResult = new EntityCollection();
 
         // Create succeeds
-        _mockService
-            .Setup(s => s.Create(It.IsAny<Entity>()))
-            .Returns(expectedId);
+        _createResult = expectedId;
 
         // RetrieveEntityRequest throws FaultException (entity metadata not found)
-        _mockService
-            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
-            .Throws(new FaultException("Entity does not exist"));
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaultException("Entity does not exist"));
 
         // Act - Should succeed despite the FaultException (graceful degradation)
         var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");
@@ -198,20 +249,16 @@ public class PluginRegistrationServiceTests
         var expectedId = Guid.NewGuid();
 
         // No existing plugin type
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
+        _retrieveMultipleResult = new EntityCollection();
 
         // Create succeeds
-        _mockService
-            .Setup(s => s.Create(It.IsAny<Entity>()))
-            .Returns(expectedId);
+        _createResult = expectedId;
 
         // RetrieveEntityRequest throws FaultException<OrganizationServiceFault>
         var fault = new OrganizationServiceFault { Message = "Entity not found", ErrorCode = -2147220969 };
-        _mockService
-            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
-            .Throws(new FaultException<OrganizationServiceFault>(fault, new FaultReason("Entity not found")));
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(fault, new FaultReason("Entity not found")));
 
         // Act - Should succeed despite the FaultException (graceful degradation)
         var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");
@@ -238,25 +285,21 @@ public class PluginRegistrationServiceTests
         var addSolutionComponentCalled = false;
 
         // No existing plugin type
-        _mockService
-            .Setup(s => s.RetrieveMultiple(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>()))
-            .Returns(new EntityCollection());
+        _retrieveMultipleResult = new EntityCollection();
 
         // Create succeeds
-        _mockService
-            .Setup(s => s.Create(It.IsAny<Entity>()))
-            .Returns(expectedId);
+        _createResult = expectedId;
 
         // RetrieveEntityRequest throws (so GetComponentTypeAsync returns 0)
-        _mockService
-            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity")))
-            .Throws(new FaultException("Entity does not exist"));
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "RetrieveEntity"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaultException("Entity does not exist"));
 
         // Track if AddSolutionComponent is called
-        _mockService
-            .Setup(s => s.Execute(It.Is<OrganizationRequest>(r => r.RequestName == "AddSolutionComponent")))
-            .Callback(() => addSolutionComponentCalled = true)
-            .Returns(new OrganizationResponse());
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.Is<OrganizationRequest>(r => r.RequestName == "AddSolutionComponent"), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((_, _) => addSolutionComponentCalled = true)
+            .ReturnsAsync(new OrganizationResponse());
 
         // Act
         var result = await _sut.UpsertPluginTypeAsync(assemblyId, "MyPlugin.Plugin", "TestSolution");

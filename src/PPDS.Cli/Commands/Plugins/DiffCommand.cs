@@ -98,8 +98,7 @@ public static class DiffCommand
 
             var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
             var logger = serviceProvider.GetRequiredService<ILogger<PluginRegistrationService>>();
-            await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
-            var registrationService = new PluginRegistrationService(client, logger);
+            var registrationService = new PluginRegistrationService(pool, logger);
 
             if (!globalOptions.IsJsonMode)
             {

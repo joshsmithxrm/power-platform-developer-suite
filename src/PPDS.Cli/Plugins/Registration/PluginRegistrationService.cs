@@ -9,16 +9,21 @@ using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Plugins.Registration;
 
 /// <summary>
 /// Service for managing plugin registrations in Dataverse.
 /// </summary>
+/// <remarks>
+/// This service uses connection pooling to enable parallel Dataverse operations.
+/// Each method acquires its own client from the pool, enabling DOP-based parallelism.
+/// See ADR-0002 and ADR-0005 for pool architecture details.
+/// </remarks>
 public sealed class PluginRegistrationService
 {
-    private readonly IOrganizationService _service;
-    private readonly IOrganizationServiceAsync2? _asyncService;
+    private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<PluginRegistrationService> _logger;
 
     // Cache for entity type codes (ETCs) - some like pluginpackage vary by environment
@@ -48,14 +53,12 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Creates a new instance of the plugin registration service.
     /// </summary>
-    /// <param name="service">The Dataverse organization service.</param>
+    /// <param name="pool">The Dataverse connection pool for acquiring clients.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
-    public PluginRegistrationService(IOrganizationService service, ILogger<PluginRegistrationService> logger)
+    public PluginRegistrationService(IDataverseConnectionPool pool, ILogger<PluginRegistrationService> logger)
     {
-        _service = service;
-        _logger = logger;
-        // Use native async when available (ServiceClient implements IOrganizationServiceAsync2)
-        _asyncService = service as IOrganizationServiceAsync2;
+        _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     #region Query Operations
@@ -64,7 +67,10 @@ public sealed class PluginRegistrationService
     /// Lists all plugin assemblies in the environment.
     /// </summary>
     /// <param name="assemblyNameFilter">Optional filter by assembly name.</param>
-    public async Task<List<PluginAssemblyInfo>> ListAssembliesAsync(string? assemblyNameFilter = null)
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginAssemblyInfo>> ListAssembliesAsync(
+        string? assemblyNameFilter = null,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(PluginAssembly.EntityLogicalName)
         {
@@ -91,7 +97,8 @@ public sealed class PluginRegistrationService
             query.Criteria.AddCondition(PluginAssembly.Fields.Name, ConditionOperator.Equal, assemblyNameFilter);
         }
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
@@ -107,7 +114,10 @@ public sealed class PluginRegistrationService
     /// Lists all plugin packages in the environment.
     /// </summary>
     /// <param name="packageNameFilter">Optional filter by package name or unique name.</param>
-    public async Task<List<PluginPackageInfo>> ListPackagesAsync(string? packageNameFilter = null)
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginPackageInfo>> ListPackagesAsync(
+        string? packageNameFilter = null,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(PluginPackage.EntityLogicalName)
         {
@@ -131,7 +141,8 @@ public sealed class PluginRegistrationService
             };
         }
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginPackageInfo
         {
@@ -145,7 +156,11 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Lists all assemblies contained in a plugin package.
     /// </summary>
-    public async Task<List<PluginAssemblyInfo>> ListAssembliesForPackageAsync(Guid packageId)
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginAssemblyInfo>> ListAssembliesForPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(PluginAssembly.EntityLogicalName)
         {
@@ -166,7 +181,8 @@ public sealed class PluginRegistrationService
             Orders = { new OrderExpression(PluginAssembly.Fields.Name, OrderType.Ascending) }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginAssemblyInfo
         {
@@ -181,27 +197,32 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Lists all plugin types for a package by querying through the package's assemblies.
     /// </summary>
-    public async Task<List<PluginTypeInfo>> ListTypesForPackageAsync(Guid packageId)
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginTypeInfo>> ListTypesForPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken = default)
     {
-        var assemblies = await ListAssembliesForPackageAsync(packageId);
+        var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
 
         if (assemblies.Count == 0)
             return [];
 
-        var allTypes = new List<PluginTypeInfo>();
-        foreach (var assembly in assemblies)
-        {
-            var types = await ListTypesForAssemblyAsync(assembly.Id);
-            allTypes.AddRange(types);
-        }
+        // Fetch types for all assemblies in parallel
+        var typeTasks = assemblies.Select(a => ListTypesForAssemblyAsync(a.Id, cancellationToken));
+        var typesPerAssembly = await Task.WhenAll(typeTasks);
 
-        return allTypes;
+        return typesPerAssembly.SelectMany(t => t).ToList();
     }
 
     /// <summary>
     /// Lists all plugin types for an assembly.
     /// </summary>
-    public async Task<List<PluginTypeInfo>> ListTypesForAssemblyAsync(Guid assemblyId)
+    /// <param name="assemblyId">The assembly ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginTypeInfo>> ListTypesForAssemblyAsync(
+        Guid assemblyId,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(PluginType.EntityLogicalName)
         {
@@ -219,7 +240,8 @@ public sealed class PluginRegistrationService
             Orders = { new OrderExpression(PluginType.Fields.TypeName, OrderType.Ascending) }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginTypeInfo
         {
@@ -232,7 +254,11 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Lists all processing steps for a plugin type.
     /// </summary>
-    public async Task<List<PluginStepInfo>> ListStepsForTypeAsync(Guid pluginTypeId)
+    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginStepInfo>> ListStepsForTypeAsync(
+        Guid pluginTypeId,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
@@ -276,7 +302,8 @@ public sealed class PluginRegistrationService
             Orders = { new OrderExpression(SdkMessageProcessingStep.Fields.Name, OrderType.Ascending) }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e =>
         {
@@ -309,7 +336,11 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Lists all images for a processing step.
     /// </summary>
-    public async Task<List<PluginImageInfo>> ListImagesForStepAsync(Guid stepId)
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<List<PluginImageInfo>> ListImagesForStepAsync(
+        Guid stepId,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
@@ -328,7 +359,8 @@ public sealed class PluginRegistrationService
             Orders = { new OrderExpression(SdkMessageProcessingStepImage.Fields.Name, OrderType.Ascending) }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
         return results.Entities.Select(e => new PluginImageInfo
         {
@@ -347,25 +379,37 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Gets an assembly by name.
     /// </summary>
-    public async Task<PluginAssemblyInfo?> GetAssemblyByNameAsync(string name)
+    /// <param name="name">The assembly name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<PluginAssemblyInfo?> GetAssemblyByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default)
     {
-        var assemblies = await ListAssembliesAsync(name);
+        var assemblies = await ListAssembliesAsync(name, cancellationToken);
         return assemblies.FirstOrDefault();
     }
 
     /// <summary>
     /// Gets a plugin package by name or unique name.
     /// </summary>
-    public async Task<PluginPackageInfo?> GetPackageByNameAsync(string name)
+    /// <param name="name">The package name or unique name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<PluginPackageInfo?> GetPackageByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default)
     {
-        var packages = await ListPackagesAsync(name);
+        var packages = await ListPackagesAsync(name, cancellationToken);
         return packages.FirstOrDefault();
     }
 
     /// <summary>
     /// Gets the SDK message ID for a message name.
     /// </summary>
-    public async Task<Guid?> GetSdkMessageIdAsync(string messageName)
+    /// <param name="messageName">The message name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid?> GetSdkMessageIdAsync(
+        string messageName,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(SdkMessage.EntityLogicalName)
         {
@@ -379,14 +423,23 @@ public sealed class PluginRegistrationService
             }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         return results.Entities.FirstOrDefault()?.Id;
     }
 
     /// <summary>
     /// Gets the SDK message filter ID for a message and entity combination.
     /// </summary>
-    public async Task<Guid?> GetSdkMessageFilterIdAsync(Guid messageId, string primaryEntity, string? secondaryEntity = null)
+    /// <param name="messageId">The message ID.</param>
+    /// <param name="primaryEntity">The primary entity logical name.</param>
+    /// <param name="secondaryEntity">Optional secondary entity logical name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid?> GetSdkMessageFilterIdAsync(
+        Guid messageId,
+        string primaryEntity,
+        string? secondaryEntity = null,
+        CancellationToken cancellationToken = default)
     {
         var query = new QueryExpression(SdkMessageFilter.EntityLogicalName)
         {
@@ -406,7 +459,8 @@ public sealed class PluginRegistrationService
             query.Criteria.AddCondition(SdkMessageFilter.Fields.SecondaryObjectTypeCode, ConditionOperator.Equal, secondaryEntity);
         }
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         return results.Entities.FirstOrDefault()?.Id;
     }
 
@@ -418,9 +472,17 @@ public sealed class PluginRegistrationService
     /// Creates or updates a plugin assembly (for classic DLL assemblies only).
     /// For NuGet packages, use <see cref="UpsertPackageAsync"/> instead.
     /// </summary>
-    public async Task<Guid> UpsertAssemblyAsync(string name, byte[] content, string? solutionName = null)
+    /// <param name="name">The assembly name.</param>
+    /// <param name="content">The assembly DLL content.</param>
+    /// <param name="solutionName">Optional solution to add the assembly to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid> UpsertAssemblyAsync(
+        string name,
+        byte[] content,
+        string? solutionName = null,
+        CancellationToken cancellationToken = default)
     {
-        var existing = await GetAssemblyByNameAsync(name);
+        var existing = await GetAssemblyByNameAsync(name, cancellationToken);
 
         var entity = new PluginAssembly
         {
@@ -433,19 +495,21 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity);
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
             if (!string.IsNullOrEmpty(solutionName))
             {
-                await AddToSolutionAsync(existing.Id, ComponentTypePluginAssembly, solutionName);
+                await AddToSolutionAsync(existing.Id, ComponentTypePluginAssembly, solutionName, cancellationToken);
             }
 
             return existing.Id;
         }
         else
         {
-            return await CreateWithSolutionAsync(entity, solutionName);
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            return await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
         }
     }
 
@@ -455,12 +519,17 @@ public sealed class PluginRegistrationService
     /// <param name="packageName">The package name from .nuspec (e.g., "ppds_MyPlugin"). This is what Dataverse uses as uniquename.</param>
     /// <param name="nupkgContent">The raw .nupkg file content.</param>
     /// <param name="solutionName">Solution to add the package to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The package ID.</returns>
-    public async Task<Guid> UpsertPackageAsync(string packageName, byte[] nupkgContent, string? solutionName = null)
+    public async Task<Guid> UpsertPackageAsync(
+        string packageName,
+        byte[] nupkgContent,
+        string? solutionName = null,
+        CancellationToken cancellationToken = default)
     {
         // packageName comes from .nuspec <id> (parsed from .nuspec)
         // Dataverse extracts uniquename from the nupkg content, so we use packageName for lookup
-        var existing = await GetPackageByNameAsync(packageName);
+        var existing = await GetPackageByNameAsync(packageName, cancellationToken);
 
         if (existing != null)
         {
@@ -476,7 +545,8 @@ public sealed class PluginRegistrationService
             {
                 request.Parameters["SolutionUniqueName"] = solutionName;
             }
-            await ExecuteAsync(request);
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await ExecuteAsync(request, client, cancellationToken);
 
             return existing.Id;
         }
@@ -488,22 +558,36 @@ public sealed class PluginRegistrationService
             Content = Convert.ToBase64String(nupkgContent)
         };
 
-        return await CreateWithSolutionHeaderAsync(entity, solutionName);
+        return await CreateWithSolutionHeaderAsync(entity, solutionName, cancellationToken);
     }
 
     /// <summary>
     /// Gets the assembly ID for an assembly that is part of a plugin package.
     /// </summary>
-    public async Task<Guid?> GetAssemblyIdForPackageAsync(Guid packageId, string assemblyName)
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="assemblyName">The assembly name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid?> GetAssemblyIdForPackageAsync(
+        Guid packageId,
+        string assemblyName,
+        CancellationToken cancellationToken = default)
     {
-        var assemblies = await ListAssembliesForPackageAsync(packageId);
+        var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
         return assemblies.FirstOrDefault(a => a.Name == assemblyName)?.Id;
     }
 
     /// <summary>
     /// Creates or updates a plugin type.
     /// </summary>
-    public async Task<Guid> UpsertPluginTypeAsync(Guid assemblyId, string typeName, string? solutionName = null)
+    /// <param name="assemblyId">The assembly ID.</param>
+    /// <param name="typeName">The type name.</param>
+    /// <param name="solutionName">Optional solution name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid> UpsertPluginTypeAsync(
+        Guid assemblyId,
+        string typeName,
+        string? solutionName = null,
+        CancellationToken cancellationToken = default)
     {
         // Check if type exists
         var query = new QueryExpression(PluginType.EntityLogicalName)
@@ -519,7 +603,8 @@ public sealed class PluginRegistrationService
             }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         if (existing != null)
@@ -535,18 +620,25 @@ public sealed class PluginRegistrationService
             Name = typeName
         };
 
-        return await CreateWithSolutionAsync(entity, solutionName);
+        return await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
     }
 
     /// <summary>
     /// Creates or updates a processing step.
     /// </summary>
+    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="stepConfig">The step configuration.</param>
+    /// <param name="messageId">The SDK message ID.</param>
+    /// <param name="filterId">Optional SDK message filter ID.</param>
+    /// <param name="solutionName">Optional solution name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<Guid> UpsertStepAsync(
         Guid pluginTypeId,
         PluginStepConfig stepConfig,
         Guid messageId,
         Guid? filterId,
-        string? solutionName = null)
+        string? solutionName = null,
+        CancellationToken cancellationToken = default)
     {
         // Check if step exists by name
         var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
@@ -562,7 +654,8 @@ public sealed class PluginRegistrationService
             }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         var entity = new SdkMessageProcessingStep
@@ -616,26 +709,32 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity);
+            await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
             if (!string.IsNullOrEmpty(solutionName))
             {
-                await AddToSolutionAsync(existing.Id, ComponentTypeSdkMessageProcessingStep, solutionName);
+                await AddToSolutionAsync(existing.Id, ComponentTypeSdkMessageProcessingStep, solutionName, cancellationToken);
             }
 
             return existing.Id;
         }
         else
         {
-            return await CreateWithSolutionAsync(entity, solutionName);
+            return await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
         }
     }
 
     /// <summary>
     /// Creates or updates a step image.
     /// </summary>
-    public async Task<Guid> UpsertImageAsync(Guid stepId, PluginImageConfig imageConfig)
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="imageConfig">The image configuration.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<Guid> UpsertImageAsync(
+        Guid stepId,
+        PluginImageConfig imageConfig,
+        CancellationToken cancellationToken = default)
     {
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
@@ -651,7 +750,8 @@ public sealed class PluginRegistrationService
             }
         };
 
-        var results = await RetrieveMultipleAsync(query);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
         var existing = results.Entities.FirstOrDefault();
 
         var entity = new SdkMessageProcessingStepImage
@@ -671,12 +771,12 @@ public sealed class PluginRegistrationService
         if (existing != null)
         {
             entity.Id = existing.Id;
-            await UpdateAsync(entity);
+            await UpdateAsync(entity, client, cancellationToken);
             return existing.Id;
         }
         else
         {
-            return await CreateAsync(entity);
+            return await CreateAsync(entity, client, cancellationToken);
         }
     }
 
@@ -687,32 +787,50 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Deletes a step image.
     /// </summary>
-    public async Task DeleteImageAsync(Guid imageId)
+    /// <param name="imageId">The image ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DeleteImageAsync(Guid imageId, CancellationToken cancellationToken = default)
     {
-        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
     }
 
     /// <summary>
-    /// Deletes a processing step (also deletes child images).
+    /// Deletes a processing step (also deletes child images in parallel).
     /// </summary>
-    public async Task DeleteStepAsync(Guid stepId)
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DeleteStepAsync(Guid stepId, CancellationToken cancellationToken = default)
     {
-        // Delete images first
-        var images = await ListImagesForStepAsync(stepId);
-        foreach (var image in images)
+        // Delete images first - fetch list and delete in parallel
+        var images = await ListImagesForStepAsync(stepId, cancellationToken);
+
+        if (images.Count > 0)
         {
-            await DeleteImageAsync(image.Id);
+            var parallelism = _pool.GetTotalRecommendedParallelism();
+            await Parallel.ForEachAsync(
+                images,
+                new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
+                async (image, ct) =>
+                {
+                    await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+                    await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, image.Id, client, ct);
+                });
         }
 
-        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId);
+        await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
     }
 
     /// <summary>
     /// Deletes a plugin type (only if it has no steps).
     /// </summary>
-    public async Task DeletePluginTypeAsync(Guid pluginTypeId)
+    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DeletePluginTypeAsync(Guid pluginTypeId, CancellationToken cancellationToken = default)
     {
-        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId, client, cancellationToken);
     }
 
     #endregion
@@ -722,7 +840,15 @@ public sealed class PluginRegistrationService
     /// <summary>
     /// Adds a component to a solution.
     /// </summary>
-    public async Task AddToSolutionAsync(Guid componentId, int componentType, string solutionName)
+    /// <param name="componentId">The component ID.</param>
+    /// <param name="componentType">The component type code.</param>
+    /// <param name="solutionName">The solution unique name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task AddToSolutionAsync(
+        Guid componentId,
+        int componentType,
+        string solutionName,
+        CancellationToken cancellationToken = default)
     {
         var request = new AddSolutionComponentRequest
         {
@@ -734,7 +860,8 @@ public sealed class PluginRegistrationService
 
         try
         {
-            await ExecuteAsync(request);
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await ExecuteAsync(request, client, cancellationToken);
         }
         catch (Exception ex) when (ex.Message.Contains("already exists"))
         {
@@ -750,7 +877,10 @@ public sealed class PluginRegistrationService
     /// Gets the solution component type code for an entity.
     /// Uses well-known values for system entities, queries metadata for custom entities like pluginpackage.
     /// </summary>
-    private async Task<int> GetComponentTypeAsync(string entityLogicalName)
+    private async Task<int> GetComponentTypeAsync(
+        string entityLogicalName,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
         // Check well-known types first (no API call needed)
         if (WellKnownComponentTypes.TryGetValue(entityLogicalName, out var wellKnownType))
@@ -773,7 +903,7 @@ public sealed class PluginRegistrationService
 
         try
         {
-            var response = (RetrieveEntityResponse)await ExecuteAsync(request);
+            var response = (RetrieveEntityResponse)await ExecuteAsync(request, client, cancellationToken);
             var objectTypeCode = response.EntityMetadata.ObjectTypeCode ?? 0;
             _entityTypeCodeCache[entityLogicalName] = objectTypeCode;
             return objectTypeCode;
@@ -799,17 +929,21 @@ public sealed class PluginRegistrationService
         }
     }
 
-    private async Task<Guid> CreateWithSolutionAsync(Entity entity, string? solutionName)
+    private async Task<Guid> CreateWithSolutionAsync(
+        Entity entity,
+        string? solutionName,
+        IOrganizationService client,
+        CancellationToken cancellationToken)
     {
-        var id = await CreateAsync(entity);
+        var id = await CreateAsync(entity, client, cancellationToken);
 
         if (!string.IsNullOrEmpty(solutionName))
         {
-            var componentType = await GetComponentTypeAsync(entity.LogicalName);
+            var componentType = await GetComponentTypeAsync(entity.LogicalName, client, cancellationToken);
 
             if (componentType > 0)
             {
-                await AddToSolutionAsync(id, componentType, solutionName);
+                await AddToSolutionAsync(id, componentType, solutionName, cancellationToken);
             }
         }
 
@@ -820,7 +954,10 @@ public sealed class PluginRegistrationService
     /// Creates an entity with atomic solution association using CreateRequest.SolutionUniqueName.
     /// This is the SDK equivalent of the MSCRM.SolutionUniqueName HTTP header.
     /// </summary>
-    private async Task<Guid> CreateWithSolutionHeaderAsync(Entity entity, string? solutionName)
+    private async Task<Guid> CreateWithSolutionHeaderAsync(
+        Entity entity,
+        string? solutionName,
+        CancellationToken cancellationToken)
     {
         var request = new CreateRequest { Target = entity };
 
@@ -829,7 +966,8 @@ public sealed class PluginRegistrationService
             request.Parameters["SolutionUniqueName"] = solutionName;
         }
 
-        var response = (CreateResponse)await ExecuteAsync(request);
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var response = (CreateResponse)await ExecuteAsync(request, client, cancellationToken);
         return response.id;
     }
 
@@ -898,41 +1036,57 @@ public sealed class PluginRegistrationService
     };
 
     // Native async helpers - use async SDK when available, otherwise fall back to Task.Run
-    private async Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query)
+    private static async Task<EntityCollection> RetrieveMultipleAsync(
+        QueryExpression query,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
-        if (_asyncService != null)
-            return await _asyncService.RetrieveMultipleAsync(query);
-        return await Task.Run(() => _service.RetrieveMultiple(query));
+        if (client is IOrganizationServiceAsync2 asyncService)
+            return await asyncService.RetrieveMultipleAsync(query, cancellationToken);
+        return await Task.Run(() => client.RetrieveMultiple(query), cancellationToken);
     }
 
-    private async Task<Guid> CreateAsync(Entity entity)
+    private static async Task<Guid> CreateAsync(
+        Entity entity,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
-        if (_asyncService != null)
-            return await _asyncService.CreateAsync(entity);
-        return await Task.Run(() => _service.Create(entity));
+        if (client is IOrganizationServiceAsync2 asyncService)
+            return await asyncService.CreateAsync(entity, cancellationToken);
+        return await Task.Run(() => client.Create(entity), cancellationToken);
     }
 
-    private async Task UpdateAsync(Entity entity)
+    private static async Task UpdateAsync(
+        Entity entity,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
-        if (_asyncService != null)
-            await _asyncService.UpdateAsync(entity);
+        if (client is IOrganizationServiceAsync2 asyncService)
+            await asyncService.UpdateAsync(entity, cancellationToken);
         else
-            await Task.Run(() => _service.Update(entity));
+            await Task.Run(() => client.Update(entity), cancellationToken);
     }
 
-    private async Task DeleteAsync(string entityName, Guid id)
+    private static async Task DeleteAsync(
+        string entityName,
+        Guid id,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
-        if (_asyncService != null)
-            await _asyncService.DeleteAsync(entityName, id);
+        if (client is IOrganizationServiceAsync2 asyncService)
+            await asyncService.DeleteAsync(entityName, id, cancellationToken);
         else
-            await Task.Run(() => _service.Delete(entityName, id));
+            await Task.Run(() => client.Delete(entityName, id), cancellationToken);
     }
 
-    private async Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request)
+    private static async Task<OrganizationResponse> ExecuteAsync(
+        OrganizationRequest request,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
     {
-        if (_asyncService != null)
-            return await _asyncService.ExecuteAsync(request);
-        return await Task.Run(() => _service.Execute(request));
+        if (client is IOrganizationServiceAsync2 asyncService)
+            return await asyncService.ExecuteAsync(request, cancellationToken);
+        return await Task.Run(() => client.Execute(request), cancellationToken);
     }
 
     #endregion

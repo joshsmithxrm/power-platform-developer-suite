@@ -25,6 +25,7 @@
 | Use magic strings for generated entities | Use `EntityLogicalName` and `Fields.*` constants; see [Generated Entities](#-generated-entities) |
 | Use late-bound `Entity` for generated entity types | Use early-bound classes (`PluginAssembly`, `SystemUser`, etc.); compile-time safety |
 | Write CLI status messages to stdout | Use `Console.Error.WriteLine` for status; stdout is for data only; see [ADR-0008](docs/adr/0008_CLI_OUTPUT_ARCHITECTURE.md) |
+| Hold single pooled client for multiple queries | Defeats pool parallelism; see [Dataverse Query Patterns](#-dataverse-query-patterns) |
 
 ---
 
@@ -436,6 +437,44 @@ See [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md) for details.
 | [0006](docs/adr/0006_CONNECTION_SOURCE_ABSTRACTION.md) | IConnectionSource for custom auth methods |
 | [0007](docs/adr/0007_UNIFIED_CLI_AND_AUTH.md) | Unified CLI and shared authentication profiles |
 | [0008](docs/adr/0008_CLI_OUTPUT_ARCHITECTURE.md) | CLI output architecture (structured errors, stdout/stderr separation) |
+
+---
+
+## 🔄 Dataverse Query Patterns
+
+Before writing code that queries Dataverse, read [ADR-0002](docs/adr/0002_MULTI_CONNECTION_POOLING.md) and [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md).
+
+**Reference implementation:** `BulkOperationExecutor` - study this before writing parallel Dataverse code.
+
+### ❌ Wrong - Single client for multiple queries
+
+```csharp
+// WRONG: Holds one client for entire operation, defeats pool parallelism
+await using var client = await pool.GetClientAsync(...);
+foreach (var item in items)  // Sequential, same client
+    await DoQuery(client, item);
+```
+
+### ✅ Correct - Client per parallel operation
+
+```csharp
+// CORRECT: Each parallel task gets its own client from the pool
+var parallelism = pool.GetTotalRecommendedParallelism();
+await Parallel.ForEachAsync(items,
+    new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+    async (item, ct) =>
+    {
+        await using var client = await pool.GetClientAsync(cancellationToken: ct);
+        await DoQuery(client, item);
+    });
+```
+
+### Why This Matters
+
+- Pool manages DOP limits, throttle tracking, and connection rotation
+- Each Application User has independent API quota (6,000 requests/5 min)
+- Getting client inside parallel loop enables true parallelism
+- Pool waits for non-throttled connection automatically
 
 ---
 

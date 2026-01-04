@@ -1,0 +1,896 @@
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using PPDS.Auth.Credentials;
+using PPDS.Auth.Discovery;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Plugins.Registration;
+using PPDS.Dataverse.Pooling;
+using StreamJsonRpc;
+
+// Aliases to disambiguate from local DTOs
+using PluginTypeInfoModel = PPDS.Cli.Plugins.Registration.PluginTypeInfo;
+using PluginImageInfoModel = PPDS.Cli.Plugins.Registration.PluginImageInfo;
+
+namespace PPDS.Cli.Commands.Serve.Handlers;
+
+/// <summary>
+/// Handles JSON-RPC method calls for the serve daemon.
+/// Method naming follows the CLI command structure: "group/subcommand".
+/// </summary>
+public class RpcMethodHandler
+{
+    #region Auth Methods
+
+    /// <summary>
+    /// Lists all authentication profiles.
+    /// Maps to: ppds auth list --json
+    /// </summary>
+    [JsonRpcMethod("auth/list")]
+    public async Task<AuthListResponse> AuthListAsync(CancellationToken cancellationToken)
+    {
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profiles = collection.All.Select(p => new ProfileInfo
+        {
+            Index = p.Index,
+            Name = p.Name,
+            Identity = p.IdentityDisplay,
+            AuthMethod = p.AuthMethod.ToString(),
+            Cloud = p.Cloud.ToString(),
+            Environment = p.Environment != null ? new EnvironmentSummary
+            {
+                Url = p.Environment.Url,
+                DisplayName = p.Environment.DisplayName
+            } : null,
+            IsActive = collection.ActiveProfile?.Index == p.Index,
+            CreatedAt = p.CreatedAt,
+            LastUsedAt = p.LastUsedAt
+        }).ToList();
+
+        return new AuthListResponse
+        {
+            ActiveProfile = collection.ActiveProfileName,
+            Profiles = profiles
+        };
+    }
+
+    /// <summary>
+    /// Gets the current active profile.
+    /// Maps to: ppds auth who --json
+    /// </summary>
+    [JsonRpcMethod("auth/who")]
+    public async Task<AuthWhoResponse> AuthWhoAsync(CancellationToken cancellationToken)
+    {
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        return new AuthWhoResponse
+        {
+            Index = profile.Index,
+            Name = profile.Name,
+            AuthMethod = profile.AuthMethod.ToString(),
+            Cloud = profile.Cloud.ToString(),
+            TenantId = profile.TenantId,
+            Username = profile.Username,
+            ObjectId = profile.ObjectId,
+            ApplicationId = profile.ApplicationId,
+            TokenExpiresOn = profile.TokenExpiresOn,
+            TokenStatus = profile.TokenExpiresOn.HasValue
+                ? (profile.TokenExpiresOn.Value < DateTimeOffset.UtcNow ? "expired" : "valid")
+                : null,
+            Environment = profile.Environment != null ? new EnvironmentDetails
+            {
+                Url = profile.Environment.Url,
+                DisplayName = profile.Environment.DisplayName,
+                UniqueName = profile.Environment.UniqueName,
+                EnvironmentId = profile.Environment.EnvironmentId,
+                OrganizationId = profile.Environment.OrganizationId,
+                Type = profile.Environment.Type,
+                Region = profile.Environment.Region
+            } : null,
+            CreatedAt = profile.CreatedAt,
+            LastUsedAt = profile.LastUsedAt
+        };
+    }
+
+    /// <summary>
+    /// Selects an authentication profile as active.
+    /// Maps to: ppds auth select --index N or ppds auth select --name "name"
+    /// </summary>
+    [JsonRpcMethod("auth/select")]
+    public async Task<AuthSelectResponse> AuthSelectAsync(
+        int? index = null,
+        string? name = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (index == null && string.IsNullOrWhiteSpace(name))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "Either 'index' or 'name' parameter is required");
+        }
+
+        if (index != null && !string.IsNullOrWhiteSpace(name))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                "Provide either 'index' or 'name', not both");
+        }
+
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        AuthProfile? profile;
+        if (index != null)
+        {
+            profile = collection.GetByIndex(index.Value);
+            if (profile == null)
+            {
+                throw new RpcException(
+                    ErrorCodes.Auth.ProfileNotFound,
+                    $"Profile with index {index} not found");
+            }
+        }
+        else
+        {
+            profile = collection.GetByName(name!);
+            if (profile == null)
+            {
+                throw new RpcException(
+                    ErrorCodes.Auth.ProfileNotFound,
+                    $"Profile '{name}' not found");
+            }
+        }
+
+        collection.SetActiveByIndex(profile.Index);
+        await store.SaveAsync(collection, cancellationToken);
+
+        return new AuthSelectResponse
+        {
+            Index = profile.Index,
+            Name = profile.Name,
+            Identity = profile.IdentityDisplay,
+            Environment = profile.Environment?.DisplayName
+        };
+    }
+
+    #endregion
+
+    #region Environment Methods
+
+    /// <summary>
+    /// Lists available environments.
+    /// Maps to: ppds env list --json
+    /// </summary>
+    [JsonRpcMethod("env/list")]
+    public async Task<EnvListResponse> EnvListAsync(
+        string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        using var gds = GlobalDiscoveryService.FromProfile(profile);
+        var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
+
+        // Apply filter if provided
+        IReadOnlyList<DiscoveredEnvironment> filtered = environments;
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            filtered = environments.Where(e =>
+                e.FriendlyName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                e.UniqueName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                e.ApiUrl.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                (e.EnvironmentId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+            ).ToList();
+        }
+
+        var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
+
+        return new EnvListResponse
+        {
+            Filter = filter,
+            Environments = filtered.Select(e => new EnvironmentInfo
+            {
+                Id = e.Id,
+                EnvironmentId = e.EnvironmentId,
+                FriendlyName = e.FriendlyName,
+                UniqueName = e.UniqueName,
+                ApiUrl = e.ApiUrl,
+                Url = e.Url,
+                Type = e.EnvironmentType,
+                State = e.IsEnabled ? "Enabled" : "Disabled",
+                Region = e.Region,
+                Version = e.Version,
+                IsActive = selectedUrl != null &&
+                    e.ApiUrl.TrimEnd('/').ToLowerInvariant() == selectedUrl
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Selects an environment for the active profile.
+    /// Maps to: ppds env select --environment "env"
+    /// </summary>
+    [JsonRpcMethod("env/select")]
+    public async Task<EnvSelectResponse> EnvSelectAsync(
+        string environment,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environment))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'environment' parameter is required");
+        }
+
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        // Use multi-layer resolution
+        using var credentialStore = new SecureCredentialStore();
+        using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
+        var result = await resolver.ResolveAsync(environment, cancellationToken);
+
+        if (!result.Success)
+        {
+            throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                result.ErrorMessage ?? $"Environment '{environment}' not found");
+        }
+
+        var resolved = result.Environment!;
+        profile.Environment = resolved;
+        await store.SaveAsync(collection, cancellationToken);
+
+        return new EnvSelectResponse
+        {
+            Url = resolved.Url,
+            DisplayName = resolved.DisplayName,
+            UniqueName = resolved.UniqueName,
+            EnvironmentId = resolved.EnvironmentId,
+            ResolutionMethod = result.Method.ToString()
+        };
+    }
+
+    #endregion
+
+    #region Plugins Methods
+
+    /// <summary>
+    /// Lists registered plugins in the environment.
+    /// Maps to: ppds plugins list --json
+    /// </summary>
+    [JsonRpcMethod("plugins/list")]
+    public async Task<PluginsListResponse> PluginsListAsync(
+        string? assembly = null,
+        string? package = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        if (profile.Environment == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+        }
+
+        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+            profile.Name,
+            profile.Environment.Url,
+            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+            cancellationToken: cancellationToken);
+
+        var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+        var logger = serviceProvider.GetRequiredService<ILogger<PluginRegistrationService>>();
+        var registrationService = new PluginRegistrationService(pool, logger);
+
+        var response = new PluginsListResponse();
+
+        // Get assemblies (unless package filter is specified)
+        if (string.IsNullOrEmpty(package))
+        {
+            var assemblies = await registrationService.ListAssembliesAsync(assembly, cancellationToken);
+
+            foreach (var asm in assemblies)
+            {
+                var assemblyOutput = new PluginAssemblyInfo
+                {
+                    Name = asm.Name,
+                    Version = asm.Version,
+                    PublicKeyToken = asm.PublicKeyToken,
+                    Types = []
+                };
+
+                var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, cancellationToken);
+                await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, cancellationToken);
+
+                response.Assemblies.Add(assemblyOutput);
+            }
+        }
+
+        // Get packages (unless assembly filter is specified)
+        if (string.IsNullOrEmpty(assembly))
+        {
+            var packages = await registrationService.ListPackagesAsync(package, cancellationToken);
+
+            foreach (var pkg in packages)
+            {
+                var packageOutput = new PluginPackageInfo
+                {
+                    Name = pkg.Name,
+                    UniqueName = pkg.UniqueName,
+                    Version = pkg.Version,
+                    Assemblies = []
+                };
+
+                var assemblies = await registrationService.ListAssembliesForPackageAsync(pkg.Id, cancellationToken);
+                foreach (var asm in assemblies)
+                {
+                    var assemblyOutput = new PluginAssemblyInfo
+                    {
+                        Name = asm.Name,
+                        Version = asm.Version,
+                        PublicKeyToken = asm.PublicKeyToken,
+                        Types = []
+                    };
+
+                    var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, cancellationToken);
+                    await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, cancellationToken);
+
+                    packageOutput.Assemblies.Add(assemblyOutput);
+                }
+
+                response.Packages.Add(packageOutput);
+            }
+        }
+
+        return response;
+    }
+
+    private static async Task PopulatePluginTypesAsync(
+        PluginRegistrationService registrationService,
+        List<PluginTypeInfoModel> types,
+        List<PluginTypeInfoDto> typeOutputs,
+        CancellationToken cancellationToken)
+    {
+        if (types.Count == 0)
+            return;
+
+        // Fetch all steps in parallel - each call gets its own client from the pool
+        var stepTasks = types.Select(t => registrationService.ListStepsForTypeAsync(t.Id, cancellationToken));
+        var stepsPerType = await Task.WhenAll(stepTasks);
+
+        // Collect all steps for image fetching
+        var allSteps = stepsPerType.SelectMany(s => s).ToList();
+
+        // Fetch all images in parallel if there are steps
+        Dictionary<Guid, List<PluginImageInfoModel>> imagesByStepId = [];
+        if (allSteps.Count > 0)
+        {
+            var imageTasks = allSteps.Select(s => registrationService.ListImagesForStepAsync(s.Id, cancellationToken));
+            var imagesPerStep = await Task.WhenAll(imageTasks);
+            imagesByStepId = allSteps
+                .Select((step, idx) => (step.Id, images: imagesPerStep[idx]))
+                .ToDictionary(t => t.Id, t => t.images);
+        }
+
+        // Build DTOs
+        for (var i = 0; i < types.Count; i++)
+        {
+            var type = types[i];
+            var stepsForType = stepsPerType[i];
+
+            var typeOutput = new PluginTypeInfoDto
+            {
+                TypeName = type.TypeName,
+                Steps = stepsForType.Select(step => new PluginStepInfo
+                {
+                    Name = step.Name,
+                    Message = step.Message,
+                    Entity = step.PrimaryEntity,
+                    Stage = step.Stage,
+                    Mode = step.Mode,
+                    ExecutionOrder = step.ExecutionOrder,
+                    FilteringAttributes = step.FilteringAttributes,
+                    IsEnabled = step.IsEnabled,
+                    Description = step.Description,
+                    Deployment = step.Deployment,
+                    RunAsUser = step.ImpersonatingUserName,
+                    AsyncAutoDelete = step.AsyncAutoDelete,
+                    Images = imagesByStepId.TryGetValue(step.Id, out var images)
+                        ? images.Select(img => new PluginImageInfo
+                        {
+                            Name = img.Name,
+                            EntityAlias = img.EntityAlias ?? img.Name,
+                            ImageType = img.ImageType,
+                            Attributes = img.Attributes
+                        }).ToList()
+                        : []
+                }).ToList()
+            };
+
+            typeOutputs.Add(typeOutput);
+        }
+    }
+
+    #endregion
+
+    #region Schema Methods
+
+    /// <summary>
+    /// Lists entity schema (fields/attributes).
+    /// Maps to: ppds data schema --entity "entityname" --json
+    /// </summary>
+    [JsonRpcMethod("schema/list")]
+    public async Task<SchemaListResponse> SchemaListAsync(
+        string entity,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(entity))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'entity' parameter is required");
+        }
+
+        // TODO: Implement schema retrieval
+        // This will be fully implemented when #51 (metadata commands) is merged
+        // For now, return a placeholder indicating the method is recognized
+        throw new RpcException(
+            ErrorCodes.Operation.NotSupported,
+            "Schema retrieval will be available after metadata commands (#51) are implemented");
+    }
+
+    #endregion
+}
+
+#region Response DTOs
+
+/// <summary>
+/// Response for auth/list method.
+/// </summary>
+public class AuthListResponse
+{
+    [JsonPropertyName("activeProfile")]
+    public string? ActiveProfile { get; set; }
+
+    [JsonPropertyName("profiles")]
+    public List<ProfileInfo> Profiles { get; set; } = [];
+}
+
+/// <summary>
+/// Profile information summary.
+/// </summary>
+public class ProfileInfo
+{
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("identity")]
+    public string Identity { get; set; } = "";
+
+    [JsonPropertyName("authMethod")]
+    public string AuthMethod { get; set; } = "";
+
+    [JsonPropertyName("cloud")]
+    public string Cloud { get; set; } = "";
+
+    [JsonPropertyName("environment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EnvironmentSummary? Environment { get; set; }
+
+    [JsonPropertyName("isActive")]
+    public bool IsActive { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    [JsonPropertyName("lastUsedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+/// <summary>
+/// Brief environment summary for profile listings.
+/// </summary>
+public class EnvironmentSummary
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+}
+
+/// <summary>
+/// Response for auth/who method.
+/// </summary>
+public class AuthWhoResponse
+{
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("authMethod")]
+    public string AuthMethod { get; set; } = "";
+
+    [JsonPropertyName("cloud")]
+    public string Cloud { get; set; } = "";
+
+    [JsonPropertyName("tenantId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TenantId { get; set; }
+
+    [JsonPropertyName("username")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("objectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ObjectId { get; set; }
+
+    [JsonPropertyName("applicationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApplicationId { get; set; }
+
+    [JsonPropertyName("tokenExpiresOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? TokenExpiresOn { get; set; }
+
+    [JsonPropertyName("tokenStatus")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TokenStatus { get; set; }
+
+    [JsonPropertyName("environment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EnvironmentDetails? Environment { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    [JsonPropertyName("lastUsedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+/// <summary>
+/// Detailed environment information.
+/// </summary>
+public class EnvironmentDetails
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
+
+    [JsonPropertyName("organizationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OrganizationId { get; set; }
+
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("region")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Region { get; set; }
+}
+
+/// <summary>
+/// Response for auth/select method.
+/// </summary>
+public class AuthSelectResponse
+{
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("identity")]
+    public string Identity { get; set; } = "";
+
+    [JsonPropertyName("environment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Environment { get; set; }
+}
+
+/// <summary>
+/// Response for env/list method.
+/// </summary>
+public class EnvListResponse
+{
+    [JsonPropertyName("filter")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Filter { get; set; }
+
+    [JsonPropertyName("environments")]
+    public List<EnvironmentInfo> Environments { get; set; } = [];
+}
+
+/// <summary>
+/// Environment information from discovery.
+/// </summary>
+public class EnvironmentInfo
+{
+    [JsonPropertyName("id")]
+    public Guid Id { get; set; }
+
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
+
+    [JsonPropertyName("friendlyName")]
+    public string FriendlyName { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("apiUrl")]
+    public string ApiUrl { get; set; } = "";
+
+    [JsonPropertyName("url")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("region")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Region { get; set; }
+
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; set; }
+
+    [JsonPropertyName("isActive")]
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// Response for env/select method.
+/// </summary>
+public class EnvSelectResponse
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
+
+    [JsonPropertyName("resolutionMethod")]
+    public string ResolutionMethod { get; set; } = "";
+}
+
+/// <summary>
+/// Response for schema/list method.
+/// </summary>
+public class SchemaListResponse
+{
+    [JsonPropertyName("entity")]
+    public string Entity { get; set; } = "";
+
+    [JsonPropertyName("attributes")]
+    public List<AttributeInfo> Attributes { get; set; } = [];
+}
+
+/// <summary>
+/// Attribute/field information.
+/// </summary>
+public class AttributeInfo
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("attributeType")]
+    public string AttributeType { get; set; } = "";
+
+    [JsonPropertyName("isCustomAttribute")]
+    public bool IsCustomAttribute { get; set; }
+
+    [JsonPropertyName("isPrimaryId")]
+    public bool IsPrimaryId { get; set; }
+
+    [JsonPropertyName("isPrimaryName")]
+    public bool IsPrimaryName { get; set; }
+}
+
+/// <summary>
+/// Response for plugins/list method.
+/// </summary>
+public class PluginsListResponse
+{
+    [JsonPropertyName("assemblies")]
+    public List<PluginAssemblyInfo> Assemblies { get; set; } = [];
+
+    [JsonPropertyName("packages")]
+    public List<PluginPackageInfo> Packages { get; set; } = [];
+}
+
+/// <summary>
+/// Plugin package information.
+/// </summary>
+public class PluginPackageInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; set; }
+
+    [JsonPropertyName("assemblies")]
+    public List<PluginAssemblyInfo> Assemblies { get; set; } = [];
+}
+
+/// <summary>
+/// Plugin assembly information.
+/// </summary>
+public class PluginAssemblyInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; set; }
+
+    [JsonPropertyName("publicKeyToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PublicKeyToken { get; set; }
+
+    [JsonPropertyName("types")]
+    public List<PluginTypeInfoDto> Types { get; set; } = [];
+}
+
+/// <summary>
+/// Plugin type information.
+/// </summary>
+public class PluginTypeInfoDto
+{
+    [JsonPropertyName("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonPropertyName("steps")]
+    public List<PluginStepInfo> Steps { get; set; } = [];
+}
+
+/// <summary>
+/// Plugin step information.
+/// </summary>
+public class PluginStepInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("entity")]
+    public string Entity { get; set; } = "";
+
+    [JsonPropertyName("stage")]
+    public string Stage { get; set; } = "";
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonPropertyName("executionOrder")]
+    public int ExecutionOrder { get; set; }
+
+    [JsonPropertyName("filteringAttributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FilteringAttributes { get; set; }
+
+    [JsonPropertyName("isEnabled")]
+    public bool IsEnabled { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("deployment")]
+    public string Deployment { get; set; } = "ServerOnly";
+
+    [JsonPropertyName("runAsUser")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RunAsUser { get; set; }
+
+    [JsonPropertyName("asyncAutoDelete")]
+    public bool AsyncAutoDelete { get; set; }
+
+    [JsonPropertyName("images")]
+    public List<PluginImageInfo> Images { get; set; } = [];
+}
+
+/// <summary>
+/// Plugin image information.
+/// </summary>
+public class PluginImageInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("entityAlias")]
+    public string EntityAlias { get; set; } = "";
+
+    [JsonPropertyName("imageType")]
+    public string ImageType { get; set; } = "";
+
+    [JsonPropertyName("attributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Attributes { get; set; }
+}
+
+#endregion
