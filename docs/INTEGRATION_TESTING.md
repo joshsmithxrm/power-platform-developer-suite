@@ -76,11 +76,12 @@ Use these to skip tests when prerequisites aren't available:
 
 **Solutions:**
 
-1. **Use `PPDS_SPN_SECRET` environment variable** (recommended for CI):
-   ```csharp
-   // CredentialProviderFactory checks env var FIRST, bypasses SecureCredentialStore
-   // Set in workflow: PPDS_SPN_SECRET: ${{ secrets.PPDS_TEST_CLIENT_SECRET }}
+1. **Set `PPDS_TEST_CLIENT_SECRET` in CI** (recommended):
+   ```yaml
+   # In workflow env section:
+   PPDS_TEST_CLIENT_SECRET: ${{ secrets.PPDS_TEST_CLIENT_SECRET }}
    ```
+   `CredentialProviderFactory` automatically checks `PPDS_SPN_SECRET` first, then falls back to `PPDS_TEST_CLIENT_SECRET`. Since CI already sets the latter, the bypass "just works" without extra configuration.
 
 2. **Mark tests with `[Trait("Category", "SecureStorage")]`**:
    ```csharp
