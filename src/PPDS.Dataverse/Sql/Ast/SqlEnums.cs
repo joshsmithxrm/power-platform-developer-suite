@@ -1,0 +1,110 @@
+using System;
+
+namespace PPDS.Dataverse.Sql.Ast;
+
+/// <summary>
+/// Comparison operators in SQL WHERE clauses.
+/// </summary>
+public enum SqlComparisonOperator
+{
+    Equal,          // =
+    NotEqual,       // <> or !=
+    LessThan,       // <
+    GreaterThan,    // >
+    LessThanOrEqual,    // <=
+    GreaterThanOrEqual  // >=
+}
+
+/// <summary>
+/// Logical operators for combining conditions.
+/// </summary>
+public enum SqlLogicalOperator
+{
+    And,
+    Or
+}
+
+/// <summary>
+/// Sort direction for ORDER BY.
+/// </summary>
+public enum SqlSortDirection
+{
+    Ascending,
+    Descending
+}
+
+/// <summary>
+/// JOIN types.
+/// </summary>
+public enum SqlJoinType
+{
+    Inner,
+    Left,
+    Right
+}
+
+/// <summary>
+/// Aggregate function types.
+/// </summary>
+public enum SqlAggregateFunction
+{
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max
+}
+
+/// <summary>
+/// Extension methods for SQL enums.
+/// </summary>
+public static class SqlEnumExtensions
+{
+    /// <summary>
+    /// Converts a comparison operator to its FetchXML equivalent.
+    /// </summary>
+    public static string ToFetchXmlOperator(this SqlComparisonOperator op) => op switch
+    {
+        SqlComparisonOperator.Equal => "eq",
+        SqlComparisonOperator.NotEqual => "ne",
+        SqlComparisonOperator.LessThan => "lt",
+        SqlComparisonOperator.GreaterThan => "gt",
+        SqlComparisonOperator.LessThanOrEqual => "le",
+        SqlComparisonOperator.GreaterThanOrEqual => "ge",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Converts a logical operator to its FetchXML filter type.
+    /// </summary>
+    public static string ToFetchXmlFilterType(this SqlLogicalOperator op) => op switch
+    {
+        SqlLogicalOperator.And => "and",
+        SqlLogicalOperator.Or => "or",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Converts a join type to its FetchXML link-type.
+    /// </summary>
+    public static string ToFetchXmlLinkType(this SqlJoinType type) => type switch
+    {
+        SqlJoinType.Inner => "inner",
+        SqlJoinType.Left => "outer",
+        SqlJoinType.Right => "outer", // FetchXML doesn't have right, we handle differently
+        _ => throw new ArgumentOutOfRangeException(nameof(type))
+    };
+
+    /// <summary>
+    /// Converts an aggregate function to its FetchXML aggregate attribute.
+    /// </summary>
+    public static string ToFetchXmlAggregate(this SqlAggregateFunction func) => func switch
+    {
+        SqlAggregateFunction.Count => "count",
+        SqlAggregateFunction.Sum => "sum",
+        SqlAggregateFunction.Avg => "avg",
+        SqlAggregateFunction.Min => "min",
+        SqlAggregateFunction.Max => "max",
+        _ => throw new ArgumentOutOfRangeException(nameof(func))
+    };
+}

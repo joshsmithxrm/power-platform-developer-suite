@@ -6,6 +6,7 @@ using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Resilience;
 
 namespace PPDS.Dataverse.DependencyInjection
@@ -246,6 +247,7 @@ namespace PPDS.Dataverse.DependencyInjection
             // Pool-consuming services (transient - stateless, get pool connection per operation)
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
             services.AddTransient<IMetadataService, DataverseMetadataService>();
+            services.AddTransient<IQueryExecutor, QueryExecutor>();
 
             return services;
         }

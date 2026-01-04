@@ -8,6 +8,10 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Dataverse.Sql.Transpilation;
 using StreamJsonRpc;
 
 // Aliases to disambiguate from local DTOs
@@ -473,6 +477,233 @@ public class RpcMethodHandler
     }
 
     #endregion
+
+    #region Query Methods
+
+    /// <summary>
+    /// Executes a FetchXML query against Dataverse.
+    /// Maps to: ppds query fetch --json
+    /// </summary>
+    [JsonRpcMethod("query/fetch")]
+    public async Task<QueryResultResponse> QueryFetchAsync(
+        string fetchXml,
+        int? top = null,
+        int? page = null,
+        string? pagingCookie = null,
+        bool count = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(fetchXml))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'fetchXml' parameter is required");
+        }
+
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        if (profile.Environment == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+        }
+
+        // Inject top attribute if specified
+        var query = fetchXml;
+        if (top.HasValue)
+        {
+            query = InjectTopAttribute(query, top.Value);
+        }
+
+        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+            profile.Name,
+            profile.Environment.Url,
+            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+            cancellationToken: cancellationToken);
+
+        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+        var result = await queryExecutor.ExecuteFetchXmlAsync(
+            query,
+            page,
+            pagingCookie,
+            count,
+            cancellationToken);
+
+        return MapToResponse(result, query);
+    }
+
+    /// <summary>
+    /// Executes a SQL query against Dataverse by transpiling to FetchXML.
+    /// Maps to: ppds query sql --json
+    /// </summary>
+    [JsonRpcMethod("query/sql")]
+    public async Task<QueryResultResponse> QuerySqlAsync(
+        string sql,
+        int? top = null,
+        int? page = null,
+        string? pagingCookie = null,
+        bool count = false,
+        bool showFetchXml = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sql' parameter is required");
+        }
+
+        // Parse and transpile SQL to FetchXML
+        SqlSelectStatement ast;
+        try
+        {
+            var parser = new SqlParser(sql);
+            ast = parser.Parse();
+        }
+        catch (SqlParseException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex);
+        }
+
+        // Override top if specified
+        if (top.HasValue)
+        {
+            ast = ast.WithTop(top.Value);
+        }
+
+        var transpiler = new SqlToFetchXmlTranspiler();
+        var fetchXml = transpiler.Transpile(ast);
+
+        // If showFetchXml is true, just return the transpiled FetchXML
+        if (showFetchXml)
+        {
+            return new QueryResultResponse
+            {
+                Success = true,
+                ExecutedFetchXml = fetchXml
+            };
+        }
+
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile;
+        if (profile == null)
+        {
+            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+        }
+
+        if (profile.Environment == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+        }
+
+        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+            profile.Name,
+            profile.Environment.Url,
+            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
+            cancellationToken: cancellationToken);
+
+        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
+        var result = await queryExecutor.ExecuteFetchXmlAsync(
+            fetchXml,
+            page,
+            pagingCookie,
+            count,
+            cancellationToken);
+
+        return MapToResponse(result, fetchXml);
+    }
+
+    private static string InjectTopAttribute(string fetchXml, int top)
+    {
+        var fetchIndex = fetchXml.IndexOf("<fetch", StringComparison.OrdinalIgnoreCase);
+        if (fetchIndex < 0) return fetchXml;
+
+        var endOfFetch = fetchXml.IndexOf('>', fetchIndex);
+        if (endOfFetch < 0) return fetchXml;
+
+        var fetchElement = fetchXml.Substring(fetchIndex, endOfFetch - fetchIndex);
+
+        if (fetchElement.Contains("top=", StringComparison.OrdinalIgnoreCase))
+        {
+            return fetchXml; // Already has top, don't override
+        }
+
+        var insertPoint = fetchIndex + "<fetch".Length;
+        return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
+    }
+
+    private static QueryResultResponse MapToResponse(QueryResult result, string fetchXml)
+    {
+        return new QueryResultResponse
+        {
+            Success = true,
+            EntityName = result.EntityLogicalName,
+            Columns = result.Columns.Select(c => new QueryColumnInfo
+            {
+                LogicalName = c.LogicalName,
+                Alias = c.Alias,
+                DisplayName = c.DisplayName,
+                DataType = c.DataType.ToString(),
+                LinkedEntityAlias = c.LinkedEntityAlias
+            }).ToList(),
+            Records = result.Records.Select(r =>
+                r.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => MapQueryValue(kvp.Value))).ToList(),
+            Count = result.Count,
+            TotalCount = result.TotalCount,
+            MoreRecords = result.MoreRecords,
+            PagingCookie = result.PagingCookie,
+            PageNumber = result.PageNumber,
+            IsAggregate = result.IsAggregate,
+            ExecutedFetchXml = fetchXml,
+            ExecutionTimeMs = result.ExecutionTimeMs
+        };
+    }
+
+    private static object? MapQueryValue(QueryValue? value)
+    {
+        if (value == null) return null;
+
+        // For lookups, return structured object
+        if (value.LookupEntityId.HasValue)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["value"] = value.Value,
+                ["formatted"] = value.FormattedValue,
+                ["entityType"] = value.LookupEntityType,
+                ["entityId"] = value.LookupEntityId
+            };
+        }
+
+        // For values with formatting, return structured object
+        if (value.FormattedValue != null)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["value"] = value.Value,
+                ["formatted"] = value.FormattedValue
+            };
+        }
+
+        // Simple value
+        return value.Value;
+    }
+
+    #endregion
 }
 
 #region Response DTOs
@@ -891,6 +1122,76 @@ public class PluginImageInfo
     [JsonPropertyName("attributes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Attributes { get; set; }
+}
+
+/// <summary>
+/// Response for query/fetch and query/sql methods.
+/// </summary>
+public class QueryResultResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("entityName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntityName { get; set; }
+
+    [JsonPropertyName("columns")]
+    public List<QueryColumnInfo> Columns { get; set; } = [];
+
+    [JsonPropertyName("records")]
+    public List<Dictionary<string, object?>> Records { get; set; } = [];
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("totalCount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TotalCount { get; set; }
+
+    [JsonPropertyName("moreRecords")]
+    public bool MoreRecords { get; set; }
+
+    [JsonPropertyName("pagingCookie")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PagingCookie { get; set; }
+
+    [JsonPropertyName("pageNumber")]
+    public int PageNumber { get; set; }
+
+    [JsonPropertyName("isAggregate")]
+    public bool IsAggregate { get; set; }
+
+    [JsonPropertyName("executedFetchXml")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutedFetchXml { get; set; }
+
+    [JsonPropertyName("executionTimeMs")]
+    public long ExecutionTimeMs { get; set; }
+}
+
+/// <summary>
+/// Column information in query results.
+/// </summary>
+public class QueryColumnInfo
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("alias")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Alias { get; set; }
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("dataType")]
+    public string DataType { get; set; } = "";
+
+    [JsonPropertyName("linkedEntityAlias")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LinkedEntityAlias { get; set; }
 }
 
 #endregion
