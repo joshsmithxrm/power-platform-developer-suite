@@ -20,6 +20,10 @@ on:
       - 'Directory.Build.props'
       - '.github/workflows/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Dependency review for PRs - checks for vulnerabilities in dependency changes
   dependency-review:

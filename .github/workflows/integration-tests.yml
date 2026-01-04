@@ -20,40 +20,17 @@ on:
       - 'Directory.Build.props'
       - '.github/workflows/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit-tests:
-    name: Unit Tests
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: |
-          8.0.x
-          9.0.x
-          10.0.x
-
-    - name: Restore dependencies
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Run Unit Tests (exclude integration)
-      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
-
   integration-tests:
     name: Integration Tests
     runs-on: windows-latest
     # Only run on PRs from the same repo (not forks) or on main branch
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     environment: test-dataverse
-    needs: unit-tests
     permissions:
       contents: read
       id-token: write  # Required for GitHub OIDC federated authentication
