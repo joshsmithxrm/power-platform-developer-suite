@@ -313,6 +313,19 @@ public static class LoadCommand
             }
             return ExitCodes.MappingRequired;
         }
+        catch (MappingValidationException ex)
+        {
+            Console.Error.WriteLine();
+            if (outputFormat == OutputFormat.Json)
+            {
+                WriteJsonValidationError(ex);
+            }
+            else
+            {
+                WriteTextValidationError(ex);
+            }
+            return ExitCodes.ValidationError;
+        }
         catch (OperationCanceledException)
         {
             Console.Error.WriteLine();
@@ -528,6 +541,63 @@ public static class LoadCommand
                     suggestions = c.Suggestions ?? []
                 }),
                 suggestion = "Use --generate-mapping to create a mapping file, or --force to skip unmatched columns"
+            }
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
+    }
+
+    private static void WriteTextValidationError(MappingValidationException ex)
+    {
+        Console.Error.WriteLine("Mapping file validation failed");
+        Console.Error.WriteLine();
+
+        if (ex.UnconfiguredColumns.Count > 0)
+        {
+            Console.Error.WriteLine("Columns with no field configured (set 'field' or 'skip: true'):");
+            foreach (var col in ex.UnconfiguredColumns)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        if (ex.MissingMappings.Count > 0)
+        {
+            Console.Error.WriteLine("CSV columns not found in mapping file:");
+            foreach (var col in ex.MissingMappings)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        if (ex.StaleMappings.Count > 0)
+        {
+            Console.Error.WriteLine("Warning: Mapping entries not found in CSV (stale entries):");
+            foreach (var col in ex.StaleMappings)
+            {
+                Console.Error.WriteLine($"  • {col}");
+            }
+            Console.Error.WriteLine();
+        }
+
+        Console.Error.WriteLine("Update the mapping file to configure all columns, then retry.");
+    }
+
+    private static void WriteJsonValidationError(MappingValidationException ex)
+    {
+        var output = new
+        {
+            success = false,
+            error = new
+            {
+                code = "MAPPING_VALIDATION_FAILED",
+                message = ex.Message,
+                unconfiguredColumns = ex.UnconfiguredColumns,
+                missingMappings = ex.MissingMappings,
+                staleMappings = ex.StaleMappings,
+                suggestion = "Update the mapping file to configure all columns (set 'field' or 'skip: true')"
             }
         };
 

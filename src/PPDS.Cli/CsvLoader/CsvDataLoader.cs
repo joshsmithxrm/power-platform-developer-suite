@@ -61,6 +61,24 @@ public sealed class CsvDataLoader
         if (options.Mapping?.Columns != null)
         {
             mappings = options.Mapping.Columns;
+
+            // Validate the mapping file against the CSV
+            var validationResult = await ValidateMappingFileAsync(csvPath, mappings, cancellationToken);
+
+            // Add stale mapping warnings
+            foreach (var stale in validationResult.StaleMappings)
+            {
+                warnings.Add($"Mapping column '{stale}' not found in CSV (stale mapping entry).");
+            }
+
+            // Throw if there are validation errors (unconfigured or missing mappings)
+            if (validationResult.UnconfiguredColumns.Count > 0 || validationResult.MissingMappings.Count > 0)
+            {
+                throw new MappingValidationException(
+                    validationResult.UnconfiguredColumns,
+                    validationResult.MissingMappings,
+                    validationResult.StaleMappings);
+            }
         }
         else
         {
@@ -598,10 +616,92 @@ public sealed class CsvDataLoader
         return null;
     }
 
+    private async Task<MappingValidationResult> ValidateMappingFileAsync(
+        string csvPath,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        CancellationToken cancellationToken)
+    {
+        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HasHeaderRecord = true,
+            MissingFieldFound = null,
+            HeaderValidated = null
+        };
+
+        using var reader = new StreamReader(csvPath);
+        using var csv = new CsvReader(reader, csvConfig);
+
+        await csv.ReadAsync();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        var csvColumns = new HashSet<string>(headers, StringComparer.OrdinalIgnoreCase);
+        var mappingColumns = new HashSet<string>(mappings.Keys, StringComparer.OrdinalIgnoreCase);
+
+        var unconfiguredColumns = new List<string>();
+        var missingMappings = new List<string>();
+        var staleMappings = new List<string>();
+
+        // Check for unconfigured columns (field: null without skip: true)
+        foreach (var (columnName, mapping) in mappings)
+        {
+            if (string.IsNullOrEmpty(mapping.Field) && !mapping.Skip)
+            {
+                unconfiguredColumns.Add(columnName);
+            }
+        }
+
+        // Check for CSV columns not in mapping
+        foreach (var csvColumn in csvColumns)
+        {
+            if (!mappingColumns.Contains(csvColumn))
+            {
+                missingMappings.Add(csvColumn);
+            }
+        }
+
+        // Check for mapping columns not in CSV (stale entries - warning only)
+        foreach (var mappingColumn in mappingColumns)
+        {
+            if (!csvColumns.Contains(mappingColumn))
+            {
+                staleMappings.Add(mappingColumn);
+            }
+        }
+
+        return new MappingValidationResult
+        {
+            UnconfiguredColumns = unconfiguredColumns,
+            MissingMappings = missingMappings,
+            StaleMappings = staleMappings
+        };
+    }
+
     private static bool IsLookupAttribute(AttributeMetadata attr)
     {
         return attr.AttributeType == AttributeTypeCode.Lookup ||
                attr.AttributeType == AttributeTypeCode.Customer ||
                attr.AttributeType == AttributeTypeCode.Owner;
     }
+}
+
+/// <summary>
+/// Result of validating a mapping file against a CSV.
+/// </summary>
+internal sealed record MappingValidationResult
+{
+    /// <summary>
+    /// Columns that have no field configured and are not marked as skip.
+    /// </summary>
+    public required List<string> UnconfiguredColumns { get; init; }
+
+    /// <summary>
+    /// CSV columns that are not present in the mapping file.
+    /// </summary>
+    public required List<string> MissingMappings { get; init; }
+
+    /// <summary>
+    /// Mapping columns that are not present in the CSV (stale entries).
+    /// </summary>
+    public required List<string> StaleMappings { get; init; }
 }
