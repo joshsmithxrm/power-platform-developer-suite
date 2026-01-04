@@ -445,7 +445,7 @@ public static class LoadCommand
     {
         Console.Error.WriteLine($"Analyzing mapping for '{entityName}'...");
 
-        var loader = new CsvDataLoader(pool, null!, null);
+        var loader = new CsvDataLoader(pool, null, null);
         var analysis = await loader.AnalyzeAsync(csvPath, entityName, cancellationToken);
 
         Console.Error.WriteLine();

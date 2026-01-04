@@ -18,19 +18,22 @@ namespace PPDS.Cli.CsvLoader;
 public sealed class CsvDataLoader
 {
     private readonly IDataverseConnectionPool _pool;
-    private readonly IBulkOperationExecutor _bulkExecutor;
+    private readonly IBulkOperationExecutor? _bulkExecutor;
     private readonly ILogger<CsvDataLoader>? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CsvDataLoader"/> class.
     /// </summary>
+    /// <param name="pool">Connection pool for Dataverse operations.</param>
+    /// <param name="bulkExecutor">Bulk operation executor. Required for LoadAsync, optional for AnalyzeAsync.</param>
+    /// <param name="logger">Optional logger.</param>
     public CsvDataLoader(
         IDataverseConnectionPool pool,
-        IBulkOperationExecutor bulkExecutor,
+        IBulkOperationExecutor? bulkExecutor,
         ILogger<CsvDataLoader>? logger = null)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
-        _bulkExecutor = bulkExecutor ?? throw new ArgumentNullException(nameof(bulkExecutor));
+        _bulkExecutor = bulkExecutor;
         _logger = logger;
     }
 
@@ -216,6 +219,12 @@ public sealed class CsvDataLoader
         IProgress<ProgressSnapshot>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (_bulkExecutor == null)
+        {
+            throw new InvalidOperationException(
+                "BulkExecutor is required for LoadAsync. Use the constructor overload that provides IBulkOperationExecutor.");
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var errors = new List<LoadError>();
         var warnings = new List<string>();
