@@ -654,6 +654,7 @@ PRs get reviewed by Copilot, Gemini, and CodeQL. **Not all findings are valid.**
 
 | Command | Purpose |
 |---------|---------|
+| `/plan-work <issues...>` | Triage issues, create worktrees, generate session prompts |
 | `/pre-pr` | Validate before PR (build, test, changelog) |
 | `/review-bot-comments [PR#]` | Triage bot review findings |
 | `/handoff` | Session summary (workspace) |
