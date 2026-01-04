@@ -26,7 +26,15 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        var result = await RunCliAsync("plugins", "list");
+        // Pass PPDS_SPN_SECRET to bypass SecureCredentialStore lookup
+        // which calls MsalCacheHelper.CreateAsync() and may hang on Windows CI.
+        // The profile still needs to exist (for auth method, tenant, etc.),
+        // but the secret is provided via env var instead of credential store.
+        var envVars = new Dictionary<string, string>
+        {
+            ["PPDS_SPN_SECRET"] = Configuration.ClientSecret!
+        };
+        var result = await RunCliWithEnvAsync(envVars, "plugins", "list");
 
         result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
     }
@@ -45,7 +53,12 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
-        var result = await RunCliAsync("plugins", "list", "--output-format", "json");
+        // Pass PPDS_SPN_SECRET to bypass SecureCredentialStore lookup
+        var envVars = new Dictionary<string, string>
+        {
+            ["PPDS_SPN_SECRET"] = Configuration.ClientSecret!
+        };
+        var result = await RunCliWithEnvAsync(envVars, "plugins", "list", "--output-format", "json");
 
         result.ExitCode.Should().Be(0, $"StdErr: {result.StdErr}");
         result.StdOut.Trim().Should().StartWith("{");
@@ -68,8 +81,15 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
+        // Pass PPDS_SPN_SECRET to bypass SecureCredentialStore lookup
+        var envVars = new Dictionary<string, string>
+        {
+            ["PPDS_SPN_SECRET"] = Configuration.ClientSecret!
+        };
+
         // Filter by a likely non-existent assembly
-        var result = await RunCliAsync(
+        var result = await RunCliWithEnvAsync(
+            envVars,
             "plugins", "list",
             "--assembly", "NonExistentAssembly12345");
 
@@ -91,8 +111,15 @@ public class PluginsListCommandE2ETests : CliE2ETestBase
 
         await RunCliAsync("auth", "select", "--name", profileName);
 
+        // Pass PPDS_SPN_SECRET to bypass SecureCredentialStore lookup
+        var envVars = new Dictionary<string, string>
+        {
+            ["PPDS_SPN_SECRET"] = Configuration.ClientSecret!
+        };
+
         // Filter by a likely non-existent package
-        var result = await RunCliAsync(
+        var result = await RunCliWithEnvAsync(
+            envVars,
             "plugins", "list",
             "--package", "NonExistentPackage12345");
 
