@@ -211,6 +211,25 @@ dotnet clean
 6. Create PR to `main`
 7. Run `/review-bot-comments` after bots comment
 
+### Plan Mode Checklist
+
+When designing implementation in plan mode, verify:
+
+- [ ] **Shared utilities identified** - Will any logic be needed in multiple files?
+- [ ] **Constants centralized** - Are there magic numbers/strings that should be shared?
+- [ ] **Code reuse anticipated** - Does Feature A's logic overlap with Feature B?
+- [ ] **Existing patterns checked** - Does similar functionality already exist to extend?
+
+**Anti-pattern:** Planning WHAT without WHERE
+
+| Planned | Should Also Plan |
+|---------|------------------|
+| "Add prefix-aware matching" | "Who else needs this matching? Extract to shared class?" |
+| "Implement `--analyze` mode" | "Does analyze share logic with load? Factor out common code?" |
+| "Add schema version validation" | "Where should version constants live? Single source of truth?" |
+
+**Lesson learned:** Duplication discovered during bot review is expensive. Anticipate shared code during planning, not after implementation.
+
 ### Code Conventions
 
 ```csharp
