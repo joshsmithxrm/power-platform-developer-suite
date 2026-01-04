@@ -3,29 +3,36 @@ name: Test
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '**/*.csproj'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - '.github/workflows/**'
   pull_request:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '**/*.csproj'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - '.github/workflows/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Detect which files changed to conditionally run jobs
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - '**/*.csproj'
+              - '*.sln'
+              - 'Directory.Build.props'
+              - '.github/workflows/**'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
 
     steps:
@@ -58,3 +65,22 @@ jobs:
         flags: unittests
         fail_ci_if_error: false  # Don't fail build if upload fails
         verbose: true
+
+  # Gate job for branch protection - always runs, reports success when test passes or is skipped
+  test-status:
+    runs-on: ubuntu-latest
+    needs: [changes, test]
+    if: always()
+    steps:
+      - name: Check test status
+        run: |
+          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
+            echo "No code changes - test skipped (OK)"
+            exit 0
+          elif [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "Tests passed"
+            exit 0
+          else
+            echo "Tests failed: ${{ needs.test.result }}"
+            exit 1
+          fi
