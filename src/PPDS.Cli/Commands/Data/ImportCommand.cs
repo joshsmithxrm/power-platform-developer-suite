@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Formats;
 using PPDS.Migration.Import;

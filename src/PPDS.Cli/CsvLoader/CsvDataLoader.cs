@@ -49,10 +49,10 @@ public sealed class CsvDataLoader
 
         // Retrieve entity metadata
         var entityMetadata = await RetrieveEntityMetadataAsync(entityLogicalName, cancellationToken);
-        var attributesByName = BuildAttributeLookup(entityMetadata);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(entityMetadata);
 
         // Extract publisher prefix
-        var prefix = ExtractPublisherPrefix(entityLogicalName);
+        var prefix = ColumnMatcher.ExtractPublisherPrefix(entityLogicalName);
 
         // Read headers and sample values
         var (headers, sampleValues) = await ReadCsvHeadersAndSamplesAsync(csvPath, cancellationToken);
@@ -169,19 +169,19 @@ public sealed class CsvDataLoader
         }
 
         // Try normalized prefix + column
-        if (prefix != null && TryFindAttribute(NormalizeForMatching(prefix + header), attributesByName, out attr))
+        if (prefix != null && ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(prefix + header), attributesByName, out attr))
         {
             return CreateMatchedAnalysis(header, attr!, "normalized-prefix", samples);
         }
 
         // Try normalized match
-        if (TryFindAttribute(NormalizeForMatching(header), attributesByName, out attr))
+        if (ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(header), attributesByName, out attr))
         {
             return CreateMatchedAnalysis(header, attr!, "normalized", samples);
         }
 
         // No match
-        var suggestions = FindSimilarAttributes(header, attributesByName, prefix);
+        var suggestions = ColumnMatcher.FindSimilarAttributes(header, attributesByName, prefix);
         return new ColumnAnalysis
         {
             CsvColumn = header,
@@ -197,7 +197,7 @@ public sealed class CsvDataLoader
         string matchType,
         List<string>? samples)
     {
-        var isLookup = IsLookupAttribute(attr);
+        var isLookup = ColumnMatcher.IsLookupAttribute(attr);
         return new ColumnAnalysis
         {
             CsvColumn = header,
@@ -236,7 +236,7 @@ public sealed class CsvDataLoader
             options.EntityLogicalName, cancellationToken);
 
         // 2. Build attribute lookup
-        var attributesByName = BuildAttributeLookup(entityMetadata);
+        var attributesByName = ColumnMatcher.BuildAttributeLookup(entityMetadata);
 
         // 3. Determine column mappings
         Dictionary<string, ColumnMappingEntry> mappings;
@@ -392,25 +392,6 @@ public sealed class CsvDataLoader
         return response.EntityMetadata;
     }
 
-    private static Dictionary<string, AttributeMetadata> BuildAttributeLookup(EntityMetadata entityMetadata)
-    {
-        var lookup = new Dictionary<string, AttributeMetadata>(StringComparer.OrdinalIgnoreCase);
-
-        if (entityMetadata.Attributes == null)
-        {
-            return lookup;
-        }
-
-        foreach (var attr in entityMetadata.Attributes)
-        {
-            if (attr.LogicalName != null)
-            {
-                lookup[attr.LogicalName] = attr;
-            }
-        }
-
-        return lookup;
-    }
 
     private async Task<AutoMappingResult> AutoMapColumnsAsync(
         string csvPath,
@@ -424,7 +405,7 @@ public sealed class CsvDataLoader
         var matchedCount = 0;
 
         // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
-        var prefix = ExtractPublisherPrefix(entityLogicalName);
+        var prefix = ColumnMatcher.ExtractPublisherPrefix(entityLogicalName);
 
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
@@ -442,7 +423,7 @@ public sealed class CsvDataLoader
 
         foreach (var header in headers)
         {
-            var normalizedHeader = NormalizeForMatching(header);
+            var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
 
             // Try exact match first
             if (attributesByName.TryGetValue(header, out var attr))
@@ -457,13 +438,13 @@ public sealed class CsvDataLoader
                 matchedCount++;
             }
             // Try normalized prefix + column
-            else if (prefix != null && TryFindAttribute(NormalizeForMatching(prefix + header), attributesByName, out attr))
+            else if (prefix != null && ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(prefix + header), attributesByName, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
                 matchedCount++;
             }
             // Try normalized match (existing)
-            else if (TryFindAttribute(normalizedHeader, attributesByName, out attr))
+            else if (ColumnMatcher.TryFindAttribute(normalizedHeader, attributesByName, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
                 matchedCount++;
@@ -471,7 +452,7 @@ public sealed class CsvDataLoader
             else
             {
                 // Column could not be matched - collect suggestions
-                var suggestions = FindSimilarAttributes(header, attributesByName, prefix);
+                var suggestions = ColumnMatcher.FindSimilarAttributes(header, attributesByName, prefix);
                 unmatchedColumns.Add(new UnmatchedColumn
                 {
                     ColumnName = header,
@@ -492,53 +473,6 @@ public sealed class CsvDataLoader
         };
     }
 
-    private static string? ExtractPublisherPrefix(string entityLogicalName)
-    {
-        // Standard Dataverse entity naming: <publisher>_<name>
-        // Extract the prefix including underscore: "ppds_city" → "ppds_"
-        var underscoreIndex = entityLogicalName.IndexOf('_');
-        if (underscoreIndex > 0)
-        {
-            return entityLogicalName[..(underscoreIndex + 1)];
-        }
-        return null;
-    }
-
-    private static List<string> FindSimilarAttributes(
-        string header,
-        Dictionary<string, AttributeMetadata> attributes,
-        string? prefix = null)
-    {
-        var normalizedHeader = NormalizeForMatching(header);
-        var normalizedPrefixedHeader = prefix != null ? NormalizeForMatching(prefix + header) : null;
-        var results = new List<(string Name, int Score, bool PrefixMatch)>();
-
-        foreach (var (attrName, _) in attributes)
-        {
-            var normalizedAttr = NormalizeForMatching(attrName);
-
-            // Check for prefixed match first (higher priority)
-            if (normalizedPrefixedHeader != null && normalizedAttr.Contains(normalizedPrefixedHeader))
-            {
-                var score = Math.Abs(normalizedAttr.Length - normalizedPrefixedHeader.Length);
-                results.Add((attrName, score, true));
-            }
-            // Check if one contains the other
-            else if (normalizedAttr.Contains(normalizedHeader) || normalizedHeader.Contains(normalizedAttr))
-            {
-                var score = Math.Abs(normalizedAttr.Length - normalizedHeader.Length);
-                results.Add((attrName, score, false));
-            }
-        }
-
-        return results
-            .OrderByDescending(r => r.PrefixMatch) // Prefix matches first
-            .ThenBy(r => r.Score)
-            .Take(3)
-            .Select(r => r.Name)
-            .ToList();
-    }
-
     private static ColumnMappingEntry CreateAutoMapping(string header, AttributeMetadata attr)
     {
         var entry = new ColumnMappingEntry
@@ -547,7 +481,7 @@ public sealed class CsvDataLoader
         };
 
         // Auto-configure lookups with GUID-only matching
-        if (IsLookupAttribute(attr))
+        if (ColumnMatcher.IsLookupAttribute(attr))
         {
             var lookupAttr = (LookupAttributeMetadata)attr;
             entry.Lookup = new LookupConfig
@@ -558,33 +492,6 @@ public sealed class CsvDataLoader
         }
 
         return entry;
-    }
-
-    private static bool TryFindAttribute(
-        string normalizedHeader,
-        Dictionary<string, AttributeMetadata> attributes,
-        out AttributeMetadata? found)
-    {
-        foreach (var kvp in attributes)
-        {
-            if (NormalizeForMatching(kvp.Key) == normalizedHeader)
-            {
-                found = kvp.Value;
-                return true;
-            }
-        }
-
-        found = null;
-        return false;
-    }
-
-    private static string NormalizeForMatching(string value)
-    {
-        return value
-            .Replace(" ", "")
-            .Replace("_", "")
-            .Replace("-", "")
-            .ToLowerInvariant();
     }
 
     private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
@@ -656,7 +563,7 @@ public sealed class CsvDataLoader
                             if (attributesByName.TryGetValue(trimmedKey, out var keyAttr))
                             {
                                 // Check if this key field is a lookup
-                                if (IsLookupAttribute(keyAttr))
+                                if (ColumnMatcher.IsLookupAttribute(keyAttr))
                                 {
                                     var mapping = mappings.GetValueOrDefault(keyHeader);
                                     if (mapping?.Lookup != null)
@@ -896,12 +803,6 @@ public sealed class CsvDataLoader
         };
     }
 
-    private static bool IsLookupAttribute(AttributeMetadata attr)
-    {
-        return attr.AttributeType == AttributeTypeCode.Lookup ||
-               attr.AttributeType == AttributeTypeCode.Customer ||
-               attr.AttributeType == AttributeTypeCode.Owner;
-    }
 }
 
 /// <summary>

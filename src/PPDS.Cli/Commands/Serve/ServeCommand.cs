@@ -2,6 +2,7 @@ using System.CommandLine;
 using Nerdbank.Streams;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using StreamJsonRpc;
 
 namespace PPDS.Cli.Commands.Serve;

@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -269,7 +270,11 @@ public static class LoadCommand
                 // Validate schema version
                 if (mapping != null)
                 {
-                    ValidateMappingSchemaVersion(mapping.Version, outputFormat);
+                    CsvMappingSchema.ValidateVersion(
+                        mapping.Version,
+                        outputFormat != OutputFormat.Json
+                            ? warning => Console.Error.WriteLine(warning)
+                            : null);
                 }
             }
 
@@ -741,43 +746,6 @@ public static class LoadCommand
         Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
     }
 
-    private const string CurrentSchemaVersion = "1.0";
-
-    private static void ValidateMappingSchemaVersion(string? fileVersion, OutputFormat outputFormat)
-    {
-        if (string.IsNullOrEmpty(fileVersion))
-        {
-            return; // No version specified, assume compatible
-        }
-
-        var fileParts = ParseVersion(fileVersion);
-        var cliParts = ParseVersion(CurrentSchemaVersion);
-
-        // Major version mismatch → fail
-        if (fileParts.Major != cliParts.Major)
-        {
-            throw new SchemaVersionException(fileVersion, CurrentSchemaVersion);
-        }
-
-        // Higher minor version → warn
-        if (fileParts.Minor > cliParts.Minor)
-        {
-            if (outputFormat != OutputFormat.Json)
-            {
-                Console.Error.WriteLine($"Warning: Mapping file version {fileVersion} is newer than CLI version {CurrentSchemaVersion}. " +
-                    "Some features may be ignored.");
-            }
-        }
-    }
-
-    private static (int Major, int Minor) ParseVersion(string version)
-    {
-        var parts = version.Split('.');
-        var major = parts.Length > 0 && int.TryParse(parts[0], out var m) ? m : 0;
-        var minor = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 0;
-        return (major, minor);
-    }
-
     private static void WriteJsonSchemaVersionError(SchemaVersionException ex)
     {
         var output = new
@@ -789,7 +757,7 @@ public static class LoadCommand
                 message = ex.Message,
                 fileVersion = ex.FileVersion,
                 cliVersion = ex.CliVersion,
-                suggestion = $"Upgrade to CLI v{ParseVersion(ex.FileVersion).Major}.x or regenerate the mapping file"
+                suggestion = $"Upgrade to CLI v{CsvMappingSchema.ParseVersion(ex.FileVersion).Major}.x or regenerate the mapping file"
             }
         };
 
