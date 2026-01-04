@@ -88,7 +88,7 @@ Before creating PR, ensure changes are pushed:
 git status
 
 # If ahead, push
-git push -u origin $(git branch --show-current)
+git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
 **The PR cannot be created if commits aren't pushed.** This is a common oversight.
