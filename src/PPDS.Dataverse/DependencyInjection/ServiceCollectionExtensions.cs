@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
 
@@ -217,6 +218,9 @@ namespace PPDS.Dataverse.DependencyInjection
 
             // Bulk operation executor (transient - stateless)
             services.AddTransient<IBulkOperationExecutor, BulkOperationExecutor>();
+
+            // Metadata service (transient - stateless, uses connection pool)
+            services.AddTransient<IMetadataService, DataverseMetadataService>();
         }
     }
 }

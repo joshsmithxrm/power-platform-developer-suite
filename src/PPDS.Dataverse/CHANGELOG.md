@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Metadata service for entity browsing** - New `IMetadataService` interface and `DataverseMetadataService` implementation providing:
+  - `GetEntitiesAsync()` - List all entities with optional filtering
+  - `GetEntityAsync()` - Get full entity metadata including attributes, relationships, keys, and privileges
+  - `GetAttributesAsync()` - List entity attributes with type filtering
+  - `GetRelationshipsAsync()` - List 1:N, N:1, and N:N relationships
+  - `GetGlobalOptionSetsAsync()` - List global option sets
+  - `GetOptionSetAsync()` - Get option set details with values
+  ([#51](https://github.com/joshsmithxrm/ppds-sdk/issues/51))
+
 ### Changed
 
 - **Replaced Newtonsoft.Json with System.Text.Json** - Removed external dependency; uses built-in JSON serialization with case-insensitive property matching ([#72](https://github.com/joshsmithxrm/ppds-sdk/issues/72))
