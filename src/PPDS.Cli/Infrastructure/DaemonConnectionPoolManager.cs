@@ -19,17 +19,41 @@ namespace PPDS.Cli.Infrastructure;
 /// </summary>
 public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
 {
+    /// <summary>
+    /// Default timeout for pool creation (5 minutes to allow for device code flow).
+    /// </summary>
+    private static readonly TimeSpan DefaultPoolCreationTimeout = TimeSpan.FromMinutes(5);
+
     private readonly ConcurrentDictionary<string, Lazy<Task<CachedPoolEntry>>> _pools = new();
+    private readonly ConcurrentBag<Task> _disposalTasks = new();
     private readonly ILoggerFactory _loggerFactory;
+    private readonly Func<CancellationToken, Task<ProfileCollection>> _loadProfilesAsync;
+    private readonly TimeSpan _poolCreationTimeout;
     private int _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DaemonConnectionPoolManager"/> class.
     /// </summary>
     /// <param name="loggerFactory">Optional logger factory. If null, uses NullLoggerFactory.</param>
-    public DaemonConnectionPoolManager(ILoggerFactory? loggerFactory = null)
+    /// <param name="loadProfilesAsync">Optional profile loader for testability. If null, uses ProfileStore.</param>
+    /// <param name="poolCreationTimeout">Optional timeout for pool creation. If null, uses 5 minutes.</param>
+    public DaemonConnectionPoolManager(
+        ILoggerFactory? loggerFactory = null,
+        Func<CancellationToken, Task<ProfileCollection>>? loadProfilesAsync = null,
+        TimeSpan? poolCreationTimeout = null)
     {
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _loadProfilesAsync = loadProfilesAsync ?? DefaultLoadProfilesAsync;
+        _poolCreationTimeout = poolCreationTimeout ?? DefaultPoolCreationTimeout;
+    }
+
+    /// <summary>
+    /// Default profile loader using ProfileStore.
+    /// </summary>
+    private static async Task<ProfileCollection> DefaultLoadProfilesAsync(CancellationToken cancellationToken)
+    {
+        using var store = new ProfileStore();
+        return await store.LoadAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -54,12 +78,28 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         var cacheKey = GenerateCacheKey(profileNames, environmentUrl);
 
         // Use Lazy<Task<T>> pattern to prevent duplicate creation races
+        // Note: CancellationToken.None is passed to CreatePoolEntryAsync because the Lazy<Task<>>
+        // caches the result - we don't want the first caller's token to affect subsequent callers.
         var lazyEntry = _pools.GetOrAdd(cacheKey, _ => new Lazy<Task<CachedPoolEntry>>(
-            () => CreatePoolEntryAsync(profileNames, environmentUrl, deviceCodeCallback, cancellationToken),
+            () => CreatePoolEntryAsync(profileNames, environmentUrl, deviceCodeCallback, CancellationToken.None),
             LazyThreadSafetyMode.ExecutionAndPublication));
 
-        var entry = await lazyEntry.Value.ConfigureAwait(false);
-        return entry.Pool;
+        // Add timeout wrapper to prevent indefinite blocking (e.g., device code flow)
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(_poolCreationTimeout);
+
+        try
+        {
+            var entry = await lazyEntry.Value.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            return entry.Pool;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Our timeout fired, not caller's cancellation
+            // Remove failed entry so next caller can retry
+            _pools.TryRemove(cacheKey, out _);
+            throw new TimeoutException($"Pool creation timed out after {_poolCreationTimeout.TotalSeconds} seconds for key: {cacheKey}");
+        }
     }
 
     /// <inheritdoc/>
@@ -78,8 +118,8 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         {
             if (_pools.TryRemove(key, out var lazyEntry))
             {
-                // Dispose asynchronously in background to not block
-                _ = DisposeEntryAsync(lazyEntry);
+                // Track disposal task for awaiting on shutdown
+                _disposalTasks.Add(DisposeEntryAsync(lazyEntry).AsTask());
             }
         }
     }
@@ -101,7 +141,8 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         {
             if (_pools.TryRemove(key, out var lazyEntry))
             {
-                _ = DisposeEntryAsync(lazyEntry);
+                // Track disposal task for awaiting on shutdown
+                _disposalTasks.Add(DisposeEntryAsync(lazyEntry).AsTask());
             }
         }
     }
@@ -114,12 +155,27 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             return;
         }
 
+        // Dispose all active pools
         var entries = _pools.Values.ToList();
         _pools.Clear();
 
         foreach (var lazyEntry in entries)
         {
             await DisposeEntryAsync(lazyEntry).ConfigureAwait(false);
+        }
+
+        // Await any pending background disposals from invalidation calls
+        var pendingDisposals = _disposalTasks.ToArray();
+        if (pendingDisposals.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(pendingDisposals).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Ignore disposal errors during shutdown
+            }
         }
     }
 
@@ -167,8 +223,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         Action<DeviceCodeInfo>? deviceCodeCallback,
         CancellationToken cancellationToken)
     {
-        var store = new ProfileStore();
-        var collection = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var collection = await _loadProfilesAsync(cancellationToken).ConfigureAwait(false);
         var credentialStore = new SecureCredentialStore();
 
         // Create connection sources for each profile
