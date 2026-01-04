@@ -84,7 +84,8 @@ public void Add_FirstProfile_SetsAsActive()
 Before creating PR, ensure changes are pushed:
 
 ```bash
-# Check if ahead of remote
+# Fetch latest and check if ahead of remote
+git fetch
 git status
 
 # If ahead, push
