@@ -45,6 +45,9 @@
 | Scale throughput by adding Application Users | Each user has independent API quota; DOP × connections = total parallelism |
 | Use early-bound classes for generated entities | Type safety, IntelliSense, refactoring support |
 | Ask user before using late-bound for ambiguous cases | If unsure whether dynamic entity handling is needed, ask first |
+| Read ADRs 0002/0005 before Dataverse multi-record code | Pool patterns are non-obvious; see [ADR index](#architecture-decision-records) |
+| Compare against BulkOperationExecutor for parallel patterns | Reference implementation for correct pool usage |
+| Fix pattern issues immediately during pre-release | Don't defer; pre-release is the time to refactor |
 
 ---
 
@@ -276,6 +279,14 @@ Each package has independent versioning using [MinVer](https://github.com/adamra
 
 **Merge Strategy:** Squash merge to main (clean commit history)
 
+### Pre-Release Mindset
+
+This project is in pre-release. When bot reviews or code analysis identifies pattern issues:
+
+- **Fix now, don't defer.** Pre-release is the time for breaking changes and refactoring.
+- **Question existing patterns.** Not all existing code follows ADRs; validate against docs.
+- **Prioritize correctness over velocity.** Wrong patterns are expensive to fix post-release.
+
 ---
 
 ## 🚀 Release Process
@@ -401,6 +412,17 @@ Total Parallelism = sum(DOP per connection)
 ```
 
 See [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md) for details.
+
+### ADR Quick Reference
+
+**Read ADRs 0002 and 0005 before implementing any multi-record Dataverse operation.**
+
+| ADR | Key Pattern | Anti-Pattern |
+|-----|-------------|--------------|
+| **0002** | Get client INSIDE parallel loops; each Application User has independent 6,000 req/5min quota | Hold single client for entire operation |
+| **0005** | Use `pool.GetTotalRecommendedParallelism()` as DOP ceiling | Hardcode parallelism values |
+
+**Reference implementation:** `BulkOperationExecutor` shows correct pool usage.
 
 ### Architecture Decision Records
 
