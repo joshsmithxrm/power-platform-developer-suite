@@ -33,7 +33,8 @@ ppds
 ├── env       Environment discovery and selection
 ├── data      Data operations (export, import, copy, analyze, schema, users)
 ├── plugins   Plugin registration management
-└── query     Execute FetchXML and SQL queries
+├── query     Execute FetchXML and SQL queries
+└── metadata  Browse entity and attribute metadata
 ```
 
 ---
@@ -355,6 +356,54 @@ ppds query sql "SELECT name FROM account" --top 100
 # Get the paging cookie from the result, then:
 ppds query sql "SELECT name FROM account" --page 2 --paging-cookie "..."
 ```
+
+### `ppds metadata`
+
+Browse Dataverse entity and attribute metadata.
+
+| Command | Description |
+|---------|-------------|
+| `ppds metadata entities` | List all entities |
+| `ppds metadata entity <name>` | Get entity details |
+| `ppds metadata attributes <entity>` | List attributes for an entity |
+| `ppds metadata relationships <entity>` | List relationships for an entity |
+| `ppds metadata keys <entity>` | List alternate keys for an entity |
+| `ppds metadata optionsets` | List global option sets |
+| `ppds metadata optionset <name>` | Get option set values |
+
+#### Examples
+
+```bash
+# List all custom entities
+ppds metadata entities --custom-only
+
+# List entities matching a pattern (use * for contains)
+ppds metadata entities --filter "*account*"
+
+# Get details for a specific entity
+ppds metadata entity account
+
+# List lookup fields on an entity
+ppds metadata attributes account --type Lookup
+
+# View entity relationships
+ppds metadata relationships account
+
+# List alternate keys
+ppds metadata keys account
+
+# List global option sets
+ppds metadata optionsets
+
+# Get values for a specific option set
+ppds metadata optionset statecode
+```
+
+Options:
+- `--filter` - Filter by name pattern (supports `*` wildcard, e.g., `*account*`)
+- `--custom-only` - Show only custom entities/attributes
+- `--type` - Filter attributes by type (String, Lookup, DateTime, etc.)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 ---
 
