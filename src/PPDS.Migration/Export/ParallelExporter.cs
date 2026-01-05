@@ -344,17 +344,18 @@ namespace PPDS.Migration.Export
 
                 foreach (var rel in m2mRelationships)
                 {
+                    // Report message-only (no Entity) to avoid 0/0 display
+                    // Entity progress is reported inside ExportM2MRelationshipAsync with actual counts
                     progress?.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Exporting,
-                        Entity = entitySchema.LogicalName,
-                        Message = $"Exporting M2M relationship {rel.Name}..."
+                        Message = $"Exporting {entitySchema.LogicalName} M2M {rel.Name}..."
                     });
 
                     try
                     {
                         var relData = await ExportM2MRelationshipAsync(
-                            entitySchema, rel, exportedIds, options, cancellationToken).ConfigureAwait(false);
+                            entitySchema, rel, exportedIds, options, progress, cancellationToken).ConfigureAwait(false);
                         entityM2MData.AddRange(relData);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -380,6 +381,7 @@ namespace PPDS.Migration.Export
             RelationshipSchema rel,
             HashSet<Guid> exportedSourceIds,
             ExportOptions options,
+            IProgressReporter? progress,
             CancellationToken cancellationToken)
         {
             await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -400,6 +402,7 @@ namespace PPDS.Migration.Export
             var pageNumber = 1;
             string? pagingCookie = null;
             var associations = new List<(Guid SourceId, Guid TargetId)>();
+            var lastReportedCount = 0;
 
             while (true)
             {
@@ -417,6 +420,20 @@ namespace PPDS.Migration.Export
                     .Where(assoc => exportedSourceIds.Contains(assoc.SourceId));
 
                 associations.AddRange(validAssociations);
+
+                // Report progress at intervals
+                if (associations.Count - lastReportedCount >= options.ProgressInterval || !response.MoreRecords)
+                {
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Exporting,
+                        Entity = entitySchema.LogicalName,
+                        Relationship = rel.Name,
+                        Current = associations.Count,
+                        Total = associations.Count // We don't know total upfront
+                    });
+                    lastReportedCount = associations.Count;
+                }
 
                 if (!response.MoreRecords)
                 {

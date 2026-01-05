@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Boolean values now export as True/False** - CMT format uses `True`/`False` for boolean values; PPDS was incorrectly exporting `1`/`0`. This change ensures CMT import compatibility. ([#181](https://github.com/joshsmithxrm/ppds-sdk/issues/181))
 - **Schema export includes relationships section** - The `<relationships>` section from input schemas is now preserved in exported `data_schema.xml` files. ([#182](https://github.com/joshsmithxrm/ppds-sdk/issues/182))
+- **M2M relationship export now shows progress counts** - Previously displayed `0/0` for M2M export progress; now shows actual association counts with relationship names (e.g., `[Export] team M2M teamroles: 112/112`). Starting messages no longer trigger entity progress display. ([#184](https://github.com/joshsmithxrm/ppds-sdk/issues/184))
 
 ## [1.0.0-beta.3] - 2026-01-04
 
