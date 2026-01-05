@@ -55,7 +55,7 @@ dependency-aware tiered import, and CMT format compatibility for automated pipel
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
   <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.79.2" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
-    <PackageReference Include="MinVer" Version="6.1.0" PrivateAssets="all" />
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- Suppress known vulnerability in transitive dependency until upstream fix -->
