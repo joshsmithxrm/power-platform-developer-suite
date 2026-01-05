@@ -499,7 +499,7 @@ public class DataDeleteCommandE2ETests : CliE2ETestBase
             {
                 await LiveTestHelpers.DeleteAccountsAsync(Configuration, _createdAccountIds);
             }
-            catch
+            catch (Exception)
             {
                 // Ignore cleanup errors
             }

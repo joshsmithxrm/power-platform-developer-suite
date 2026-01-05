@@ -162,9 +162,9 @@ public static class LiveTestHelpers
             {
                 client.Delete("account", id);
             }
-            catch
+            catch (Exception ex) when (IsNotFoundError(ex))
             {
-                // Ignore delete errors (record may already be deleted)
+                // Ignore delete errors when record doesn't exist
             }
         }
     }
@@ -184,7 +184,7 @@ public static class LiveTestHelpers
             var result = client.Retrieve("account", accountId, new ColumnSet("description"));
             return result.GetAttributeValue<string>("description");
         }
-        catch
+        catch (Exception ex) when (IsNotFoundError(ex))
         {
             return null;
         }
