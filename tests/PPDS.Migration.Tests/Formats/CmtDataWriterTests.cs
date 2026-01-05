@@ -50,13 +50,15 @@ public class CmtDataWriterTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
-    [Fact]
-    public async Task WriteAsync_BooleanTrue_WritesTrueNotOne()
+    [Theory]
+    [InlineData(true, "True")]
+    [InlineData(false, "False")]
+    public async Task WriteAsync_BooleanValues_WritesStringFormat(bool value, string expected)
     {
         // Arrange
         var writer = new CmtDataWriter();
         var entity = new Entity("testentity", Guid.NewGuid());
-        entity["boolfield"] = true;
+        entity["boolfield"] = value;
 
         var schema = new MigrationSchema
         {
@@ -100,60 +102,7 @@ public class CmtDataWriterTests
             .Select(f => f.Attribute("value")?.Value)
             .FirstOrDefault();
 
-        fieldValue.Should().Be("True", "CMT format uses 'True' not '1' for boolean true values");
-    }
-
-    [Fact]
-    public async Task WriteAsync_BooleanFalse_WritesFalseNotZero()
-    {
-        // Arrange
-        var writer = new CmtDataWriter();
-        var entity = new Entity("testentity", Guid.NewGuid());
-        entity["boolfield"] = false;
-
-        var schema = new MigrationSchema
-        {
-            Entities = new List<EntitySchema>
-            {
-                new EntitySchema
-                {
-                    LogicalName = "testentity",
-                    DisplayName = "Test Entity",
-                    PrimaryIdField = "testentityid",
-                    Fields = new List<FieldSchema>
-                    {
-                        new FieldSchema { LogicalName = "boolfield", Type = "bool" }
-                    }
-                }
-            }
-        };
-
-        var data = new MigrationData
-        {
-            Schema = schema,
-            EntityData = new Dictionary<string, IReadOnlyList<Entity>>
-            {
-                { "testentity", new List<Entity> { entity } }
-            }
-        };
-
-        // Act
-        using var stream = new MemoryStream();
-        await writer.WriteAsync(data, stream);
-        stream.Position = 0;
-
-        // Assert
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-        var dataEntry = archive.GetEntry("data.xml");
-        using var dataStream = dataEntry!.Open();
-        var doc = XDocument.Load(dataStream);
-
-        var fieldValue = doc.Descendants("field")
-            .Where(f => f.Attribute("name")?.Value == "boolfield")
-            .Select(f => f.Attribute("value")?.Value)
-            .FirstOrDefault();
-
-        fieldValue.Should().Be("False", "CMT format uses 'False' not '0' for boolean false values");
+        fieldValue.Should().Be(expected, $"CMT format uses '{expected}' for boolean {value} values");
     }
 
     [Fact]
