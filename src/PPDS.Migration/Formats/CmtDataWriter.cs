@@ -235,7 +235,8 @@ namespace PPDS.Migration.Formats
                     break;
 
                 case bool b:
-                    await writer.WriteAttributeStringAsync(null, "value", null, b ? "1" : "0").ConfigureAwait(false);
+                    // Use True/False format for CMT compatibility (not 1/0)
+                    await writer.WriteAttributeStringAsync(null, "value", null, b.ToString()).ConfigureAwait(false);
                     break;
 
                 case Guid g:
@@ -329,6 +330,43 @@ namespace PPDS.Migration.Formats
                     await writer.WriteEndElementAsync().ConfigureAwait(false); // field
                 }
                 await writer.WriteEndElementAsync().ConfigureAwait(false); // fields
+
+                // Write relationships if present (CMT format)
+                if (entity.Relationships.Count > 0)
+                {
+                    await writer.WriteStartElementAsync(null, "relationships", null).ConfigureAwait(false);
+                    foreach (var rel in entity.Relationships)
+                    {
+                        await writer.WriteStartElementAsync(null, "relationship", null).ConfigureAwait(false);
+                        await writer.WriteAttributeStringAsync(null, "name", null, rel.Name).ConfigureAwait(false);
+                        await writer.WriteAttributeStringAsync(null, "manyToMany", null, rel.IsManyToMany.ToString().ToLowerInvariant()).ConfigureAwait(false);
+                        if (rel.IsReflexive)
+                        {
+                            await writer.WriteAttributeStringAsync(null, "isreflexive", null, "true").ConfigureAwait(false);
+                        }
+                        if (rel.IsManyToMany)
+                        {
+                            if (!string.IsNullOrEmpty(rel.Entity2))
+                            {
+                                await writer.WriteAttributeStringAsync(null, "m2mTargetEntity", null, rel.Entity2).ConfigureAwait(false);
+                            }
+                            if (!string.IsNullOrEmpty(rel.TargetEntityPrimaryKey))
+                            {
+                                await writer.WriteAttributeStringAsync(null, "m2mTargetEntityPrimaryKey", null, rel.TargetEntityPrimaryKey).ConfigureAwait(false);
+                            }
+                        }
+                        else
+                        {
+                            // One-to-Many relationship attributes
+                            if (!string.IsNullOrEmpty(rel.Entity2))
+                            {
+                                await writer.WriteAttributeStringAsync(null, "relatedEntityName", null, rel.Entity2).ConfigureAwait(false);
+                            }
+                        }
+                        await writer.WriteEndElementAsync().ConfigureAwait(false); // relationship
+                    }
+                    await writer.WriteEndElementAsync().ConfigureAwait(false); // relationships
+                }
 
                 // Write filter if present (HTML-encoded)
                 if (!string.IsNullOrEmpty(entity.FetchXmlFilter))
