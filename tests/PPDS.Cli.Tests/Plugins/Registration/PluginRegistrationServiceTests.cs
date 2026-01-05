@@ -4,6 +4,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
@@ -338,18 +339,18 @@ public class PluginRegistrationServiceTests
     }
 
     [Theory]
-    [InlineData("create")]
-    [InlineData("CREATE")]
-    [InlineData("SetState")]
-    [InlineData("SETSTATE")]
-    [InlineData("setstate")]
-    public void GetDefaultImagePropertyName_IsCaseInsensitive(string messageName)
+    [InlineData("create", "id")]
+    [InlineData("CREATE", "id")]
+    [InlineData("SetState", "EntityMoniker")]
+    [InlineData("SETSTATE", "EntityMoniker")]
+    [InlineData("setstate", "EntityMoniker")]
+    public void GetDefaultImagePropertyName_IsCaseInsensitive(string messageName, string expectedPropertyName)
     {
         // Act
         var result = PluginRegistrationService.GetDefaultImagePropertyName(messageName);
 
         // Assert
-        Assert.NotNull(result);
+        Assert.Equal(expectedPropertyName, result);
     }
 
     [Theory]
@@ -365,6 +366,27 @@ public class PluginRegistrationServiceTests
 
         // Assert
         Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("Retrieve")]
+    [InlineData("RetrieveMultiple")]
+    [InlineData("CustomAction")]
+    public async Task UpsertImageAsync_ThrowsInvalidOperationException_ForUnsupportedMessages(string messageName)
+    {
+        // Arrange
+        var imageConfig = new PluginImageConfig
+        {
+            Name = "TestImage",
+            ImageType = "PreImage"
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.UpsertImageAsync(Guid.NewGuid(), imageConfig, messageName));
+
+        Assert.Contains(messageName, exception.Message);
+        Assert.Contains("does not support images", exception.Message);
     }
 
     #endregion
