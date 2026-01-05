@@ -48,7 +48,39 @@ public sealed class PluginRegistrationService
     private const int StageMainOperation = 30;
     private const int StagePostOperation = 40;
 
+    /// <summary>
+    /// Default image property names per SDK message.
+    /// This is static knowledge matching Plugin Registration Tool behavior.
+    /// Source: extension/src/features/pluginRegistration/domain/services/MessageMetadataService.ts
+    /// </summary>
+    private static readonly Dictionary<string, string> DefaultImagePropertyNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Create"] = "id",
+            ["CreateMultiple"] = "Ids",
+            ["Update"] = "Target",
+            ["UpdateMultiple"] = "Targets",
+            ["Delete"] = "Target",
+            ["Assign"] = "Target",
+            ["SetState"] = "EntityMoniker",
+            ["SetStateDynamicEntity"] = "EntityMoniker",
+            ["Route"] = "Target",
+            ["Send"] = "EmailId",
+            ["DeliverIncoming"] = "EmailId",
+            ["DeliverPromote"] = "EmailId",
+            ["ExecuteWorkflow"] = "Target",
+            ["Merge"] = "Target"
+        };
+
     #endregion
+
+    /// <summary>
+    /// Gets the default message property name for an SDK message.
+    /// </summary>
+    /// <param name="messageName">The SDK message name (e.g., "Create", "Update", "SetState").</param>
+    /// <returns>The message property name, or null if message doesn't support images.</returns>
+    public static string? GetDefaultImagePropertyName(string messageName)
+        => DefaultImagePropertyNames.GetValueOrDefault(messageName);
 
     /// <summary>
     /// Creates a new instance of the plugin registration service.
@@ -730,12 +762,18 @@ public sealed class PluginRegistrationService
     /// </summary>
     /// <param name="stepId">The step ID.</param>
     /// <param name="imageConfig">The image configuration.</param>
+    /// <param name="messageName">The SDK message name (e.g., "Create", "Update", "SetState").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the message does not support images.</exception>
     public async Task<Guid> UpsertImageAsync(
         Guid stepId,
         PluginImageConfig imageConfig,
+        string messageName,
         CancellationToken cancellationToken = default)
     {
+        var messagePropertyName = GetDefaultImagePropertyName(messageName)
+            ?? throw new InvalidOperationException($"Message '{messageName}' does not support images.");
+
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
@@ -760,7 +798,7 @@ public sealed class PluginRegistrationService
             Name = imageConfig.Name,
             EntityAlias = imageConfig.EntityAlias ?? imageConfig.Name,
             ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue(imageConfig.ImageType),
-            MessagePropertyName = "Target"
+            MessagePropertyName = messagePropertyName
         };
 
         if (!string.IsNullOrEmpty(imageConfig.Attributes))

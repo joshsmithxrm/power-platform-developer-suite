@@ -363,7 +363,7 @@ public static class DeployCommand
                         }
                         else
                         {
-                            await service.UpsertImageAsync(stepId, imageConfig);
+                            await service.UpsertImageAsync(stepId, imageConfig, stepConfig.Message);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
