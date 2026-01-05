@@ -127,9 +127,9 @@ public static class LiveTestHelpers
             var result = client.Retrieve("account", accountId, new ColumnSet(false));
             return result != null;
         }
-        catch (Exception ex) when (ex.Message.Contains("does not exist") ||
-                                   ex.Message.Contains("not found") ||
-                                   ex.Message.Contains("ObjectNotFound"))
+        catch (Exception ex) when (ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+                                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+                                   ex.Message.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
