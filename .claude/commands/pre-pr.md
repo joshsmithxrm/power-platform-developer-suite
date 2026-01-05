@@ -79,7 +79,24 @@ public void Add_FirstProfile_SetsAsActive()
 - File is already covered by integration tests in PPDS.LiveTests
 - User explicitly confirms "this doesn't need unit tests because [reason]"
 
-### 6. Push Check
+### 6. CLI README Consistency
+
+**Only applies when `src/PPDS.Cli/Commands/` files are modified.**
+
+1. **Command structure matches reality**
+   ```bash
+   ppds data --help   # or whichever command group changed
+   ```
+   Compare subcommand list against README "Command Structure" section at top of file.
+
+2. **New commands have README sections**
+   - Check `src/PPDS.Cli/README.md` for corresponding `#### CommandName` section
+   - Must have: examples, options list
+   - Destructive commands (update, delete, clean) need "Safety Features" callout
+
+**If README is outdated:** Update it and amend the commit before proceeding.
+
+### 7. Push Check
 
 Before creating PR, ensure changes are pushed:
 
@@ -104,6 +121,7 @@ Pre-PR Validation
 [!] Missing XML docs: MsalClientBuilder.CreateClient()
 [✓] No TODOs found
 [✗] Missing tests for: EnvironmentResolutionService, ProfileValidator
+[✓] CLI README: Command structure matches (or N/A if no CLI changes)
 
 Missing tests is a blocker. Writing tests now...
 ```

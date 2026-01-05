@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ppds data update` command** - Update records in Dataverse entities ([#135](https://github.com/joshsmithxrm/ppds-sdk/issues/135))
+  - Single record update by GUID (`--id`) or alternate key (`--key`) with `--set field=value`
+  - Bulk update from CSV file (`--file`) containing IDs and values
+  - Query-based update with SQL-like filter (`--filter`)
+  - `--set` option supports multiple fields: `--set "name=New Name,description=Updated"`
+  - Automatic type coercion for strings, numbers, booleans, dates, GUIDs
+  - Safety features: confirmation prompt, `--force` for automation, `--dry-run` for preview, `--limit` to cap updates
+  - Supports `--bypass-plugins`, `--bypass-flows`, `--continue-on-error`
+  - Column mapping via `--mapping` for CSV files
+- **`ppds data delete` command** - Delete records from Dataverse entities ([#135](https://github.com/joshsmithxrm/ppds-sdk/issues/135))
+  - Single record delete by GUID (`--id`) or alternate key (`--key`)
+  - Bulk delete from CSV/JSON file (`--file`)
+  - Query-based delete with SQL-like filter (`--filter`)
+  - Safety features: confirmation prompt (type count to confirm), `--force` for automation, `--dry-run` for preview, `--limit` to cap deletions
+  - Supports `--bypass-plugins`, `--bypass-flows`, `--continue-on-error`
+  - Progress reporting for bulk operations
 - **`ppds docs` command** - Opens CLI documentation in browser ([#165](https://github.com/joshsmithxrm/ppds-sdk/issues/165))
 - **Documentation URL in help** - `ppds --help` now shows documentation URL ([#165](https://github.com/joshsmithxrm/ppds-sdk/issues/165))
 

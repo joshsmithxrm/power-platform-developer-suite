@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using PPDS.Auth.Credentials;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
@@ -90,5 +92,101 @@ public static class LiveTestHelpers
         var loggerFactory = LoggerFactory.Create(builder => builder.AddDebug());
         var logger = loggerFactory.CreateLogger<ThrottleTracker>();
         return new ThrottleTracker(logger);
+    }
+
+    /// <summary>
+    /// Creates a test account record in Dataverse.
+    /// </summary>
+    /// <param name="config">The live test configuration.</param>
+    /// <param name="name">The account name.</param>
+    /// <returns>The ID of the created account.</returns>
+    public static async Task<Guid> CreateAccountAsync(LiveTestConfiguration config, string name)
+    {
+        using var client = await CreateServiceClientAsync(config);
+
+        var account = new Entity("account")
+        {
+            ["name"] = name
+        };
+
+        return client.Create(account);
+    }
+
+    /// <summary>
+    /// Checks if an account record exists in Dataverse.
+    /// </summary>
+    /// <param name="config">The live test configuration.</param>
+    /// <param name="accountId">The account ID to check.</param>
+    /// <returns>True if the account exists, false otherwise.</returns>
+    public static async Task<bool> AccountExistsAsync(LiveTestConfiguration config, Guid accountId)
+    {
+        using var client = await CreateServiceClientAsync(config);
+
+        try
+        {
+            var result = client.Retrieve("account", accountId, new ColumnSet(false));
+            return result != null;
+        }
+        catch (Exception ex) when (IsNotFoundError(ex))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks if an exception indicates a record was not found.
+    /// Handles FaultException where error text is in Detail, not Message.
+    /// </summary>
+    private static bool IsNotFoundError(Exception ex)
+    {
+        // Check the full exception text (includes FaultException.Detail)
+        var fullText = ex.ToString();
+        return fullText.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+               fullText.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+               fullText.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Deletes multiple account records from Dataverse.
+    /// Ignores errors for records that don't exist.
+    /// </summary>
+    /// <param name="config">The live test configuration.</param>
+    /// <param name="accountIds">The account IDs to delete.</param>
+    public static async Task DeleteAccountsAsync(LiveTestConfiguration config, IEnumerable<Guid> accountIds)
+    {
+        using var client = await CreateServiceClientAsync(config);
+
+        foreach (var id in accountIds)
+        {
+            try
+            {
+                client.Delete("account", id);
+            }
+            catch (Exception ex) when (IsNotFoundError(ex))
+            {
+                // Ignore delete errors when record doesn't exist
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the description field of an account record.
+    /// </summary>
+    /// <param name="config">The live test configuration.</param>
+    /// <param name="accountId">The account ID.</param>
+    /// <returns>The description value, or null if not set.</returns>
+    public static async Task<string?> GetAccountDescriptionAsync(LiveTestConfiguration config, Guid accountId)
+    {
+        using var client = await CreateServiceClientAsync(config);
+
+        try
+        {
+            var result = client.Retrieve("account", accountId, new ColumnSet("description"));
+            return result.GetAttributeValue<string>("description");
+        }
+        catch (Exception ex) when (IsNotFoundError(ex))
+        {
+            return null;
+        }
     }
 }
