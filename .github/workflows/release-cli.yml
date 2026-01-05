@@ -109,7 +109,37 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Check if release exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release ${{ steps.version.outputs.tag }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release ${{ steps.version.outputs.tag }} does not exist"
+          fi
+
+      - name: Upload to existing release
+        if: steps.check_release.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Uploading binaries to existing release..."
+          gh release upload "${{ steps.version.outputs.tag }}" \
+            ./release/ppds-win-x64.exe \
+            ./release/ppds-win-arm64.exe \
+            ./release/ppds-osx-x64 \
+            ./release/ppds-osx-arm64 \
+            ./release/ppds-linux-x64 \
+            ./release/checksums.sha256 \
+            --clobber
+          echo "Successfully uploaded binaries to release"
+
+      - name: Create new release with assets
+        if: steps.check_release.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           name: PPDS CLI v${{ steps.version.outputs.version }}
