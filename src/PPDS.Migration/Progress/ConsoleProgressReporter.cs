@@ -66,10 +66,16 @@ namespace PPDS.Migration.Progress
                         break;
                     }
 
-                    if (args.Entity != _lastEntity || args.Current == args.Total || ShouldUpdate(args.Current))
+                    // Use unique key for M2M relationships to track progress separately
+                    var progressKey = string.IsNullOrEmpty(args.Relationship)
+                        ? args.Entity
+                        : $"{args.Entity}:{args.Relationship}";
+
+                    if (progressKey != _lastEntity || args.Current == args.Total || ShouldUpdate(args.Current))
                     {
                         var phase = args.Phase == MigrationPhase.Exporting ? "Export" : "Import";
                         var tierInfo = args.TierNumber.HasValue ? $" (Tier {args.TierNumber})" : "";
+                        var relInfo = !string.IsNullOrEmpty(args.Relationship) ? $" M2M {args.Relationship}" : "";
                         var rps = args.RecordsPerSecond.HasValue ? $" @ {args.RecordsPerSecond:F1} rec/s" : "";
                         var pct = args.Total > 0 ? $" ({args.PercentComplete:F0}%)" : "";
                         var eta = args.EstimatedRemaining.HasValue ? $" | ETA: {FormatEta(args.EstimatedRemaining.Value)}" : "";
@@ -79,9 +85,9 @@ namespace PPDS.Migration.Progress
                             ? $" [{args.SuccessCount} ok, {args.FailureCount} failed]"
                             : "";
 
-                        Console.Error.WriteLine($"{prefix} [{phase}] {args.Entity}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
+                        Console.Error.WriteLine($"{prefix} [{phase}] {args.Entity}{relInfo}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
 
-                        _lastEntity = args.Entity;
+                        _lastEntity = progressKey;
                         _lastProgress = args.Current;
                     }
                     break;
