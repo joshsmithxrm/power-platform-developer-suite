@@ -551,14 +551,12 @@ public static class DeleteCommand
                 }
             }
         }
-        else if (doc.RootElement.ValueKind == JsonValueKind.Object)
+        else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                 doc.RootElement.TryGetProperty("records", out var records) &&
+                 records.ValueKind == JsonValueKind.Array)
         {
             // Handle { "records": [...] } format
-            if (doc.RootElement.TryGetProperty("records", out var records) &&
-                records.ValueKind == JsonValueKind.Array)
-            {
-                return ParseJsonIds(records.GetRawText());
-            }
+            return ParseJsonIds(records.GetRawText());
         }
 
         return ids;
