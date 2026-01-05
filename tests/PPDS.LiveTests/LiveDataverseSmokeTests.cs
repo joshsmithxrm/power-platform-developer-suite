@@ -23,9 +23,11 @@ public class LiveDataverseSmokeTests : LiveTestBase
         var hasAny = Configuration.HasAnyCredentials;
         var hasSecret = Configuration.HasClientSecretCredentials;
         var hasCert = Configuration.HasCertificateCredentials;
+        var hasGitHubOidc = Configuration.HasGitHubOidcCredentials;
+        var hasAzDoOidc = Configuration.HasAzureDevOpsOidcCredentials;
 
-        // Assert that the aggregate property reflects the state of the specific properties
-        hasAny.Should().Be(hasSecret || hasCert);
+        // Assert that the aggregate property reflects the state of all credential types
+        hasAny.Should().Be(hasSecret || hasCert || hasGitHubOidc || hasAzDoOidc);
     }
 
     [SkipIfNoCredentials]
