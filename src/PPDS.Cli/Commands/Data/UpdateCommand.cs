@@ -523,17 +523,18 @@ public static class UpdateCommand
 
     private static void ApplySetValues(Entity entity, string setString)
     {
-        // Parse field=value pairs from --set option
-        foreach (var pair in setString.Split(','))
+        // Parse field=value pairs from --set option, respecting quoted values
+        // Format: field1=value1,field2="value with, comma",field3=value3
+        foreach (var pair in ParseSetPairs(setString))
         {
-            var parts = pair.Split('=', 2);
-            if (parts.Length != 2)
+            var eqIndex = pair.IndexOf('=');
+            if (eqIndex < 0)
             {
                 throw new ArgumentException($"Invalid --set format: {pair}. Expected field=value.");
             }
 
-            var field = parts[0].Trim();
-            var value = parts[1].Trim();
+            var field = pair[..eqIndex].Trim();
+            var value = pair[(eqIndex + 1)..].Trim();
 
             // Handle special values
             if (value.Equals("null", StringComparison.OrdinalIgnoreCase))
@@ -570,6 +571,47 @@ public static class UpdateCommand
                 entity[field] = value;
             }
         }
+    }
+
+    /// <summary>
+    /// Parses field=value pairs, respecting quoted values that may contain commas.
+    /// </summary>
+    private static List<string> ParseSetPairs(string setString)
+    {
+        var pairs = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var inQuotes = false;
+
+        foreach (var c in setString)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+                // Don't include quotes in output
+            }
+            else if (c == ',' && !inQuotes)
+            {
+                var pair = current.ToString().Trim();
+                if (!string.IsNullOrEmpty(pair))
+                {
+                    pairs.Add(pair);
+                }
+                current.Clear();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        // Add final pair
+        var finalPair = current.ToString().Trim();
+        if (!string.IsNullOrEmpty(finalPair))
+        {
+            pairs.Add(finalPair);
+        }
+
+        return pairs;
     }
 
     private static async Task<Guid?> ResolveAlternateKeyAsync(
@@ -631,7 +673,7 @@ public static class UpdateCommand
         }
 
         // Parse CSV
-        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length == 0) return new List<Entity>();
 
         // Parse header
@@ -736,7 +778,7 @@ public static class UpdateCommand
             if (c == '"')
             {
                 inQuotes = !inQuotes;
-                current.Append(c);
+                // Don't append quotes - just toggle state
             }
             else if (c == ',' && !inQuotes)
             {

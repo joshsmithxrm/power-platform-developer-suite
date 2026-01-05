@@ -567,7 +567,7 @@ public static class DeleteCommand
     private static List<Guid> ParseCsvIds(string content, string? idColumn, string entity)
     {
         var ids = new List<Guid>();
-        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
 
         if (lines.Length == 0) return ids;
 
