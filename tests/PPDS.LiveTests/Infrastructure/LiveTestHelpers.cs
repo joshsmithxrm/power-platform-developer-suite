@@ -127,12 +127,23 @@ public static class LiveTestHelpers
             var result = client.Retrieve("account", accountId, new ColumnSet(false));
             return result != null;
         }
-        catch (Exception ex) when (ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-                                   ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-                                   ex.Message.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex) when (IsNotFoundError(ex))
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Checks if an exception indicates a record was not found.
+    /// Handles FaultException where error text is in Detail, not Message.
+    /// </summary>
+    private static bool IsNotFoundError(Exception ex)
+    {
+        // Check the full exception text (includes FaultException.Detail)
+        var fullText = ex.ToString();
+        return fullText.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+               fullText.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+               fullText.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
