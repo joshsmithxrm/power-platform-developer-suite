@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace PPDS.Migration.Progress
 {
@@ -61,6 +62,12 @@ namespace PPDS.Migration.Progress
         /// Gets or sets the number of records that failed in the current batch/phase.
         /// </summary>
         public int FailureCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets sample errors from the current batch for real-time visibility.
+        /// Limited to a small number (typically 2) to avoid flooding output.
+        /// </summary>
+        public IReadOnlyList<MigrationError>? ErrorSamples { get; set; }
 
         /// <summary>
         /// Gets or sets a descriptive message.

@@ -457,6 +457,7 @@ namespace PPDS.Migration.Import
                 Phase = MigrationPhase.Importing,
                 EntityLogicalName = entityName,
                 RecordIndex = e.Index,
+                RecordId = e.RecordId,
                 ErrorCode = e.ErrorCode,
                 Message = e.Message
             }).ToList();

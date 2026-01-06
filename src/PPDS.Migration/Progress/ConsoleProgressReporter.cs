@@ -87,6 +87,23 @@ namespace PPDS.Migration.Progress
 
                         Console.Error.WriteLine($"{prefix} [{phase}] {args.Entity}{relInfo}{tierInfo}: {args.Current:N0}/{args.Total:N0}{pct}{rps}{eta}{failureInfo}");
 
+                        // Show sample errors for real-time visibility
+                        if (args.FailureCount > 0 && args.ErrorSamples?.Count > 0)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            foreach (var error in args.ErrorSamples.Take(2))
+                            {
+                                var idPrefix = error.RecordId.HasValue
+                                    ? $"[{error.RecordId.Value.ToString("D")[..8]}...] "
+                                    : "";
+                                var shortMessage = error.Message.Length > 80
+                                    ? error.Message[..77] + "..."
+                                    : error.Message;
+                                Console.Error.WriteLine($"        {idPrefix}{shortMessage}");
+                            }
+                            Console.ResetColor();
+                        }
+
                         _lastEntity = progressKey;
                         _lastProgress = args.Current;
                     }
@@ -152,6 +169,35 @@ namespace PPDS.Migration.Progress
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.Error.WriteLine($"    {result.FailureCount:N0} Error(s)");
                 Console.ResetColor();
+
+                // Show per-entity breakdown
+                var byEntity = result.Errors
+                    .Where(e => !string.IsNullOrEmpty(e.EntityLogicalName))
+                    .GroupBy(e => e.EntityLogicalName!)
+                    .OrderByDescending(g => g.Count())
+                    .Take(5)
+                    .ToList();
+
+                if (byEntity.Count > 0)
+                {
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("Failures by entity:");
+                    foreach (var group in byEntity)
+                    {
+                        Console.Error.WriteLine($"  {group.Key}: {group.Count():N0} failed");
+                        // Show sample RecordIds if available
+                        var sampleIds = group
+                            .Where(e => e.RecordId.HasValue)
+                            .Take(3)
+                            .Select(e => e.RecordId!.Value.ToString("D")[..8] + "...");
+                        if (sampleIds.Any())
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkGray;
+                            Console.Error.WriteLine($"    Sample IDs: {string.Join(", ", sampleIds)}");
+                            Console.ResetColor();
+                        }
+                    }
+                }
             }
             else
             {

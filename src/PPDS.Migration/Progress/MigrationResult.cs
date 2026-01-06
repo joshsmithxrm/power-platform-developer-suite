@@ -60,7 +60,7 @@ namespace PPDS.Migration.Progress
 
     /// <summary>
     /// Error information from a migration operation.
-    /// Does not contain record data to avoid PII exposure in logs.
+    /// Contains RecordId (GUID) for correlation but no record data to avoid PII exposure.
     /// </summary>
     public class MigrationError
     {
@@ -75,9 +75,15 @@ namespace PPDS.Migration.Progress
         public string? EntityLogicalName { get; set; }
 
         /// <summary>
-        /// Gets or sets the record index (position in batch, not ID).
+        /// Gets or sets the record index (position in batch).
         /// </summary>
         public int? RecordIndex { get; set; }
+
+        /// <summary>
+        /// Gets or sets the record ID (GUID).
+        /// This is a unique identifier, not PII.
+        /// </summary>
+        public Guid? RecordId { get; set; }
 
         /// <summary>
         /// Gets or sets the Dataverse error code.

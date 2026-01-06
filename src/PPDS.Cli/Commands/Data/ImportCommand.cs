@@ -90,6 +90,11 @@ public static class ImportCommand
             DefaultValueFactory = _ => false
         };
 
+        var errorReportOption = new Option<FileInfo?>("--error-report")
+        {
+            Description = "Path to write detailed error report (JSON format with all failed records)"
+        };
+
         var command = new Command("import", "Import data from a ZIP file into Dataverse")
         {
             dataOption,
@@ -104,7 +109,8 @@ public static class ImportCommand
             skipMissingColumnsOption,
             outputFormatOption,
             verboseOption,
-            debugOption
+            debugOption,
+            errorReportOption
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
@@ -122,13 +128,14 @@ public static class ImportCommand
             var outputFormat = parseResult.GetValue(outputFormatOption);
             var verbose = parseResult.GetValue(verboseOption);
             var debug = parseResult.GetValue(debugOption);
+            var errorReport = parseResult.GetValue(errorReportOption);
 
             var bypassPlugins = DataCommandGroup.ParseBypassPlugins(bypassPluginsValue);
 
             return await ExecuteAsync(
                 profile, environment, data, bypassPlugins, bypassFlows,
                 continueOnError, mode, userMappingFile, stripOwnerFields,
-                skipMissingColumns, outputFormat, verbose, debug, cancellationToken);
+                skipMissingColumns, outputFormat, verbose, debug, errorReport, cancellationToken);
         });
 
         return command;
@@ -148,6 +155,7 @@ public static class ImportCommand
         OutputFormat outputFormat,
         bool verbose,
         bool debug,
+        FileInfo? errorReport,
         CancellationToken cancellationToken)
     {
         var progressReporter = ServiceFactory.CreateProgressReporter(outputFormat, "Import");
@@ -229,6 +237,19 @@ public static class ImportCommand
                 importOptions,
                 progressReporter,
                 cancellationToken);
+
+            // Write error report if specified and there are errors
+            if (errorReport != null && result.Errors.Count > 0)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                await ErrorReportWriter.WriteAsync(
+                    errorReport.FullName,
+                    result,
+                    data.FullName,
+                    connectionInfo.EnvironmentUrl,
+                    cancellationToken);
+                Console.Error.WriteLine($"Error report written to: {errorReport.FullName}");
+            }
 
             return result.Success ? ExitCodes.Success : ExitCodes.Failure;
         }

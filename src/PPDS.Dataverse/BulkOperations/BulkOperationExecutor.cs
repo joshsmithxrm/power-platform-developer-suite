@@ -104,10 +104,12 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            // Get connection info for parallelism baseline
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var connectionName = client.ConnectionName;
-            var recommended = client.RecommendedDegreesOfParallelism;
+            // Get connection info for logging only - release immediately to avoid holding pool slot
+            int recommended;
+            {
+                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                recommended = infoClient.RecommendedDegreesOfParallelism;
+            }
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
@@ -167,10 +169,12 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            // Get connection info for parallelism baseline
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var connectionName = client.ConnectionName;
-            var recommended = client.RecommendedDegreesOfParallelism;
+            // Get connection info for logging only - release immediately to avoid holding pool slot
+            int recommended;
+            {
+                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                recommended = infoClient.RecommendedDegreesOfParallelism;
+            }
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
@@ -230,10 +234,12 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var entityList = entities.ToList();
 
-            // Get connection info for parallelism baseline
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var connectionName = client.ConnectionName;
-            var recommended = client.RecommendedDegreesOfParallelism;
+            // Get connection info for logging only - release immediately to avoid holding pool slot
+            int recommended;
+            {
+                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                recommended = infoClient.RecommendedDegreesOfParallelism;
+            }
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(entityList, options.BatchSize).ToList();
@@ -293,10 +299,12 @@ namespace PPDS.Dataverse.BulkOperations
             options ??= _options.BulkOperations;
             var idList = ids.ToList();
 
-            // Get connection info for parallelism baseline
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
-            var connectionName = client.ConnectionName;
-            var recommended = client.RecommendedDegreesOfParallelism;
+            // Get connection info for logging only - release immediately to avoid holding pool slot
+            int recommended;
+            {
+                await using var infoClient = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken);
+                recommended = infoClient.RecommendedDegreesOfParallelism;
+            }
 
             var stopwatch = Stopwatch.StartNew();
             var batches = Batch(idList, options.BatchSize).ToList();
