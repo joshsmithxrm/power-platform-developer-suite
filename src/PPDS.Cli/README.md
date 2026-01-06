@@ -144,6 +144,7 @@ Data migration operations.
 | `ppds data load` | Load CSV data into an entity |
 | `ppds data update` | Update records in an entity |
 | `ppds data delete` | Delete records from an entity |
+| `ppds data truncate` | Delete ALL records from an entity |
 
 #### Export
 
@@ -368,6 +369,47 @@ Options:
 - Use `--force` to bypass confirmation in scripts/CI
 - Use `--dry-run` to preview what would be deleted
 - Use `--limit` to cap the number of records (fails if query exceeds limit)
+
+#### Truncate
+
+Delete ALL records from an entity. Designed for dev/test scenarios where you need to clear an entire table.
+
+```bash
+# Preview record count (dry-run)
+ppds data truncate --entity account --dry-run
+
+# Delete all records (interactive confirmation required)
+ppds data truncate --entity account
+
+# Non-interactive (for CI/CD scripts)
+ppds data truncate --entity account --force
+
+# With custom batch size
+ppds data truncate --entity account --batch-size 500 --force
+```
+
+Options:
+- `--entity`, `-e` (required) - Target entity logical name
+- `--dry-run` - Preview record count without deleting
+- `--force` - Skip confirmation prompt (required for non-interactive)
+- `--batch-size` - Records per delete batch (default: 1000, max: 1000)
+- `--bypass-plugins` - Bypass plugins: sync, async, or all
+- `--bypass-flows` - Bypass Power Automate flows
+- `--continue-on-error` - Continue on individual record failures
+- `--profile`, `-p` - Profile name
+- `--environment`, `-env` - Override environment URL
+- `--output-format`, `-o` - Output format (Text or Json)
+
+**Safety Features:**
+- Requires typing `TRUNCATE <entity> <count>` to confirm (e.g., `TRUNCATE account 5000`)
+- Use `--force` to bypass confirmation in automation scripts
+- Use `--dry-run` to preview record count before deleting
+- Progress reporting shows deletion rate and estimated time remaining
+
+**When to use Truncate vs Delete:**
+- Use `truncate` when you need to delete ALL records from an entity
+- Use `delete --filter` when you need to delete a subset of records
+- Truncate is optimized for bulk deletion with progress reporting
 
 ### `ppds query`
 
