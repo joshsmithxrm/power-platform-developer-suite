@@ -109,25 +109,29 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Check if release exists
+      # Check if /release created a draft release (preferred flow)
+      - name: Check if draft release exists
         id: check_release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Release ${{ steps.version.outputs.tag }} already exists"
+          RELEASE_JSON=$(gh release view "${{ steps.version.outputs.tag }}" --json isDraft,name 2>/dev/null || echo '{}')
+          if echo "$RELEASE_JSON" | jq -e '.isDraft == true' > /dev/null 2>&1; then
+            echo "is_draft=true" >> $GITHUB_OUTPUT
+            echo "Draft release found, will upload assets and publish"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Release ${{ steps.version.outputs.tag }} does not exist"
+            echo "is_draft=false" >> $GITHUB_OUTPUT
+            echo "No draft release found, will create new release"
           fi
 
-      - name: Upload to existing release
-        if: steps.check_release.outputs.exists == 'true'
+      # Draft flow: upload binaries to existing draft release
+      - name: Upload assets to draft release
+        if: steps.check_release.outputs.is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          echo "Uploading binaries to existing release..."
           gh release upload "${{ steps.version.outputs.tag }}" \
             ./release/ppds-win-x64.exe \
             ./release/ppds-win-arm64.exe \
@@ -136,13 +140,24 @@ jobs:
             ./release/ppds-linux-x64 \
             ./release/checksums.sha256 \
             --clobber
-          echo "Successfully uploaded binaries to release"
 
+      - name: Publish draft release
+        if: steps.check_release.outputs.is_draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit "${{ steps.version.outputs.tag }}" --draft=false
+          echo "Release published with binaries attached"
+
+      # Fallback flow: create new release if no draft exists (manual tag push)
       - name: Create new release with assets
-        if: steps.check_release.outputs.exists == 'false'
+        if: steps.check_release.outputs.is_draft == 'false'
         uses: softprops/action-gh-release@v2
         with:
           name: PPDS CLI v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           generate_release_notes: true
           files: |
             ./release/ppds-win-x64.exe
