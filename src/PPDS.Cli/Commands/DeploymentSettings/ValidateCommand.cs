@@ -146,22 +146,22 @@ public static class ValidateCommand
 
                     if (errors.Count > 0)
                     {
-                        Console.WriteLine("ERRORS:");
+                        Console.Error.WriteLine("ERRORS:");
                         foreach (var issue in errors)
                         {
-                            Console.WriteLine($"  [{issue.EntryType}] {issue.Name}");
-                            Console.WriteLine($"    {issue.Message}");
+                            Console.Error.WriteLine($"  [{issue.EntryType}] {issue.Name}");
+                            Console.Error.WriteLine($"    {issue.Message}");
                         }
-                        Console.WriteLine();
+                        Console.Error.WriteLine();
                     }
 
                     if (warnings.Count > 0)
                     {
-                        Console.WriteLine("WARNINGS:");
+                        Console.Error.WriteLine("WARNINGS:");
                         foreach (var issue in warnings)
                         {
-                            Console.WriteLine($"  [{issue.EntryType}] {issue.Name}");
-                            Console.WriteLine($"    {issue.Message}");
+                            Console.Error.WriteLine($"  [{issue.EntryType}] {issue.Name}");
+                            Console.Error.WriteLine($"    {issue.Message}");
                         }
                     }
                 }

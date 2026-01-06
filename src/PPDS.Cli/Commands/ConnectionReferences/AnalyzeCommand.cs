@@ -133,46 +133,46 @@ public static class AnalyzeCommand
 
                 if (orphanedFlows.Count > 0)
                 {
-                    Console.WriteLine();
-                    Console.WriteLine("ORPHANED FLOWS (referencing missing connection references):");
-                    Console.WriteLine("------------------------------------------------------------");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("ORPHANED FLOWS (referencing missing connection references):");
+                    Console.Error.WriteLine("------------------------------------------------------------");
                     foreach (var r in orphanedFlows)
                     {
-                        Console.WriteLine($"  Flow: {r.FlowDisplayName ?? r.FlowUniqueName}");
-                        Console.WriteLine($"    References missing CR: {r.ConnectionReferenceLogicalName}");
-                        Console.WriteLine();
+                        Console.Error.WriteLine($"  Flow: {r.FlowDisplayName ?? r.FlowUniqueName}");
+                        Console.Error.WriteLine($"    References missing CR: {r.ConnectionReferenceLogicalName}");
+                        Console.Error.WriteLine();
                     }
                 }
 
                 if (orphanedCRs.Count > 0)
                 {
-                    Console.WriteLine();
-                    Console.WriteLine("ORPHANED CONNECTION REFERENCES (not used by any flow):");
-                    Console.WriteLine("------------------------------------------------------");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("ORPHANED CONNECTION REFERENCES (not used by any flow):");
+                    Console.Error.WriteLine("------------------------------------------------------");
                     foreach (var r in orphanedCRs)
                     {
                         var boundStatus = r.IsBound == true ? "Bound" : "Unbound";
-                        Console.WriteLine($"  {r.ConnectionReferenceDisplayName ?? r.ConnectionReferenceLogicalName}");
-                        Console.WriteLine($"    Name: {r.ConnectionReferenceLogicalName}  Status: {boundStatus}");
+                        Console.Error.WriteLine($"  {r.ConnectionReferenceDisplayName ?? r.ConnectionReferenceLogicalName}");
+                        Console.Error.WriteLine($"    Name: {r.ConnectionReferenceLogicalName}  Status: {boundStatus}");
                         if (r.ConnectorId != null)
                         {
-                            Console.WriteLine($"    Connector: {r.ConnectorId}");
+                            Console.Error.WriteLine($"    Connector: {r.ConnectorId}");
                         }
-                        Console.WriteLine();
+                        Console.Error.WriteLine();
                     }
                 }
 
                 if (!orphansOnly && validRelationships.Count > 0)
                 {
-                    Console.WriteLine();
-                    Console.WriteLine("VALID RELATIONSHIPS:");
-                    Console.WriteLine("--------------------");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("VALID RELATIONSHIPS:");
+                    Console.Error.WriteLine("--------------------");
                     foreach (var r in validRelationships)
                     {
                         var boundStatus = r.IsBound == true ? "Bound" : "Unbound";
-                        Console.WriteLine($"  Flow: {r.FlowDisplayName ?? r.FlowUniqueName}");
-                        Console.WriteLine($"    -> CR: {r.ConnectionReferenceLogicalName} ({boundStatus})");
-                        Console.WriteLine();
+                        Console.Error.WriteLine($"  Flow: {r.FlowDisplayName ?? r.FlowUniqueName}");
+                        Console.Error.WriteLine($"    -> CR: {r.ConnectionReferenceLogicalName} ({boundStatus})");
+                        Console.Error.WriteLine();
                     }
                 }
             }
