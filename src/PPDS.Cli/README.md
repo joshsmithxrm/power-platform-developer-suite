@@ -613,7 +613,7 @@ Manage Power Platform solutions.
 | `ppds solutions list` | List solutions (supports `--include-managed`, `--filter`) |
 | `ppds solutions get <name>` | Get solution details by unique name |
 | `ppds solutions export <name>` | Export solution as ZIP file (supports `--managed`) |
-| `ppds solutions import <file>` | Import solution ZIP file |
+| `ppds solutions import <file>` | Import solution ZIP file (supports `--overwrite`, `--publish-workflows`) |
 | `ppds solutions components <name>` | List solution components (supports `--type`) |
 | `ppds solutions publish` | Publish all customizations |
 | `ppds solutions url <name>` | Get Maker portal URL for a solution |
@@ -639,7 +639,7 @@ Manage environment variables.
 | `ppds environmentvariables list` | List environment variables (supports `--solution`) |
 | `ppds environmentvariables get <name>` | Get environment variable details |
 | `ppds environmentvariables set <name> <value>` | Set environment variable value |
-| `ppds environmentvariables export` | Export for deployment settings |
+| `ppds environmentvariables export` | Export for deployment settings (supports `--solution`, `--output`) |
 | `ppds environmentvariables url <name>` | Get Maker portal URL |
 
 ### `ppds flows`
@@ -689,7 +689,7 @@ Manage system users.
 
 | Command | Description |
 |---------|-------------|
-| `ppds users list` | List users (supports `--filter`, `--include-disabled`) |
+| `ppds users list` | List users (supports `--filter`, `--include-disabled`, `--top`) |
 | `ppds users show <user>` | Show user details (by GUID or domain name) |
 | `ppds users roles <user>` | List roles assigned to a user |
 

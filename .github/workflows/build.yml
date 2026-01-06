@@ -24,7 +24,9 @@ jobs:
           filters: |
             code:
               - 'src/**'
+              - '!src/**/*.md'
               - 'tests/**'
+              - '!tests/**/*.md'
               - '**/*.csproj'
               - '*.sln'
               - 'Directory.Build.props'
