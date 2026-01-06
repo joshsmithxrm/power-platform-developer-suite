@@ -12,14 +12,14 @@ namespace PPDS.Auth.Profiles;
 /// <para>Schema v2 changes from v1:</para>
 /// <list type="bullet">
 /// <item><description>Profiles stored as array instead of dictionary</description></item>
-/// <item><description>Active profile tracked by name instead of index</description></item>
+/// <item><description>Active profile tracked by index (with name kept for backwards compatibility)</description></item>
 /// <item><description>Secrets moved to secure credential store</description></item>
 /// </list>
 /// </remarks>
 public sealed class ProfileCollection
 {
     /// <summary>
-    /// Storage format version. v2 uses array storage and name-based active profile.
+    /// Storage format version. v2 uses array storage and index-based active profile tracking.
     /// </summary>
     [JsonPropertyName("version")]
     public int Version { get; set; } = 2;
@@ -180,10 +180,10 @@ public sealed class ProfileCollection
 
         Profiles.Remove(profile);
 
-        // If we removed the active profile, select the first remaining profile
+        // If we removed the active profile, select the lowest-indexed remaining profile
         if (ActiveProfileIndex == profile.Index)
         {
-            var next = Profiles.FirstOrDefault();
+            var next = Profiles.OrderBy(p => p.Index).FirstOrDefault();
             ActiveProfileIndex = next?.Index;
             ActiveProfileName = next?.Name;
         }
