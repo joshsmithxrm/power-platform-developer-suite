@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Version header at startup** - CLI now outputs diagnostic header to stderr: version info (CLI, SDK, .NET runtime) and platform. Enables correlating issues to specific builds. Skipped for `--help`, `--version`, or no arguments. See [ADR-0018](../../docs/adr/0018_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
+- **Version header at startup** - CLI now outputs diagnostic header to stderr: version info (CLI, SDK, .NET runtime) and platform. Enables correlating issues to specific builds. Skipped for `--help`, `--version`, or no arguments. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
 - **`ppds solutions` command group** - Manage Power Platform solutions ([#137](https://github.com/joshsmithxrm/ppds-sdk/issues/137)):
   - `ppds solutions list` - List solutions in environment (supports `--include-managed`, `--filter`)
   - `ppds solutions get <name>` - Get solution details by unique name
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ppds roles show <role>` - Show role details and assigned users (by GUID or name)
   - `ppds roles assign <role> --user <user>` - Assign a role to a user
   - `ppds roles remove <role> --user <user>` - Remove a role from a user
-- **`ppds data truncate` command** - Delete ALL records from an entity for dev/test scenarios. See [ADR-0017](../../docs/adr/0017_TRUNCATE_COMMAND.md).
+- **`ppds data truncate` command** - Delete ALL records from an entity for dev/test scenarios. See [ADR-0021](../../docs/adr/0021_TRUNCATE_COMMAND.md).
   - Required confirmation prompt (type `TRUNCATE <entity> <count>` to proceed)
   - `--dry-run` to preview record count without deleting
   - `--force` to skip confirmation for automation/CI

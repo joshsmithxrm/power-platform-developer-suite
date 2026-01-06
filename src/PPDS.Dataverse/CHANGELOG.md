@@ -11,16 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`Workflow` early-bound entity** - Entity class for Power Automate flows (classic workflows). Supports flow management operations. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
 - **`ConnectionReference` early-bound entity** - Entity class for connection references used by flows and canvas apps. Fixed naming from pac modelbuilder's inconsistent lowercase output. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
-- **Field-level error context in bulk operation errors** - `BulkOperationError` now includes `FieldName` (extracted from error messages) and `FieldValueDescription` (sanitized value info for EntityReferences). Makes debugging lookup failures and required field errors easier. See [ADR-0018](../../docs/adr/0018_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
+- **Field-level error context in bulk operation errors** - `BulkOperationError` now includes `FieldName` (extracted from error messages) and `FieldValueDescription` (sanitized value info for EntityReferences). Makes debugging lookup failures and required field errors easier. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
 
 ### Changed
 
-- **Increased default AcquireTimeout from 30s to 120s** - With ADR-0015 pool-managed concurrency, tasks queue on the semaphore and need longer timeouts for large imports with many batches. Previously tasks would timeout during normal queuing.
+- **Increased default AcquireTimeout from 30s to 120s** - With ADR-0019 pool-managed concurrency, tasks queue on the semaphore and need longer timeouts for large imports with many batches. Previously tasks would timeout during normal queuing.
 - **Reduced pool exhaustion retry attempts from 3 to 1** - With proper pool queuing, exhaustion is rare and typically indicates a real capacity issue rather than transient contention.
 
 ### Fixed
 
-- **Pool exhaustion under concurrent bulk operations** - Multiple consumers (e.g., entities importing in parallel) each assumed they could use full pool capacity, causing N×DOP tasks to compete for DOP semaphore slots. Replaced adaptive parallelism calculation with pool-managed blocking where tasks naturally queue on `GetClientAsync()`. See [ADR-0015](../../docs/adr/0015_POOL_MANAGED_CONCURRENCY.md).
+- **Pool exhaustion under concurrent bulk operations** - Multiple consumers (e.g., entities importing in parallel) each assumed they could use full pool capacity, causing N×DOP tasks to compete for DOP semaphore slots. Replaced adaptive parallelism calculation with pool-managed blocking where tasks naturally queue on `GetClientAsync()`. See [ADR-0019](../../docs/adr/0019_POOL_MANAGED_CONCURRENCY.md).
 - **Pool exhaustion during throttling** - Capped batch parallelism at pool capacity to prevent over-subscription when throttling reduces effective throughput. On high-core machines, `ProcessorCount * 4` (e.g., 96 tasks on 24-core) far exceeded pool capacity (~20 slots), causing timeout storms when throttled connections held semaphore slots during Retry-After waits.
 
 ## [1.0.0-beta.3] - 2026-01-04

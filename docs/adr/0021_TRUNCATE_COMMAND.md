@@ -1,4 +1,4 @@
-# ADR-0017: Truncate Command
+# ADR-0021: Truncate Command
 
 ## Status
 

@@ -1428,7 +1428,7 @@ namespace PPDS.Dataverse.BulkOperations
         /// assuming it can use the full pool capacity.
         /// </para>
         /// <para>
-        /// See ADR-0015 for architectural rationale.
+        /// See ADR-0019 for architectural rationale.
         /// </para>
         /// </remarks>
         private async Task<BulkOperationResult> ExecuteBatchesParallelAsync<T>(

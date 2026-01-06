@@ -192,6 +192,11 @@ Key points:
 | [0012](docs/adr/0012_HYBRID_FILTER_DESIGN.md) | Hybrid filter design |
 | [0013](docs/adr/0013_CLI_DRY_RUN_CONVENTION.md) | CLI --dry-run convention |
 | [0014](docs/adr/0014_CSV_MAPPING_SCHEMA.md) | CSV mapping schema |
+| [0015](docs/adr/0015_APPLICATION_SERVICE_LAYER.md) | Application service layer for CLI/TUI/Daemon |
+| [0019](docs/adr/0019_POOL_MANAGED_CONCURRENCY.md) | Pool-managed concurrency |
+| [0020](docs/adr/0020_IMPORT_ERROR_REPORTING.md) | Import error reporting |
+| [0021](docs/adr/0021_TRUNCATE_COMMAND.md) | Truncate command |
+| [0022](docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md) | Import diagnostics architecture |
 
 ---
 

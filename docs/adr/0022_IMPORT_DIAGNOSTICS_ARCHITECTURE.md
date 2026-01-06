@@ -1,4 +1,4 @@
-# ADR-0018: Import Diagnostics Architecture
+# ADR-0022: Import Diagnostics Architecture
 
 ## Status
 
@@ -128,4 +128,4 @@ public class BulkOperationError
 ## Related ADRs
 
 - **ADR-0008**: CLI Output Architecture (stderr for version header)
-- **ADR-0016**: Import Error Reporting (this extends that work)
+- **ADR-0020**: Import Error Reporting (this extends that work)

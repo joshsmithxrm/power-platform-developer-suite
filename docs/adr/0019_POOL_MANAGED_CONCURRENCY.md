@@ -1,4 +1,4 @@
-# ADR-0015: Pool-Managed Concurrency
+# ADR-0019: Pool-Managed Concurrency
 
 **Status:** Accepted
 **Date:** 2026-01-05
@@ -90,9 +90,9 @@ ADR-0005 (DOP-Based Parallelism) established:
 - Don't exceed DOP to avoid throttles
 - Scale by adding connections (Application Users)
 
-**That remains unchanged.** ADR-0015 changes WHO decides parallelism:
+**That remains unchanged.** ADR-0019 changes WHO decides parallelism:
 
-| Aspect | ADR-0005 | ADR-0015 |
+| Aspect | ADR-0005 | ADR-0019 |
 |--------|----------|----------|
 | Pool capacity sizing | DOP-based | (unchanged) |
 | Who limits concurrency | Callers read DOP | Pool semaphore blocks |

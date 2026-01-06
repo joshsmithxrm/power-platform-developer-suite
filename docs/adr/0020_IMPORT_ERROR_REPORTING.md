@@ -1,4 +1,4 @@
-# ADR-0016: Import Error Reporting
+# ADR-0020: Import Error Reporting
 
 ## Status
 
@@ -103,4 +103,4 @@ The following patterns are automatically detected:
 ## Related ADRs
 
 - **ADR-0008**: CLI Output Architecture (stderr for progress)
-- **ADR-0015**: Pool-Managed Concurrency (pool exhaustion handling)
+- **ADR-0019**: Pool-Managed Concurrency (pool exhaustion handling)
