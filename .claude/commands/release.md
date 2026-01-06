@@ -76,6 +76,18 @@ For each package with untagged versions:
 
 1. **Extract release notes** from changelog (content between version header and next version header)
 2. **Create GitHub release:**
+
+   **For CLI package** (creates draft - see [ADR-0023](../../docs/adr/0023_CLI_BINARY_RELEASE_PROCESS.md)):
+   ```bash
+   gh release create Cli-v{version} \
+     --title "PPDS CLI v{version}" \
+     --notes "{changelog_content}" \
+     --prerelease \
+     --draft
+   ```
+   Report: "Draft release created. The release-cli.yml workflow will add binaries and publish."
+
+   **For all other packages** (published immediately):
    ```bash
    gh release create {Package}-v{version} \
      --title "PPDS.{Package} v{version}" \
@@ -100,16 +112,23 @@ Show final summary:
 
 ## CLI Release Special Handling
 
-The CLI package has additional automation beyond NuGet publishing. When the `Cli-v*` tag is pushed:
+The CLI package requires special handling because GitHub releases become immutable after publishing. See [ADR-0023](../../docs/adr/0023_CLI_BINARY_RELEASE_PROCESS.md) for details.
+
+When the `Cli-v*` tag is pushed:
 
 1. `publish-nuget.yml` publishes the CLI as a .NET tool to NuGet.org
-2. `release-cli.yml` builds and attaches self-contained binaries
+2. `release-cli.yml` builds self-contained binaries and handles the release
 
-**If a release is created via `/release` before the tag is pushed:** The workflow detects the existing release and uploads binaries to it.
+**Draft-first flow (recommended via `/release`):**
+1. `/release` creates a **draft** release with changelog notes
+2. Tag push triggers `release-cli.yml`
+3. Workflow uploads binaries to the draft release
+4. Workflow publishes the release (removes draft status)
 
-**If a tag is pushed without a pre-existing release:** The workflow creates the release with auto-generated notes and attaches binaries.
+**Fallback flow (manual tag push):**
+If a tag is pushed without a pre-existing draft release, the workflow creates the release with auto-generated notes and attaches binaries.
 
-Either order works - the binaries will be attached to the final release.
+**Important:** Do NOT publish CLI releases manually via GitHub UI. The workflow handles publishing after binaries are attached.
 
 ## Example Session
 

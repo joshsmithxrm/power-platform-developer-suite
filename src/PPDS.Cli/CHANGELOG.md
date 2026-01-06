@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-beta.11] - 2026-01-06
-
-### Fixed
-
-- **Release workflow failed to attach binaries** - GitHub releases were created as immutable before binaries could be uploaded. Workflow now creates releases as drafts, attaches all assets, then publishes.
-
 ## [1.0.0-beta.10] - 2026-01-06
 
 ### Added
