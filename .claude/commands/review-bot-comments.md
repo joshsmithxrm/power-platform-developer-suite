@@ -17,12 +17,10 @@ Fetch BOTH PR comments AND code scanning alerts:
 gh api repos/joshsmithxrm/ppds-sdk/pulls/[PR]/comments \
   --jq '.[] | select(.user.login | test("gemini|Copilot|copilot|github-advanced")) | {id, user: .user.login, body: .body[:100], path, line}'
 
-# 1b. Code scanning alerts (includes Copilot Autofix)
-# First get the PR branch name
-gh pr view [PR] --repo joshsmithxrm/ppds-sdk --json headRefName --jq '.headRefName'
-
-# Then fetch alerts for that branch
-gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=[BRANCH]&state=open" \
+# 1b. Code scanning alerts on the PR merge ref
+# IMPORTANT: Use refs/pull/[PR]/merge to get alerts introduced by the PR
+# Using just the branch name returns empty or wrong results!
+gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" \
   --jq '.[] | {number, rule: .rule.description, path: .most_recent_instance.location.path, line: .most_recent_instance.location.start_line, severity: .rule.severity}'
 ```
 
@@ -155,7 +153,7 @@ gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments --jq "length"
 
 **Code scanning alerts** - All are fixed or dismissed:
 ```bash
-gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=[BRANCH]&state=open" --jq "length"
+gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" --jq "length"
 # Should return 0
 ```
 

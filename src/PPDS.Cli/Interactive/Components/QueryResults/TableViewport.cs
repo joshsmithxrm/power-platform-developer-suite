@@ -164,8 +164,6 @@ internal sealed class TableViewport
         var layouts = _state.ColumnLayouts;
         if (layouts.Count == 0) return;
 
-        var terminalWidth = Console.WindowWidth;
-
         // Top border
         Console.ForegroundColor = ConsoleColor.DarkCyan;
         Console.Write("┌");
@@ -272,9 +270,7 @@ internal sealed class TableViewport
     {
         Console.SetCursorPosition(0, screenY);
 
-        var nav = _state.NavigationState;
         var visibleLayouts = _state.ColumnLayouts.Where(l => l.IsVisible).ToList();
-
         RenderDataRow(rowIndex, isSelected, visibleLayouts);
     }
 
@@ -313,12 +309,10 @@ internal sealed class TableViewport
         for (var i = 0; i < columns.Count; i++)
         {
             var isFixed = i < _state.FixedColumnCount;
-            var isScrollable = !isFixed;
 
             // For scrollable columns, check if they should be visible
             var scrollableIndex = i - _state.FixedColumnCount;
-            var isVisible = isFixed ||
-                            (isScrollable && scrollableIndex >= _state.FirstScrollableColumn);
+            var isVisible = isFixed || scrollableIndex >= _state.FirstScrollableColumn;
 
             if (!isVisible)
             {
