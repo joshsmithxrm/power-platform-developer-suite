@@ -30,11 +30,12 @@ namespace PPDS.Dataverse.BulkOperations
     public sealed class BulkOperationExecutor : IBulkOperationExecutor
     {
         /// <summary>
-        /// Maximum number of retries when connection pool is exhausted.
-        /// With ADR-0015 pool-managed concurrency, exhaustion is rare since tasks
-        /// queue on the semaphore. One retry provides a safety net for edge cases.
+        /// Maximum number of retries when connection pool is exhausted in GetClientWithRetryAsync.
+        /// This provides a safety net before propagating to the outer retry loop in
+        /// ExecuteBatchWithThrottleHandlingAsync, which handles PoolExhaustedException with
+        /// unlimited retries (pool exhaustion is always transient).
         /// </summary>
-        private const int MaxPoolExhaustionRetries = 1;
+        private const int MaxPoolExhaustionRetries = 3;
 
         /// <summary>
         /// Maximum number of retries for bulk operation infrastructure race conditions.
@@ -849,6 +850,23 @@ namespace PPDS.Dataverse.BulkOperations
                     await Task.Delay(delay, cancellationToken);
 
                     // Continue to next iteration to retry
+                }
+                catch (PoolExhaustedException ex)
+                {
+                    // Pool exhaustion is ALWAYS transient - connections will free up as batches complete.
+                    // Retry indefinitely with exponential backoff (same pattern as throttling).
+                    // Only cancellation token can stop this - pool exhaustion should never cause data loss.
+                    var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, attempt - 1), 32)); // Cap at 32s
+
+                    _logger.LogWarning(
+                        "Pool exhausted for {Entity} (attempt {Attempt}). " +
+                        "Waiting {Delay}s for connections to free. Active: {Active}/{MaxPool}",
+                        entityLogicalName, attempt, delay.TotalSeconds,
+                        ex.ActiveConnections, ex.MaxPoolSize);
+
+                    await Task.Delay(delay, cancellationToken);
+
+                    // Continue to next iteration of while(true) loop - pool will eventually have capacity
                 }
                 catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException)
                 {
