@@ -142,7 +142,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
             throw new ArgumentException("Profile TenantId is required", nameof(profile));
 
         if (string.IsNullOrWhiteSpace(clientSecret))
-            throw new ArgumentNullException(nameof(clientSecret));
+            throw new ArgumentException("Client secret is required", nameof(clientSecret));
 
         return new PowerPlatformTokenProvider(profile.ApplicationId, clientSecret, profile.TenantId, profile.Cloud);
     }

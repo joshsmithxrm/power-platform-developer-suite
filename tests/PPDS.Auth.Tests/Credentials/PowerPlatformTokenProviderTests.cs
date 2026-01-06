@@ -178,7 +178,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, null!);
 
-        act.Should().Throw<ArgumentNullException>()
+        act.Should().Throw<ArgumentException>()
             .WithParameterName("clientSecret");
     }
 
