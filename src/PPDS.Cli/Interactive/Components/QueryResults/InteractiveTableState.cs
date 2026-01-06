@@ -327,13 +327,22 @@ internal sealed class InteractiveTableState
     }
 
     /// <summary>
+    /// Recalculates visible row count for current terminal height.
+    /// Call this when terminal is resized.
+    /// </summary>
+    public void RecalculateVisibleRowCount()
+    {
+        VisibleRowCount = CalculateVisibleRowCount();
+    }
+
+    /// <summary>
     /// Calculates how many rows fit in the current terminal.
     /// </summary>
     private static int CalculateVisibleRowCount()
     {
-        // Reserve space for: header panel (~4 lines), column headers (2 lines),
+        // Reserve space for: header panel (~5 lines with profile), column headers (2 lines),
         // status bar (2 lines), borders
-        const int reservedLines = 10;
+        const int reservedLines = 11;
         return Math.Max(3, Console.WindowHeight - reservedLines);
     }
 

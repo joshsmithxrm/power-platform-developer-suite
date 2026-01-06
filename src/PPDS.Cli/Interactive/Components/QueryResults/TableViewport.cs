@@ -17,9 +17,24 @@ internal sealed class TableViewport
     private int _headerHeight;
     private int _tableStartY;
 
+    // Track terminal dimensions for resize detection
+    private int _lastWindowWidth;
+    private int _lastWindowHeight;
+
     public TableViewport(InteractiveTableState state)
     {
         _state = state;
+        _lastWindowWidth = Console.WindowWidth;
+        _lastWindowHeight = Console.WindowHeight;
+    }
+
+    /// <summary>
+    /// Checks if the terminal was resized since last render.
+    /// </summary>
+    private bool HasTerminalResized()
+    {
+        return Console.WindowWidth != _lastWindowWidth ||
+               Console.WindowHeight != _lastWindowHeight;
     }
 
     /// <summary>
@@ -29,6 +44,13 @@ internal sealed class TableViewport
     {
         Console.Clear();
         Console.CursorVisible = false;
+
+        // Track current terminal size
+        _lastWindowWidth = Console.WindowWidth;
+        _lastWindowHeight = Console.WindowHeight;
+
+        // Recalculate visible row count in case terminal was resized
+        _state.RecalculateVisibleRowCount();
 
         // Calculate column layouts for current terminal width
         CalculateColumnLayouts();
@@ -52,6 +74,13 @@ internal sealed class TableViewport
     /// </summary>
     public void UpdateRowHighlight(int previousRow, int newRow)
     {
+        // If terminal was resized, do a full re-render instead
+        if (HasTerminalResized())
+        {
+            Render();
+            return;
+        }
+
         // Only redraw if both rows are visible
         var visibleStart = _state.FirstVisibleRow;
         var visibleEnd = visibleStart + _state.VisibleRowCount;
@@ -79,6 +108,13 @@ internal sealed class TableViewport
     /// </summary>
     public void RenderStatusBar()
     {
+        // If terminal was resized, do a full re-render instead
+        if (HasTerminalResized())
+        {
+            Render();
+            return;
+        }
+
         var statusY = _tableStartY + 2 + _state.VisibleRowCount + 1;
         Console.SetCursorPosition(0, statusY);
 
