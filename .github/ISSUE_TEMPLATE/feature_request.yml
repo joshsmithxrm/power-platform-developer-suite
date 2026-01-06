@@ -1,0 +1,67 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please fill out the sections below.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Brief description of the feature
+      placeholder: What should this feature do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this needed? What problem does it solve?
+      placeholder: Describe the use case or problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this be implemented?
+      placeholder: Describe your suggested implementation
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How do we know when this is complete?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Implementation Notes
+      description: Technical details, files to modify, etc.
+      placeholder: Any technical considerations
+    validations:
+      required: false
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related
+      description: Related issues, PRs, or ADRs
+      placeholder: |
+        - Relates to #123
+        - Blocks #456
+    validations:
+      required: false

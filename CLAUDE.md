@@ -250,10 +250,45 @@ Run `/review-bot-comments [PR#]` to triage.
 
 ---
 
+## 🗺️ Issue Triage
+
+Issues are tracked in the [PPDS Roadmap](https://github.com/users/joshsmithxrm/projects/3) project.
+
+### Triage Command
+
+`/triage` - Systematically categorize GitHub issues with project fields and labels
+
+### Project Fields
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| **Type** | feature, bug, chore, docs, refactor | Work category |
+| **Priority** | P0-Critical, P1-High, P2-Medium, P3-Low | Urgency/importance |
+| **Size** | XS, S, M, L, XL | Effort estimate |
+| **Status** | Todo, In Progress, Done | Current state |
+| **Target** | This Week, Next, Q1 2026, CLI v1.0.0, Blocked | Sequencing |
+| **Parent Issue** | Link to epic/parent | Issue hierarchy |
+
+### Label Strategy
+
+**Use labels for:**
+- **Epics**: epic:cli-daemon, epic:testing, epic:data-migration
+- **Phases**: phase:1-core, phase:2-connections, phase:3-traces, phase:4-webresources, phase:5-migration
+- **Areas**: area:plugins, area:data, area:auth, area:cli, area:tui, area:pooling, area:daemon
+- **Special**: foundation, blocked, performance
+- **Type hints** (optional): bug, enhancement, documentation
+
+**Don't use labels for:** Priority, Size, Status, Target (use project fields instead)
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed guidelines.
+
+---
+
 ## 🛠️ Claude Commands
 
 | Command | Purpose |
 |---------|---------|
+| `/triage [options] [issues...]` | Batch triage issues in PPDS Roadmap project |
 | `/plan-work <issues...>` | Triage issues, create worktrees |
 | `/pre-pr` | Validate before PR |
 | `/review-bot-comments [PR#]` | Triage bot findings |

@@ -3,8 +3,18 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '.claude/**'
+      - '*.md'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '.claude/**'
+      - '*.md'
+      - '.github/ISSUE_TEMPLATE/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

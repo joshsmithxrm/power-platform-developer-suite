@@ -93,6 +93,7 @@
       "Bash(gh auth status:*)",
       "Bash(gh release list:*)",
       "Bash(gh release view:*)",
+      "Bash(gh issue create:*)",
       "WebSearch"
     ],
     "deny": [
@@ -134,7 +135,6 @@
       "Bash(gh pr merge:*)",
       "Bash(gh pr close:*)",
       "Bash(gh pr edit:*)",
-      "Bash(gh issue create:*)",
       "Bash(gh issue close:*)",
       "Bash(gh issue edit:*)",
       "Bash(gh release create:*)",
