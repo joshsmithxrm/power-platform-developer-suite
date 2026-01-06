@@ -1428,16 +1428,20 @@ namespace PPDS.Dataverse.BulkOperations
             var updatedCount = 0;
             var hasUpsertCounts = 0; // 0 = false, 1 = true (for thread-safe flag)
 
-            // Per ADR-0015: Use a loose CPU-bound limit and let the pool's semaphore
-            // handle actual concurrency control. Multiple consumers (entities importing
-            // in parallel) naturally queue on GetClientAsync() when pool is at capacity.
-            // Do NOT use GetTotalRecommendedParallelism() here - that causes each consumer
-            // to spawn pool-capacity tasks, leading to N×DOP tasks competing for DOP slots.
+            // Cap parallelism at pool capacity to prevent over-subscription during throttling.
+            // When throttling occurs, connections hold semaphore slots while waiting on Retry-After,
+            // reducing effective throughput. Using ProcessorCount * 4 on a 24-core machine spawns
+            // 96 tasks that queue for ~20 pool slots, exceeding AcquireTimeout (120s).
+            // The Min(CPU, Pool) approach respects both constraints.
+            var cpuBasedLimit = Environment.ProcessorCount * 4;
+            var poolCapacity = _connectionPool.GetTotalRecommendedParallelism();
+            var effectiveParallelism = Math.Min(cpuBasedLimit, Math.Max(poolCapacity, 1));
+
             await Parallel.ForEachAsync(
                 batches,
                 new ParallelOptions
                 {
-                    MaxDegreeOfParallelism = Environment.ProcessorCount * 4,
+                    MaxDegreeOfParallelism = effectiveParallelism,
                     CancellationToken = cancellationToken
                 },
                 async (batch, ct) =>

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Pool exhaustion under concurrent bulk operations** - Multiple consumers (e.g., entities importing in parallel) each assumed they could use full pool capacity, causing N×DOP tasks to compete for DOP semaphore slots. Replaced adaptive parallelism calculation with pool-managed blocking where tasks naturally queue on `GetClientAsync()`. See [ADR-0015](../../docs/adr/0015_POOL_MANAGED_CONCURRENCY.md).
+- **Pool exhaustion during throttling** - Capped batch parallelism at pool capacity to prevent over-subscription when throttling reduces effective throughput. On high-core machines, `ProcessorCount * 4` (e.g., 96 tasks on 24-core) far exceeded pool capacity (~20 slots), causing timeout storms when throttled connections held semaphore slots during Retry-After waits.
 
 ## [1.0.0-beta.3] - 2026-01-04
 

@@ -114,6 +114,33 @@ ADR-0005 (DOP-Based Parallelism) established:
   - .NET handles this efficiently (tasks are lightweight when awaiting)
   - Trade-off is acceptable for correctness
 
+## Addendum: Throttling Edge Case (2026-01-06)
+
+The original guidance ("use `ProcessorCount * 4`") proved problematic on high-core machines during throttling:
+
+```
+Machine: 24 cores → ProcessorCount * 4 = 96 tasks
+Pool capacity: 20 slots (4 profiles × 5 DOP)
+AcquireTimeout: 120 seconds
+```
+
+When service protection throttling occurs:
+1. Throttled connections hold semaphore slots during Retry-After (30s-5min)
+2. Effective throughput drops from 20 to ~10-15 active connections
+3. 96 tasks queue for reduced slots, exceeding AcquireTimeout
+
+**Solution:** Cap parallelism at `Math.Min(ProcessorCount * 4, poolCapacity)`:
+
+```csharp
+var cpuBasedLimit = Environment.ProcessorCount * 4;
+var poolCapacity = _connectionPool.GetTotalRecommendedParallelism();
+var effectiveParallelism = Math.Min(cpuBasedLimit, Math.Max(poolCapacity, 1));
+```
+
+This differs from the regressed approach (which ONLY used pool capacity) by taking the SMALLER of CPU-based and pool-based limits, ensuring:
+- Small pool → don't spawn excess tasks (prevents throttle timeout storms)
+- Large pool + few cores → don't exceed CPU-based limit (original behavior)
+
 ### Measured Impact
 
 | Scenario | Before | After |
