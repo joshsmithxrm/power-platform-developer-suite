@@ -135,8 +135,8 @@ internal static class ProfileSelector
         var profile = choice.Profile;
         var parts = new List<string>();
 
-        // Name/index
-        parts.Add(profile.DisplayIdentifier);
+        // Name/index (escape for markup safety)
+        parts.Add(Markup.Escape(profile.DisplayIdentifier));
 
         // Identity
         if (!string.IsNullOrEmpty(profile.IdentityDisplay))

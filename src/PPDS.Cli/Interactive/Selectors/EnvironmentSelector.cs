@@ -256,7 +256,7 @@ internal static class EnvironmentSelector
         var currentUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
         var isActive = env.ApiUrl.TrimEnd('/').ToLowerInvariant() == currentUrl;
 
-        // Name
+        // Name (escape for markup safety)
         if (isActive)
         {
             parts.Add(Styles.SuccessText(env.FriendlyName));
@@ -264,7 +264,7 @@ internal static class EnvironmentSelector
         }
         else
         {
-            parts.Add(env.FriendlyName);
+            parts.Add(Markup.Escape(env.FriendlyName));
         }
 
         // Type
