@@ -1,3 +1,4 @@
+using PPDS.Cli.Infrastructure;
 using PPDS.Dataverse.Query;
 using Spectre.Console;
 
@@ -20,6 +21,8 @@ internal static class RecordView
         Next,
         JumpTo,
         ToggleNulls,
+        OpenInBrowser,
+        CopyUrl,
         SwitchToTableView,
         NewQuery,
         Back
@@ -44,6 +47,7 @@ internal static class RecordView
             {
                 case RecordAction.Previous:
                     state.MovePrevious();
+                    state.LastAction = NavigationAction.Previous;
                     break;
 
                 case RecordAction.Next:
@@ -53,14 +57,27 @@ internal static class RecordView
                         await LoadMoreRecords(state, fetchPage, cancellationToken);
                         state.MoveNext();
                     }
+                    state.LastAction = NavigationAction.Next;
                     break;
 
                 case RecordAction.JumpTo:
                     await ShowJumpToDialog(state);
+                    state.LastAction = NavigationAction.JumpTo;
                     break;
 
                 case RecordAction.ToggleNulls:
                     state.ShowNullValues = !state.ShowNullValues;
+                    state.LastAction = NavigationAction.ToggleNulls;
+                    break;
+
+                case RecordAction.OpenInBrowser:
+                    OpenRecordInBrowser(state);
+                    state.LastAction = NavigationAction.OpenInBrowser;
+                    break;
+
+                case RecordAction.CopyUrl:
+                    CopyRecordUrl(state);
+                    state.LastAction = NavigationAction.CopyUrl;
                     break;
 
                 case RecordAction.SwitchToTableView:
@@ -75,6 +92,32 @@ internal static class RecordView
         }
 
         return ViewResult.Back;
+    }
+
+    private static void OpenRecordInBrowser(RecordNavigationState state)
+    {
+        var url = state.GetCurrentRecordUrl();
+        if (url != null)
+        {
+            BrowserHelper.OpenUrl(url);
+        }
+    }
+
+    private static void CopyRecordUrl(RecordNavigationState state)
+    {
+        var url = state.GetCurrentRecordUrl();
+        if (url != null)
+        {
+            if (ClipboardHelper.CopyToClipboard(url))
+            {
+                AnsiConsole.MarkupLine(Styles.SuccessText("URL copied to clipboard"));
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(Styles.MutedText($"URL: {url}"));
+            }
+            Thread.Sleep(500); // Brief pause to show message
+        }
     }
 
     private static void RenderRecord(RecordNavigationState state)
@@ -149,26 +192,34 @@ internal static class RecordView
     {
         var choices = new List<RecordNavigationChoice>();
 
-        if (state.CanMovePrevious)
-        {
-            choices.Add(new RecordNavigationChoice
-            {
-                Label = "< Previous Record",
-                Action = RecordAction.Previous
-            });
-        }
+        // Determine which navigation action should be first (default)
+        var preferNext = state.LastAction == NavigationAction.Next ||
+                         state.LastAction == NavigationAction.JumpTo ||
+                         state.LastAction == NavigationAction.None;
 
-        if (state.CanMoveNext)
-        {
-            var label = state.NeedsMoreRecords
-                ? "> Next Record (load more)"
-                : "> Next Record";
+        // Navigation choices - smart ordering based on last action
+        var previousChoice = state.CanMovePrevious
+            ? new RecordNavigationChoice { Label = "< Previous Record", Action = RecordAction.Previous }
+            : null;
 
-            choices.Add(new RecordNavigationChoice
+        var nextChoice = state.CanMoveNext
+            ? new RecordNavigationChoice
             {
-                Label = label,
+                Label = state.NeedsMoreRecords ? "> Next Record (load more)" : "> Next Record",
                 Action = RecordAction.Next
-            });
+            }
+            : null;
+
+        // Add navigation choices in smart order (default first)
+        if (preferNext)
+        {
+            if (nextChoice != null) choices.Add(nextChoice);
+            if (previousChoice != null) choices.Add(previousChoice);
+        }
+        else
+        {
+            if (previousChoice != null) choices.Add(previousChoice);
+            if (nextChoice != null) choices.Add(nextChoice);
         }
 
         if (state.TotalLoaded > 3)
@@ -177,6 +228,22 @@ internal static class RecordView
             {
                 Label = "# Jump to Record...",
                 Action = RecordAction.JumpTo
+            });
+        }
+
+        // Browser integration - only show if URL can be constructed
+        if (state.CanBuildRecordUrl)
+        {
+            choices.Add(new RecordNavigationChoice
+            {
+                Label = "Open in Browser",
+                Action = RecordAction.OpenInBrowser
+            });
+
+            choices.Add(new RecordNavigationChoice
+            {
+                Label = "Copy Record URL",
+                Action = RecordAction.CopyUrl
             });
         }
 

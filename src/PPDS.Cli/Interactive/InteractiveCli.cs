@@ -1,4 +1,5 @@
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Interactive.Components;
 using PPDS.Cli.Interactive.Selectors;
@@ -6,6 +7,17 @@ using PPDS.Cli.Interactive.Wizards;
 using Spectre.Console;
 
 namespace PPDS.Cli.Interactive;
+
+/// <summary>
+/// Result of a wizard action indicating how the main loop should proceed.
+/// </summary>
+internal enum WizardResult
+{
+    /// <summary>Continue showing the main menu.</summary>
+    Continue,
+    /// <summary>Exit the entire interactive CLI.</summary>
+    Exit
+}
 
 /// <summary>
 /// Entry point for the interactive TUI mode.
@@ -62,6 +74,12 @@ internal static class InteractiveCli
     {
         using var store = new ProfileStore();
 
+        // Create session for connection pool reuse across queries
+        // Session is lazily initialized on first query
+        await using var session = new InteractiveSession(
+            profileName: null, // Uses active profile
+            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             // Clear screen for fresh display
@@ -81,7 +99,7 @@ internal static class InteractiveCli
             var action = MainMenu.Show(hasProfile, hasEnvironment, cancellationToken);
 
             // Handle action
-            var shouldExit = await HandleActionAsync(action, store, collection, cancellationToken);
+            var shouldExit = await HandleActionAsync(action, store, collection, session, cancellationToken);
             if (shouldExit)
             {
                 break;
@@ -97,6 +115,7 @@ internal static class InteractiveCli
         MainMenu.MenuAction action,
         ProfileStore store,
         ProfileCollection collection,
+        InteractiveSession session,
         CancellationToken cancellationToken)
     {
         switch (action)
@@ -105,11 +124,11 @@ internal static class InteractiveCli
                 return true;
 
             case MainMenu.MenuAction.SwitchProfile:
-                await HandleSwitchProfileAsync(store, collection, cancellationToken);
+                await HandleSwitchProfileAsync(store, collection, session, cancellationToken);
                 break;
 
             case MainMenu.MenuAction.SwitchEnvironment:
-                await HandleSwitchEnvironmentAsync(store, collection, cancellationToken);
+                await HandleSwitchEnvironmentAsync(store, collection, session, cancellationToken);
                 break;
 
             case MainMenu.MenuAction.CreateProfile:
@@ -119,7 +138,11 @@ internal static class InteractiveCli
             case MainMenu.MenuAction.SqlQuery:
                 if (collection.ActiveProfile != null)
                 {
-                    await SqlQueryWizard.RunAsync(collection.ActiveProfile, cancellationToken);
+                    var result = await SqlQueryWizard.RunAsync(collection.ActiveProfile, session, cancellationToken);
+                    if (result == WizardResult.Exit)
+                    {
+                        return true;
+                    }
                 }
                 break;
 
@@ -136,6 +159,7 @@ internal static class InteractiveCli
     private static async Task HandleSwitchProfileAsync(
         ProfileStore store,
         ProfileCollection collection,
+        InteractiveSession session,
         CancellationToken cancellationToken)
     {
         AnsiConsole.WriteLine();
@@ -148,6 +172,8 @@ internal static class InteractiveCli
         }
         else if (result.Changed)
         {
+            // Profile changed - invalidate session to force new connection
+            await session.InvalidateAsync();
             // Pause briefly to show success message
             await Task.Delay(500, cancellationToken);
         }
@@ -156,6 +182,7 @@ internal static class InteractiveCli
     private static async Task HandleSwitchEnvironmentAsync(
         ProfileStore store,
         ProfileCollection collection,
+        InteractiveSession session,
         CancellationToken cancellationToken)
     {
         AnsiConsole.WriteLine();
@@ -171,6 +198,8 @@ internal static class InteractiveCli
         }
         else if (result.Changed)
         {
+            // Environment changed - session will auto-recreate pool on next query
+            // (InteractiveSession detects URL changes)
             // Pause briefly to show success message
             await Task.Delay(500, cancellationToken);
         }

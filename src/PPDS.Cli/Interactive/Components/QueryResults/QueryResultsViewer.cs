@@ -22,7 +22,9 @@ internal static class QueryResultsViewer
         /// <summary>User wants to go back to the main menu.</summary>
         Back,
         /// <summary>User wants to enter a new query.</summary>
-        NewQuery
+        NewQuery,
+        /// <summary>User wants to exit the entire interactive CLI.</summary>
+        Exit
     }
 
     /// <summary>
@@ -30,11 +32,13 @@ internal static class QueryResultsViewer
     /// </summary>
     /// <param name="result">The query result to display.</param>
     /// <param name="fetchPage">Optional function to fetch additional pages.</param>
+    /// <param name="environmentUrl">The environment URL for building record links.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The action the user wants to take next.</returns>
     public static async Task<ShowResult> ShowAsync(
         QueryResult result,
         Func<int, string?, Task<QueryResult>>? fetchPage,
+        string? environmentUrl,
         CancellationToken cancellationToken)
     {
         if (result.Count == 0)
@@ -43,7 +47,7 @@ internal static class QueryResultsViewer
             return ShowResult.NewQuery;
         }
 
-        var state = new RecordNavigationState(result);
+        var state = new RecordNavigationState(result, environmentUrl);
 
         // Choose initial view based on column count
         var useTableView = result.Columns.Count <= TableViewMaxColumns;
@@ -68,6 +72,9 @@ internal static class QueryResultsViewer
 
                 case ViewResult.NewQuery:
                     return ShowResult.NewQuery;
+
+                case ViewResult.Exit:
+                    return ShowResult.Exit;
 
                 case ViewResult.SwitchToRecordView:
                     useTableView = false;

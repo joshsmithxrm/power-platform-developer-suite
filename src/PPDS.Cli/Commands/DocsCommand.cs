@@ -1,6 +1,5 @@
 using System.CommandLine;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli.Commands;
 
@@ -24,35 +23,10 @@ public static class DocsCommand
         command.SetAction((parseResult, cancellationToken) =>
         {
             Console.Error.WriteLine($"Opening documentation: {DocsUrl}");
-            OpenBrowser(DocsUrl);
+            BrowserHelper.OpenUrl(DocsUrl);
             return Task.FromResult(0);
         });
 
         return command;
-    }
-
-    private static void OpenBrowser(string url)
-    {
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                Process.Start("open", url);
-            }
-            else
-            {
-                // Linux and other Unix-like systems
-                Process.Start("xdg-open", url);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Could not open browser: {ex.Message}");
-            Console.Error.WriteLine($"Please visit: {url}");
-        }
     }
 }

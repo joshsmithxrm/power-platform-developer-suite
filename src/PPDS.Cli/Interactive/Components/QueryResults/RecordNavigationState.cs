@@ -3,6 +3,20 @@ using PPDS.Dataverse.Query;
 namespace PPDS.Cli.Interactive.Components.QueryResults;
 
 /// <summary>
+/// Tracks the last navigation action for smart menu defaults.
+/// </summary>
+internal enum NavigationAction
+{
+    None,
+    Previous,
+    Next,
+    JumpTo,
+    ToggleNulls,
+    OpenInBrowser,
+    CopyUrl
+}
+
+/// <summary>
 /// Manages navigation state for record-by-record viewing.
 /// Accumulates records across pages for seamless navigation.
 /// </summary>
@@ -21,6 +35,16 @@ internal sealed class RecordNavigationState
     /// The entity logical name.
     /// </summary>
     public string EntityName { get; }
+
+    /// <summary>
+    /// The environment URL for building record links.
+    /// </summary>
+    public string? EnvironmentUrl { get; }
+
+    /// <summary>
+    /// The last navigation action performed (for smart menu defaults).
+    /// </summary>
+    public NavigationAction LastAction { get; set; }
 
     /// <summary>
     /// The current record index (0-based).
@@ -75,10 +99,13 @@ internal sealed class RecordNavigationState
     /// <summary>
     /// Creates navigation state from an initial query result.
     /// </summary>
-    public RecordNavigationState(QueryResult initialResult)
+    /// <param name="initialResult">The initial query result.</param>
+    /// <param name="environmentUrl">The environment URL for building record links (optional).</param>
+    public RecordNavigationState(QueryResult initialResult, string? environmentUrl = null)
     {
         Columns = initialResult.Columns;
         EntityName = initialResult.EntityLogicalName;
+        EnvironmentUrl = environmentUrl;
         ExecutionTimeMs = initialResult.ExecutionTimeMs;
         _loadedRecords = new List<IReadOnlyDictionary<string, QueryValue>>(initialResult.Records);
         _pagingCookie = initialResult.PagingCookie;
@@ -149,4 +176,45 @@ internal sealed class RecordNavigationState
     /// Checks if the user is at the last loaded record and more are available.
     /// </summary>
     public bool NeedsMoreRecords => CurrentIndex >= TotalLoaded - 1 && MoreRecordsAvailable;
+
+    /// <summary>
+    /// Gets the URL to open the current record in the Dataverse web interface.
+    /// </summary>
+    /// <returns>The record URL, or null if insufficient information available.</returns>
+    public string? GetCurrentRecordUrl()
+    {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            return null;
+        }
+
+        // Find primary key field: {entityname}id
+        var pkField = $"{EntityName}id";
+        if (!CurrentRecord.TryGetValue(pkField, out var pkValue))
+        {
+            return null;
+        }
+
+        // Extract GUID from the value
+        Guid? recordId = pkValue.Value switch
+        {
+            Guid g => g,
+            string s when Guid.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
+
+        if (recordId == null)
+        {
+            return null;
+        }
+
+        // Build the Dataverse record URL
+        var baseUrl = EnvironmentUrl.TrimEnd('/');
+        return $"{baseUrl}/main.aspx?etn={EntityName}&id={recordId:D}&pagetype=entityrecord";
+    }
+
+    /// <summary>
+    /// Gets whether a record URL can be constructed for the current record.
+    /// </summary>
+    public bool CanBuildRecordUrl => GetCurrentRecordUrl() != null;
 }

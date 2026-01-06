@@ -312,5 +312,7 @@ internal enum ViewResult
     /// <summary>User wants to switch to record view.</summary>
     SwitchToRecordView,
     /// <summary>User wants to switch to table view.</summary>
-    SwitchToTableView
+    SwitchToTableView,
+    /// <summary>User wants to exit the entire interactive CLI.</summary>
+    Exit
 }
