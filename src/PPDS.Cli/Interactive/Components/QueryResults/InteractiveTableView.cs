@@ -18,6 +18,10 @@ internal static class InteractiveTableView
         Func<int, string?, Task<QueryResult>>? fetchPage,
         CancellationToken cancellationToken)
     {
+        // Prevent Ctrl+C from terminating the app - we handle it as copy
+        var previousCtrlC = Console.TreatControlCAsInput;
+        Console.TreatControlCAsInput = true;
+
         var state = new InteractiveTableState(navigationState);
         var viewport = new TableViewport(state);
 
@@ -163,15 +167,15 @@ internal static class InteractiveTableView
                     break;
 
                 case TableInputAction.NewQuery:
-                    RestoreConsole();
+                    RestoreConsole(previousCtrlC);
                     return ViewResult.NewQuery;
 
                 case TableInputAction.Escape:
-                    RestoreConsole();
+                    RestoreConsole(previousCtrlC);
                     return ViewResult.Back;
 
                 case TableInputAction.Exit:
-                    RestoreConsole();
+                    RestoreConsole(previousCtrlC);
                     return ViewResult.Exit;
 
                 case TableInputAction.ShowHelp:
@@ -184,7 +188,7 @@ internal static class InteractiveTableView
             }
         }
 
-        RestoreConsole();
+        RestoreConsole(previousCtrlC);
         return ViewResult.Back;
     }
 
@@ -283,8 +287,9 @@ internal static class InteractiveTableView
         }
     }
 
-    private static void RestoreConsole()
+    private static void RestoreConsole(bool previousCtrlC)
     {
+        Console.TreatControlCAsInput = previousCtrlC;
         Console.CursorVisible = true;
         Console.ResetColor();
     }
