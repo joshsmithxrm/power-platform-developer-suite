@@ -95,6 +95,43 @@ public static class CloudEndpoints
     }
 
     /// <summary>
+    /// Gets the Power Apps API base URL for the specified cloud environment.
+    /// Used for connections, flows, and other Power Platform management APIs.
+    /// </summary>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The Power Apps API base URL.</returns>
+    public static string GetPowerAppsApiUrl(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://api.powerapps.com",
+            CloudEnvironment.UsGov => "https://gov.api.powerapps.us",
+            CloudEnvironment.UsGovHigh => "https://high.api.powerapps.us",
+            CloudEnvironment.UsGovDod => "https://api.apps.appsplatform.us",
+            CloudEnvironment.China => "https://api.powerapps.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
+    /// Gets the Power Automate (Flow) API base URL for the specified cloud environment.
+    /// </summary>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The Power Automate API base URL.</returns>
+    public static string GetPowerAutomateApiUrl(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://api.flow.microsoft.com",
+            CloudEnvironment.UsGov => "https://gov.api.flow.microsoft.us",
+            CloudEnvironment.UsGovHigh => "https://high.api.flow.microsoft.us",
+            CloudEnvironment.UsGovDod => "https://api.flow.appsplatform.us",
+            CloudEnvironment.China => "https://api.flow.microsoft.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
     /// Parses a cloud environment from a string value.
     /// </summary>
     /// <param name="value">The string value (case-insensitive).</param>

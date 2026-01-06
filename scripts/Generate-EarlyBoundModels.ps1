@@ -58,6 +58,10 @@ $Entities = @(
     # Environment variables
     'environmentvariabledefinition'
     'environmentvariablevalue'
+    # Flows and automation
+    'workflow'
+    # Connection references
+    'connectionreference'
 )
 
 Write-Host "PPDS Early-Bound Model Generator" -ForegroundColor Cyan

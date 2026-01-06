@@ -497,12 +497,14 @@ namespace PPDS.Dataverse.Generated
 			public const string WorkflowActivationId = "workflowactivationid";
 			public const string WorkflowStageName = "workflowstagename";
 			public const string Workload = "workload";
+			public const string connectionreference_AsyncOperations = "connectionreference_AsyncOperations";
 			public const string environmentvariabledefinition_AsyncOperations = "environmentvariabledefinition_AsyncOperations";
 			public const string environmentvariablevalue_AsyncOperations = "environmentvariablevalue_AsyncOperations";
 			public const string lk_asyncoperation_createdby = "lk_asyncoperation_createdby";
 			public const string lk_asyncoperation_createdonbehalfby = "lk_asyncoperation_createdonbehalfby";
 			public const string lk_asyncoperation_modifiedby = "lk_asyncoperation_modifiedby";
 			public const string lk_asyncoperation_modifiedonbehalfby = "lk_asyncoperation_modifiedonbehalfby";
+			public const string lk_asyncoperation_workflowactivationid = "lk_asyncoperation_workflowactivationid";
 			public const string pluginpackage_AsyncOperations = "pluginpackage_AsyncOperations";
 			public const string Role_AsyncOperations = "Role_AsyncOperations";
 			public const string SdkMessageProcessingStep_AsyncOperations = "SdkMessageProcessingStep_AsyncOperations";
@@ -1361,6 +1363,25 @@ namespace PPDS.Dataverse.Generated
 		}
 		
 		/// <summary>
+		/// N:1 connectionreference_AsyncOperations
+		/// </summary>
+		[Microsoft.Xrm.Sdk.AttributeLogicalNameAttribute("regardingobjectid")]
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("connectionreference_AsyncOperations")]
+		public PPDS.Dataverse.Generated.ConnectionReference connectionreference_AsyncOperations
+		{
+			get
+			{
+				return this.GetRelatedEntity<PPDS.Dataverse.Generated.ConnectionReference>("connectionreference_AsyncOperations", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("connectionreference_AsyncOperations");
+				this.SetRelatedEntity<PPDS.Dataverse.Generated.ConnectionReference>("connectionreference_AsyncOperations", null, value);
+				this.OnPropertyChanged("connectionreference_AsyncOperations");
+			}
+		}
+		
+		/// <summary>
 		/// N:1 environmentvariabledefinition_AsyncOperations
 		/// </summary>
 		[Microsoft.Xrm.Sdk.AttributeLogicalNameAttribute("regardingobjectid")]
@@ -1447,6 +1468,25 @@ namespace PPDS.Dataverse.Generated
 			get
 			{
 				return this.GetRelatedEntity<PPDS.Dataverse.Generated.SystemUser>("lk_asyncoperation_modifiedonbehalfby", null);
+			}
+		}
+		
+		/// <summary>
+		/// N:1 lk_asyncoperation_workflowactivationid
+		/// </summary>
+		[Microsoft.Xrm.Sdk.AttributeLogicalNameAttribute("workflowactivationid")]
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_asyncoperation_workflowactivationid")]
+		public PPDS.Dataverse.Generated.Workflow lk_asyncoperation_workflowactivationid
+		{
+			get
+			{
+				return this.GetRelatedEntity<PPDS.Dataverse.Generated.Workflow>("lk_asyncoperation_workflowactivationid", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("lk_asyncoperation_workflowactivationid");
+				this.SetRelatedEntity<PPDS.Dataverse.Generated.Workflow>("lk_asyncoperation_workflowactivationid", null, value);
+				this.OnPropertyChanged("lk_asyncoperation_workflowactivationid");
 			}
 		}
 		

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Workflow` early-bound entity** - Entity class for Power Automate flows (classic workflows). Supports flow management operations. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
+- **`ConnectionReference` early-bound entity** - Entity class for connection references used by flows and canvas apps. Fixed naming from pac modelbuilder's inconsistent lowercase output. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
+
 ## [1.0.0-beta.3] - 2026-01-04
 
 ### Added

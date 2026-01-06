@@ -481,6 +481,10 @@ namespace PPDS.Dataverse.Generated
 			public const string lk_asyncoperation_createdonbehalfby = "lk_asyncoperation_createdonbehalfby";
 			public const string lk_asyncoperation_modifiedby = "lk_asyncoperation_modifiedby";
 			public const string lk_asyncoperation_modifiedonbehalfby = "lk_asyncoperation_modifiedonbehalfby";
+			public const string lk_connectionreference_createdby = "lk_connectionreference_createdby";
+			public const string lk_connectionreference_createdonbehalfby = "lk_connectionreference_createdonbehalfby";
+			public const string lk_connectionreference_modifiedby = "lk_connectionreference_modifiedby";
+			public const string lk_connectionreference_modifiedonbehalfby = "lk_connectionreference_modifiedonbehalfby";
 			public const string lk_environmentvariabledefinition_createdby = "lk_environmentvariabledefinition_createdby";
 			public const string lk_environmentvariabledefinition_createdonbehalfby = "lk_environmentvariabledefinition_createdonbehalfby";
 			public const string lk_environmentvariabledefinition_modifiedby = "lk_environmentvariabledefinition_modifiedby";
@@ -534,9 +538,16 @@ namespace PPDS.Dataverse.Generated
 			public const string modifiedby_sdkmessageprocessingstep = "modifiedby_sdkmessageprocessingstep";
 			public const string modifiedby_sdkmessageprocessingstepimage = "modifiedby_sdkmessageprocessingstepimage";
 			public const string system_user_asyncoperation = "system_user_asyncoperation";
+			public const string system_user_workflow = "system_user_workflow";
 			public const string SystemUser_AsyncOperations = "SystemUser_AsyncOperations";
+			public const string user_connectionreference = "user_connectionreference";
 			public const string user_environmentvariabledefinition = "user_environmentvariabledefinition";
 			public const string Referenceduser_parent_user = "Referenceduser_parent_user";
+			public const string workflow_createdby = "workflow_createdby";
+			public const string workflow_createdonbehalfby = "workflow_createdonbehalfby";
+			public const string Workflow_licensee = "Workflow_licensee";
+			public const string workflow_modifiedby = "workflow_modifiedby";
+			public const string workflow_modifiedonbehalfby = "workflow_modifiedonbehalfby";
 			public const string systemuserroles_association = "systemuserroles_association";
 			public const string Referencinglk_systemuser_createdonbehalfby = "lk_systemuser_createdonbehalfby";
 			public const string Referencinglk_systemuser_modifiedonbehalfby = "lk_systemuser_modifiedonbehalfby";
@@ -3007,6 +3018,78 @@ namespace PPDS.Dataverse.Generated
 		}
 		
 		/// <summary>
+		/// 1:N lk_connectionreference_createdby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_connectionreference_createdby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.ConnectionReference> lk_connectionreference_createdby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_createdby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("lk_connectionreference_createdby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_createdby", null, value);
+				this.OnPropertyChanged("lk_connectionreference_createdby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N lk_connectionreference_createdonbehalfby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_connectionreference_createdonbehalfby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.ConnectionReference> lk_connectionreference_createdonbehalfby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_createdonbehalfby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("lk_connectionreference_createdonbehalfby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_createdonbehalfby", null, value);
+				this.OnPropertyChanged("lk_connectionreference_createdonbehalfby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N lk_connectionreference_modifiedby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_connectionreference_modifiedby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.ConnectionReference> lk_connectionreference_modifiedby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_modifiedby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("lk_connectionreference_modifiedby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_modifiedby", null, value);
+				this.OnPropertyChanged("lk_connectionreference_modifiedby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N lk_connectionreference_modifiedonbehalfby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_connectionreference_modifiedonbehalfby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.ConnectionReference> lk_connectionreference_modifiedonbehalfby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_modifiedonbehalfby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("lk_connectionreference_modifiedonbehalfby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("lk_connectionreference_modifiedonbehalfby", null, value);
+				this.OnPropertyChanged("lk_connectionreference_modifiedonbehalfby");
+			}
+		}
+		
+		/// <summary>
 		/// 1:N lk_environmentvariabledefinition_createdby
 		/// </summary>
 		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("lk_environmentvariabledefinition_createdby")]
@@ -3961,6 +4044,24 @@ namespace PPDS.Dataverse.Generated
 		}
 		
 		/// <summary>
+		/// 1:N system_user_workflow
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("system_user_workflow")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> system_user_workflow
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("system_user_workflow", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("system_user_workflow");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("system_user_workflow", null, value);
+				this.OnPropertyChanged("system_user_workflow");
+			}
+		}
+		
+		/// <summary>
 		/// 1:N SystemUser_AsyncOperations
 		/// </summary>
 		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("SystemUser_AsyncOperations")]
@@ -3975,6 +4076,24 @@ namespace PPDS.Dataverse.Generated
 				this.OnPropertyChanging("SystemUser_AsyncOperations");
 				this.SetRelatedEntities<PPDS.Dataverse.Generated.AsyncOperation>("SystemUser_AsyncOperations", null, value);
 				this.OnPropertyChanged("SystemUser_AsyncOperations");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N user_connectionreference
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("user_connectionreference")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.ConnectionReference> user_connectionreference
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("user_connectionreference", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("user_connectionreference");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.ConnectionReference>("user_connectionreference", null, value);
+				this.OnPropertyChanged("user_connectionreference");
 			}
 		}
 		
@@ -4011,6 +4130,96 @@ namespace PPDS.Dataverse.Generated
 				this.OnPropertyChanging("Referenceduser_parent_user");
 				this.SetRelatedEntities<PPDS.Dataverse.Generated.SystemUser>("user_parent_user", Microsoft.Xrm.Sdk.EntityRole.Referenced, value);
 				this.OnPropertyChanged("Referenceduser_parent_user");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N workflow_createdby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("workflow_createdby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> workflow_createdby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_createdby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("workflow_createdby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_createdby", null, value);
+				this.OnPropertyChanged("workflow_createdby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N workflow_createdonbehalfby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("workflow_createdonbehalfby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> workflow_createdonbehalfby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_createdonbehalfby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("workflow_createdonbehalfby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_createdonbehalfby", null, value);
+				this.OnPropertyChanged("workflow_createdonbehalfby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N Workflow_licensee
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("Workflow_licensee")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> Workflow_licensee
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("Workflow_licensee", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("Workflow_licensee");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("Workflow_licensee", null, value);
+				this.OnPropertyChanged("Workflow_licensee");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N workflow_modifiedby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("workflow_modifiedby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> workflow_modifiedby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_modifiedby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("workflow_modifiedby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_modifiedby", null, value);
+				this.OnPropertyChanged("workflow_modifiedby");
+			}
+		}
+		
+		/// <summary>
+		/// 1:N workflow_modifiedonbehalfby
+		/// </summary>
+		[Microsoft.Xrm.Sdk.RelationshipSchemaNameAttribute("workflow_modifiedonbehalfby")]
+		public System.Collections.Generic.IEnumerable<PPDS.Dataverse.Generated.Workflow> workflow_modifiedonbehalfby
+		{
+			get
+			{
+				return this.GetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_modifiedonbehalfby", null);
+			}
+			set
+			{
+				this.OnPropertyChanging("workflow_modifiedonbehalfby");
+				this.SetRelatedEntities<PPDS.Dataverse.Generated.Workflow>("workflow_modifiedonbehalfby", null, value);
+				this.OnPropertyChanged("workflow_modifiedonbehalfby");
 			}
 		}
 		

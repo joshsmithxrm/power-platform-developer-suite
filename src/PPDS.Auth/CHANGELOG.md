@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`IPowerPlatformTokenProvider`** - New interface for acquiring tokens for Power Platform REST APIs (Power Apps, Power Automate). Enables CLI commands that interact with Power Platform management APIs. ([#150](https://github.com/joshsmithxrm/ppds-sdk/issues/150))
+- **`PowerPlatformTokenProvider`** - Implementation supporting interactive browser, device code, and client credentials (SPN) flows. Shares MSAL token cache with existing credential providers.
+- **`CloudEndpoints.GetPowerAppsApiUrl()`** - Returns Power Apps API URL for each cloud environment (Public, UsGov, UsGovHigh, UsGovDod, China).
+- **`CloudEndpoints.GetPowerAutomateApiUrl()`** - Returns Power Automate API URL for each cloud environment.
+
 ### Fixed
 
 - **Unnamed profile selection silently failed** - Selecting a profile without a name (`ppds auth select --index N`) appeared to succeed but would revert to the first profile on next command. Active profile tracking now uses index-based lookup instead of name-based, with backwards compatibility for existing profiles.json files.

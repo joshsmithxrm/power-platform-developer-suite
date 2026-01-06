@@ -72,7 +72,7 @@ ppds-sdk/
 
 Early-bound classes in `src/PPDS.Dataverse/Generated/` provide type safety.
 
-**Available:** `PluginAssembly`, `PluginType`, `SdkMessage`, `SdkMessageFilter`, `SdkMessageProcessingStep`, `SdkMessageProcessingStepImage`, `Solution`, `SolutionComponent`, `AsyncOperation`, `SystemUser`, `Publisher`
+**Available:** `PluginAssembly`, `PluginPackage`, `PluginType`, `SdkMessage`, `SdkMessageFilter`, `SdkMessageProcessingStep`, `SdkMessageProcessingStepImage`, `Solution`, `SolutionComponent`, `AsyncOperation`, `ImportJob`, `SystemUser`, `Role`, `Publisher`, `EnvironmentVariableDefinition`, `EnvironmentVariableValue`, `Workflow`, `ConnectionReference`
 
 ```csharp
 // ✅ Correct - Early-bound with constants

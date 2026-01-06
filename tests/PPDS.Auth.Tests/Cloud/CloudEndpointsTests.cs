@@ -162,4 +162,46 @@ public class CloudEndpointsTests
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://api.powerapps.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://gov.api.powerapps.us")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://high.api.powerapps.us")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://api.apps.appsplatform.us")]
+    [InlineData(CloudEnvironment.China, "https://api.powerapps.cn")]
+    public void GetPowerAppsApiUrl_ReturnsCorrectUrl(CloudEnvironment cloud, string expected)
+    {
+        var result = CloudEndpoints.GetPowerAppsApiUrl(cloud);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetPowerAppsApiUrl_InvalidCloud_Throws()
+    {
+        var act = () => CloudEndpoints.GetPowerAppsApiUrl((CloudEnvironment)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(CloudEnvironment.Public, "https://api.flow.microsoft.com")]
+    [InlineData(CloudEnvironment.UsGov, "https://gov.api.flow.microsoft.us")]
+    [InlineData(CloudEnvironment.UsGovHigh, "https://high.api.flow.microsoft.us")]
+    [InlineData(CloudEnvironment.UsGovDod, "https://api.flow.appsplatform.us")]
+    [InlineData(CloudEnvironment.China, "https://api.flow.microsoft.cn")]
+    public void GetPowerAutomateApiUrl_ReturnsCorrectUrl(CloudEnvironment cloud, string expected)
+    {
+        var result = CloudEndpoints.GetPowerAutomateApiUrl(cloud);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetPowerAutomateApiUrl_InvalidCloud_Throws()
+    {
+        var act = () => CloudEndpoints.GetPowerAutomateApiUrl((CloudEnvironment)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }
