@@ -266,6 +266,9 @@ namespace PPDS.Migration.Import
                             foreach (var error in result.Errors)
                             {
                                 errors.Add(error);
+
+                                // Stream error immediately via callback (thread-safe)
+                                options.ErrorCallback?.Invoke(error);
                             }
                         }).ConfigureAwait(false);
 
@@ -338,6 +341,9 @@ namespace PPDS.Migration.Import
                     Phase = MigrationPhase.Importing,
                     Message = safeMessage
                 };
+
+                // Stream exception error via callback
+                options?.ErrorCallback?.Invoke(exceptionError);
 
                 return new ImportResult
                 {

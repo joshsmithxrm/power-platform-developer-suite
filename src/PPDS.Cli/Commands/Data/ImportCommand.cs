@@ -93,7 +93,7 @@ public static class ImportCommand
 
         var errorReportOption = new Option<FileInfo?>("--error-report")
         {
-            Description = "Path to write detailed error report (JSON format with all failed records)"
+            Description = "Base path for output files (creates .errors.jsonl, .progress.log, .summary.json). Errors are streamed in real-time."
         };
 
         var command = new Command("import", "Import data from a ZIP file into Dataverse")
@@ -221,50 +221,88 @@ public static class ImportCommand
                 });
             }
 
-            var importOptions = new ImportOptions
+            // Create streaming output manager if error report path specified
+            ImportOutputManager? outputManager = null;
+            var basePath = errorReport?.FullName;
+            if (basePath != null)
             {
-                BypassCustomPlugins = bypassPlugins,
-                BypassPowerAutomateFlows = bypassFlows,
-                ContinueOnError = continueOnError,
-                Mode = mode,
-                UserMappings = userMappings,
-                StripOwnerFields = stripOwnerFields,
-                SkipMissingColumns = skipMissingColumns,
-                CurrentUserId = currentUserId
-            };
-
-            var result = await importer.ImportAsync(
-                data.FullName,
-                importOptions,
-                progressReporter,
-                cancellationToken);
-
-            // Write error report if specified and there are errors
-            if (errorReport != null && result.Errors.Count > 0)
-            {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                var executionContext = new ImportExecutionContext
+                // Remove extension if provided (e.g., .json) to use as base path
+                var extension = Path.GetExtension(basePath);
+                if (!string.IsNullOrEmpty(extension))
                 {
-                    CliVersion = ErrorOutput.Version,
-                    SdkVersion = ErrorOutput.SdkVersion,
-                    RuntimeVersion = Environment.Version.ToString(),
-                    Platform = RuntimeInformation.OSDescription,
-                    ImportMode = importOptions.Mode.ToString(),
-                    StripOwnerFields = importOptions.StripOwnerFields,
-                    BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
-                    UserMappingProvided = importOptions.UserMappings != null
-                };
-                await ErrorReportWriter.WriteAsync(
-                    errorReport.FullName,
-                    result,
-                    data.FullName,
-                    connectionInfo.EnvironmentUrl,
-                    executionContext,
-                    cancellationToken);
-                Console.Error.WriteLine($"Error report written to: {errorReport.FullName}");
+                    basePath = basePath[..^extension.Length];
+                }
+
+                outputManager = new ImportOutputManager(basePath);
+
+                progressReporter.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Analyzing,
+                    Message = $"Streaming output to: {outputManager.ErrorsPath}"
+                });
             }
 
-            return result.Success ? ExitCodes.Success : ExitCodes.Failure;
+            try
+            {
+                var importOptions = new ImportOptions
+                {
+                    BypassCustomPlugins = bypassPlugins,
+                    BypassPowerAutomateFlows = bypassFlows,
+                    ContinueOnError = continueOnError,
+                    Mode = mode,
+                    UserMappings = userMappings,
+                    StripOwnerFields = stripOwnerFields,
+                    SkipMissingColumns = skipMissingColumns,
+                    CurrentUserId = currentUserId,
+                    // Wire up error streaming callback
+                    ErrorCallback = outputManager != null ? outputManager.LogError : null
+                };
+
+                var result = await importer.ImportAsync(
+                    data.FullName,
+                    importOptions,
+                    progressReporter,
+                    cancellationToken);
+
+                // Write summary if output manager is active
+                if (outputManager != null)
+                {
+                    var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                    var executionContext = new ImportExecutionContext
+                    {
+                        CliVersion = ErrorOutput.Version,
+                        SdkVersion = ErrorOutput.SdkVersion,
+                        RuntimeVersion = Environment.Version.ToString(),
+                        Platform = RuntimeInformation.OSDescription,
+                        ImportMode = importOptions.Mode.ToString(),
+                        StripOwnerFields = importOptions.StripOwnerFields,
+                        BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
+                        UserMappingProvided = importOptions.UserMappings != null
+                    };
+
+                    await outputManager.WriteSummaryAsync(
+                        result,
+                        data.FullName,
+                        connectionInfo.EnvironmentUrl,
+                        executionContext,
+                        cancellationToken);
+
+                    Console.Error.WriteLine($"Output written to:");
+                    Console.Error.WriteLine($"  Errors: {outputManager.ErrorsPath}");
+                    Console.Error.WriteLine($"  Progress: {outputManager.ProgressPath}");
+                    Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
+                }
+
+                return result.Success ? ExitCodes.Success : ExitCodes.Failure;
+            }
+            finally
+            {
+                // Always dispose the output manager to flush streams
+                if (outputManager != null)
+                {
+                    await outputManager.DisposeAsync();
+                }
+            }
         }
         catch (OperationCanceledException)
         {

@@ -1,6 +1,7 @@
 using System;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Migration.Models;
+using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Import
 {
@@ -126,6 +127,22 @@ namespace PPDS.Migration.Import
         /// </para>
         /// </remarks>
         public Guid? CurrentUserId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the callback for streaming errors as they occur.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// When set, this callback is invoked immediately when an error occurs during import.
+        /// This allows real-time error streaming (e.g., to a .errors.jsonl file) so errors
+        /// are not lost if the import is cancelled.
+        /// </para>
+        /// <para>
+        /// The callback is invoked on multiple threads concurrently, so implementations
+        /// must be thread-safe.
+        /// </para>
+        /// </remarks>
+        public Action<MigrationError>? ErrorCallback { get; set; }
     }
 
     /// <summary>

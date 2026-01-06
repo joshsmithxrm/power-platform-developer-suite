@@ -1446,6 +1446,11 @@ namespace PPDS.Dataverse.BulkOperations
                 },
                 async (batch, ct) =>
                 {
+                    // Acquire global batch slot from coordinator.
+                    // This ensures all concurrent bulk operations (e.g., multiple entities importing
+                    // in parallel) don't exceed the pool's total capacity.
+                    await using var slot = await _connectionPool.BatchCoordinator.AcquireAsync(ct);
+
                     var batchResult = await executeBatch(batch, ct);
 
                     // Aggregate results (thread-safe)
@@ -1626,6 +1631,9 @@ namespace PPDS.Dataverse.BulkOperations
             var message = GetExceptionMessage(ex);
             var fieldName = TryExtractFieldName(message);
 
+            // Analyze the batch failure to identify which record(s) caused the issue
+            var diagnostics = AnalyzeBatchFailure(batch, ex);
+
             var errors = batch.Select((e, i) => new BulkOperationError
             {
                 Index = i,
@@ -1633,7 +1641,8 @@ namespace PPDS.Dataverse.BulkOperations
                 ErrorCode = errorCode,
                 Message = message,
                 FieldName = fieldName,
-                FieldValueDescription = DescribeFieldValue(e, fieldName)
+                FieldValueDescription = DescribeFieldValue(e, fieldName),
+                Diagnostics = diagnostics.Count > 0 ? diagnostics : null
             }).ToList();
 
             return new BulkOperationResult
@@ -1702,6 +1711,111 @@ namespace PPDS.Dataverse.BulkOperations
             public int RequestIndex { get; set; }
             public string? Id { get; set; }
             public int StatusCode { get; set; }
+        }
+
+        /// <summary>
+        /// Regex pattern to extract GUIDs from "Does Not Exist" error messages.
+        /// </summary>
+        private static readonly Regex MissingIdPattern = new(
+            @"(?:With )?Ids? = ([0-9a-fA-F-]{36})",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
+        /// Analyzes a batch failure to identify which record(s) caused the failure.
+        /// </summary>
+        /// <param name="batch">The batch of entities that failed.</param>
+        /// <param name="exception">The exception that was thrown.</param>
+        /// <returns>A list of diagnostics identifying problematic records.</returns>
+        /// <remarks>
+        /// <para>
+        /// When a batch fails with a "Does Not Exist" error, this method:
+        /// 1. Parses the error message to extract the missing reference ID(s)
+        /// 2. Scans all records in the batch for EntityReference fields matching those IDs
+        /// 3. Returns diagnostics identifying which record/field contains the problematic reference
+        /// </para>
+        /// <para>
+        /// Special patterns detected:
+        /// <list type="bullet">
+        ///   <item><c>SELF_REFERENCE</c>: Record references itself (common in hierarchical entities)</item>
+        ///   <item><c>SAME_BATCH_REFERENCE</c>: Record references another record in the same batch</item>
+        ///   <item><c>MISSING_REFERENCE</c>: Record references an entity that doesn't exist in target</item>
+        /// </list>
+        /// </para>
+        /// </remarks>
+        public static IReadOnlyList<BatchFailureDiagnostic> AnalyzeBatchFailure(
+            IReadOnlyList<Entity> batch,
+            Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(batch);
+            ArgumentNullException.ThrowIfNull(exception);
+
+            var diagnostics = new List<BatchFailureDiagnostic>();
+            var message = GetExceptionMessage(exception);
+
+            // Extract all GUIDs mentioned in the error message
+            var missingIds = new HashSet<Guid>();
+            var matches = MissingIdPattern.Matches(message);
+            foreach (Match match in matches)
+            {
+                if (Guid.TryParse(match.Groups[1].Value, out var id))
+                {
+                    missingIds.Add(id);
+                }
+            }
+
+            if (missingIds.Count == 0)
+            {
+                // No GUIDs in error message - can't diagnose further
+                return diagnostics;
+            }
+
+            // Build a set of IDs in this batch for detecting same-batch references
+            var batchIds = new HashSet<Guid>(batch.Select(e => e.Id).Where(id => id != Guid.Empty));
+
+            // Scan all records in the batch for references to missing IDs
+            for (int i = 0; i < batch.Count; i++)
+            {
+                var entity = batch[i];
+
+                foreach (var attr in entity.Attributes)
+                {
+                    if (attr.Value is EntityReference er && missingIds.Contains(er.Id))
+                    {
+                        // Determine the error pattern
+                        string pattern;
+                        string? suggestion = null;
+
+                        if (er.Id == entity.Id)
+                        {
+                            pattern = "SELF_REFERENCE";
+                            suggestion = "Record references itself. Consider two-pass import: create records first, then update self-references.";
+                        }
+                        else if (batchIds.Contains(er.Id))
+                        {
+                            pattern = "SAME_BATCH_REFERENCE";
+                            suggestion = "Record references another record in the same batch that hasn't been created yet. Consider dependency-aware batching.";
+                        }
+                        else
+                        {
+                            pattern = "MISSING_REFERENCE";
+                            suggestion = "Referenced record doesn't exist in target environment. Ensure the referenced entity is imported first.";
+                        }
+
+                        diagnostics.Add(new BatchFailureDiagnostic
+                        {
+                            RecordId = entity.Id,
+                            RecordIndex = i,
+                            FieldName = attr.Key,
+                            ReferencedId = er.Id,
+                            ReferencedEntityName = er.LogicalName,
+                            Pattern = pattern,
+                            Suggestion = suggestion
+                        });
+                    }
+                }
+            }
+
+            return diagnostics;
         }
     }
 }

@@ -94,5 +94,14 @@ namespace PPDS.Dataverse.BulkOperations
         /// Does not contain actual data values to avoid PII in logs.
         /// </summary>
         public string? FieldValueDescription { get; init; }
+
+        /// <summary>
+        /// Gets diagnostics identifying which record(s) caused the batch failure.
+        /// </summary>
+        /// <remarks>
+        /// Populated when a batch fails with a "Does Not Exist" error. Contains details
+        /// about which record contains the problematic reference and the pattern detected.
+        /// </remarks>
+        public IReadOnlyList<BatchFailureDiagnostic>? Diagnostics { get; init; }
     }
 }

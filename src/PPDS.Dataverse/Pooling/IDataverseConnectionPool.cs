@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Client;
 
 namespace PPDS.Dataverse.Pooling
@@ -137,5 +138,21 @@ namespace PPDS.Dataverse.Pooling
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>A pooled client if capacity is available, null otherwise.</returns>
         Task<IPooledClient?> TryGetClientWithCapacityAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets the batch parallelism coordinator for coordinating concurrent bulk operations.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Use this coordinator to ensure that concurrent bulk operations (e.g., multiple entities
+        /// importing in parallel) don't exceed the pool's total capacity. Each batch should
+        /// acquire a slot from the coordinator before execution.
+        /// </para>
+        /// <para>
+        /// The coordinator tracks the pool's live DOP and adjusts capacity dynamically as
+        /// the server's recommendation changes (e.g., during throttle recovery).
+        /// </para>
+        /// </remarks>
+        BatchParallelismCoordinator BatchCoordinator { get; }
     }
 }

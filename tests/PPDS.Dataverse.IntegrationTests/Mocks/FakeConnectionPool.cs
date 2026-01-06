@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
 
@@ -14,6 +15,8 @@ public class FakeConnectionPool : IDataverseConnectionPool
     private readonly string _connectionName;
     private readonly int _recommendedParallelism;
     private int _activeConnections;
+    private BatchParallelismCoordinator? _batchCoordinator;
+    private readonly object _batchCoordinatorLock = new();
 
     public FakeConnectionPool(
         IOrganizationService service,
@@ -27,6 +30,18 @@ public class FakeConnectionPool : IDataverseConnectionPool
 
     public bool IsEnabled => true;
     public int SourceCount => 1;
+
+    public BatchParallelismCoordinator BatchCoordinator
+    {
+        get
+        {
+            if (_batchCoordinator != null) return _batchCoordinator;
+            lock (_batchCoordinatorLock)
+            {
+                return _batchCoordinator ??= new BatchParallelismCoordinator(this);
+            }
+        }
+    }
 
     public PoolStatistics Statistics => new()
     {
@@ -83,6 +98,14 @@ public class FakeConnectionPool : IDataverseConnectionPool
     public void RecordConnectionFailure() { }
     public void InvalidateSeed(string connectionName) { }
 
-    public void Dispose() { }
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public void Dispose()
+    {
+        _batchCoordinator?.Dispose();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _batchCoordinator?.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

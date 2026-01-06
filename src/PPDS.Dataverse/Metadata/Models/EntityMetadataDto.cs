@@ -172,6 +172,26 @@ public sealed class EntityMetadataDto
     public bool IsIntersect { get; init; }
 
     /// <summary>
+    /// Gets whether the entity supports the CreateMultiple bulk API.
+    /// </summary>
+    /// <remarks>
+    /// When false, bulk create operations should fall back to single-record creates
+    /// or ExecuteMultiple batching.
+    /// </remarks>
+    [JsonPropertyName("canCreateMultiple")]
+    public bool CanCreateMultiple { get; init; }
+
+    /// <summary>
+    /// Gets whether the entity supports the UpdateMultiple bulk API.
+    /// </summary>
+    /// <remarks>
+    /// When false, bulk update operations should fall back to single-record updates
+    /// or ExecuteMultiple batching.
+    /// </remarks>
+    [JsonPropertyName("canUpdateMultiple")]
+    public bool CanUpdateMultiple { get; init; }
+
+    /// <summary>
     /// Gets the entity attributes.
     /// </summary>
     [JsonPropertyName("attributes")]

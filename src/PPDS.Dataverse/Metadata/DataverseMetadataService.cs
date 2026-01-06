@@ -132,6 +132,10 @@ public class DataverseMetadataService : IMetadataService
             IsDuplicateDetectionEnabled = metadata.IsDuplicateDetectionEnabled?.Value ?? false,
             IsValidForQueue = metadata.IsValidForQueue?.Value ?? false,
             IsIntersect = metadata.IsIntersect ?? false,
+            // Note: CanCreateMultiple/CanUpdateMultiple are not directly exposed by current SDK version.
+            // Default to true (optimistic) - runtime detection in TieredImporter handles unsupported entities.
+            CanCreateMultiple = true,
+            CanUpdateMultiple = true,
             Attributes = includeAttributes ? MapAttributes(metadata).ToList() : [],
             OneToManyRelationships = includeRelationships ? MapOneToManyRelationships(metadata).ToList() : [],
             ManyToOneRelationships = includeRelationships ? MapManyToOneRelationships(metadata).ToList() : [],

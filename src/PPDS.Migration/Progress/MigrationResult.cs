@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PPDS.Dataverse.BulkOperations;
 
 namespace PPDS.Migration.Progress
 {
@@ -99,5 +100,14 @@ namespace PPDS.Migration.Progress
         /// Gets or sets the timestamp when the error occurred.
         /// </summary>
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Gets or sets diagnostics identifying which record(s) caused the batch failure.
+        /// </summary>
+        /// <remarks>
+        /// Populated when a batch fails with a "Does Not Exist" error. Contains details
+        /// about which record contains the problematic reference and the pattern detected.
+        /// </remarks>
+        public IReadOnlyList<BatchFailureDiagnostic>? Diagnostics { get; set; }
     }
 }

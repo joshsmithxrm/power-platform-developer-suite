@@ -115,7 +115,8 @@ namespace PPDS.Migration.Progress
                     ErrorCode = error.ErrorCode,
                     Message = error.Message,
                     Pattern = !string.IsNullOrEmpty(pattern) ? pattern : null,
-                    Timestamp = error.Timestamp
+                    Timestamp = error.Timestamp,
+                    Diagnostics = error.Diagnostics
                 });
             }
 

@@ -14,6 +14,7 @@ using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Pooling.Strategies;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
 
@@ -50,6 +51,8 @@ namespace PPDS.Dataverse.Pooling
         private int _disposed;
         private static bool _performanceSettingsApplied;
         private static readonly object _performanceSettingsLock = new();
+        private BatchParallelismCoordinator? _batchCoordinator;
+        private readonly object _batchCoordinatorLock = new();
 
         /// <summary>
         /// Initializes a new connection pool from connection sources.
@@ -166,6 +169,20 @@ namespace PPDS.Dataverse.Pooling
 
         /// <inheritdoc />
         public int SourceCount => _sources.Count;
+
+        /// <inheritdoc />
+        public BatchParallelismCoordinator BatchCoordinator
+        {
+            get
+            {
+                if (_batchCoordinator != null) return _batchCoordinator;
+
+                lock (_batchCoordinatorLock)
+                {
+                    return _batchCoordinator ??= new BatchParallelismCoordinator(this);
+                }
+            }
+        }
 
         /// <inheritdoc />
         public PoolStatistics Statistics => GetStatistics();
@@ -1217,6 +1234,7 @@ namespace PPDS.Dataverse.Pooling
                 source.Dispose();
             }
 
+            _batchCoordinator?.Dispose();
             _connectionSemaphore.Dispose();
             _validationCts.Dispose();
         }
@@ -1258,6 +1276,7 @@ namespace PPDS.Dataverse.Pooling
                 source.Dispose();
             }
 
+            _batchCoordinator?.Dispose();
             _connectionSemaphore.Dispose();
             _validationCts.Dispose();
         }
