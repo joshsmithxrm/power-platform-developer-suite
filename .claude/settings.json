@@ -105,7 +105,8 @@
       "Bash(Invoke-WebRequest:*)",
       "Bash(chmod 777:*)",
       "Bash(sudo:*)",
-      "Bash(su:*)"
+      "Bash(su:*)",
+      "Bash(ppds data truncate:*)"
     ],
     "ask": [
       "Bash(rm -rf:*)",
