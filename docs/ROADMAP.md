@@ -595,8 +595,8 @@ When in doubt, field > label.
 
 - **Feature roadmap:** [FEATURE_ROADMAP.md](FEATURE_ROADMAP.md) - Phase planning, extension parity epic
 - **Issue templates:** `.github/ISSUE_TEMPLATE/`
-- **Triage command:** `sdk/.claude/commands/triage.md`
-- **SDK CLAUDE.md:** Quick reference table
+- **Triage command:** `.claude/commands/triage.md`
+- **CLAUDE.md:** Quick reference table
 - **Workspace CLAUDE.md:** Cross-repo roadmap link
 
 ---

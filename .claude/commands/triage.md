@@ -18,7 +18,13 @@ Examples:
 
 Fetch project field IDs and option IDs once per session (hardcoded for performance):
 
+**Note:** These IDs can change if project fields are modified. To update them, use:
+```bash
+# Get project ID and field IDs
+gh api graphql -f query='query { node(id: "PVT_kwHOAGk32c4BLj-0") { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2Field { id name } ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }'
 ```
+
+```bash
 PROJECT_NUMBER=3
 PROJECT_ID=PVT_kwHOAGk32c4BLj-0
 REPO_OWNER=joshsmithxrm
@@ -168,11 +174,11 @@ Instructions:
 3. Leave cell empty to skip that field
 4. Delete rows you don't want to triage
 
-| Issue | Type | Priority | Size | Status | Target | Suggested Area |
-|-------|------|----------|------|--------|--------|----------------|
-| #224 | feature | | | Todo | | area:data |
-| #223 | feature | | | Todo | | area:data |
-| #220 | | | M | | Next | area:data |
+| Issue | Type | Priority | Size | Status | Target | Parent Issue | Suggested Area |
+|-------|------|----------|------|--------|--------|--------------|----------------|
+| #224 | feature | | | Todo | | #210 | area:data |
+| #223 | feature | | | Todo | | #210 | area:data |
+| #220 | | | M | | Next | | area:data |
 
 Valid values:
 - Type: feature, bug, chore, docs, refactor
@@ -180,6 +186,7 @@ Valid values:
 - Size: XS, S, M, L, XL
 - Status: Todo, In Progress, Done
 - Target: This Week, Next, Q1 2026, CLI v1.0.0, Blocked, or (empty)
+- Parent Issue: Issue number (e.g., #210) to link to epic/parent, or (empty)
 - Suggested Area: Suggestions based on title/labels (apply manually if desired)
 
 Paste the completed table when ready.
