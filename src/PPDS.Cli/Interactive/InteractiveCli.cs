@@ -28,7 +28,14 @@ internal static class InteractiveCli
     /// Runs the interactive TUI.
     /// </summary>
     /// <returns>Exit code.</returns>
-    public static async Task<int> RunAsync()
+    public static Task<int> RunAsync() => RunAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Runs the interactive TUI with external cancellation support.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token from caller (e.g., System.CommandLine).</param>
+    /// <returns>Exit code.</returns>
+    public static async Task<int> RunAsync(CancellationToken cancellationToken)
     {
         // Check if we're in a TTY environment
         if (!AnsiConsole.Profile.Capabilities.Interactive)
@@ -46,6 +53,9 @@ internal static class InteractiveCli
 
         using var cts = new CancellationTokenSource();
 
+        // Link external token so we cancel if caller cancels
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, cancellationToken);
+
         // Handle Ctrl+C gracefully
         Console.CancelKeyPress += (_, e) =>
         {
@@ -55,7 +65,7 @@ internal static class InteractiveCli
 
         try
         {
-            return await RunMainLoopAsync(cts.Token);
+            return await RunMainLoopAsync(linkedCts.Token);
         }
         catch (OperationCanceledException)
         {

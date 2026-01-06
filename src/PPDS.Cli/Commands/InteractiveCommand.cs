@@ -20,7 +20,7 @@ public static class InteractiveCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            return await InteractiveCli.RunAsync();
+            return await InteractiveCli.RunAsync(cancellationToken);
         });
 
         return command;
