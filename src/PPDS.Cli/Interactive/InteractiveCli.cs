@@ -65,6 +65,7 @@ internal static class InteractiveCli
         }
         catch (Exception ex)
         {
+            Console.Error.WriteLine($"Interactive mode error: {ex}");
             AnsiConsole.MarkupLine(Styles.ErrorText($"Error: {ex.Message}"));
             return ExitCodes.Failure;
         }

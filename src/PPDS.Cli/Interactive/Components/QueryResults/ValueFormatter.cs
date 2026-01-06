@@ -210,14 +210,12 @@ internal static class ValueFormatter
             return "(null)";
         }
 
-        var display = value.FormattedValue ?? value.Value?.ToString() ?? "";
-
-        // For GUIDs, account for the truncated format
-        if (column.DataType == QueryColumnType.Guid && value.Value is Guid)
+        // For GUIDs, return the truncated format (use actual GUID, not display string)
+        if (column.DataType == QueryColumnType.Guid && value.Value is Guid guid)
         {
-            return $"...{display[^GuidSuffixLength..]}";
+            return $"...{guid.ToString("N")[^GuidSuffixLength..]}";
         }
 
-        return display;
+        return value.FormattedValue ?? value.Value.ToString() ?? "";
     }
 }

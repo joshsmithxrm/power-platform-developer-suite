@@ -78,18 +78,4 @@ public static class ClipboardHelper
             return false;
         }
     }
-
-    private static string EscapeForCmd(string text)
-    {
-        // Remove newlines and escape special characters for cmd.exe
-        return text
-            .Replace("\r\n", " ")
-            .Replace("\n", " ")
-            .Replace("\r", " ")
-            .Replace("&", "^&")
-            .Replace("<", "^<")
-            .Replace(">", "^>")
-            .Replace("|", "^|")
-            .Replace("^", "^^");
-    }
 }
