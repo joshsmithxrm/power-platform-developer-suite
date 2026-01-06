@@ -22,6 +22,12 @@ public sealed class ResolvedEnvironment
     /// Gets the environment unique name.
     /// </summary>
     public string? UniqueName { get; init; }
+
+    /// <summary>
+    /// Gets the Power Platform environment ID.
+    /// Required for Power Apps Admin API operations.
+    /// </summary>
+    public string? EnvironmentId { get; init; }
 }
 
 /// <summary>
@@ -86,7 +92,8 @@ public static class EnvironmentResolverHelper
         {
             Url = resolved.ApiUrl,
             DisplayName = resolved.FriendlyName,
-            UniqueName = resolved.UniqueName
+            UniqueName = resolved.UniqueName,
+            EnvironmentId = resolved.EnvironmentId
         };
     }
 
@@ -183,7 +190,8 @@ public static class EnvironmentResolverHelper
         {
             Url = resolved.ApiUrl,
             DisplayName = resolved.FriendlyName,
-            UniqueName = resolved.UniqueName
+            UniqueName = resolved.UniqueName,
+            EnvironmentId = resolved.EnvironmentId
         };
     }
 }

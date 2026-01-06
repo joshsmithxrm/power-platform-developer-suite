@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`IFlowService`** - Service for cloud flow operations ([#142](https://github.com/joshsmithxrm/ppds-sdk/issues/142)):
+  - `ListAsync` - List flows with optional solution and state filters
+  - `GetAsync` - Get flow by unique name
+  - `GetByIdAsync` - Get flow by ID
+  - Parses flow `clientdata` JSON to extract connection reference logical names
+- **`IConnectionReferenceService`** - Service for connection reference operations with orphan detection ([#143](https://github.com/joshsmithxrm/ppds-sdk/issues/143)):
+  - `ListAsync` - List connection references with solution and orphan filtering
+  - `GetAsync` - Get connection reference by logical name
+  - `GetFlowsUsingAsync` - Get flows that use a specific connection reference
+  - `AnalyzeAsync` - Full relationship analysis with orphan detection (flows referencing missing CRs, CRs not used by any flow)
+- **`IDeploymentSettingsService`** - Service for PAC-compatible deployment settings files ([#145](https://github.com/joshsmithxrm/ppds-sdk/issues/145)):
+  - `GenerateAsync` - Generate settings from current environment (captures current values)
+  - `SyncAsync` - Sync existing file with solution (preserves values, adds new entries, removes stale)
+  - `ValidateAsync` - Validate settings against solution (missing entries, stale entries, unbound CRs)
+- **`FlowClientDataParser`** - Utility for extracting connection reference logical names from flow clientdata JSON
 - **`Workflow` early-bound entity** - Entity class for Power Automate flows (classic workflows). Supports flow management operations. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
 - **`ConnectionReference` early-bound entity** - Entity class for connection references used by flows and canvas apps. Fixed naming from pac modelbuilder's inconsistent lowercase output. ([#149](https://github.com/joshsmithxrm/ppds-sdk/issues/149))
 - **Field-level error context in bulk operation errors** - `BulkOperationError` now includes `FieldName` (extracted from error messages) and `FieldValueDescription` (sanitized value info for EntityReferences). Makes debugging lookup failures and required field errors easier. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).

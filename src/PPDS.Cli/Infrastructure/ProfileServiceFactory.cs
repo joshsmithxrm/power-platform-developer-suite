@@ -32,6 +32,12 @@ public sealed class ResolvedConnectionInfo
     /// Gets the environment display name if available.
     /// </summary>
     public string? EnvironmentDisplayName { get; init; }
+
+    /// <summary>
+    /// Gets the Power Platform environment ID if available.
+    /// Required for Power Apps Admin API operations.
+    /// </summary>
+    public string? EnvironmentId { get; init; }
 }
 
 /// <summary>
@@ -75,7 +81,7 @@ public static class ProfileServiceFactory
         }
 
         // Resolve environment - handles URL, name, ID, or uses profile's saved environment
-        var (envUrl, envDisplayName) = await ResolveEnvironmentAsync(
+        var (envUrl, envDisplayName, envId) = await ResolveEnvironmentAsync(
             profile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
         // Create credential store for secure secret lookups (registered in DI for disposal)
@@ -89,16 +95,17 @@ public static class ProfileServiceFactory
         {
             Profile = profile,
             EnvironmentUrl = envUrl,
-            EnvironmentDisplayName = envDisplayName
+            EnvironmentDisplayName = envDisplayName,
+            EnvironmentId = envId
         };
 
         return CreateProviderFromSources(new[] { adapter }, connectionInfo, credentialStore, verbose, debug);
     }
 
     /// <summary>
-    /// Resolves an environment identifier to a URL and display name.
+    /// Resolves an environment identifier to a URL, display name, and environment ID.
     /// </summary>
-    private static async Task<(string Url, string? DisplayName)> ResolveEnvironmentAsync(
+    private static async Task<(string Url, string? DisplayName, string? EnvironmentId)> ResolveEnvironmentAsync(
         AuthProfile profile,
         string? environmentOverride,
         CancellationToken cancellationToken)
@@ -114,21 +121,22 @@ public static class ProfileServiceFactory
                     "  1. Select an environment: ppds env select <name>\n" +
                     "  2. Specify on command: --environment <url>");
             }
-            return (profile.Environment.Url, profile.Environment.DisplayName);
+            return (profile.Environment.Url, profile.Environment.DisplayName, profile.Environment.EnvironmentId);
         }
 
         // Check if it's already a URL
         if (Uri.TryCreate(environmentOverride, UriKind.Absolute, out var uri) &&
             (uri.Scheme == "https" || uri.Scheme == "http"))
         {
-            return (environmentOverride.TrimEnd('/'), uri.Host);
+            // URL override - we don't have the environment ID
+            return (environmentOverride.TrimEnd('/'), uri.Host, null);
         }
 
         // Resolve name/ID to URL using GlobalDiscoveryService
         var resolved = await EnvironmentResolverHelper.ResolveAsync(
             profile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
-        return (resolved.Url, resolved.DisplayName);
+        return (resolved.Url, resolved.DisplayName, resolved.EnvironmentId);
     }
 
     /// <summary>
@@ -168,7 +176,7 @@ public static class ProfileServiceFactory
         var firstProfile = collection.GetByName(names[0])
             ?? throw new InvalidOperationException($"Profile '{names[0]}' not found.");
 
-        var (envUrl, envDisplayName) = await ResolveEnvironmentAsync(
+        var (envUrl, envDisplayName, envId) = await ResolveEnvironmentAsync(
             firstProfile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
         // Create credential store for secure secret lookups (registered in DI for disposal)
@@ -187,7 +195,8 @@ public static class ProfileServiceFactory
         {
             Profile = firstProfile,
             EnvironmentUrl = envUrl,
-            EnvironmentDisplayName = envDisplayName
+            EnvironmentDisplayName = envDisplayName,
+            EnvironmentId = envId
         };
 
         return CreateProviderFromSources(adapters, connectionInfo, credentialStore, verbose, debug);

@@ -132,6 +132,29 @@ public static class CloudEndpoints
     }
 
     /// <summary>
+    /// Gets the Power Apps Service scope URL for the specified cloud environment.
+    /// This is the resource/audience used when acquiring tokens for the Flow API and Connections API.
+    /// </summary>
+    /// <remarks>
+    /// The Flow API (api.flow.microsoft.com) requires tokens with the service.powerapps.com audience,
+    /// not the api.powerapps.com or api.flow.microsoft.com audiences.
+    /// </remarks>
+    /// <param name="cloud">The cloud environment.</param>
+    /// <returns>The Power Apps Service scope URL (without /.default suffix).</returns>
+    public static string GetPowerAppsServiceScope(CloudEnvironment cloud)
+    {
+        return cloud switch
+        {
+            CloudEnvironment.Public => "https://service.powerapps.com",
+            CloudEnvironment.UsGov => "https://service.powerapps.us",
+            CloudEnvironment.UsGovHigh => "https://high.service.powerapps.us",
+            CloudEnvironment.UsGovDod => "https://service.apps.appsplatform.us",
+            CloudEnvironment.China => "https://service.powerapps.cn",
+            _ => throw new ArgumentOutOfRangeException(nameof(cloud), cloud, "Unknown cloud environment")
+        };
+    }
+
+    /// <summary>
     /// Parses a cloud environment from a string value.
     /// </summary>
     /// <param name="value">The string value (case-insensitive).</param>

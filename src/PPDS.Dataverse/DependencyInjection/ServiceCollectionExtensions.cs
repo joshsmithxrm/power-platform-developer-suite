@@ -257,6 +257,11 @@ namespace PPDS.Dataverse.DependencyInjection
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IRoleService, RoleService>();
 
+            // Phase 2 services
+            services.AddTransient<IFlowService, FlowService>();
+            services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
+            services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
+
             return services;
         }
     }

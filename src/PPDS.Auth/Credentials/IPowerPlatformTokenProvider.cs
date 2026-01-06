@@ -30,6 +30,16 @@ public interface IPowerPlatformTokenProvider : IDisposable
     Task<PowerPlatformToken> GetPowerAutomateTokenAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Acquires an access token for the Flow API using the correct service.powerapps.com scope.
+    /// Use this method for Flow API and Connections API operations, which require the
+    /// service.powerapps.com audience rather than api.flow.microsoft.com.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A valid access token with service.powerapps.com audience.</returns>
+    /// <exception cref="AuthenticationException">If authentication fails.</exception>
+    Task<PowerPlatformToken> GetFlowApiTokenAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Acquires an access token for the specified Power Platform resource.
     /// </summary>
     /// <param name="resource">The resource URL (e.g., https://api.powerapps.com).</param>

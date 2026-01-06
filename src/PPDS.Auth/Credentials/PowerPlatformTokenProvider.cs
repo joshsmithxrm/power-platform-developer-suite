@@ -162,6 +162,15 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
     }
 
     /// <inheritdoc />
+    public Task<PowerPlatformToken> GetFlowApiTokenAsync(CancellationToken cancellationToken = default)
+    {
+        // The Flow API and Connections API require tokens with the service.powerapps.com scope,
+        // not the api.flow.microsoft.com scope. This is a Microsoft API design quirk.
+        var resource = CloudEndpoints.GetPowerAppsServiceScope(_cloud);
+        return GetTokenForResourceAsync(resource, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<PowerPlatformToken> GetTokenForResourceAsync(string resource, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(resource))

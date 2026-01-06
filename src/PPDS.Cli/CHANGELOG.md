@@ -21,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session-scoped connection pooling for faster subsequent queries
   - Graceful degradation when not in a TTY environment
 - **Version header at startup** - CLI now outputs diagnostic header to stderr: version info (CLI, SDK, .NET runtime) and platform. Enables correlating issues to specific builds. Skipped for `--help`, `--version`, or no arguments. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
+- **`ppds flows` command group** - Manage cloud flows ([#142](https://github.com/joshsmithxrm/ppds-sdk/issues/142)):
+  - `ppds flows list` - List cloud flows (supports `--solution`, `--state`)
+  - `ppds flows get <name>` - Get flow details by unique name
+  - `ppds flows url <name>` - Get Power Automate maker URL for a flow
+- **`ppds connections` command group** - List Power Platform connections ([#144](https://github.com/joshsmithxrm/ppds-sdk/issues/144)):
+  - `ppds connections list` - List connections from Power Apps Admin API (supports `--connector`)
+  - `ppds connections get <id>` - Get connection details by ID
+- **`ppds connectionreferences` command group** - Manage connection references with orphan detection ([#143](https://github.com/joshsmithxrm/ppds-sdk/issues/143)):
+  - `ppds connectionreferences list` - List connection references (supports `--solution`, `--orphaned`)
+  - `ppds connectionreferences get <name>` - Get connection reference details by logical name
+  - `ppds connectionreferences flows <name>` - List flows using a connection reference
+  - `ppds connectionreferences connections <name>` - Show bound connection details
+  - `ppds connectionreferences analyze` - Analyze flow-to-connection-reference relationships with orphan detection
+- **`ppds deployment-settings` command group** - Generate and sync deployment settings files ([#145](https://github.com/joshsmithxrm/ppds-sdk/issues/145)):
+  - `ppds deployment-settings generate` - Generate deployment settings file from current environment
+  - `ppds deployment-settings sync` - Sync existing file with solution (preserves values, adds new entries, removes stale)
+  - `ppds deployment-settings validate` - Validate deployment settings file against solution
 - **`ppds solutions` command group** - Manage Power Platform solutions ([#137](https://github.com/joshsmithxrm/ppds-sdk/issues/137)):
   - `ppds solutions list` - List solutions in environment (supports `--include-managed`, `--filter`)
   - `ppds solutions get <name>` - Get solution details by unique name
