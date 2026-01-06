@@ -113,9 +113,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+          if gh release view "${{ steps.version.outputs.tag }}" --repo ${{ github.repository }} > /dev/null 2>&1; then
             echo "Deleting existing release to allow clean creation..."
-            gh release delete "${{ steps.version.outputs.tag }}" --yes
+            gh release delete "${{ steps.version.outputs.tag }}" --yes --repo ${{ github.repository }}
           fi
 
       - name: Create draft release with assets
@@ -139,5 +139,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "Publishing release..."
-          gh release edit "${{ steps.version.outputs.tag }}" --draft=false
+          gh release edit "${{ steps.version.outputs.tag }}" --draft=false --repo ${{ github.repository }}
           echo "Release published with all assets attached"

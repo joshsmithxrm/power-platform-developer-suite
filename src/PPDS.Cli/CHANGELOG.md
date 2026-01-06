@@ -300,7 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged as .NET global tool (`ppds`)
 - Targets: `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.10...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.11...HEAD
+[1.0.0-beta.11]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.10...Cli-v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.9...Cli-v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.8...Cli-v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/joshsmithxrm/ppds-sdk/compare/Cli-v1.0.0-beta.7...Cli-v1.0.0-beta.8
