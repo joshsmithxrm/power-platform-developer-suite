@@ -295,7 +295,7 @@ namespace PPDS.Migration.Import
 
             // Check if first error indicates bulk operation not supported
             var firstError = result.Errors[0];
-            return firstError.Message?.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) == true;
+            return firstError.Message?.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ?? false;
         }
     }
 }

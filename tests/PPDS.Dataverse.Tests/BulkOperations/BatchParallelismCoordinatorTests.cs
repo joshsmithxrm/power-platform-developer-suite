@@ -230,13 +230,12 @@ public class BatchParallelismCoordinatorTests : IDisposable
     {
         _coordinator = new BatchParallelismCoordinator(_mockPool.Object);
 
-        var slot = await _coordinator.AcquireAsync();
+        await using var slot = await _coordinator.AcquireAsync();
 
-        // Dispose coordinator while slot is held
+        // Dispose coordinator while slot is held - slot will be disposed by await using
         _coordinator.Dispose();
 
-        // Releasing slot after dispose should not throw
-        await slot.DisposeAsync();
+        // await using ensures slot.DisposeAsync() is called even if Dispose throws
     }
 
     #endregion

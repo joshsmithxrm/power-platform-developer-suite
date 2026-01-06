@@ -410,24 +410,20 @@ namespace PPDS.Migration.Import
             const int DuplicateKeyErrorCode = unchecked((int)0x80040237);
 
             // Check for FaultException with OrganizationServiceFault
-            if (ex is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> faultEx)
+            if (ex is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> faultEx
+                && faultEx.Detail?.ErrorCode == DuplicateKeyErrorCode)
             {
-                if (faultEx.Detail?.ErrorCode == DuplicateKeyErrorCode)
-                {
-                    return true;
-                }
+                return true;
             }
 
             // Fallback: check message for common duplicate key patterns
             var message = ex.Message;
-            if (message != null)
+            if (message != null &&
+                (message.Contains("Cannot insert duplicate key", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("0x80040237", StringComparison.OrdinalIgnoreCase)))
             {
-                if (message.Contains("Cannot insert duplicate key", StringComparison.OrdinalIgnoreCase) ||
-                    message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) ||
-                    message.Contains("0x80040237", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
 
             return false;

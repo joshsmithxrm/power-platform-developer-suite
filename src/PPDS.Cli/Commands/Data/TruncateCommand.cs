@@ -375,7 +375,6 @@ public static class TruncateCommand
             {
                 if (!globalOptions.IsJsonMode)
                 {
-                    var total = totalDeleted + totalFailed + snapshot.Processed;
                     Console.Error.Write($"\r  Deleted: {totalDeleted + snapshot.Processed:N0} | {snapshot.InstantRatePerSecond:F0}/s");
                 }
             });
