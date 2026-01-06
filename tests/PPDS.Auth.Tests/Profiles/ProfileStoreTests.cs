@@ -118,6 +118,7 @@ public class ProfileStoreTests : IDisposable
         var loaded = await _store.LoadAsync();
 
         loaded.ActiveProfile!.Name.Should().Be("second");
+        loaded.ActiveProfileIndex.Should().Be(2);
         loaded.ActiveProfileName.Should().Be("second");
     }
 
@@ -256,7 +257,7 @@ public class ProfileStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_UsesActiveProfileName()
+    public async Task SaveAsync_UsesActiveProfileIndexAndName()
     {
         var collection = new ProfileCollection();
         collection.Add(new AuthProfile { Name = "myprofile" });
@@ -264,6 +265,7 @@ public class ProfileStoreTests : IDisposable
         await _store.SaveAsync(collection);
         var json = await File.ReadAllTextAsync(_tempFilePath);
 
+        json.Should().Contain("\"activeProfileIndex\": 1");
         json.Should().Contain("\"activeProfile\": \"myprofile\"");
     }
 

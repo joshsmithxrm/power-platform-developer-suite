@@ -404,7 +404,8 @@ public static class AuthCommandGroup
                         Console.Error.WriteLine("Resolving environment...");
                         try
                         {
-                            using var gds = new GlobalDiscoveryService(options.Cloud, options.Tenant);
+                            using var gds = new GlobalDiscoveryService(options.Cloud, options.Tenant,
+                                preferredAuthMethod: authMethod);
                             var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
 
                             DiscoveredEnvironment? resolved;
@@ -740,7 +741,8 @@ public static class AuthCommandGroup
     {
         var output = new
         {
-            activeProfile = collection.ActiveProfileName,
+            activeProfile = collection.ActiveProfile?.Name,
+            activeProfileIndex = collection.ActiveProfileIndex,
             profiles = collection.All.Select(p => new
             {
                 index = p.Index,

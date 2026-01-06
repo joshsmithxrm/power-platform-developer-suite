@@ -83,7 +83,8 @@ public class RpcMethodHandler
 
         return new AuthListResponse
         {
-            ActiveProfile = collection.ActiveProfileName,
+            ActiveProfile = collection.ActiveProfile?.Name,
+            ActiveProfileIndex = collection.ActiveProfileIndex,
             Profiles = profiles
         };
     }
@@ -769,6 +770,9 @@ public class AuthListResponse
 {
     [JsonPropertyName("activeProfile")]
     public string? ActiveProfile { get; set; }
+
+    [JsonPropertyName("activeProfileIndex")]
+    public int? ActiveProfileIndex { get; set; }
 
     [JsonPropertyName("profiles")]
     public List<ProfileInfo> Profiles { get; set; } = [];

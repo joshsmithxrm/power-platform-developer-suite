@@ -25,8 +25,14 @@ public sealed class ProfileCollection
     public int Version { get; set; } = 2;
 
     /// <summary>
+    /// Gets or sets the index of the active profile. Primary tracking mechanism.
+    /// </summary>
+    [JsonPropertyName("activeProfileIndex")]
+    public int? ActiveProfileIndex { get; set; }
+
+    /// <summary>
     /// Gets or sets the name of the active profile.
-    /// Null if no profile is active (collection empty).
+    /// Kept for backwards compatibility with v2 profiles.json files and for display purposes.
     /// </summary>
     [JsonPropertyName("activeProfile")]
     public string? ActiveProfileName { get; set; }
@@ -45,10 +51,27 @@ public sealed class ProfileCollection
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(ActiveProfileName))
-                return Profiles.FirstOrDefault();
+            // Primary: Use index-based lookup
+            if (ActiveProfileIndex.HasValue)
+            {
+                var byIndex = GetByIndex(ActiveProfileIndex.Value);
+                if (byIndex != null) return byIndex;
+            }
 
-            return GetByName(ActiveProfileName) ?? Profiles.FirstOrDefault();
+            // Backwards compat: Legacy name-based lookup for old profiles.json
+            if (!string.IsNullOrWhiteSpace(ActiveProfileName))
+            {
+                var byName = GetByName(ActiveProfileName);
+                if (byName != null)
+                {
+                    // Migrate: update index so next save is index-based
+                    ActiveProfileIndex = byName.Index;
+                    return byName;
+                }
+            }
+
+            // No active profile
+            return null;
         }
     }
 
@@ -93,6 +116,7 @@ public sealed class ProfileCollection
         // Auto-select first profile as active, or if explicitly requested
         if (setAsActive || Profiles.Count == 1)
         {
+            ActiveProfileIndex = profile.Index;
             ActiveProfileName = profile.Name;
         }
     }
@@ -157,9 +181,11 @@ public sealed class ProfileCollection
         Profiles.Remove(profile);
 
         // If we removed the active profile, select the first remaining profile
-        if (string.Equals(ActiveProfileName, profile.Name, StringComparison.OrdinalIgnoreCase))
+        if (ActiveProfileIndex == profile.Index)
         {
-            ActiveProfileName = Profiles.FirstOrDefault()?.Name;
+            var next = Profiles.FirstOrDefault();
+            ActiveProfileIndex = next?.Index;
+            ActiveProfileName = next?.Name;
         }
 
         return true;
@@ -189,7 +215,8 @@ public sealed class ProfileCollection
             throw new InvalidOperationException($"Profile with index {index} not found.");
         }
 
-        ActiveProfileName = profile.Name;
+        ActiveProfileIndex = index;
+        ActiveProfileName = profile.Name;  // Keep for display, may be null
     }
 
     /// <summary>
@@ -205,6 +232,7 @@ public sealed class ProfileCollection
             throw new InvalidOperationException($"Profile with name '{name}' not found.");
         }
 
+        ActiveProfileIndex = profile.Index;
         ActiveProfileName = profile.Name;
     }
 
@@ -214,6 +242,7 @@ public sealed class ProfileCollection
     public void Clear()
     {
         Profiles.Clear();
+        ActiveProfileIndex = null;
         ActiveProfileName = null;
     }
 
@@ -241,6 +270,7 @@ public sealed class ProfileCollection
         var copy = new ProfileCollection
         {
             Version = Version,
+            ActiveProfileIndex = ActiveProfileIndex,
             ActiveProfileName = ActiveProfileName
         };
 

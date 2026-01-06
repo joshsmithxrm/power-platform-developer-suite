@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unnamed profile selection silently failed** - Selecting a profile without a name (`ppds auth select --index N`) appeared to succeed but would revert to the first profile on next command. Active profile tracking now uses index-based lookup instead of name-based, with backwards compatibility for existing profiles.json files.
+
 ## [1.0.0-beta.4] - 2026-01-03
 
 ### Changed

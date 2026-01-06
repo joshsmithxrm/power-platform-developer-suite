@@ -163,6 +163,36 @@ If any PR comments are missing replies or alerts remain open, address them befor
 
 **Note:** Code scanning alerts don't need replies - they're resolved by fixing code or dismissing via API.
 
+### 7. Base Branch Check & Push
+
+Before pushing fixes, ensure the branch is based on latest `origin/main`:
+
+```bash
+# Fetch latest from origin
+git fetch origin
+
+# Check if current branch is behind origin/main
+git rev-list --count HEAD..origin/main
+```
+
+**If the count is > 0, the branch is behind `origin/main`.** Rebase before pushing:
+
+```bash
+# Rebase onto latest main
+git rebase origin/main
+
+# If conflicts, resolve them and continue
+git rebase --continue
+```
+
+**Only after rebasing (if needed)**, push the fixes:
+
+```bash
+# Push (or force-push after rebase)
+git push
+# If rebased, may need: git push --force-with-lease
+```
+
 ## When to Use
 
 - After opening a PR (before requesting review)

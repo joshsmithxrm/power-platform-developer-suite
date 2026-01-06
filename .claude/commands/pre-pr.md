@@ -96,17 +96,37 @@ public void Add_FirstProfile_SetsAsActive()
 
 **If README is outdated:** Update it and amend the commit before proceeding.
 
-### 7. Push Check
+### 7. Base Branch Check & Push
 
-Before creating PR, ensure changes are pushed:
+Before creating PR, ensure the branch is based on latest `origin/main`:
 
 ```bash
-# Fetch latest and check if ahead of remote
-git fetch
+# Fetch latest from origin
+git fetch origin
+
+# Check if current branch is behind origin/main
+git rev-list --count HEAD..origin/main
+```
+
+**If the count is > 0, the branch is behind `origin/main`.** Rebase before pushing:
+
+```bash
+# Rebase onto latest main
+git rebase origin/main
+
+# If conflicts, resolve them and continue
+git rebase --continue
+```
+
+**Only after rebasing (if needed)**, push the branch:
+
+```bash
+# Check status
 git status
 
-# If ahead, push
+# Push (or force-push after rebase)
 git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+# If rebased, may need: git push --force-with-lease
 ```
 
 **The PR cannot be created if commits aren't pushed.** This is a common oversight.
@@ -122,6 +142,7 @@ Pre-PR Validation
 [✓] No TODOs found
 [✗] Missing tests for: EnvironmentResolutionService, ProfileValidator
 [✓] CLI README: Command structure matches (or N/A if no CLI changes)
+[✓] Base branch: Up to date with origin/main (or "Behind by N commits - rebasing...")
 
 Missing tests is a blocker. Writing tests now...
 ```

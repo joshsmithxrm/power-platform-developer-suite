@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`auth create -env` failed to resolve environment** - Creating profiles with InteractiveBrowser or DeviceCode auth and specifying `-env <url>` would fail with "Auth method '' is not supported" because the auth method wasn't passed to Global Discovery Service.
+
 ## [1.0.0-beta.9] - 2026-01-05
 
 ### Changed

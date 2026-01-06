@@ -15,6 +15,7 @@ public class ProfileCollectionTests
         collection.Add(profile);
 
         collection.ActiveProfile.Should().Be(profile);
+        collection.ActiveProfileIndex.Should().Be(profile.Index);
         collection.ActiveProfileName.Should().Be(profile.Name);
     }
 
@@ -239,6 +240,7 @@ public class ProfileCollectionTests
 
         collection.RemoveByIndex(profile.Index);
 
+        collection.ActiveProfileIndex.Should().BeNull();
         collection.ActiveProfileName.Should().BeNull();
         collection.ActiveProfile.Should().BeNull();
     }
@@ -255,6 +257,7 @@ public class ProfileCollectionTests
         collection.RemoveByIndex(5);
 
         collection.ActiveProfile.Should().Be(profile2);
+        collection.ActiveProfileIndex.Should().Be(10);
         collection.ActiveProfileName.Should().Be("second");
     }
 
@@ -365,6 +368,7 @@ public class ProfileCollectionTests
         collection.Clear();
 
         collection.Count.Should().Be(0);
+        collection.ActiveProfileIndex.Should().BeNull();
         collection.ActiveProfileName.Should().BeNull();
         collection.ActiveProfile.Should().BeNull();
     }
@@ -437,6 +441,7 @@ public class ProfileCollectionTests
 
         clone.Should().NotBeSameAs(collection);
         clone.Count.Should().Be(1);
+        clone.ActiveProfileIndex.Should().Be(collection.ActiveProfileIndex);
         clone.ActiveProfileName.Should().Be(collection.ActiveProfileName);
         clone.All.First().Should().NotBeSameAs(profile);
         clone.All.First().Name.Should().Be("test");
@@ -482,15 +487,61 @@ public class ProfileCollectionTests
     }
 
     [Fact]
-    public void ActiveProfile_InvalidActiveProfileName_ReturnsFirstProfile()
+    public void ActiveProfile_InvalidActiveProfileName_ReturnsNull()
     {
         var collection = new ProfileCollection();
-        collection.Add(new AuthProfile { Index = 1, Name = "test" });
+        // Directly add profile without using Add() which auto-sets ActiveProfileIndex
+        collection.Profiles.Add(new AuthProfile { Index = 1, Name = "test" });
         collection.ActiveProfileName = "nonexistent";
+        // Don't set ActiveProfileIndex - simulates corrupt/old data with invalid name
 
-        // Falls back to first profile when active name doesn't match
-        collection.ActiveProfile.Should().NotBeNull();
-        collection.ActiveProfile!.Name.Should().Be("test");
+        // No fallback to first profile - returns null when active profile not found
+        collection.ActiveProfile.Should().BeNull();
+    }
+
+    [Fact]
+    public void ActiveProfile_LegacyNameOnlyMigration_SetsIndex()
+    {
+        var collection = new ProfileCollection();
+        var profile = new AuthProfile { Index = 3, Name = "legacy-profile" };
+        collection.Profiles.Add(profile); // Direct add, no automatic active setting
+        collection.ActiveProfileName = "legacy-profile"; // Simulate old profiles.json
+        // ActiveProfileIndex is null - simulates migration scenario
+
+        // Accessing ActiveProfile should work and migrate to index-based
+        var active = collection.ActiveProfile;
+
+        active.Should().Be(profile);
+        collection.ActiveProfileIndex.Should().Be(3); // Index should now be set
+    }
+
+    [Fact]
+    public void SetActiveByIndex_UnnamedProfile_WorksCorrectly()
+    {
+        // This is the bug we're fixing - unnamed profiles should work
+        var collection = new ProfileCollection();
+        var namedProfile = new AuthProfile { Name = "named", Index = 1 };
+        var unnamedProfile = new AuthProfile { Name = null, Index = 2 }; // No name
+        collection.Add(namedProfile);
+        collection.Profiles.Add(unnamedProfile); // Direct add for unnamed
+
+        collection.SetActiveByIndex(2);
+
+        collection.ActiveProfile.Should().Be(unnamedProfile);
+        collection.ActiveProfileIndex.Should().Be(2);
+        collection.ActiveProfileName.Should().BeNull();
+    }
+
+    [Fact]
+    public void ActiveProfile_UnnamedProfileByIndex_ReturnsCorrectProfile()
+    {
+        // Verify that unnamed profiles are found by index
+        var collection = new ProfileCollection();
+        var unnamedProfile = new AuthProfile { Index = 5, Name = null };
+        collection.Profiles.Add(unnamedProfile);
+        collection.ActiveProfileIndex = 5;
+
+        collection.ActiveProfile.Should().Be(unnamedProfile);
     }
 
     [Fact]
