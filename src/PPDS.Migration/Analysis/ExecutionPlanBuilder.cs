@@ -85,14 +85,18 @@ namespace PPDS.Migration.Analysis
                         }
 
                         // If target is in circular reference and processed after this entity, defer
+                        // Also defer self-referencing lookups (entity references itself) since parent
+                        // records may be in the same batch as children
                         if (circularSet.Contains(field.LookupEntity))
                         {
                             var targetIndex = entityOrder.IndexOf(field.LookupEntity);
-                            if (targetIndex > i)
+                            var isSelfReference = field.LookupEntity.Equals(entityName, StringComparison.OrdinalIgnoreCase);
+                            if (targetIndex > i || isSelfReference)
                             {
                                 deferred.Add(field.LogicalName);
-                                _logger?.LogDebug("Deferring {Entity}.{Field} -> {Target}",
-                                    entityName, field.LogicalName, field.LookupEntity);
+                                _logger?.LogDebug("Deferring {Entity}.{Field} -> {Target}{Reason}",
+                                    entityName, field.LogicalName, field.LookupEntity,
+                                    isSelfReference ? " (self-reference)" : "");
                             }
                         }
                     }

@@ -120,6 +120,53 @@ public class ExecutionPlanBuilderTests
     }
 
     [Fact]
+    public void Build_IdentifiesSelfReferencingDeferredFields()
+    {
+        // Self-referencing entities (e.g., et_source.et_parentsourceid -> et_source) must defer
+        // the lookup field because parent and child records may be in the same batch
+        var graph = new DependencyGraph
+        {
+            Tiers = new List<IReadOnlyList<string>>
+            {
+                new List<string> { "et_source" }
+            },
+            CircularReferences = new List<CircularReference>
+            {
+                new()
+                {
+                    Entities = new List<string> { "et_source" },
+                    Edges = new List<DependencyEdge>
+                    {
+                        new() { FromEntity = "et_source", ToEntity = "et_source", FieldName = "et_parentsourceid" }
+                    }
+                }
+            }
+        };
+
+        var schema = new MigrationSchema
+        {
+            Entities = new List<EntitySchema>
+            {
+                new()
+                {
+                    LogicalName = "et_source",
+                    Fields = new List<FieldSchema>
+                    {
+                        new() { LogicalName = "et_parentsourceid", Type = "lookup", LookupEntity = "et_source" }
+                    }
+                }
+            }
+        };
+
+        var builder = new ExecutionPlanBuilder();
+
+        var plan = builder.Build(graph, schema);
+
+        plan.DeferredFields.Should().ContainKey("et_source");
+        plan.DeferredFields["et_source"].Should().Contain("et_parentsourceid");
+    }
+
+    [Fact]
     public void Build_IdentifiesManyToManyRelationships()
     {
         var graph = new DependencyGraph
