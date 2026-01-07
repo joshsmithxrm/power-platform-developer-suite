@@ -41,6 +41,12 @@ internal sealed class PpdsApplication : IDisposable
         // Create session for connection pool reuse across screens
         _session = new InteractiveSession(_profileName, _profileStore, _deviceCodeCallback);
 
+        // Start warming the connection pool in the background
+        // This runs while Terminal.Gui initializes, so connection is ready faster
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling in InitializeAsync
+        _ = _session.InitializeAsync(cancellationToken);
+#pragma warning restore PPDS013
+
         // Register cancellation to request stop
         using var registration = cancellationToken.Register(() => Application.RequestStop());
 

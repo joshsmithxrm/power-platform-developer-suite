@@ -109,42 +109,47 @@ internal sealed class SqlQueryScreen : Window
 
         Add(queryFrame, _filterFrame, _resultsTable, _statusLabel);
 
-        // Load profile and environment info (fire-and-forget with error handling)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = LoadProfileInfoAsync().ContinueWith(t =>
+        // Subscribe to environment changes from the session
+        _session.EnvironmentChanged += OnEnvironmentChanged;
+
+        // Initialize from session's current environment (may already be set from InitializeAsync)
+        if (_session.CurrentEnvironmentUrl != null)
         {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    _statusLabel.Text = $"Error loading profile: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            _environmentUrl = _session.CurrentEnvironmentUrl;
+            _resultsTable.SetEnvironmentUrl(_environmentUrl);
+            Title = $"SQL Query - {_session.CurrentEnvironmentDisplayName ?? _environmentUrl}";
+        }
+        else
+        {
+            _statusLabel.Text = "Connecting to environment...";
+        }
 
         // Set up keyboard shortcuts
         SetupKeyboardShortcuts();
     }
 
-    private async Task LoadProfileInfoAsync()
+    private void OnEnvironmentChanged(string? url, string? displayName)
     {
-        var store = _session.GetProfileStore();
-        var collection = await store.LoadAsync(CancellationToken.None);
-        var profile = collection.ActiveProfile;
-
-        // Update UI on main thread
         Application.MainLoop?.Invoke(() =>
         {
-            if (profile?.Environment != null)
+            if (url != null)
             {
-                _environmentUrl = profile.Environment.Url;
+                _environmentUrl = url;
                 _resultsTable.SetEnvironmentUrl(_environmentUrl);
-                Title = $"SQL Query - {profile.Environment.DisplayName}";
+                Title = $"SQL Query - {displayName ?? url}";
+                _statusLabel.Text = "Ready. Press Ctrl+Enter to execute query.";
+
+                // Clear stale results from previous environment
+                _resultsTable.Clear();
+                _lastSql = null;
+                _lastPagingCookie = null;
+                _lastPageNumber = 1;
             }
             else
             {
-                _statusLabel.Text = "No environment selected. Select a profile with an environment first.";
+                _environmentUrl = null;
+                Title = "SQL Query";
+                _statusLabel.Text = "No environment selected. Select an environment first.";
             }
         });
     }

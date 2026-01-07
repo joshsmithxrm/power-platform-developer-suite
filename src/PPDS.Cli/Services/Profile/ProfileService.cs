@@ -171,6 +171,47 @@ public sealed class ProfileService : IProfileService
     }
 
     /// <inheritdoc />
+    public async Task SetEnvironmentAsync(
+        string? nameOrIndex,
+        string environmentUrl,
+        string? displayName = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
+
+        var collection = await _store.LoadAsync(cancellationToken);
+
+        AuthProfile? profile;
+        if (string.IsNullOrWhiteSpace(nameOrIndex))
+        {
+            profile = collection.ActiveProfile;
+            if (profile == null)
+            {
+                throw new PpdsNotFoundException("Profile", "active profile");
+            }
+        }
+        else
+        {
+            profile = collection.GetByNameOrIndex(nameOrIndex);
+            if (profile == null)
+            {
+                throw new PpdsNotFoundException("Profile", nameOrIndex);
+            }
+        }
+
+        profile.Environment = new EnvironmentInfo
+        {
+            Url = environmentUrl.TrimEnd('/'),
+            DisplayName = displayName ?? ExtractEnvironmentName(environmentUrl)
+        };
+
+        await _store.SaveAsync(collection, cancellationToken);
+
+        _logger.LogInformation("Set environment for profile {ProfileIdentifier} to {EnvironmentUrl}",
+            profile.DisplayIdentifier, environmentUrl);
+    }
+
+    /// <inheritdoc />
     public async Task<ProfileSummary> CreateProfileAsync(
         ProfileCreateRequest request,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,

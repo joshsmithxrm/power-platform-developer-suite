@@ -34,12 +34,23 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
     private ServiceProvider? _serviceProvider;
     private string? _currentEnvironmentUrl;
+    private string? _currentEnvironmentDisplayName;
     private bool _disposed;
+
+    /// <summary>
+    /// Event raised when the environment changes (either via initialization or explicit switch).
+    /// </summary>
+    public event Action<string?, string?>? EnvironmentChanged;
 
     /// <summary>
     /// Gets the current environment URL, or null if no connection has been established.
     /// </summary>
-    public string? EnvironmentUrl => _currentEnvironmentUrl;
+    public string? CurrentEnvironmentUrl => _currentEnvironmentUrl;
+
+    /// <summary>
+    /// Gets the current environment display name, or null if not set.
+    /// </summary>
+    public string? CurrentEnvironmentDisplayName => _currentEnvironmentDisplayName;
 
     /// <summary>
     /// Creates a new interactive session for the specified profile.
@@ -55,6 +66,96 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _profileName = profileName ?? string.Empty;
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _deviceCodeCallback = deviceCodeCallback;
+    }
+
+    /// <summary>
+    /// Initializes the session by loading the active profile and warming the connection pool.
+    /// Call this early (e.g., during TUI startup) so the connection is ready when needed.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        TuiDebugLog.Log("Initializing session...");
+
+        var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var profile = string.IsNullOrEmpty(_profileName)
+            ? collection.ActiveProfile
+            : collection.GetByName(_profileName);
+
+        if (profile?.Environment?.Url != null)
+        {
+            _currentEnvironmentDisplayName = profile.Environment.DisplayName;
+            TuiDebugLog.Log($"Warming connection to {profile.Environment.DisplayName} ({profile.Environment.Url})");
+
+            // Fire-and-forget warming - don't block TUI startup
+            // Errors are logged but don't prevent TUI from starting
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+            _ = GetServiceProviderAsync(profile.Environment.Url, cancellationToken)
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        TuiDebugLog.Log($"Warm failed: {t.Exception?.InnerException?.Message}");
+                    }
+                    else
+                    {
+                        TuiDebugLog.Log("Connection pool warmed successfully");
+                        EnvironmentChanged?.Invoke(profile.Environment.Url, profile.Environment.DisplayName);
+                    }
+                }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+        }
+        else
+        {
+            TuiDebugLog.Log("No environment configured - skipping connection warming");
+        }
+    }
+
+    /// <summary>
+    /// Switches to a new environment, updating the profile and warming the new connection.
+    /// </summary>
+    /// <param name="environmentUrl">The new environment URL.</param>
+    /// <param name="displayName">The display name for the environment.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task SetEnvironmentAsync(
+        string environmentUrl,
+        string? displayName = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
+
+        TuiDebugLog.Log($"Switching environment to {displayName ?? environmentUrl}");
+
+        // Update profile to persist the environment selection
+        var profileService = GetProfileService();
+        var profileName = string.IsNullOrEmpty(_profileName) ? null : _profileName;
+        await profileService.SetEnvironmentAsync(profileName, environmentUrl, displayName, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Invalidate old connection
+        await InvalidateAsync().ConfigureAwait(false);
+
+        // Update local state
+        _currentEnvironmentDisplayName = displayName;
+
+        // Warm new connection (fire-and-forget)
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+        _ = GetServiceProviderAsync(environmentUrl, cancellationToken)
+            .ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    TuiDebugLog.Log($"Warm failed after switch: {t.Exception?.InnerException?.Message}");
+                }
+                else
+                {
+                    TuiDebugLog.Log("New connection pool warmed successfully");
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+
+        // Notify listeners
+        EnvironmentChanged?.Invoke(environmentUrl, displayName);
     }
 
     /// <summary>

@@ -28,13 +28,12 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Open Feedback
 
-- [ ] Connection pool warming - First query takes 6+ seconds (pool created on demand, not proactively)
-  - `GetServiceProviderAsync()` does token acquisition + connection on first use
-  - Should warm pool when environment is loaded, not on first query
-  - Debug log shows: "Getting SQL query service..." → 6.7s → "Got service"
+_No open items_
 
 ## Done
 
+- [x] Connection pool warming - InitializeAsync() warms pool at TUI startup (fixed: 2026-01-07)
+- [x] Environment change events - SetEnvironmentAsync() + EnvironmentChanged event (fixed: 2026-01-07)
 - [x] Debug logging - TuiDebugLog writes to ~/.ppds/tui-debug.log (fixed: 2026-01-07)
 - [x] Deadlock fix - Replaced nested Application.Run() with MessageBox.Query() (fixed: 2026-01-07)
 - [x] SQL query error - Removed PageNumber=1 that conflicted with TOP (fixed: 2026-01-07)

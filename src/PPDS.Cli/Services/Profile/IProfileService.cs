@@ -80,6 +80,21 @@ public interface IProfileService
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task ClearAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the environment for a profile directly (without re-resolving).
+    /// Use this when you already have the environment URL and display name.
+    /// </summary>
+    /// <param name="nameOrIndex">Profile name or index (null for active profile).</param>
+    /// <param name="environmentUrl">The environment URL.</param>
+    /// <param name="displayName">The display name (optional).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="PpdsNotFoundException">If the profile is not found.</exception>
+    Task SetEnvironmentAsync(
+        string? nameOrIndex,
+        string environmentUrl,
+        string? displayName = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
