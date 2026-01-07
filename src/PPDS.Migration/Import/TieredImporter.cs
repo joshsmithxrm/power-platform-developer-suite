@@ -137,6 +137,12 @@ namespace PPDS.Migration.Import
             var errors = new ConcurrentBag<MigrationError>();
             var totalImported = 0;
 
+            // Track overall progress across all entities
+            var totalEntities = data.EntityData.Count;
+            var overallTotal = data.TotalRecordCount;
+            long overallProcessed = 0;
+            var entityIndex = 0;
+
             _logger?.LogInformation("Starting tiered import: {Tiers} tiers, {Records} records",
                 plan.TierCount, data.TotalRecordCount);
 
@@ -183,7 +189,10 @@ namespace PPDS.Migration.Import
             }
 
             // Create shared import context for phase processors
-            var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress);
+            var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress)
+            {
+                OutputManager = options.OutputManager
+            };
 
             // Disable plugins on entities with disableplugins=true
             IReadOnlyList<Guid> disabledPluginSteps = Array.Empty<Guid>();
@@ -220,10 +229,23 @@ namespace PPDS.Migration.Import
                 // Phase 1: Process each tier sequentially
                 foreach (var tier in plan.Tiers)
                 {
+                    // Track tier-level statistics
+                    var tierStopwatch = Stopwatch.StartNew();
+                    var tierRecordsProcessed = 0L;
+                    var tierRecordsSuccess = 0L;
+                    var tierRecordsFailed = 0L;
+
+                    // Log tier start checkpoint
+                    context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
+
                     progress?.Report(new ProgressEventArgs
                     {
                         Phase = MigrationPhase.Importing,
                         TierNumber = tier.TierNumber,
+                        TotalTiers = plan.TierCount,
+                        TotalEntities = totalEntities,
+                        OverallProcessed = Interlocked.Read(ref overallProcessed),
+                        OverallTotal = overallTotal,
                         Message = $"Processing tier {tier.TierNumber}: {string.Join(", ", tier.Entities)}"
                     });
 
@@ -262,6 +284,29 @@ namespace PPDS.Migration.Import
                             entityResults.Add(result);
                             Interlocked.Add(ref totalImported, result.SuccessCount);
 
+                            // Update tier-level tracking
+                            Interlocked.Add(ref tierRecordsProcessed, result.RecordCount);
+                            Interlocked.Add(ref tierRecordsSuccess, result.SuccessCount);
+                            Interlocked.Add(ref tierRecordsFailed, result.FailureCount);
+
+                            // Update overall progress tracking
+                            Interlocked.Add(ref overallProcessed, result.RecordCount);
+                            Interlocked.Increment(ref entityIndex);
+
+                            // Log entity completion checkpoint
+                            if (result.Duration.TotalSeconds > 0)
+                            {
+                                var rps = result.SuccessCount / result.Duration.TotalSeconds;
+                                context.OutputManager?.LogEntityProgress(entityName, result.SuccessCount, records.Count, rps);
+                            }
+
+                            // Log entity error checkpoint if failures occurred
+                            if (result.FailureCount > 0)
+                            {
+                                var errorSummary = result.Errors.FirstOrDefault()?.Message ?? "Multiple errors";
+                                context.OutputManager?.LogEntityError(entityName, result.FailureCount, errorSummary);
+                            }
+
                             // Add all detailed errors from this entity
                             foreach (var error in result.Errors)
                             {
@@ -272,18 +317,47 @@ namespace PPDS.Migration.Import
                             }
                         }).ConfigureAwait(false);
 
-                    _logger?.LogInformation("Tier {Tier} complete", tier.TierNumber);
+                    // Report tier completion summary
+                    tierStopwatch.Stop();
+                    var tierDuration = tierStopwatch.Elapsed;
+                    var tierRps = tierDuration.TotalSeconds > 0
+                        ? tierRecordsSuccess / tierDuration.TotalSeconds
+                        : 0;
+
+                    var tierSummaryMessage = tierRecordsFailed > 0
+                        ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
+                        : $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
+
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Importing,
+                        TierNumber = tier.TierNumber,
+                        TotalTiers = plan.TierCount,
+                        Message = tierSummaryMessage
+                    });
+
+                    context.OutputManager?.LogProgress(tierSummaryMessage);
+
+                    _logger?.LogInformation("Tier {Tier} complete: {Entities} entities, {Records} records in {Duration}",
+                        tier.TierNumber, tier.Entities.Count(), tierRecordsSuccess, tierDuration);
                 }
 
+                // Capture Phase 1 duration (entity import)
+                var phase1Duration = stopwatch.Elapsed;
+
                 // Phase 2: Process deferred fields
+                context.OutputManager?.LogProgress("Starting deferred fields phase");
                 var deferredResult = await _deferredFieldProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 var deferredUpdates = deferredResult.SuccessCount;
+                var phase2Duration = deferredResult.Duration;
 
                 // Phase 3: Process M2M relationships
+                context.OutputManager?.LogProgress("Starting M2M relationships phase");
                 var relationshipResult = await _relationshipProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 var relationshipsProcessed = relationshipResult.SuccessCount;
+                var phase3Duration = relationshipResult.Duration;
 
                 stopwatch.Stop();
 
@@ -298,6 +372,9 @@ namespace PPDS.Migration.Import
                     RecordsUpdated = deferredUpdates,
                     RelationshipsProcessed = relationshipsProcessed,
                     Duration = stopwatch.Elapsed,
+                    Phase1Duration = phase1Duration,
+                    Phase2Duration = phase2Duration,
+                    Phase3Duration = phase3Duration,
                     EntityResults = entityResults.ToArray(),
                     Errors = errors.ToArray()
                 };
@@ -760,8 +837,11 @@ namespace PPDS.Migration.Import
         /// Determines if a bulk operation failure indicates the entity doesn't support bulk operations.
         /// </summary>
         /// <remarks>
-        /// Some entities (like team) don't support CreateMultiple/UpdateMultiple/UpsertMultiple.
+        /// Some entities (like team, queue) don't support CreateMultiple/UpdateMultiple/UpsertMultiple.
         /// When detected, the importer should fallback to individual operations.
+        /// Error messages vary by entity:
+        /// - "is not enabled on the entity" (team)
+        /// - "does not support entities of type" (queue)
         /// </remarks>
         private static bool IsBulkNotSupportedFailure(BulkOperationResult result, int totalRecords)
         {
@@ -770,8 +850,14 @@ namespace PPDS.Migration.Import
                 return false;
 
             // Check if first error indicates bulk operation not supported
+            // Different entities return different error messages
             var firstError = result.Errors[0];
-            return firstError.Message?.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ?? false;
+            var message = firstError.Message;
+            if (string.IsNullOrEmpty(message))
+                return false;
+
+            return message.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("does not support entities of type", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

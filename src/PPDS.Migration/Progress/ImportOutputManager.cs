@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -252,7 +254,33 @@ namespace PPDS.Migration.Progress
                 RecordsUpdated = result.RecordsUpdated,
                 RecordsFailed = _errorCount,
                 RecordsPerSecond = result.RecordsPerSecond,
-                ErrorPatterns = DetectErrorPatterns(result)
+                ErrorPatterns = DetectErrorPatterns(result),
+                Entities = result.EntityResults.Count > 0
+                    ? result.EntityResults.Select(er => new EntitySummary
+                    {
+                        Entity = er.EntityLogicalName,
+                        Tier = er.TierNumber,
+                        RecordCount = er.RecordCount,
+                        SuccessCount = er.SuccessCount,
+                        FailureCount = er.FailureCount,
+                        CreatedCount = er.CreatedCount,
+                        UpdatedCount = er.UpdatedCount,
+                        Duration = er.Duration,
+                        RecordsPerSecond = er.Duration.TotalSeconds > 0
+                            ? er.SuccessCount / er.Duration.TotalSeconds
+                            : 0
+                    }).ToList()
+                    : null,
+                PhaseTiming = result.Phase1Duration > TimeSpan.Zero ||
+                              result.Phase2Duration > TimeSpan.Zero ||
+                              result.Phase3Duration > TimeSpan.Zero
+                    ? new PhaseTiming
+                    {
+                        EntityImport = result.Phase1Duration,
+                        DeferredFields = result.Phase2Duration,
+                        Relationships = result.Phase3Duration
+                    }
+                    : null
             };
 
             var json = JsonSerializer.Serialize(summary, SummaryJsonOptions);
@@ -379,6 +407,60 @@ namespace PPDS.Migration.Progress
 
             [JsonPropertyName("errorPatterns")]
             public System.Collections.Generic.Dictionary<string, int>? ErrorPatterns { get; set; }
+
+            [JsonPropertyName("entities")]
+            public List<EntitySummary>? Entities { get; set; }
+
+            [JsonPropertyName("phaseTiming")]
+            public PhaseTiming? PhaseTiming { get; set; }
+        }
+
+        /// <summary>
+        /// Phase timing breakdown for summary report.
+        /// </summary>
+        private sealed class PhaseTiming
+        {
+            [JsonPropertyName("entityImport")]
+            public TimeSpan EntityImport { get; set; }
+
+            [JsonPropertyName("deferredFields")]
+            public TimeSpan DeferredFields { get; set; }
+
+            [JsonPropertyName("relationships")]
+            public TimeSpan Relationships { get; set; }
+        }
+
+        /// <summary>
+        /// Per-entity breakdown for summary report.
+        /// </summary>
+        private sealed class EntitySummary
+        {
+            [JsonPropertyName("entity")]
+            public string Entity { get; set; } = string.Empty;
+
+            [JsonPropertyName("tier")]
+            public int Tier { get; set; }
+
+            [JsonPropertyName("recordCount")]
+            public int RecordCount { get; set; }
+
+            [JsonPropertyName("successCount")]
+            public int SuccessCount { get; set; }
+
+            [JsonPropertyName("failureCount")]
+            public int FailureCount { get; set; }
+
+            [JsonPropertyName("createdCount")]
+            public int? CreatedCount { get; set; }
+
+            [JsonPropertyName("updatedCount")]
+            public int? UpdatedCount { get; set; }
+
+            [JsonPropertyName("duration")]
+            public TimeSpan Duration { get; set; }
+
+            [JsonPropertyName("recordsPerSecond")]
+            public double RecordsPerSecond { get; set; }
         }
 
         /// <summary>

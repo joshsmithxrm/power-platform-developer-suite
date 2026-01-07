@@ -130,18 +130,8 @@ namespace PPDS.Migration.Import
                 totalUpdated += successCount;
                 totalFailures += failureCount;
 
-                // Report completion for this entity
-                context.Progress?.Report(new ProgressEventArgs
-                {
-                    Phase = MigrationPhase.ProcessingDeferredFields,
-                    Entity = entityName,
-                    Field = fieldList,
-                    Current = updates.Count,
-                    Total = updates.Count,
-                    SuccessCount = successCount,
-                    FailureCount = failureCount,
-                    Message = $"[Deferred] {entityName}: {fieldList}"
-                });
+                // Note: Final progress is already reported by ExecuteUpdatesAsync/ExecuteIndividualUpdatesAsync
+                // Don't report again here to avoid duplicate completion lines
             }
 
             stopwatch.Stop();

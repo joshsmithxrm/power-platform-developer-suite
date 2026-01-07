@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 
@@ -18,32 +17,30 @@ namespace PPDS.Migration.Progress
     /// Progress is written to stderr to keep stdout clean for command results,
     /// enabling piping (e.g., <c>ppds data export | jq</c>) without interference.
     /// </para>
+    /// <para>
+    /// Uses <see cref="OperationClock"/> for elapsed time to stay synchronized with
+    /// MEL log formatters. See ADR-0027.
+    /// </para>
     /// </remarks>
     public class ConsoleProgressReporter : IProgressReporter
     {
         private const int MaxErrorsToDisplay = 10;
         private const int MaxSuggestionsToDisplay = 3;
+        private const int OverallProgressIntervalSeconds = 10;
 
-        private readonly Stopwatch _stopwatch = new();
         private string? _lastEntity;
         private int _lastProgress;
+        private DateTime _lastOverallProgressTime = DateTime.MinValue;
 
         /// <inheritdoc />
         public string OperationName { get; set; } = "Operation";
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ConsoleProgressReporter"/> class.
-        /// </summary>
-        public ConsoleProgressReporter()
-        {
-            _stopwatch.Start();
-        }
-
         /// <inheritdoc />
         public void Report(ProgressEventArgs args)
         {
-            var elapsed = _stopwatch.Elapsed;
-            var prefix = $"[+{elapsed:hh\\:mm\\:ss\\.fff}]";
+            var elapsed = OperationClock.Elapsed;
+            var totalHours = (int)elapsed.TotalHours;
+            var prefix = $"[+{totalHours:D2}:{elapsed.Minutes:00}:{elapsed.Seconds:00}.{elapsed.Milliseconds:000}]";
 
             switch (args.Phase)
             {
@@ -71,7 +68,10 @@ namespace PPDS.Migration.Progress
                         ? args.Entity
                         : $"{args.Entity}:{args.Relationship}";
 
-                    if (progressKey != _lastEntity || args.Current == args.Total || ShouldUpdate(args.Current))
+                    // Track if this is a new entity (for overall progress display)
+                    var isNewEntity = progressKey != _lastEntity;
+
+                    if (isNewEntity || args.Current == args.Total || ShouldUpdate(args.Current))
                     {
                         var phase = args.Phase == MigrationPhase.Exporting ? "Export" : "Import";
                         var tierInfo = args.TierNumber.HasValue ? $" (Tier {args.TierNumber})" : "";
@@ -107,6 +107,34 @@ namespace PPDS.Migration.Progress
                         _lastEntity = progressKey;
                         _lastProgress = args.Current;
                     }
+
+                    // Show overall progress: on entity change or periodic interval
+                    if (args.OverallTotal.HasValue && args.OverallProcessed.HasValue &&
+                        (isNewEntity || ShouldShowOverallProgress()))
+                    {
+                        var overallPct = args.OverallPercentComplete;
+                        var tierInfo = args.TierNumber.HasValue && args.TotalTiers.HasValue
+                            ? $" | Tier {args.TierNumber}/{args.TotalTiers}"
+                            : "";
+
+                        // Estimate overall ETA based on current rate
+                        var overallEta = "";
+                        if (args.RecordsPerSecond.HasValue && args.RecordsPerSecond > 0)
+                        {
+                            var remainingRecords = args.OverallTotal.Value - args.OverallProcessed.Value;
+                            var etaSeconds = remainingRecords / args.RecordsPerSecond.Value;
+                            if (etaSeconds > 0 && etaSeconds < 86400) // Cap at 24 hours
+                            {
+                                overallEta = $" | ETA: {FormatEta(TimeSpan.FromSeconds(etaSeconds))}";
+                            }
+                        }
+
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.Error.WriteLine($"{prefix} Overall: {args.OverallProcessed:N0}/{args.OverallTotal:N0} ({overallPct:F0}%){tierInfo}{overallEta}");
+                        Console.ResetColor();
+
+                        _lastOverallProgressTime = DateTime.UtcNow;
+                    }
                     break;
 
                 case MigrationPhase.ProcessingDeferredFields:
@@ -138,7 +166,6 @@ namespace PPDS.Migration.Progress
         /// <inheritdoc />
         public void Complete(MigrationResult result)
         {
-            _stopwatch.Stop();
             Console.Error.WriteLine();
 
             // Header line: "Export succeeded." or "Export completed with errors."
@@ -421,7 +448,7 @@ namespace PPDS.Migration.Progress
         /// <inheritdoc />
         public void Reset()
         {
-            _stopwatch.Restart();
+            OperationClock.Start();
             _lastEntity = null;
             _lastProgress = 0;
         }
@@ -430,6 +457,12 @@ namespace PPDS.Migration.Progress
         {
             // Update every 1000 records or 100 records, whichever comes first
             return current - _lastProgress >= 1000 || current - _lastProgress >= 100;
+        }
+
+        private bool ShouldShowOverallProgress()
+        {
+            // Show overall progress every N seconds
+            return (DateTime.UtcNow - _lastOverallProgressTime).TotalSeconds >= OverallProgressIntervalSeconds;
         }
 
         /// <summary>

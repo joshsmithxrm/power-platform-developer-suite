@@ -67,5 +67,11 @@ namespace PPDS.Migration.Import
         /// Gets the optional progress reporter.
         /// </summary>
         public IProgressReporter? Progress { get; }
+
+        /// <summary>
+        /// Gets or sets the optional output manager for checkpoint logging.
+        /// When set, tier starts, entity completions, and phase transitions are logged to the progress file.
+        /// </summary>
+        public ImportOutputManager? OutputManager { get; set; }
     }
 }

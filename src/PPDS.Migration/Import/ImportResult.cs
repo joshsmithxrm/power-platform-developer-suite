@@ -40,6 +40,21 @@ namespace PPDS.Migration.Import
         public TimeSpan Duration { get; set; }
 
         /// <summary>
+        /// Gets or sets the duration of Phase 1 (entity import).
+        /// </summary>
+        public TimeSpan Phase1Duration { get; set; }
+
+        /// <summary>
+        /// Gets or sets the duration of Phase 2 (deferred fields).
+        /// </summary>
+        public TimeSpan Phase2Duration { get; set; }
+
+        /// <summary>
+        /// Gets or sets the duration of Phase 3 (M2M relationships).
+        /// </summary>
+        public TimeSpan Phase3Duration { get; set; }
+
+        /// <summary>
         /// Gets or sets the errors that occurred.
         /// </summary>
         public IReadOnlyList<MigrationError> Errors { get; set; } = Array.Empty<MigrationError>();

@@ -30,6 +30,18 @@ namespace PPDS.Migration.Import
         private ConcurrentDictionary<string, string>? _relationshipNameCache;
 
         /// <summary>
+        /// Tracks the last reported progress count for throttling.
+        /// Thread-safe via Interlocked operations.
+        /// </summary>
+        private int _lastReportedProgress;
+
+        /// <summary>
+        /// The minimum interval between progress reports (in associations).
+        /// Default is 500 to reduce log verbosity for high-volume M2M operations.
+        /// </summary>
+        private const int ProgressReportInterval = 500;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="RelationshipProcessor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
@@ -57,6 +69,9 @@ namespace PPDS.Migration.Import
             }
 
             var stopwatch = Stopwatch.StartNew();
+
+            // Reset progress throttle state for this run
+            _lastReportedProgress = 0;
 
             // Flatten all M2M operations into a list for parallel processing
             var allOperations = context.Data.RelationshipData
@@ -171,17 +186,20 @@ namespace PPDS.Migration.Import
                         var newSuccess = Interlocked.Add(ref successCount, mappedTargetIds.Count);
                         var current = Interlocked.Add(ref processedAssociations, mappedTargetIds.Count);
 
-                        // Report progress
-                        context.Progress?.Report(new ProgressEventArgs
+                        // Report progress (throttled to reduce log verbosity)
+                        if (ShouldReportProgress(current, totalTargetAssociations))
                         {
-                            Phase = MigrationPhase.ProcessingRelationships,
-                            Entity = entityName,
-                            Relationship = resolvedRelationshipName,
-                            Current = current,
-                            Total = totalTargetAssociations,
-                            SuccessCount = newSuccess,
-                            Message = $"[M2M] {resolvedRelationshipName}"
-                        });
+                            context.Progress?.Report(new ProgressEventArgs
+                            {
+                                Phase = MigrationPhase.ProcessingRelationships,
+                                Entity = entityName,
+                                Relationship = resolvedRelationshipName,
+                                Current = current,
+                                Total = totalTargetAssociations,
+                                SuccessCount = newSuccess,
+                                Message = $"[M2M] {resolvedRelationshipName}"
+                            });
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -197,16 +215,20 @@ namespace PPDS.Migration.Import
                             var current = Interlocked.Add(ref processedAssociations, mappedTargetIds.Count);
                             Interlocked.Increment(ref skippedDuplicateCount);
 
-                            context.Progress?.Report(new ProgressEventArgs
+                            // Report progress (throttled to reduce log verbosity)
+                            if (ShouldReportProgress(current, totalTargetAssociations))
                             {
-                                Phase = MigrationPhase.ProcessingRelationships,
-                                Entity = entityName,
-                                Relationship = resolvedRelationshipName,
-                                Current = current,
-                                Total = totalTargetAssociations,
-                                SuccessCount = newSuccess,
-                                Message = $"[M2M] {resolvedRelationshipName}"
-                            });
+                                context.Progress?.Report(new ProgressEventArgs
+                                {
+                                    Phase = MigrationPhase.ProcessingRelationships,
+                                    Entity = entityName,
+                                    Relationship = resolvedRelationshipName,
+                                    Current = current,
+                                    Total = totalTargetAssociations,
+                                    SuccessCount = newSuccess,
+                                    Message = $"[M2M] {resolvedRelationshipName}"
+                                });
+                            }
                         }
                         else
                         {
@@ -228,6 +250,22 @@ namespace PPDS.Migration.Import
             if (firstException != null)
             {
                 throw firstException;
+            }
+
+            // Report final completion (parallel counting may not hit exact total)
+            if (totalTargetAssociations > 0)
+            {
+                context.Progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.ProcessingRelationships,
+                    Entity = "M2M",
+                    Relationship = "All relationships",
+                    Current = successCount + failureCount,
+                    Total = totalTargetAssociations,
+                    SuccessCount = successCount,
+                    FailureCount = failureCount,
+                    Message = "[M2M] Completed"
+                });
             }
 
             stopwatch.Stop();
@@ -425,6 +463,35 @@ namespace PPDS.Migration.Import
                  message.Contains("0x80040237", StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if a progress report should be sent based on throttling rules.
+        /// Thread-safe for parallel execution using atomic compare-exchange.
+        /// </summary>
+        /// <param name="current">Current progress count.</param>
+        /// <param name="total">Total count.</param>
+        /// <returns>True if progress should be reported.</returns>
+        private bool ShouldReportProgress(int current, int total)
+        {
+            // Always report completion
+            if (current == total)
+            {
+                return true;
+            }
+
+            // Throttle intermediate progress using atomic compare-exchange
+            var lastReported = _lastReportedProgress;
+            if (current - lastReported >= ProgressReportInterval)
+            {
+                // Attempt atomic update - if another thread updated first, skip this report
+                if (Interlocked.CompareExchange(ref _lastReportedProgress, current, lastReported) == lastReported)
+                {
+                    return true;
+                }
             }
 
             return false;

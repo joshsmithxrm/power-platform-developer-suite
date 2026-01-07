@@ -34,6 +34,31 @@ namespace PPDS.Migration.Progress
         public int? TierNumber { get; set; }
 
         /// <summary>
+        /// Gets or sets the total number of tiers in the import plan.
+        /// </summary>
+        public int? TotalTiers { get; set; }
+
+        /// <summary>
+        /// Gets or sets the total number of entities to process.
+        /// </summary>
+        public int? TotalEntities { get; set; }
+
+        /// <summary>
+        /// Gets or sets the current entity index (1-based).
+        /// </summary>
+        public int? CurrentEntityIndex { get; set; }
+
+        /// <summary>
+        /// Gets or sets the overall records processed across all entities.
+        /// </summary>
+        public long? OverallProcessed { get; set; }
+
+        /// <summary>
+        /// Gets or sets the overall total records across all entities.
+        /// </summary>
+        public long? OverallTotal { get; set; }
+
+        /// <summary>
         /// Gets or sets the current record/item count.
         /// </summary>
         public int Current { get; set; }
@@ -83,5 +108,12 @@ namespace PPDS.Migration.Progress
         /// Gets the percentage complete (0-100).
         /// </summary>
         public double PercentComplete => Total > 0 ? (double)Current / Total * 100 : 0;
+
+        /// <summary>
+        /// Gets the overall percentage complete across all entities (0-100).
+        /// </summary>
+        public double OverallPercentComplete => OverallTotal > 0 && OverallProcessed.HasValue
+            ? (double)OverallProcessed.Value / OverallTotal.Value * 100
+            : 0;
     }
 }

@@ -143,6 +143,15 @@ namespace PPDS.Migration.Import
         /// </para>
         /// </remarks>
         public Action<MigrationError>? ErrorCallback { get; set; }
+
+        /// <summary>
+        /// Gets or sets the output manager for checkpoint logging during import.
+        /// </summary>
+        /// <remarks>
+        /// When set, tier starts, entity completions, and phase transitions are logged
+        /// to the progress file, providing a structured record of import progress.
+        /// </remarks>
+        public ImportOutputManager? OutputManager { get; set; }
     }
 
     /// <summary>

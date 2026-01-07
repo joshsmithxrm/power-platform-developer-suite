@@ -196,4 +196,5 @@ new ProgressSnapshot
 
 - ADR-0015: Application Service Layer
 - ADR-0024: Shared Local State Architecture
+- ADR-0027: Operation Clock (elapsed time ownership)
 - Existing pattern: `IProgress<ImportProgress>` in `TieredImporter`

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
@@ -319,11 +320,12 @@ public static class ProfileServiceFactory
                 builder.SetMinimumLevel(LogLevel.Warning);
             }
 
-            builder.AddSimpleConsole(options =>
+            // Use elapsed time formatter to match ConsoleProgressReporter's [+HH:mm:ss.fff] format
+            builder.AddConsole(options =>
             {
-                options.SingleLine = true;
-                options.TimestampFormat = "[HH:mm:ss] ";
+                options.FormatterName = ElapsedTimeConsoleFormatter.FormatterName;
             });
+            builder.AddConsoleFormatter<ElapsedTimeConsoleFormatter, ConsoleFormatterOptions>();
         });
     }
 

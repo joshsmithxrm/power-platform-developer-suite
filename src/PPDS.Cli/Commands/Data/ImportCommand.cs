@@ -11,6 +11,8 @@ using PPDS.Migration.Import;
 using PPDS.Migration.Models;
 using PPDS.Migration.Progress;
 
+using OperationClock = PPDS.Migration.Progress.OperationClock;
+
 namespace PPDS.Cli.Commands.Data;
 
 /// <summary>
@@ -159,6 +161,9 @@ public static class ImportCommand
         FileInfo? errorReport,
         CancellationToken cancellationToken)
     {
+        // Start the operation clock for synchronized elapsed time (ADR-0027)
+        OperationClock.Start();
+
         var progressReporter = ServiceFactory.CreateProgressReporter(outputFormat, "Import");
 
         try
@@ -181,6 +186,16 @@ public static class ImportCommand
 
             var importer = serviceProvider.GetRequiredService<IImporter>();
             var connectionPool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
+
+            // Display pool configuration for visibility into parallelism
+            if (outputFormat != OutputFormat.Json)
+            {
+                var totalDop = connectionPool.GetTotalRecommendedParallelism();
+                var sourceCount = connectionPool.SourceCount;
+                var dopPerSource = sourceCount > 0 ? totalDop / sourceCount : totalDop;
+                Console.Error.WriteLine($"Pool: {sourceCount} source(s), DOP={dopPerSource} each, {totalDop} total parallelism");
+                Console.Error.WriteLine();
+            }
 
             // Get current user ID for fallback when user mappings can't resolve a reference
             var whoAmIResponse = (WhoAmIResponse)await connectionPool.ExecuteAsync(
@@ -255,7 +270,9 @@ public static class ImportCommand
                     SkipMissingColumns = skipMissingColumns,
                     CurrentUserId = currentUserId,
                     // Wire up error streaming callback
-                    ErrorCallback = outputManager != null ? outputManager.LogError : null
+                    ErrorCallback = outputManager != null ? outputManager.LogError : null,
+                    // Wire up output manager for checkpoint logging
+                    OutputManager = outputManager
                 };
 
                 var result = await importer.ImportAsync(
