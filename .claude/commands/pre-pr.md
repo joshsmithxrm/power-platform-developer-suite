@@ -96,7 +96,22 @@ public void Add_FirstProfile_SetsAsActive()
 
 **If README is outdated:** Update it and amend the commit before proceeding.
 
-### 7. Base Branch Check & Push
+### 7. Design Doc Cleanup
+
+Remove the `.claude/design.md` file before creating the PR. This file is used for development context but should not be included in the PR to main.
+
+```bash
+# Check if design.md exists
+if [ -f .claude/design.md ]; then
+  # Remove and commit the removal
+  git rm .claude/design.md
+  git commit -m "chore: remove design doc before PR"
+fi
+```
+
+**Note:** The design doc is intentionally committed to the branch for portability - any developer can pick up the work with full context. We remove it only when merging to main.
+
+### 8. Base Branch Check & Push
 
 Before creating PR, ensure the branch is based on latest `origin/main`:
 
@@ -142,6 +157,7 @@ Pre-PR Validation
 [✓] No TODOs found
 [✗] Missing tests for: EnvironmentResolutionService, ProfileValidator
 [✓] CLI README: Command structure matches (or N/A if no CLI changes)
+[✓] Design doc: Removed .claude/design.md (or N/A if not present)
 [✓] Base branch: Up to date with origin/main (or "Behind by N commits - rebasing...")
 
 Missing tests is a blocker. Writing tests now...
