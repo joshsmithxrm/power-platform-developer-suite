@@ -282,7 +282,6 @@ public sealed class McpConnectionPoolManagerTests
     public async Task GetOrCreatePoolAsync_Timeout_ThrowsTimeoutException()
     {
         // Arrange - create manager with a profile loader that hangs forever
-        var cts = new CancellationTokenSource();
         var hangingLoader = new TaskCompletionSource<ProfileCollection>();
 
         await using var manager = new McpConnectionPoolManager(

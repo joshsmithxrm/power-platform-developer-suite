@@ -61,7 +61,7 @@ public sealed class QueryFetchTool
             includeCount: false,
             cancellationToken).ConfigureAwait(false);
 
-        return MapToResult(result, query);
+        return QueryResultMapper.MapToResult(result, query);
     }
 
     private static string InjectTopAttribute(string fetchXml, int top)
@@ -81,56 +81,5 @@ public sealed class QueryFetchTool
 
         var insertPoint = fetchIndex + "<fetch".Length;
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
-    }
-
-    private static QueryResult MapToResult(PPDS.Dataverse.Query.QueryResult result, string fetchXml)
-    {
-        return new QueryResult
-        {
-            EntityName = result.EntityLogicalName,
-            Columns = result.Columns.Select(c => new QueryColumnInfo
-            {
-                LogicalName = c.LogicalName,
-                Alias = c.Alias,
-                DisplayName = c.DisplayName,
-                DataType = c.DataType.ToString(),
-                LinkedEntityAlias = c.LinkedEntityAlias
-            }).ToList(),
-            Records = result.Records.Select(r =>
-                r.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => MapQueryValue(kvp.Value))).ToList(),
-            Count = result.Count,
-            MoreRecords = result.MoreRecords,
-            ExecutedFetchXml = fetchXml,
-            ExecutionTimeMs = result.ExecutionTimeMs
-        };
-    }
-
-    private static object? MapQueryValue(QueryValue? value)
-    {
-        if (value == null) return null;
-
-        if (value.LookupEntityId.HasValue)
-        {
-            return new Dictionary<string, object?>
-            {
-                ["value"] = value.Value,
-                ["formatted"] = value.FormattedValue,
-                ["entityType"] = value.LookupEntityType,
-                ["entityId"] = value.LookupEntityId
-            };
-        }
-
-        if (value.FormattedValue != null)
-        {
-            return new Dictionary<string, object?>
-            {
-                ["value"] = value.Value,
-                ["formatted"] = value.FormattedValue
-            };
-        }
-
-        return value.Value;
     }
 }
