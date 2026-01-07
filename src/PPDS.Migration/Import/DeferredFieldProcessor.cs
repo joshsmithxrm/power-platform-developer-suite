@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Progress;
@@ -249,7 +250,9 @@ namespace PPDS.Migration.Import
 
                 try
                 {
-                    await client.UpdateAsync(updates[i]).ConfigureAwait(false);
+                    var updateRequest = new UpdateRequest { Target = updates[i] };
+                    ApplyBypassOptions(updateRequest, context.Options);
+                    await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
                     successCount++;
                 }
                 catch (Exception ex)
@@ -282,6 +285,29 @@ namespace PPDS.Migration.Import
             }
 
             return (successCount, failureCount);
+        }
+
+        /// <summary>
+        /// Applies bypass options to an OrganizationRequest for individual operations.
+        /// </summary>
+        private static void ApplyBypassOptions(OrganizationRequest request, ImportOptions options)
+        {
+            // Custom business logic bypass
+            if (options.BypassCustomPlugins != CustomLogicBypass.None)
+            {
+                var parts = new List<string>(2);
+                if (options.BypassCustomPlugins.HasFlag(CustomLogicBypass.Synchronous))
+                    parts.Add("CustomSync");
+                if (options.BypassCustomPlugins.HasFlag(CustomLogicBypass.Asynchronous))
+                    parts.Add("CustomAsync");
+                request.Parameters["BypassBusinessLogicExecution"] = string.Join(",", parts);
+            }
+
+            // Power Automate flows bypass
+            if (options.BypassPowerAutomateFlows)
+            {
+                request.Parameters["SuppressCallbackRegistrationExpanderJob"] = true;
+            }
         }
 
         /// <summary>

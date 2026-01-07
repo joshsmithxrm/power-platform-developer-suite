@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Progress;
 
@@ -163,6 +164,7 @@ namespace PPDS.Migration.Import
                         RelatedEntities = relatedEntities,
                         Relationship = new Relationship(resolvedRelationshipName)
                     };
+                    ApplyBypassOptions(request, context.Options);
 
                     try
                     {
@@ -427,6 +429,29 @@ namespace PPDS.Migration.Import
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Applies bypass options to an OrganizationRequest for M2M association operations.
+        /// </summary>
+        private static void ApplyBypassOptions(OrganizationRequest request, ImportOptions options)
+        {
+            // Custom business logic bypass
+            if (options.BypassCustomPlugins != CustomLogicBypass.None)
+            {
+                var parts = new List<string>(2);
+                if (options.BypassCustomPlugins.HasFlag(CustomLogicBypass.Synchronous))
+                    parts.Add("CustomSync");
+                if (options.BypassCustomPlugins.HasFlag(CustomLogicBypass.Asynchronous))
+                    parts.Add("CustomAsync");
+                request.Parameters["BypassBusinessLogicExecution"] = string.Join(",", parts);
+            }
+
+            // Power Automate flows bypass
+            if (options.BypassPowerAutomateFlows)
+            {
+                request.Parameters["SuppressCallbackRegistrationExpanderJob"] = true;
+            }
         }
     }
 }

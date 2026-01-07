@@ -51,6 +51,27 @@ Key: Get client INSIDE parallel loops. Use `pool.GetTotalRecommendedParallelism(
 
 MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 
+## CLI Command Groups
+
+| Command | Purpose |
+|---------|---------|
+| `ppds auth` | Authentication profiles (create, list, delete) |
+| `ppds env` | Environment selection and management |
+| `ppds query` | Execute FetchXML (`fetch`) and SQL (`sql`) queries |
+| `ppds data` | Data operations (export, import, load, update, delete, truncate, schema) |
+| `ppds plugins` | Plugin management (list, deploy, diff, extract, clean) |
+| `ppds solutions` | Solution operations |
+| `ppds flows` | Cloud flow management |
+| `ppds metadata` | Entity/attribute metadata |
+| `ppds users` | User management |
+| `ppds roles` | Security role operations |
+| `ppds connections` | Connection management |
+| `ppds connection-references` | Connection reference operations |
+| `ppds environment-variables` | Environment variable operations |
+| `ppds deployment-settings` | Deployment settings generation |
+| `ppds import-jobs` | Import job monitoring |
+| `ppds serve` | RPC server for IDE integration |
+
 ## Commands
 
 | Command | Purpose |
