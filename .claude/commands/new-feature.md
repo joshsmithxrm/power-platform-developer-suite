@@ -34,6 +34,7 @@ Identify:
 
 For each interface, determine:
 - **In Scope?** - Does this feature need this interface?
+- **Status** - Current implementation status (checkbox)
 - **Implementation** - What specifically will be built?
 
 ### 4. Output Issue Template
@@ -53,13 +54,13 @@ Generate a GitHub issue with the interface matrix.
 
 ### Interface Matrix
 
-| Interface | In Scope | Implementation |
-|-----------|----------|----------------|
-| CLI       | [ ]      | `ppds [command]` |
-| TUI       | [ ]      | [Panel name] |
-| RPC       | [ ]      | `[method]` (if extension needs it) |
-| MCP       | [ ]      | `ppds_[tool]` (if AI-useful) |
-| Extension | [ ]      | [View name] (ports TUI) |
+| Interface | In Scope | Status | Implementation |
+|-----------|----------|--------|----------------|
+| CLI       | [ ]      | [ ]    | `ppds [command]` |
+| TUI       | [ ]      | [ ]    | [Panel name] |
+| RPC       | [ ]      | [ ]    | `[method]` (if extension needs it) |
+| MCP       | [ ]      | [ ]    | `ppds_[tool]` (if AI-useful) |
+| Extension | [ ]      | [ ]    | [View name] (ports TUI) |
 
 ### Acceptance Criteria
 
@@ -128,13 +129,13 @@ Generate a GitHub issue with the interface matrix.
 
 ### Interface Matrix
 
-| Interface | In Scope | Implementation |
-|-----------|----------|----------------|
-| CLI       | [x]      | `ppds plugins history --assembly Foo --days 7` |
-| TUI       | [x]      | Plugin History Panel with timeline chart |
-| RPC       | [ ]      | Uses existing plugin-traces RPC |
-| MCP       | [x]      | `ppds_plugins_history` (trend analysis) |
-| Extension | [x]      | Plugin History View (ports TUI timeline) |
+| Interface | In Scope | Status | Implementation |
+|-----------|----------|--------|----------------|
+| CLI       | [x]      | [ ]    | `ppds plugins history --assembly Foo --days 7` |
+| TUI       | [x]      | [ ]    | Plugin History Panel with timeline chart |
+| RPC       | [ ]      | N/A    | Uses existing plugin-traces RPC |
+| MCP       | [x]      | [ ]    | `ppds_plugins_history` (trend analysis) |
+| Extension | [x]      | [ ]    | Plugin History View (ports TUI timeline) |
 
 ### Acceptance Criteria
 
