@@ -39,7 +39,8 @@ namespace PPDS.Migration.Progress
         public void Report(ProgressEventArgs args)
         {
             var elapsed = OperationClock.Elapsed;
-            var prefix = $"[+{elapsed:hh\\:mm\\:ss\\.fff}]";
+            var totalHours = (int)elapsed.TotalHours;
+            var prefix = $"[+{totalHours:D2}:{elapsed.Minutes:00}:{elapsed.Seconds:00}.{elapsed.Milliseconds:000}]";
 
             switch (args.Phase)
             {

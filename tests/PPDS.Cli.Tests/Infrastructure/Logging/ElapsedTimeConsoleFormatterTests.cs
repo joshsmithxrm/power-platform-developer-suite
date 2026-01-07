@@ -161,7 +161,7 @@ public class ElapsedTimeConsoleFormatterTests
         var output = writer.ToString();
 
         // Should have a timestamp that's not [+00:00:00.000]
-        // The pattern should be [+HH:mm:ss.fff]
-        Assert.Matches(@"\[\+\d{2}:\d{2}:\d{2}\.\d{3}\]", output);
+        // The pattern should be [+HH:mm:ss.fff] where HH is total hours (can exceed 24)
+        Assert.Matches(@"\[\+\d{2,}:\d{2}:\d{2}\.\d{3}\]", output);
     }
 }

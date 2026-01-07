@@ -31,7 +31,8 @@ public sealed class ElapsedTimeConsoleFormatter : ConsoleFormatter
             return;
 
         var elapsed = OperationClock.Elapsed;
-        var timestamp = $"[+{elapsed:hh\\:mm\\:ss\\.fff}]";
+        var totalHours = (int)elapsed.TotalHours;
+        var timestamp = $"[+{totalHours:D2}:{elapsed.Minutes:00}:{elapsed.Seconds:00}.{elapsed.Milliseconds:000}]";
 
         var logLevel = GetLogLevelString(logEntry.LogLevel);
         var category = logEntry.Category;

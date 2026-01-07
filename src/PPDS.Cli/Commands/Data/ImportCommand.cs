@@ -270,7 +270,9 @@ public static class ImportCommand
                     SkipMissingColumns = skipMissingColumns,
                     CurrentUserId = currentUserId,
                     // Wire up error streaming callback
-                    ErrorCallback = outputManager != null ? outputManager.LogError : null
+                    ErrorCallback = outputManager != null ? outputManager.LogError : null,
+                    // Wire up output manager for checkpoint logging
+                    OutputManager = outputManager
                 };
 
                 var result = await importer.ImportAsync(

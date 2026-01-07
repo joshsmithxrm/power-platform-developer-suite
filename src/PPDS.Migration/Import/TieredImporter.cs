@@ -189,7 +189,10 @@ namespace PPDS.Migration.Import
             }
 
             // Create shared import context for phase processors
-            var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress);
+            var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress)
+            {
+                OutputManager = options.OutputManager
+            };
 
             // Disable plugins on entities with disableplugins=true
             IReadOnlyList<Guid> disabledPluginSteps = Array.Empty<Guid>();
@@ -288,7 +291,7 @@ namespace PPDS.Migration.Import
 
                             // Update overall progress tracking
                             Interlocked.Add(ref overallProcessed, result.RecordCount);
-                            var currentEntityIndex = Interlocked.Increment(ref entityIndex);
+                            Interlocked.Increment(ref entityIndex);
 
                             // Log entity completion checkpoint
                             if (result.Duration.TotalSeconds > 0)

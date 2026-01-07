@@ -92,8 +92,8 @@ Example:
 ADRs are numbered sequentially: `0001`, `0002`, etc. Use the next available number.
 
 To find the next number:
-```bash
-ls docs/adr/*.md | sort | tail -1
+```powershell
+Get-ChildItem docs/adr/*.md | Sort-Object Name | Select-Object -Last 1
 ```
 
 ## File Naming
