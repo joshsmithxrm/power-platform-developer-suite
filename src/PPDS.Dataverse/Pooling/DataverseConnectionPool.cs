@@ -970,7 +970,7 @@ namespace PPDS.Dataverse.Pooling
                 try
                 {
                     // GetSeedClient populates _sourceDop with the server's RecommendedDegreesOfParallelism
-                    var seed = GetSeedClient(source.Name);
+                    GetSeedClient(source.Name);
                     var dop = _sourceDop.TryGetValue(source.Name, out var d) ? d : 4;
 
                     _seedInitResults.Add(new SeedInitializationResult
