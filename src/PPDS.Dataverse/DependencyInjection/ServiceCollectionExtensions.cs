@@ -262,6 +262,9 @@ namespace PPDS.Dataverse.DependencyInjection
             services.AddTransient<IConnectionReferenceService, ConnectionReferenceService>();
             services.AddTransient<IDeploymentSettingsService, DeploymentSettingsService>();
 
+            // Phase 3 services
+            services.AddTransient<IPluginTraceService, PluginTraceService>();
+
             return services;
         }
     }
