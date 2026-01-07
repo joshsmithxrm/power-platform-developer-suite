@@ -43,7 +43,7 @@ Multi-select (AskUserQuestion with multiSelect: true):
 | VS Code workspace | Create `ppds.code-workspace` file |
 | Terminal profile | Install `ppds`, `goto`, `ppdsw` commands |
 | Sound notification | Play Windows sound when Claude finishes |
-| Status line | Show worktree name in Claude's status bar |
+| Status line | Show directory and git branch in Claude's status bar |
 
 ### Step 4: Execute Setup
 
@@ -120,11 +120,18 @@ Read existing settings.json first, merge the hooks section, then write back.
 
 1. Create status line script at `~/.claude/statusline.ps1`:
 ```powershell
-# PPDS Claude status line - shows worktree name
-$data = $input | ConvertFrom-Json
+# PPDS Claude status line - shows directory and git branch
+$json = [Console]::In.ReadToEnd()
+$data = $json | ConvertFrom-Json
 $dir = Split-Path $data.workspace.current_dir -Leaf
-$model = $data.model.display_name
-Write-Output "[$model] $dir"
+$branch = ""
+try {
+    Push-Location $data.workspace.current_dir
+    $b = git branch --show-current 2>$null
+    if ($LASTEXITCODE -eq 0 -and $b) { $branch = " ($b)" }
+    Pop-Location
+} catch {}
+Write-Host "$dir$branch"
 ```
 
 2. Add statusLine config to `~/.claude/settings.json`:
@@ -132,12 +139,12 @@ Write-Output "[$model] $dir"
 {
   "statusLine": {
     "type": "command",
-    "command": "powershell -NoProfile -File ~/.claude/statusline.ps1"
+    "command": "pwsh -NoProfile -File ~/.claude/statusline.ps1"
   }
 }
 ```
 
-This shows `[Claude Sonnet 4] sdk-tui-enhancements` at the bottom of Claude's UI - great for split panes!
+This shows `sdk (main)` or `sdk (feature/my-branch)` at the bottom of Claude's UI - great for split panes!
 
 ### Step 5: Summary
 
@@ -153,7 +160,7 @@ Developer tools configured:
   - VS Code workspace: {base}/ppds.code-workspace
   - Terminal profile: ppds, goto, ppdsw commands installed
   - Sound notification: Plays when Claude finishes
-  - Status line: Shows worktree name in Claude UI
+  - Status line: Shows directory and git branch in Claude UI
 
 Next steps:
   - Open workspace: code "{base}/ppds.code-workspace"
