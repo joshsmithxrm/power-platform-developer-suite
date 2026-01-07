@@ -10,8 +10,11 @@ public class FakeThrottleTracker : IThrottleTracker
 {
     private readonly Dictionary<string, DateTime> _throttledConnections = new();
     private long _totalThrottleEvents;
+    private long _totalBackoffTicks;
 
     public long TotalThrottleEvents => _totalThrottleEvents;
+
+    public TimeSpan TotalBackoffTime => TimeSpan.FromTicks(Interlocked.Read(ref _totalBackoffTicks));
 
     public int ThrottledConnectionCount => _throttledConnections.Count(kvp => kvp.Value > DateTime.UtcNow);
 
@@ -25,6 +28,7 @@ public class FakeThrottleTracker : IThrottleTracker
     {
         _throttledConnections[connectionName] = DateTime.UtcNow.Add(retryAfter);
         Interlocked.Increment(ref _totalThrottleEvents);
+        Interlocked.Add(ref _totalBackoffTicks, retryAfter.Ticks);
     }
 
     public bool IsThrottled(string connectionName)
@@ -68,5 +72,6 @@ public class FakeThrottleTracker : IThrottleTracker
     {
         _throttledConnections.Clear();
         _totalThrottleEvents = 0;
+        _totalBackoffTicks = 0;
     }
 }

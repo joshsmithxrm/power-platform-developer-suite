@@ -15,6 +15,7 @@ namespace PPDS.Dataverse.Resilience
         private readonly ConcurrentDictionary<string, ThrottleState> _throttleStates;
         private readonly ILogger<ThrottleTracker> _logger;
         private long _totalThrottleEvents;
+        private long _totalBackoffTicks;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ThrottleTracker"/> class.
@@ -28,6 +29,9 @@ namespace PPDS.Dataverse.Resilience
 
         /// <inheritdoc />
         public long TotalThrottleEvents => _totalThrottleEvents;
+
+        /// <inheritdoc />
+        public TimeSpan TotalBackoffTime => TimeSpan.FromTicks(Interlocked.Read(ref _totalBackoffTicks));
 
         /// <inheritdoc />
         public int ThrottledConnectionCount
@@ -68,6 +72,7 @@ namespace PPDS.Dataverse.Resilience
 
             _throttleStates.AddOrUpdate(connectionName, state, (_, __) => state);
             Interlocked.Increment(ref _totalThrottleEvents);
+            Interlocked.Add(ref _totalBackoffTicks, retryAfter.Ticks);
 
             _logger.LogWarning(
                 "Connection throttled. Name: {ConnectionName}, RetryAfter: {RetryAfter}, ExpiresAt: {ExpiresAt}",

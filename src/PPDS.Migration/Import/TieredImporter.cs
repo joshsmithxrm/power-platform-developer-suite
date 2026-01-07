@@ -135,6 +135,7 @@ namespace PPDS.Migration.Import
             var idMappings = new IdMappingCollection();
             var entityResults = new ConcurrentBag<EntityImportResult>();
             var errors = new ConcurrentBag<MigrationError>();
+            var warnings = new WarningCollector();
             var totalImported = 0;
 
             // Track overall progress across all entities
@@ -179,6 +180,14 @@ namespace PPDS.Migration.Import
                 {
                     _logger?.LogWarning("Entity {Entity}: skipping columns [{Columns}]",
                         entity, string.Join(", ", columns));
+
+                    warnings.AddWarning(new ImportWarning
+                    {
+                        Code = ImportWarningCodes.ColumnSkipped,
+                        Entity = entity,
+                        Message = $"Skipping columns not found in target: {string.Join(", ", columns)}",
+                        Impact = $"{columns.Count} column(s) skipped"
+                    });
                 }
 
                 progress?.Report(new ProgressEventArgs
@@ -279,6 +288,7 @@ namespace PPDS.Migration.Import
                                 idMappings,
                                 options,
                                 progress,
+                                warnings,
                                 ct).ConfigureAwait(false);
 
                             entityResults.Add(result);
@@ -376,7 +386,9 @@ namespace PPDS.Migration.Import
                     Phase2Duration = phase2Duration,
                     Phase3Duration = phase3Duration,
                     EntityResults = entityResults.ToArray(),
-                    Errors = errors.ToArray()
+                    Errors = errors.ToArray(),
+                    PoolStatistics = _connectionPool.Statistics,
+                    Warnings = warnings.GetWarnings()
                 };
 
                 // Calculate record-level failure count from entity results
@@ -429,7 +441,9 @@ namespace PPDS.Migration.Import
                     RecordsImported = totalImported,
                     Duration = stopwatch.Elapsed,
                     EntityResults = entityResults.ToArray(),
-                    Errors = errors.Append(exceptionError).ToArray()
+                    Errors = errors.Append(exceptionError).ToArray(),
+                    PoolStatistics = _connectionPool.Statistics,
+                    Warnings = warnings.GetWarnings()
                 };
             }
             finally
@@ -467,6 +481,7 @@ namespace PPDS.Migration.Import
             IdMappingCollection idMappings,
             ImportOptions options,
             IProgressReporter? progress,
+            IWarningCollector warnings,
             CancellationToken cancellationToken)
         {
             var entityStopwatch = Stopwatch.StartNew();
@@ -529,6 +544,14 @@ namespace PPDS.Migration.Import
                     // Cache that this entity doesn't support bulk operations
                     _bulkNotSupportedEntities[entityName] = true;
                     _logger?.LogWarning("Entity {Entity} does not support bulk operations, falling back to individual operations", entityName);
+
+                    warnings.AddWarning(new ImportWarning
+                    {
+                        Code = ImportWarningCodes.BulkNotSupported,
+                        Entity = entityName,
+                        Message = "Entity does not support bulk operations, fell back to individual operations",
+                        Impact = $"Reduced throughput for {preparedRecords.Count} records"
+                    });
 
                     // Fall back to individual operations for ALL records (including the probe record)
                     bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, options, cancellationToken).ConfigureAwait(false);

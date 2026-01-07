@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Eager pool initialization** - `IDataverseConnectionPool.EnsureInitializedAsync()` allows triggering authentication during startup, avoiding surprise browser popups on first query. Idempotent - subsequent calls are no-ops. ([#292](https://github.com/joshsmithxrm/ppds-sdk/issues/292))
+- **Seed initialization result tracking** - `IDataverseConnectionPool.InitializationResults` exposes per-source seed initialization status with failure reason classification (auth, network, service, connection not ready). Enables accurate pool health reporting. ([#287](https://github.com/joshsmithxrm/ppds-sdk/issues/287))
+- **Throttle backoff time tracking** - `IThrottleTracker.TotalBackoffTime` accumulates total backoff duration across all throttle events for observability. ([#273](https://github.com/joshsmithxrm/ppds-sdk/issues/273))
+- **Retry statistics in PoolStatistics** - `PoolStatistics` now includes `TotalBackoffTime`, `RetriesAttempted`, and `RetriesSucceeded` counters for throttle/retry visibility. ([#273](https://github.com/joshsmithxrm/ppds-sdk/issues/273))
+
+### Changed
+
+- **Reduced seed failure log noise** - Per-attempt seed creation failures now log at DEBUG level instead of WARNING. Only the final consolidated error logs at ERROR level with classified failure reason. ([#287](https://github.com/joshsmithxrm/ppds-sdk/issues/287))
+- **Accurate pool initialization status** - Pool now logs "initialized with N degraded source(s)" or "initialization failed" based on actual seed results, instead of always claiming success. ([#287](https://github.com/joshsmithxrm/ppds-sdk/issues/287))
+
 ## [1.0.0-beta.4] - 2026-01-06
 
 ### Added

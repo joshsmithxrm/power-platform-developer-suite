@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Import
@@ -63,6 +64,16 @@ namespace PPDS.Migration.Import
         /// Gets or sets the results per entity.
         /// </summary>
         public IReadOnlyList<EntityImportResult> EntityResults { get; set; } = Array.Empty<EntityImportResult>();
+
+        /// <summary>
+        /// Gets or sets the connection pool statistics at the end of the import.
+        /// </summary>
+        public PoolStatistics? PoolStatistics { get; set; }
+
+        /// <summary>
+        /// Gets or sets the warnings that occurred during import.
+        /// </summary>
+        public IReadOnlyList<ImportWarning> Warnings { get; set; } = Array.Empty<ImportWarning>();
 
         /// <summary>
         /// Gets the average records per second.

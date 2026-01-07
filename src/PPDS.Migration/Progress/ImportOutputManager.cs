@@ -280,6 +280,25 @@ namespace PPDS.Migration.Progress
                         DeferredFields = result.Phase2Duration,
                         Relationships = result.Phase3Duration
                     }
+                    : null,
+                PoolStatistics = result.PoolStatistics != null
+                    ? new PoolStatisticsSummary
+                    {
+                        RequestsServed = result.PoolStatistics.RequestsServed,
+                        ThrottleEvents = result.PoolStatistics.ThrottleEvents,
+                        TotalBackoffTime = result.PoolStatistics.TotalBackoffTime,
+                        RetriesAttempted = result.PoolStatistics.RetriesAttempted,
+                        RetriesSucceeded = result.PoolStatistics.RetriesSucceeded
+                    }
+                    : null,
+                Warnings = result.Warnings.Count > 0
+                    ? result.Warnings.Select(w => new WarningSummary
+                    {
+                        Code = w.Code,
+                        Entity = w.Entity,
+                        Message = w.Message,
+                        Impact = w.Impact
+                    }).ToList()
                     : null
             };
 
@@ -413,6 +432,51 @@ namespace PPDS.Migration.Progress
 
             [JsonPropertyName("phaseTiming")]
             public PhaseTiming? PhaseTiming { get; set; }
+
+            [JsonPropertyName("poolStatistics")]
+            public PoolStatisticsSummary? PoolStatistics { get; set; }
+
+            [JsonPropertyName("warnings")]
+            public List<WarningSummary>? Warnings { get; set; }
+        }
+
+        /// <summary>
+        /// Warning item for summary report.
+        /// </summary>
+        private sealed class WarningSummary
+        {
+            [JsonPropertyName("code")]
+            public string Code { get; set; } = string.Empty;
+
+            [JsonPropertyName("entity")]
+            public string? Entity { get; set; }
+
+            [JsonPropertyName("message")]
+            public string Message { get; set; } = string.Empty;
+
+            [JsonPropertyName("impact")]
+            public string? Impact { get; set; }
+        }
+
+        /// <summary>
+        /// Pool statistics for summary report.
+        /// </summary>
+        private sealed class PoolStatisticsSummary
+        {
+            [JsonPropertyName("requestsServed")]
+            public long RequestsServed { get; set; }
+
+            [JsonPropertyName("throttleEvents")]
+            public long ThrottleEvents { get; set; }
+
+            [JsonPropertyName("totalBackoffTime")]
+            public TimeSpan TotalBackoffTime { get; set; }
+
+            [JsonPropertyName("retriesAttempted")]
+            public long RetriesAttempted { get; set; }
+
+            [JsonPropertyName("retriesSucceeded")]
+            public long RetriesSucceeded { get; set; }
         }
 
         /// <summary>

@@ -42,6 +42,12 @@ namespace PPDS.Dataverse.Resilience
         long TotalThrottleEvents { get; }
 
         /// <summary>
+        /// Gets the total backoff time accumulated from all throttle events.
+        /// This represents the sum of all RetryAfter durations, not actual time spent waiting.
+        /// </summary>
+        TimeSpan TotalBackoffTime { get; }
+
+        /// <summary>
         /// Gets the number of currently throttled connections.
         /// </summary>
         int ThrottledConnectionCount { get; }

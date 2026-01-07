@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace PPDS.Dataverse.Pooling
@@ -36,6 +37,21 @@ namespace PPDS.Dataverse.Pooling
         /// Gets the total number of throttle events recorded.
         /// </summary>
         public long ThrottleEvents { get; init; }
+
+        /// <summary>
+        /// Gets the total backoff time accumulated from all throttle events.
+        /// </summary>
+        public TimeSpan TotalBackoffTime { get; init; }
+
+        /// <summary>
+        /// Gets the total number of retry attempts made after throttle events.
+        /// </summary>
+        public long RetriesAttempted { get; init; }
+
+        /// <summary>
+        /// Gets the number of retry attempts that succeeded.
+        /// </summary>
+        public long RetriesSucceeded { get; init; }
 
         /// <summary>
         /// Gets the number of connections that were invalidated due to failures.

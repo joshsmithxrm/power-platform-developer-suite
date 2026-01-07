@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Warnings array in summary.json** - Import warnings (column skipped, bulk not supported, schema mismatch, etc.) are now captured in `ImportResult.Warnings` and serialized to the `warnings` array in summary.json. Enables programmatic consumers to detect non-fatal issues. ([#271](https://github.com/joshsmithxrm/ppds-sdk/issues/271))
+- **Pool statistics in summary.json** - `ImportResult.PoolStatistics` captures throttle/retry metrics (`requestsServed`, `throttleEvents`, `totalBackoffTime`, `retriesAttempted`, `retriesSucceeded`) and serializes to the `poolStatistics` object in summary.json. ([#273](https://github.com/joshsmithxrm/ppds-sdk/issues/273))
+- **IWarningCollector interface** - Thread-safe warning collection during parallel import operations. Used by `TieredImporter` to aggregate warnings from concurrent entity imports. ([#271](https://github.com/joshsmithxrm/ppds-sdk/issues/271))
+- **ImportWarning and ImportWarningCodes** - Structured warning type with standard codes: `BULK_NOT_SUPPORTED`, `COLUMN_SKIPPED`, `SCHEMA_MISMATCH`, `USER_MAPPING_FALLBACK`, `PLUGIN_REENABLE_FAILED`. ([#271](https://github.com/joshsmithxrm/ppds-sdk/issues/271))
+
 ## [1.0.0-beta.5] - 2026-01-06
 
 ### Added

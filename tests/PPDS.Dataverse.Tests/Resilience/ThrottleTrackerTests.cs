@@ -206,4 +206,45 @@ public class ThrottleTrackerTests
     }
 
     #endregion
+
+    #region TotalBackoffTime Tests
+
+    [Fact]
+    public void TotalBackoffTime_StartsAtZero()
+    {
+        // Assert
+        _tracker.TotalBackoffTime.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void TotalBackoffTime_AccumulatesBackoffDurations()
+    {
+        // Arrange
+        var firstBackoff = TimeSpan.FromMinutes(1);
+        var secondBackoff = TimeSpan.FromMinutes(2);
+
+        // Act
+        _tracker.RecordThrottle("Primary", firstBackoff);
+        _tracker.RecordThrottle("Secondary", secondBackoff);
+
+        // Assert
+        _tracker.TotalBackoffTime.Should().Be(firstBackoff + secondBackoff);
+    }
+
+    [Fact]
+    public void TotalBackoffTime_AccumulatesForSameConnection()
+    {
+        // Arrange
+        var firstBackoff = TimeSpan.FromMinutes(1);
+        var secondBackoff = TimeSpan.FromMinutes(2);
+
+        // Act
+        _tracker.RecordThrottle("Primary", firstBackoff);
+        _tracker.RecordThrottle("Primary", secondBackoff);
+
+        // Assert
+        _tracker.TotalBackoffTime.Should().Be(firstBackoff + secondBackoff);
+    }
+
+    #endregion
 }
