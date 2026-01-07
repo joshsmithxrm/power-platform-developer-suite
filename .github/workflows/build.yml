@@ -3,50 +3,32 @@ name: Build
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Detect which files changed to conditionally run jobs
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            code:
-              - 'src/**'
-              - '!src/**/*.md'
-              - 'tests/**'
-              - '!tests/**/*.md'
-              - '**/*.csproj'
-              - '*.sln'
-              - 'Directory.Build.props'
-              - '.github/workflows/**'
-
   # Dependency review for PRs - checks for vulnerabilities in dependency changes
   dependency-review:
     runs-on: ubuntu-latest
-    needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request'
 
     steps:
       - name: Checkout
@@ -60,8 +42,6 @@ jobs:
           deny-licenses: ''
 
   build:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
 
     steps:
@@ -119,18 +99,15 @@ jobs:
           src/PPDS.Plugins/bin/Release/*.snupkg
         if-no-files-found: warn
 
-  # Gate job for branch protection - always runs, reports success when build passes or is skipped
+  # Gate job for branch protection
   build-status:
     runs-on: ubuntu-latest
-    needs: [changes, build]
+    needs: build
     if: always()
     steps:
       - name: Check build status
         run: |
-          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
-            echo "No code changes - build skipped (OK)"
-            exit 0
-          elif [[ "${{ needs.build.result }}" == "success" ]]; then
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
             echo "Build passed"
             exit 0
           else

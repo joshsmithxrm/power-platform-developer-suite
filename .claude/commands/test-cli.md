@@ -1,6 +1,6 @@
 # CLI Smoke Test
 
-Installs and tests the local CLI to verify changes work correctly.
+Tests the local CLI to verify changes work correctly.
 
 ## When to Use
 
@@ -24,18 +24,14 @@ Installs and tests the local CLI to verify changes work correctly.
 - Identify which commands/features need testing
 - If unclear what to test, ask the user
 
-### 2. Install Latest
-```powershell
-pwsh -ExecutionPolicy Bypass -File ./scripts/Install-LocalCli.ps1
-```
-
-### 3. Verify Version
+### 2. Verify Version
 ```bash
 ppds --version
 ```
 - Confirm version includes expected commit hash from `git rev-parse --short HEAD`
+- If CLI is not available, prompt user to run `/install-cli` or use terminal profile's `ppds` function
 
-### 4. Run Tests
+### 3. Run Tests
 
 **CRITICAL**: Run each command INDIVIDUALLY.
 
@@ -85,7 +81,7 @@ Use the `cli-test` profile:
 - If `cli-test` doesn't exist, SKIP auth tests and note it
 - Never run destructive commands
 
-### 5. Report Results
+### 4. Report Results
 
 After running all tests, provide a summary:
 
@@ -114,8 +110,8 @@ Summary: 9/9 passed
 
 | Situation | Action |
 |-----------|--------|
+| CLI not found | Prompt to run `/install-cli` or use terminal profile |
 | Test failure | Report which failed, show output, continue |
-| Install failure | Stop and report |
 | Version mismatch | Warn but continue |
 | Profile missing | Skip auth tests with note |
 

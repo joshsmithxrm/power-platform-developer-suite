@@ -142,7 +142,39 @@ gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments/{comment_id}/replies \
 | Resource not disposed | Yes - but verify interface first |
 | Generic catch clause | Context-dependent |
 
-### 6. Verify All Findings Addressed
+### 6. Resolve All Review Threads
+
+After addressing comments, resolve the threads so the PR can be merged:
+
+```bash
+# Get thread IDs
+gh api graphql -f query='
+query {
+  repository(owner: "joshsmithxrm", name: "ppds-sdk") {
+    pullRequest(number: {PR}) {
+      reviewThreads(first: 20) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes { author { login } }
+          }
+        }
+      }
+    }
+  }
+}'
+
+# Resolve each unresolved thread
+gh api graphql -f query='
+mutation {
+  resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } }
+}'
+```
+
+Resolve ALL threads (bot and human) that have been addressed.
+
+### 7. Verify All Findings Addressed
 
 Before completing, verify:
 
@@ -157,11 +189,17 @@ gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=refs/pull/[PR]/merg
 # Should return 0
 ```
 
-If any PR comments are missing replies or alerts remain open, address them before marking complete.
+**Review threads** - All resolved:
+```bash
+gh api graphql -f query='query { repository(owner: "joshsmithxrm", name: "ppds-sdk") { pullRequest(number: {PR}) { reviewThreads(first: 20) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+# Should return 0
+```
+
+If any PR comments are missing replies, alerts remain open, or threads are unresolved, address them before marking complete.
 
 **Note:** Code scanning alerts don't need replies - they're resolved by fixing code or dismissing via API.
 
-### 7. Base Branch Check & Push
+### 8. Base Branch Check & Push
 
 Before pushing fixes, ensure the branch is based on latest `origin/main`:
 

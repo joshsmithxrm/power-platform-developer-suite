@@ -3,48 +3,29 @@ name: Test
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Detect which files changed to conditionally run jobs
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            code:
-              - 'src/**'
-              - '!src/**/*.md'
-              - 'tests/**'
-              - '!tests/**/*.md'
-              - '**/*.csproj'
-              - '*.sln'
-              - 'Directory.Build.props'
-              - '.github/workflows/**'
-
   test:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
 
     steps:
@@ -78,18 +59,15 @@ jobs:
         fail_ci_if_error: false  # Don't fail build if upload fails
         verbose: true
 
-  # Gate job for branch protection - always runs, reports success when test passes or is skipped
+  # Gate job for branch protection
   test-status:
     runs-on: ubuntu-latest
-    needs: [changes, test]
+    needs: test
     if: always()
     steps:
       - name: Check test status
         run: |
-          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
-            echo "No code changes - test skipped (OK)"
-            exit 0
-          elif [[ "${{ needs.test.result }}" == "success" ]]; then
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
             echo "Tests passed"
             exit 0
           else

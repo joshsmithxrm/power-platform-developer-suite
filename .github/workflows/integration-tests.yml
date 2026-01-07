@@ -3,18 +3,22 @@ name: Integration Tests
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '.claude/**'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'nuget.config'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

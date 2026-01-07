@@ -52,6 +52,8 @@
       "Bash(git mv:*)",
       "Bash(git worktree list:*)",
       "Bash(git worktree prune:*)",
+      "Bash(git worktree add:*)",
+      "Bash(git worktree remove:*)",
       "Bash(git describe:*)",
       "Bash(git tag:*)",
       "Bash(git -C:*)",
@@ -94,6 +96,9 @@
       "Bash(gh release list:*)",
       "Bash(gh release view:*)",
       "Bash(gh issue create:*)",
+      "Bash(gh label list:*)",
+      "Bash(gh project item-add:*)",
+      "Bash(gh project item-edit:*)",
       "WebSearch"
     ],
     "deny": [
@@ -125,8 +130,6 @@
       "Bash(git revert:*)",
       "Bash(git apply:*)",
       "Bash(git am:*)",
-      "Bash(git worktree add:*)",
-      "Bash(git worktree remove:*)",
       "Bash(git branch -D:*)",
       "Bash(git branch -d:*)",
       "Bash(git tag -d:*)",
