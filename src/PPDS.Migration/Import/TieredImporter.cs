@@ -226,6 +226,12 @@ namespace PPDS.Migration.Import
                 // Phase 1: Process each tier sequentially
                 foreach (var tier in plan.Tiers)
                 {
+                    // Track tier-level statistics
+                    var tierStopwatch = Stopwatch.StartNew();
+                    var tierRecordsProcessed = 0L;
+                    var tierRecordsSuccess = 0L;
+                    var tierRecordsFailed = 0L;
+
                     // Log tier start checkpoint
                     context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
 
@@ -275,6 +281,11 @@ namespace PPDS.Migration.Import
                             entityResults.Add(result);
                             Interlocked.Add(ref totalImported, result.SuccessCount);
 
+                            // Update tier-level tracking
+                            Interlocked.Add(ref tierRecordsProcessed, result.RecordCount);
+                            Interlocked.Add(ref tierRecordsSuccess, result.SuccessCount);
+                            Interlocked.Add(ref tierRecordsFailed, result.FailureCount);
+
                             // Update overall progress tracking
                             Interlocked.Add(ref overallProcessed, result.RecordCount);
                             var currentEntityIndex = Interlocked.Increment(ref entityIndex);
@@ -303,7 +314,29 @@ namespace PPDS.Migration.Import
                             }
                         }).ConfigureAwait(false);
 
-                    _logger?.LogInformation("Tier {Tier} complete", tier.TierNumber);
+                    // Report tier completion summary
+                    tierStopwatch.Stop();
+                    var tierDuration = tierStopwatch.Elapsed;
+                    var tierRps = tierDuration.TotalSeconds > 0
+                        ? tierRecordsSuccess / tierDuration.TotalSeconds
+                        : 0;
+
+                    var tierSummaryMessage = tierRecordsFailed > 0
+                        ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
+                        : $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
+
+                    progress?.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Importing,
+                        TierNumber = tier.TierNumber,
+                        TotalTiers = plan.TierCount,
+                        Message = tierSummaryMessage
+                    });
+
+                    context.OutputManager?.LogProgress(tierSummaryMessage);
+
+                    _logger?.LogInformation("Tier {Tier} complete: {Entities} entities, {Records} records in {Duration}",
+                        tier.TierNumber, tier.Entities.Count(), tierRecordsSuccess, tierDuration);
                 }
 
                 // Capture Phase 1 duration (entity import)
@@ -801,8 +834,11 @@ namespace PPDS.Migration.Import
         /// Determines if a bulk operation failure indicates the entity doesn't support bulk operations.
         /// </summary>
         /// <remarks>
-        /// Some entities (like team) don't support CreateMultiple/UpdateMultiple/UpsertMultiple.
+        /// Some entities (like team, queue) don't support CreateMultiple/UpdateMultiple/UpsertMultiple.
         /// When detected, the importer should fallback to individual operations.
+        /// Error messages vary by entity:
+        /// - "is not enabled on the entity" (team)
+        /// - "does not support entities of type" (queue)
         /// </remarks>
         private static bool IsBulkNotSupportedFailure(BulkOperationResult result, int totalRecords)
         {
@@ -811,8 +847,14 @@ namespace PPDS.Migration.Import
                 return false;
 
             // Check if first error indicates bulk operation not supported
+            // Different entities return different error messages
             var firstError = result.Errors[0];
-            return firstError.Message?.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ?? false;
+            var message = firstError.Message;
+            if (string.IsNullOrEmpty(message))
+                return false;
+
+            return message.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("does not support entities of type", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

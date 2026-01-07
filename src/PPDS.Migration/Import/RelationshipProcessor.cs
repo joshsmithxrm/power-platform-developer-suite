@@ -252,6 +252,22 @@ namespace PPDS.Migration.Import
                 throw firstException;
             }
 
+            // Report final completion (parallel counting may not hit exact total)
+            if (totalTargetAssociations > 0)
+            {
+                context.Progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.ProcessingRelationships,
+                    Entity = "M2M",
+                    Relationship = "All relationships",
+                    Current = successCount + failureCount,
+                    Total = totalTargetAssociations,
+                    SuccessCount = successCount,
+                    FailureCount = failureCount,
+                    Message = "[M2M] Completed"
+                });
+            }
+
             stopwatch.Stop();
 
             if (skippedDuplicateCount > 0)

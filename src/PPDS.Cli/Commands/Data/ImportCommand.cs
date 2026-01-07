@@ -182,6 +182,16 @@ public static class ImportCommand
             var importer = serviceProvider.GetRequiredService<IImporter>();
             var connectionPool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
 
+            // Display pool configuration for visibility into parallelism
+            if (outputFormat != OutputFormat.Json)
+            {
+                var totalDop = connectionPool.GetTotalRecommendedParallelism();
+                var sourceCount = connectionPool.SourceCount;
+                var dopPerSource = sourceCount > 0 ? totalDop / sourceCount : totalDop;
+                Console.Error.WriteLine($"Pool: {sourceCount} source(s), DOP={dopPerSource} each, {totalDop} total parallelism");
+                Console.Error.WriteLine();
+            }
+
             // Get current user ID for fallback when user mappings can't resolve a reference
             var whoAmIResponse = (WhoAmIResponse)await connectionPool.ExecuteAsync(
                 new WhoAmIRequest(), cancellationToken);

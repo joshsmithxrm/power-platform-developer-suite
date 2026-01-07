@@ -73,7 +73,10 @@ namespace PPDS.Migration.Progress
                         ? args.Entity
                         : $"{args.Entity}:{args.Relationship}";
 
-                    if (progressKey != _lastEntity || args.Current == args.Total || ShouldUpdate(args.Current))
+                    // Track if this is a new entity (for overall progress display)
+                    var isNewEntity = progressKey != _lastEntity;
+
+                    if (isNewEntity || args.Current == args.Total || ShouldUpdate(args.Current))
                     {
                         var phase = args.Phase == MigrationPhase.Exporting ? "Export" : "Import";
                         var tierInfo = args.TierNumber.HasValue ? $" (Tier {args.TierNumber})" : "";
@@ -110,8 +113,9 @@ namespace PPDS.Migration.Progress
                         _lastProgress = args.Current;
                     }
 
-                    // Show periodic overall progress if available
-                    if (args.OverallTotal.HasValue && args.OverallProcessed.HasValue && ShouldShowOverallProgress())
+                    // Show overall progress: on entity change or periodic interval
+                    if (args.OverallTotal.HasValue && args.OverallProcessed.HasValue &&
+                        (isNewEntity || ShouldShowOverallProgress()))
                     {
                         var overallPct = args.OverallPercentComplete;
                         var tierInfo = args.TierNumber.HasValue && args.TotalTiers.HasValue
