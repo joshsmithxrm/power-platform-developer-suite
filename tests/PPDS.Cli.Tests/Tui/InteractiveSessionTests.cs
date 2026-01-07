@@ -144,12 +144,12 @@ public class InteractiveSessionTests : IAsyncLifetime
     #region Environment URL Tests
 
     [Fact]
-    public void EnvironmentUrl_InitiallyNull()
+    public void CurrentEnvironmentUrl_InitiallyNull()
     {
         using var store = new ProfileStore();
         var session = new InteractiveSession(profileName: null, store);
 
-        Assert.Null(session.EnvironmentUrl);
+        Assert.Null(session.CurrentEnvironmentUrl);
     }
 
     #endregion

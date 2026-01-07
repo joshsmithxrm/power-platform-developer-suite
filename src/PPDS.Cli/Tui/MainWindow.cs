@@ -242,6 +242,7 @@ internal sealed class MainWindow : Window
     {
         var service = _session.GetProfileService();
 
+        // Update active profile in the profile store (persisted to disk)
         await service.SetActiveProfileAsync(profile.DisplayIdentifier);
 
         // Reload profile info
@@ -249,8 +250,11 @@ internal sealed class MainWindow : Window
         _environmentName = profile.EnvironmentName;
         _environmentUrl = profile.EnvironmentUrl;
 
-        // Invalidate session to force reconnection with new profile
-        await _session.InvalidateAsync();
+        // Switch session to new profile - this invalidates the old pool and re-warms with new credentials
+        await _session.SetActiveProfileAsync(
+            profile.DisplayIdentifier,
+            profile.EnvironmentUrl,
+            profile.EnvironmentName);
 
         Application.MainLoop?.Invoke(() =>
         {

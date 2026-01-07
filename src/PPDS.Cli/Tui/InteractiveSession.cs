@@ -27,7 +27,7 @@ namespace PPDS.Cli.Tui;
 /// </remarks>
 internal sealed class InteractiveSession : IAsyncDisposable
 {
-    private readonly string _profileName;
+    private string _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly ProfileStore _profileStore;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -272,14 +272,68 @@ internal sealed class InteractiveSession : IAsyncDisposable
         {
             if (_serviceProvider != null)
             {
+                TuiDebugLog.Log("Invalidating connection pool...");
                 await _serviceProvider.DisposeAsync().ConfigureAwait(false);
                 _serviceProvider = null;
                 _currentEnvironmentUrl = null;
+                TuiDebugLog.Log("Connection pool invalidated");
             }
         }
         finally
         {
             _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Switches to a different profile, invalidating the connection pool and optionally re-warming.
+    /// </summary>
+    /// <param name="profileName">The new profile name.</param>
+    /// <param name="environmentUrl">The environment URL for re-warming (optional).</param>
+    /// <param name="environmentDisplayName">The environment display name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task SetActiveProfileAsync(
+        string profileName,
+        string? environmentUrl,
+        string? environmentDisplayName = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileName);
+
+        TuiDebugLog.Log($"Switching to profile: {profileName}");
+
+        // Update the profile name for future service provider creation
+        _profileName = profileName;
+
+        // Invalidate old connection (uses old profile's credentials)
+        await InvalidateAsync().ConfigureAwait(false);
+
+        // Update display name if provided
+        if (environmentDisplayName != null)
+        {
+            _currentEnvironmentDisplayName = environmentDisplayName;
+        }
+
+        // Re-warm with new profile credentials if environment is known
+        if (!string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            TuiDebugLog.Log($"Re-warming connection for {environmentDisplayName ?? environmentUrl}");
+
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+            _ = GetServiceProviderAsync(environmentUrl, cancellationToken)
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        TuiDebugLog.Log($"Re-warm failed: {t.Exception?.InnerException?.Message}");
+                    }
+                    else
+                    {
+                        TuiDebugLog.Log("New profile connection warmed successfully");
+                        EnvironmentChanged?.Invoke(environmentUrl, environmentDisplayName);
+                    }
+                }, TaskScheduler.Default);
+#pragma warning restore PPDS013
         }
     }
 
@@ -340,9 +394,40 @@ internal sealed class InteractiveSession : IAsyncDisposable
         if (_serviceProvider != null)
         {
             TuiDebugLog.Log("Disposing ServiceProvider (connection pool)...");
-            await _serviceProvider.DisposeAsync().ConfigureAwait(false);
-            _serviceProvider = null;
-            TuiDebugLog.Log("ServiceProvider disposed");
+
+            // Use timeout to prevent blocking on ServiceClient.Dispose()
+            // Microsoft's ServiceClient can hang during disposal if there are pending HTTP requests
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var disposeTask = _serviceProvider.DisposeAsync().AsTask();
+
+                // Wait with timeout - if it doesn't complete, force-abandon
+                var completedTask = await Task.WhenAny(disposeTask, Task.Delay(Timeout.Infinite, cts.Token))
+                    .ConfigureAwait(false);
+
+                if (completedTask == disposeTask)
+                {
+                    await disposeTask.ConfigureAwait(false); // Propagate any exception
+                    TuiDebugLog.Log("ServiceProvider disposed");
+                }
+                else
+                {
+                    TuiDebugLog.Log("ServiceProvider disposal timed out - abandoning");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                TuiDebugLog.Log("ServiceProvider disposal timed out - abandoning");
+            }
+            catch (Exception ex)
+            {
+                TuiDebugLog.Log($"ServiceProvider disposal error: {ex.Message}");
+            }
+            finally
+            {
+                _serviceProvider = null;
+            }
         }
 
         _lock.Dispose();

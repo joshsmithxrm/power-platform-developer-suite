@@ -28,18 +28,20 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Open Feedback
 
-- [ ] Profile switch to SP fails query - "Failed to create seed after 3 attempts"
-  - User switched from user auth to Service Principal profile
-  - InitializeAsync warmed with original profile, then profile changed
-  - Query failed with DataverseConnectionException
-  - Need to invalidate/re-warm pool when profile changes, not just environment
-
-- [ ] Ctrl+Q hang on quit - ServiceProvider disposal blocks (added 3s timeout as workaround)
-  - Debug log confirms: hangs at "Disposing ServiceProvider (connection pool)..."
-  - Timeout kicks in after 3s, forces exit
-  - Root cause: connection pool disposal blocking
+(None - all current items fixed)
 
 ## Done
+
+- [x] Profile switch re-warms pool with new credentials (fixed: 2026-01-07)
+  - Added `InteractiveSession.SetActiveProfileAsync()` that updates profile name and re-warms pool
+  - `MainWindow.SetActiveProfileAsync()` now calls session method instead of just InvalidateAsync
+  - `_profileName` changed from readonly to mutable to support profile switching
+
+- [x] Ctrl+Q quit no longer hangs (fixed: 2026-01-07)
+  - Added 2s timeout to ServiceProvider disposal in InteractiveSession
+  - DataverseConnectionPool.DisposeAsync now uses timeouts for validation task and source disposal
+  - Client disposal now fire-and-forget to avoid blocking on ServiceClient.Dispose()
+
 
 - [x] Connection pool warming - InitializeAsync() warms pool at TUI startup (fixed: 2026-01-07)
 - [x] Environment change events - SetEnvironmentAsync() + EnvironmentChanged event (fixed: 2026-01-07)
