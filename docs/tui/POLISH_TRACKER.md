@@ -47,6 +47,15 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Done
 
+- [x] **Autonomous TUI testing infrastructure** (fixed: 2026-01-07, ADR-0028)
+  - Created `IServiceProviderFactory` to enable mock injection in InteractiveSession
+  - Created `MockServiceProviderFactory`, `FakeSqlQueryService`, `FakeExportService`, `FakeQueryHistoryService`, `TempProfileStore` mocks
+  - Added 16 TUI unit tests in `InteractiveSessionLifecycleTests.cs`
+  - Tests cover: initialization, provider lifecycle, profile switching, environment switching, disposal, error handling
+  - Run with: `dotnet test --filter "Category=TuiUnit"`
+  - New rule: `.claude/rules/TUI_TESTING.md`
+  - New command: `/tui-test`
+
 - [x] Token cache reuse across sessions (fixed: 2026-01-07, ADR-0027)
   - Root cause: `HomeAccountId` not persisted after auth, so MSAL couldn't find cached account
   - Added `ProfileStore.UpdateProfileAsync()` for partial profile updates

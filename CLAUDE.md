@@ -21,6 +21,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Write progress directly to console from services | Accept `IProgressReporter`; let UI render (ADR-0025) |
 | Throw raw exceptions from Application Services | Wrap in `PpdsException` with ErrorCode/UserMessage (ADR-0026) |
 | Use comma-separated issues in `Closes` | GitHub only auto-closes first; use separate `Closes #N` lines |
+| Add TUI service code without tests | Use MockServiceProviderFactory for testability (ADR-0028) |
 
 ## ALWAYS
 
@@ -35,6 +36,8 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Make new user data accessible via `ppds serve` | VS Code extension needs same data as CLI/TUI |
 | Link related issues in PR body | Use separate `Closes #N` per issue; comma syntax only closes first |
 | Use JSON for config files, JSONL for streaming | No YAML; consistency with CLI output (ADR-0016) |
+| Test TUI services with `Category=TuiUnit` | Enables autonomous iteration without manual testing (ADR-0028) |
+| Use `IServiceProviderFactory` in InteractiveSession | Required for mock injection in tests (ADR-0028) |
 
 ---
 
@@ -168,6 +171,7 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 | `/triage` | Batch triage issues |
 | `/ppds-help` | CLI quick reference |
 | `/setup-ecosystem` | Set up PPDS repos on new machine |
+| `/tui-test` | Run TUI unit and integration tests |
 
 Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 
@@ -175,5 +179,6 @@ Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 
 - `.claude/rules/DATAVERSE_PATTERNS.md` - Pool usage, parallelism
 - `.claude/rules/TESTING.md` - Test categories, CI behavior
+- `.claude/rules/TUI_TESTING.md` - TUI test infrastructure (ADR-0028)
 - `.claude/rules/TUI_TROUBLESHOOTING.md` - TUI debugging (check `~/.ppds/tui-debug.log`)
 - `docs/adr/` - Architecture decisions
