@@ -28,9 +28,16 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Open Feedback
 
+- [ ] Profile switch to SP fails query - "Failed to create seed after 3 attempts"
+  - User switched from user auth to Service Principal profile
+  - InitializeAsync warmed with original profile, then profile changed
+  - Query failed with DataverseConnectionException
+  - Need to invalidate/re-warm pool when profile changes, not just environment
+
 - [ ] Ctrl+Q hang on quit - ServiceProvider disposal blocks (added 3s timeout as workaround)
-  - Debug log shows where it hangs (ServiceProvider dispose or session dispose)
-  - Need to investigate connection pool disposal
+  - Debug log confirms: hangs at "Disposing ServiceProvider (connection pool)..."
+  - Timeout kicks in after 3s, forces exit
+  - Root cause: connection pool disposal blocking
 
 ## Done
 
