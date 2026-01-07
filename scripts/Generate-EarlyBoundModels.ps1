@@ -45,6 +45,7 @@ $Entities = @(
     'sdkmessagefilter'
     'sdkmessageprocessingstep'
     'sdkmessageprocessingstepimage'
+    'plugintracelog'  # Plugin trace logs for debugging
     # Solution/ALM
     'solution'
     'solutioncomponent'
