@@ -6,6 +6,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 
 | Rule | Why |
 |------|-----|
+| Commit directly to main | Protected branch; always create branch + PR |
 | Regenerate `PPDS.Plugins.snk` | Breaks strong naming |
 | Create new ServiceClient per request | 42,000x slower than pool |
 | Hold single pooled client for multiple queries | Defeats pool parallelism |
