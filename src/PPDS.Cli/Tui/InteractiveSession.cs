@@ -30,6 +30,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly ProfileStore _profileStore;
+    private readonly IServiceProviderFactory _serviceProviderFactory;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     private ServiceProvider? _serviceProvider;
@@ -57,14 +58,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// </summary>
     /// <param name="profileName">The profile name (null for active profile).</param>
     /// <param name="profileStore">Shared profile store instance.</param>
+    /// <param name="serviceProviderFactory">Factory for creating service providers (null for default).</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
     public InteractiveSession(
         string? profileName,
         ProfileStore profileStore,
+        IServiceProviderFactory? serviceProviderFactory = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null)
     {
         _profileName = profileName ?? string.Empty;
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
+        _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
     }
 
@@ -201,12 +205,12 @@ internal sealed class InteractiveSession : IAsyncDisposable
                 _currentEnvironmentUrl = null;
             }
 
-            // Create new provider
-            _serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+            // Create new provider using injected factory
+            _serviceProvider = await _serviceProviderFactory.CreateAsync(
                 string.IsNullOrEmpty(_profileName) ? null : _profileName,
                 environmentUrl,
-                deviceCodeCallback: _deviceCodeCallback,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                _deviceCodeCallback,
+                cancellationToken).ConfigureAwait(false);
 
             _currentEnvironmentUrl = environmentUrl;
             TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");

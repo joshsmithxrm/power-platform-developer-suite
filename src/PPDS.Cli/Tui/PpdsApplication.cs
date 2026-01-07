@@ -39,7 +39,7 @@ internal sealed class PpdsApplication : IDisposable
         _profileStore = new ProfileStore();
 
         // Create session for connection pool reuse across screens
-        _session = new InteractiveSession(_profileName, _profileStore, _deviceCodeCallback);
+        _session = new InteractiveSession(_profileName, _profileStore, serviceProviderFactory: null, _deviceCodeCallback);
 
         // Start warming the connection pool in the background
         // This runs while Terminal.Gui initializes, so connection is ready faster

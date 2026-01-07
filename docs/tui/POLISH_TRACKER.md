@@ -28,7 +28,22 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Open Feedback
 
-(None - all current items fixed)
+- [ ] **Pool invalidated unexpectedly after profile switch** (reported: 2026-01-07)
+  - User switches profile, pool re-warms successfully, then pool is INVALIDATED again
+  - SQL query fails with "No environment selected" because `_environmentUrl` is null
+  - Debug log shows two unexplained invalidations:
+    ```
+    [15:27:03] Connection pool warmed successfully
+    [15:27:10] Invalidating connection pool... (7s later - WHY?)
+    [15:27:24] New profile connection warmed successfully
+    [15:27:28] Invalidating connection pool... (4s later - WHY?)
+    ```
+  - Suspect: Race condition with `EnvironmentChanged` firing on ThreadPool vs UI thread
+  - Suspect: Something calling `InvalidateAsync()` or `SetEnvironmentAsync()` unexpectedly
+  - Files to investigate:
+    - `InteractiveSession.cs` (InvalidateAsync, SetActiveProfileAsync)
+    - `MainWindow.cs` (profile/env selector handling)
+    - `SqlQueryScreen.cs` (OnEnvironmentChanged, _environmentUrl lifecycle)
 
 ## Done
 
