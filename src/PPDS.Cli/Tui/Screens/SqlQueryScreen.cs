@@ -219,12 +219,13 @@ internal sealed class SqlQueryScreen : Window
         }
 
         TuiDebugLog.Log($"Starting query execution for: {_environmentUrl}");
+        TuiDebugLog.Log($"Session.CurrentEnvironmentUrl: {_session.CurrentEnvironmentUrl}");
 
         try
         {
             // Status: Connecting
             UpdateStatus("Connecting to Dataverse...");
-            TuiDebugLog.Log("Getting SQL query service...");
+            TuiDebugLog.Log($"Getting SQL query service for URL: {_environmentUrl}");
 
             var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, CancellationToken.None);
             TuiDebugLog.Log("Got service, executing query...");

@@ -75,12 +75,14 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        TuiDebugLog.Log("Initializing session...");
+        TuiDebugLog.Log($"Initializing session with profile filter: '{_profileName}'");
 
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
             ? collection.ActiveProfile
             : collection.GetByName(_profileName);
+
+        TuiDebugLog.Log($"Loaded profile: {profile?.DisplayIdentifier ?? "(none)"}, AuthMethod: {profile?.AuthMethod}");
 
         if (profile?.Environment?.Url != null)
         {
@@ -177,7 +179,18 @@ internal sealed class InteractiveSession : IAsyncDisposable
             // Check if we need to create or recreate the provider
             if (_serviceProvider != null && _currentEnvironmentUrl == environmentUrl)
             {
+                TuiDebugLog.Log($"Reusing existing provider for {environmentUrl}");
                 return _serviceProvider;
+            }
+
+            // Log why we're creating a new provider
+            if (_serviceProvider == null)
+            {
+                TuiDebugLog.Log($"Creating new provider (no existing provider) for {environmentUrl}, profile={_profileName}");
+            }
+            else
+            {
+                TuiDebugLog.Log($"Creating new provider (URL mismatch: '{_currentEnvironmentUrl}' != '{environmentUrl}'), profile={_profileName}");
             }
 
             // Dispose existing provider if environment changed
@@ -196,6 +209,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             _currentEnvironmentUrl = environmentUrl;
+            TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");
             return _serviceProvider;
         }
         finally
