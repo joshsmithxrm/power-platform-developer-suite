@@ -57,7 +57,11 @@ public static class ServiceRegistration
                         $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.");
                 }
 
+                // DI factory delegates are synchronous; GetAsync is safe here because
+                // credential store uses file I/O, not network calls that would benefit from async.
+#pragma warning disable PPDS012 // Sync-over-async: DI factory cannot be async
                 var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
                 if (storedCredential?.ClientSecret == null)
                 {
                     throw new InvalidOperationException(

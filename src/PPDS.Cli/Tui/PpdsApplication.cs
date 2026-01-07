@@ -49,7 +49,9 @@ internal sealed class PpdsApplication : IDisposable
             // Note: Sync-over-async is required here because Terminal.Gui's Application.Run()
             // is synchronous and we need to clean up the session before returning.
             // The session disposal is fast (just releases pooled connections).
+#pragma warning disable PPDS012 // Terminal.Gui requires sync disposal
             _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning restore PPDS012
         }
     }
 
@@ -57,6 +59,8 @@ internal sealed class PpdsApplication : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+#pragma warning disable PPDS012 // IDisposable.Dispose must be synchronous
         _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning restore PPDS012
     }
 }
