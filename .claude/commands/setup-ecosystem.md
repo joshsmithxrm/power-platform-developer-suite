@@ -121,8 +121,7 @@ Read existing settings.json first, merge the hooks section, then write back.
 1. Create status line script at `~/.claude/statusline.ps1`:
 ```powershell
 # PPDS Claude status line - shows directory and git branch
-$json = [Console]::In.ReadToEnd()
-$data = $json | ConvertFrom-Json
+$data = $input | ConvertFrom-Json
 $dir = Split-Path $data.workspace.current_dir -Leaf
 $branch = ""
 try {
@@ -131,7 +130,7 @@ try {
     if ($LASTEXITCODE -eq 0 -and $b) { $branch = " ($b)" }
     Pop-Location
 } catch {}
-Write-Host "$dir$branch"
+Write-Output "$dir$branch"
 ```
 
 2. Add statusLine config to `~/.claude/settings.json`:
