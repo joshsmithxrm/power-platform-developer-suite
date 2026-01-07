@@ -163,6 +163,7 @@ namespace PPDS.Migration.Import
                         RelatedEntities = relatedEntities,
                         Relationship = new Relationship(resolvedRelationshipName)
                     };
+                    request.ApplyBypassOptions(context.Options);
 
                     try
                     {

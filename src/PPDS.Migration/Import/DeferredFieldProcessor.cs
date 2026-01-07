@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Progress;
@@ -249,7 +250,9 @@ namespace PPDS.Migration.Import
 
                 try
                 {
-                    await client.UpdateAsync(updates[i]).ConfigureAwait(false);
+                    var updateRequest = new UpdateRequest { Target = updates[i] };
+                    updateRequest.ApplyBypassOptions(context.Options);
+                    await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
                     successCount++;
                 }
                 catch (Exception ex)

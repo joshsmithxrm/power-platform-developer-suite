@@ -554,15 +554,22 @@ namespace PPDS.Migration.Import
                     switch (options.Mode)
                     {
                         case ImportMode.Create:
-                            newId = await client.CreateAsync(record).ConfigureAwait(false);
+                            var createRequest = new CreateRequest { Target = record };
+                            createRequest.ApplyBypassOptions(options);
+                            var createResponse = (CreateResponse)await client.ExecuteAsync(createRequest).ConfigureAwait(false);
+                            newId = createResponse.id;
                             break;
                         case ImportMode.Update:
-                            await client.UpdateAsync(record).ConfigureAwait(false);
+                            var updateRequest = new UpdateRequest { Target = record };
+                            updateRequest.ApplyBypassOptions(options);
+                            await client.ExecuteAsync(updateRequest).ConfigureAwait(false);
                             newId = record.Id;
                             break;
                         default:
-                            var response = (UpsertResponse)await client.ExecuteAsync(new UpsertRequest { Target = record }).ConfigureAwait(false);
-                            newId = response.Target?.Id ?? record.Id;
+                            var upsertRequest = new UpsertRequest { Target = record };
+                            upsertRequest.ApplyBypassOptions(options);
+                            var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest).ConfigureAwait(false);
+                            newId = upsertResponse.Target?.Id ?? record.Id;
                             break;
                     }
 
