@@ -98,3 +98,19 @@ jobs:
           src/PPDS.Plugins/bin/Release/*.nupkg
           src/PPDS.Plugins/bin/Release/*.snupkg
         if-no-files-found: warn
+
+  # Gate job for branch protection
+  build-status:
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            echo "Build passed"
+            exit 0
+          else
+            echo "Build failed: ${{ needs.build.result }}"
+            exit 1
+          fi
