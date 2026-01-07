@@ -760,7 +760,7 @@ ppds plugintraces list --entity account --errors-only --last-24h --top 50
 Options:
 - `--type`, `-t` - Filter by plugin type name (contains)
 - `--message`, `-m` - Filter by message name (Create, Update, Delete, etc.)
-- `--entity`, `-e` - Filter by primary entity
+- `--entity` - Filter by primary entity
 - `--mode` - Filter by mode (Synchronous, Asynchronous)
 - `--errors-only` - Show only traces with exceptions
 - `--since` - Show traces created after this date/time

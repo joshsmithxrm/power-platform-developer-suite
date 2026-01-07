@@ -228,22 +228,27 @@ public static class ListCommand
 
             // Apply record filter (#247)
             var record = parseResult.GetValue(recordOption);
-            if (!string.IsNullOrEmpty(record))
+            var recordResult = PluginTracesCommandGroup.ParseRecordOption(record);
+            if (!recordResult.Success)
             {
-                // Parse format: "entity" or "entity/guid"
-                var slashIndex = record.IndexOf('/');
-                if (slashIndex > 0)
+                var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+                var error = new StructuredError(
+                    ErrorCodes.Validation.InvalidArguments,
+                    recordResult.ErrorMessage!);
+
+                if (globalOptions.IsJsonMode)
                 {
-                    // Format: entity/guid - use entity name for filtering
-                    // Note: record ID filtering is not supported as plugintracelog doesn't store it directly
-                    var entityName = record[..slashIndex];
-                    filter = filter with { PrimaryEntity = entityName };
+                    writer.WriteError(error);
                 }
                 else
                 {
-                    // Format: just entity name
-                    filter = filter with { PrimaryEntity = record };
+                    Console.Error.WriteLine($"Error: {recordResult.ErrorMessage}");
                 }
+                return ExitCodes.InvalidArguments;
+            }
+            if (!string.IsNullOrEmpty(recordResult.EntityName))
+            {
+                filter = filter with { PrimaryEntity = recordResult.EntityName };
             }
 
             // Load filter from file if specified (#155)

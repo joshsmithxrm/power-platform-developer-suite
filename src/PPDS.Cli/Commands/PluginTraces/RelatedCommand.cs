@@ -98,12 +98,24 @@ public static class RelatedCommand
         }
 
         // Parse record option if provided (#247)
-        string? recordEntity = null;
-        if (!string.IsNullOrEmpty(record))
+        var recordResult = PluginTracesCommandGroup.ParseRecordOption(record);
+        if (!recordResult.Success)
         {
-            var slashIndex = record.IndexOf('/');
-            recordEntity = slashIndex > 0 ? record[..slashIndex] : record;
+            var error = new StructuredError(
+                ErrorCodes.Validation.InvalidArguments,
+                recordResult.ErrorMessage!);
+
+            if (globalOptions.IsJsonMode)
+            {
+                writer.WriteError(error);
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {recordResult.ErrorMessage}");
+            }
+            return ExitCodes.InvalidArguments;
         }
+        string? recordEntity = recordResult.EntityName;
 
         try
         {

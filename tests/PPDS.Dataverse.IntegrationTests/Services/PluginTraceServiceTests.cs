@@ -186,15 +186,15 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
     }
 
     [Fact]
-    public async Task GetAsync_WithInvalidId_ThrowsOrReturnsNull()
+    public async Task GetAsync_WithInvalidId_Throws()
     {
         // Arrange
         InitializeWith(CreatePluginTrace("MyPlugin.AccountPlugin", "Create", "account"));
 
         // Act & Assert
-        // FakeXrmEasy throws an exception when retrieving non-existent entities
-        // The actual service catches "does not exist" exceptions and returns null
-        // This test validates that an invalid ID doesn't return a trace
+        // FakeXrmEasy throws an exception when retrieving non-existent entities.
+        // The actual service catches "does not exist" exceptions and returns null,
+        // but in this FakeXrmEasy-based integration test we assert the thrown exception behavior.
         var act = () => _service.GetAsync(Guid.NewGuid());
         await act.Should().ThrowAsync<Exception>();
     }
@@ -271,14 +271,15 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
     }
 
     [Fact]
-    public async Task DeleteAsync_WithInvalidId_ThrowsOrReturnsFalse()
+    public async Task DeleteAsync_WithInvalidId_Throws()
     {
         // Arrange
         InitializeWith(CreatePluginTrace("MyPlugin.AccountPlugin", "Create", "account"));
 
         // Act & Assert
-        // FakeXrmEasy throws an exception when deleting non-existent entities
-        // The actual service catches "does not exist" exceptions and returns false
+        // FakeXrmEasy throws an exception when deleting non-existent entities.
+        // The actual service catches "does not exist" exceptions and returns false,
+        // but in this FakeXrmEasy-based integration test we assert the thrown exception behavior.
         var act = () => _service.DeleteAsync(Guid.NewGuid());
         await act.Should().ThrowAsync<Exception>();
     }
