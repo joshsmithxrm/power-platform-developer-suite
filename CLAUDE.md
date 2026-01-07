@@ -20,6 +20,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Implement data/business logic in UI layer | UIs are dumb views; logic belongs in Application Services |
 | Write progress directly to console from services | Accept `IProgressReporter`; let UI render (ADR-0025) |
 | Throw raw exceptions from Application Services | Wrap in `PpdsException` with ErrorCode/UserMessage (ADR-0026) |
+| Use comma-separated issues in `Closes` | GitHub only auto-closes first; use separate `Closes #N` lines |
 
 ## ALWAYS
 
@@ -32,7 +33,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Accept `IProgressReporter` for operations >1 second | All UIs need feedback for long operations (ADR-0025) |
 | Include ErrorCode in `PpdsException` | Enables programmatic handling (retry, re-auth) (ADR-0026) |
 | Make new user data accessible via `ppds serve` | VS Code extension needs same data as CLI/TUI |
-| Link related issues in PR body | Use "Closes #123" or "Relates to #456" |
+| Link related issues in PR body | Use separate `Closes #N` per issue; comma syntax only closes first |
 | Use JSON for config files, JSONL for streaming | No YAML; consistency with CLI output (ADR-0016) |
 
 ---
