@@ -12,7 +12,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Commit with failing tests | All tests must pass before merge |
 | Create new ServiceClient per request | 42,000x slower than Clone/pool pattern |
 | Guess parallelism values | Use `RecommendedDegreesOfParallelism` from server |
-| Hold single pooled client for multiple queries | Defeats pool parallelism; see `.claude/rules/DATAVERSE_PATTERNS.md` |
+| Hold single pooled client for multiple queries | Defeats pool parallelism; see ADR-0002 |
 | Use magic strings for generated entities | Use `EntityLogicalName` and `Fields.*` constants |
 | Use late-bound `Entity` for generated entity types | Use early-bound classes; compile-time safety |
 | Write CLI status messages to stdout | Use `Console.Error.WriteLine` for status; stdout is for data |
@@ -27,7 +27,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 
 | Rule | Why |
 |------|-----|
-| Use connection pool for multi-request scenarios | See `.claude/rules/DATAVERSE_PATTERNS.md` |
+| Use connection pool for multi-request scenarios | See ADR-0002, ADR-0005 |
 | Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) | 5x faster than `ExecuteMultiple` |
 | Add new services to `RegisterDataverseServices()` | Keeps CLI and library DI in sync |
 | Use Application Services for all persistent state | Single code path for CLI/TUI/RPC (ADR-0024) |
@@ -175,10 +175,19 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 
 Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 
-## Rules
+## Testing
 
-- `.claude/rules/DATAVERSE_PATTERNS.md` - Pool usage, parallelism
-- `.claude/rules/TESTING.md` - Test categories, CI behavior
-- `.claude/rules/TUI_TESTING.md` - TUI test infrastructure (ADR-0028)
-- `.claude/rules/TUI_TROUBLESHOOTING.md` - TUI debugging (check `~/.ppds/tui-debug.log`)
-- `docs/adr/` - Architecture decisions
+| Category | Purpose | Filter |
+|----------|---------|--------|
+| Unit (default) | Fast tests, no external deps | `--filter Category!=Integration` |
+| `Integration` | Live Dataverse tests | `--filter Category=Integration` |
+| `TuiUnit` | TUI session lifecycle | `--filter Category=TuiUnit` |
+
+Pre-commit hook runs unit tests (~10s). See ADR-0028 (TUI), ADR-0029 (full strategy).
+
+## Documentation
+
+- `docs/adr/` - Architecture Decision Records (detailed patterns, "why" context)
+- CLAUDE.md - Brief reminders (<100 tokens each), auto-loaded into all conversations
+
+**Guidance:** If you need examples, code snippets, or rationale → create/update an ADR. CLAUDE.md is for one-liner "don't do X" rules only.

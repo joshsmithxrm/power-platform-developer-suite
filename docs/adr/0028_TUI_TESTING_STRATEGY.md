@@ -84,7 +84,53 @@ public InteractiveSession(
 - NEW: `tests/PPDS.Cli.Tests/Tui/InteractiveSessionLifecycleTests.cs`
 - MODIFIED: `src/PPDS.Cli/Tui/InteractiveSession.cs`
 
+## Troubleshooting
+
+### Debug Log
+
+When troubleshooting TUI issues (`ppds -i`), check:
+
+```
+~/.ppds/tui-debug.log
+```
+
+The log contains timestamps, thread IDs, caller info, and status updates. Each `ppds -i` run clears the previous log.
+
+### Common Issues
+
+| Symptom | Check | Likely Cause |
+|---------|-------|--------------|
+| Query hangs at "Executing..." | Debug log for errors | Dataverse API error, deadlock |
+| UI doesn't update | Debug log for status | `MainLoop.Invoke()` not called |
+| Dialog doesn't close | Debug log | Nested `Application.Run()` (deadlock) |
+
+### Terminal.Gui Safety Rules
+
+**Safe from MainLoop.Invoke:**
+- `MessageBox.Query()` / `MessageBox.ErrorQuery()` - modal, blocks, returns
+- Direct property updates (`_label.Text = "..."`)
+- `Application.Refresh()`
+
+**UNSAFE (causes deadlock):**
+- `Application.Run(dialog)` inside `MainLoop.Invoke()` - **NEVER DO THIS**
+- Nested event loops
+
+**Async pattern:**
+```csharp
+#pragma warning disable PPDS013
+_ = DoWorkAsync().ContinueWith(t =>
+{
+    if (t.IsFaulted)
+    {
+        Application.MainLoop?.Invoke(() =>
+            _statusLabel.Text = $"Error: {t.Exception?.InnerException?.Message}");
+    }
+}, TaskScheduler.Default);
+#pragma warning restore PPDS013
+```
+
 ## References
 - [Terminal.Gui Testing Wiki](https://github.com/gui-cs/Terminal.Gui/wiki/Testing)
 - ADR-0015: Application Services Layer
 - ADR-0024: Shared Local State
+- ADR-0029: Testing Strategy
