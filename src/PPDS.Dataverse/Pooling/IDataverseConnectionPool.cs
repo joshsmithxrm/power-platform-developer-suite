@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
@@ -40,6 +41,21 @@ namespace PPDS.Dataverse.Pooling
         /// Gets pool statistics and health information.
         /// </summary>
         PoolStatistics Statistics { get; }
+
+        /// <summary>
+        /// Gets the results of seed initialization for each connection source.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Use this to check whether all connection sources initialized successfully.
+        /// A source may fail to initialize due to invalid credentials, network issues, etc.
+        /// </para>
+        /// <para>
+        /// Failed sources will use a default DOP of 4 and may fail on first actual request.
+        /// Check this property after pool construction to detect configuration issues early.
+        /// </para>
+        /// </remarks>
+        IReadOnlyList<SeedInitializationResult> InitializationResults { get; }
 
         /// <summary>
         /// Gets a value indicating whether the pool is enabled.
@@ -154,5 +170,14 @@ namespace PPDS.Dataverse.Pooling
         /// </para>
         /// </remarks>
         BatchParallelismCoordinator BatchCoordinator { get; }
+
+        /// <summary>
+        /// Ensures the pool is initialized by warming all seed connections.
+        /// Triggers authentication and DOP discovery.
+        /// Idempotent - subsequent calls are no-ops.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>A task that completes when initialization is done.</returns>
+        Task EnsureInitializedAsync(CancellationToken cancellationToken = default);
     }
 }

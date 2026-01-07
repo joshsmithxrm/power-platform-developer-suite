@@ -33,6 +33,7 @@ namespace PPDS.Dataverse.Pooling
         private readonly ConcurrentDictionary<string, ServiceClient> _seedClients = new();
         private readonly ConcurrentDictionary<string, int> _sourceDop = new();
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _seedCreationLocks = new();
+        private readonly List<SeedInitializationResult> _seedInitResults = new();
 
         private readonly ConcurrentDictionary<string, ConcurrentQueue<PooledClient>> _pools;
         private readonly ConcurrentDictionary<string, int> _activeConnections;
@@ -48,7 +49,10 @@ namespace PPDS.Dataverse.Pooling
         private long _invalidConnectionCount;
         private long _authFailureCount;
         private long _connectionFailureCount;
+        private long _retriesAttempted;
+        private long _retriesSucceeded;
         private int _disposed;
+        private volatile bool _seedsInitialized;
         private static bool _performanceSettingsApplied;
         private static readonly object _performanceSettingsLock = new();
         private BatchParallelismCoordinator? _batchCoordinator;
@@ -102,6 +106,7 @@ namespace PPDS.Dataverse.Pooling
 
             // Create seeds first to discover DOP from server before sizing the semaphore
             InitializeSeedsAndDiscoverDop();
+            _seedsInitialized = true;
 
             // Now size the semaphore based on actual DOP (not the 52 hard limit)
             _totalPoolCapacity = CalculateTotalPoolCapacity();
@@ -123,11 +128,50 @@ namespace PPDS.Dataverse.Pooling
             // Warm up pool with 1 connection per source
             WarmUpConnections();
 
-            _logger.LogInformation(
-                "DataverseConnectionPool initialized. Sources: {SourceCount}, TotalDOP: {TotalDOP}, Strategy: {Strategy}",
-                _sources.Count,
-                _totalPoolCapacity,
-                _poolOptions.SelectionStrategy);
+            // Log initialization status based on actual results
+            LogInitializationStatus();
+        }
+
+        /// <summary>
+        /// Logs the pool initialization status based on seed initialization results.
+        /// </summary>
+        private void LogInitializationStatus()
+        {
+            var successCount = _seedInitResults.Count(r => r.Success);
+            var failureCount = _seedInitResults.Count(r => !r.Success);
+
+            if (failureCount == 0)
+            {
+                _logger.LogInformation(
+                    "Connection pool initialized successfully. Sources: {SourceCount}, TotalDOP: {TotalDOP}, Strategy: {Strategy}",
+                    _sources.Count,
+                    _totalPoolCapacity,
+                    _poolOptions.SelectionStrategy);
+            }
+            else if (successCount > 0)
+            {
+                // Partial failure - some sources initialized
+                var failedSources = _seedInitResults.Where(r => !r.Success).Select(r => r.ConnectionName);
+                _logger.LogWarning(
+                    "Connection pool initialized with {FailureCount} degraded source(s). Working: {SuccessCount}, Failed: [{FailedSources}], TotalDOP: {TotalDOP}",
+                    failureCount,
+                    successCount,
+                    string.Join(", ", failedSources),
+                    _totalPoolCapacity);
+            }
+            else
+            {
+                // All sources failed
+                var failureReasons = _seedInitResults
+                    .Where(r => !r.Success)
+                    .Select(r => $"{r.ConnectionName}: {r.ErrorMessage}")
+                    .ToList();
+
+                _logger.LogError(
+                    "Connection pool initialization failed - all {SourceCount} source(s) failed: {FailureReasons}",
+                    _sources.Count,
+                    string.Join("; ", failureReasons));
+            }
         }
 
         /// <summary>
@@ -186,6 +230,9 @@ namespace PPDS.Dataverse.Pooling
 
         /// <inheritdoc />
         public PoolStatistics Statistics => GetStatistics();
+
+        /// <inheritdoc />
+        public IReadOnlyList<SeedInitializationResult> InitializationResults => _seedInitResults.AsReadOnly();
 
         /// <inheritdoc />
         public int GetTotalRecommendedParallelism()
@@ -623,7 +670,8 @@ namespace PPDS.Dataverse.Pooling
                     catch (Exception ex) when (attempt < maxAttempts)
                     {
                         lastException = ex;
-                        _logger.LogWarning(ex,
+                        // Use DEBUG for intermediate retries to reduce log noise
+                        _logger.LogDebug(ex,
                             "Seed creation attempt {Attempt}/{MaxAttempts} failed for {ConnectionName}, retrying after backoff",
                             attempt, maxAttempts, connectionName);
 
@@ -633,9 +681,11 @@ namespace PPDS.Dataverse.Pooling
                     catch (Exception ex)
                     {
                         lastException = ex;
-                        _logger.LogError(ex,
-                            "Seed creation failed after {MaxAttempts} attempts for {ConnectionName}",
-                            maxAttempts, connectionName);
+                        // Only log once on final failure with root cause classification
+                        var (reason, message) = ClassifyFailure(ex);
+                        _logger.LogError(
+                            "Seed creation failed for {ConnectionName} after {MaxAttempts} attempts: {FailureReason} - {Message}",
+                            connectionName, maxAttempts, reason, message);
                     }
                 }
 
@@ -920,15 +970,78 @@ namespace PPDS.Dataverse.Pooling
                 try
                 {
                     // GetSeedClient populates _sourceDop with the server's RecommendedDegreesOfParallelism
-                    GetSeedClient(source.Name);
+                    var seed = GetSeedClient(source.Name);
+                    var dop = _sourceDop.TryGetValue(source.Name, out var d) ? d : 4;
+
+                    _seedInitResults.Add(new SeedInitializationResult
+                    {
+                        ConnectionName = source.Name,
+                        Success = true,
+                        DiscoveredDop = dop
+                    });
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to initialize seed for {ConnectionName}, using default DOP=4", source.Name);
+                    var (reason, message) = ClassifyFailure(ex);
+
+                    _seedInitResults.Add(new SeedInitializationResult
+                    {
+                        ConnectionName = source.Name,
+                        Success = false,
+                        ErrorMessage = message,
+                        FailureReason = reason,
+                        Exception = ex
+                    });
+
                     // Use conservative default if seed creation fails
                     _sourceDop[source.Name] = 4;
                 }
             }
+        }
+
+        /// <summary>
+        /// Classifies the failure reason from an exception.
+        /// </summary>
+        private static (SeedFailureReason reason, string message) ClassifyFailure(Exception ex)
+        {
+            // Check for authentication-related failures
+            if (ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("401", StringComparison.Ordinal) ||
+                ex.Message.Contains("invalid_client", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("AADSTS", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("client secret", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("credential", StringComparison.OrdinalIgnoreCase))
+            {
+                return (SeedFailureReason.AuthenticationFailed, "Authentication failed - check credentials");
+            }
+
+            // Check for network-related failures
+            if (ex is System.Net.WebException ||
+                ex is System.Net.Http.HttpRequestException ||
+                ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("Unable to connect", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("DNS", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("network", StringComparison.OrdinalIgnoreCase))
+            {
+                return (SeedFailureReason.NetworkError, "Network error - check connectivity");
+            }
+
+            // Check for connection readiness failures
+            if (ex.Message.Contains("not ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return (SeedFailureReason.ConnectionNotReady, "Connection failed to initialize");
+            }
+
+            // Check for Dataverse service errors
+            if (ex is FaultException ||
+                ex.Message.Contains("OrganizationServiceFault", StringComparison.OrdinalIgnoreCase))
+            {
+                return (SeedFailureReason.ServiceError, "Dataverse service error");
+            }
+
+            // Default to unknown
+            return (SeedFailureReason.Unknown, ex.Message);
         }
 
         /// <summary>
@@ -1095,6 +1208,9 @@ namespace PPDS.Dataverse.Pooling
                 ThrottledConnections = connectionStats.Values.Count(s => s.IsThrottled),
                 RequestsServed = _totalRequestsServed,
                 ThrottleEvents = _throttleTracker.TotalThrottleEvents,
+                TotalBackoffTime = _throttleTracker.TotalBackoffTime,
+                RetriesAttempted = Interlocked.Read(ref _retriesAttempted),
+                RetriesSucceeded = Interlocked.Read(ref _retriesSucceeded),
                 InvalidConnections = Interlocked.Read(ref _invalidConnectionCount),
                 AuthFailures = Interlocked.Read(ref _authFailureCount),
                 ConnectionFailures = Interlocked.Read(ref _connectionFailureCount),
@@ -1181,6 +1297,8 @@ namespace PPDS.Dataverse.Pooling
         {
             ThrowIfDisposed();
 
+            bool isRetry = false;
+
             // Retry forever on service protection errors - only CancellationToken stops us
             while (true)
             {
@@ -1190,11 +1308,23 @@ namespace PPDS.Dataverse.Pooling
 
                 try
                 {
-                    return await client.ExecuteAsync(request, cancellationToken);
+                    var response = await client.ExecuteAsync(request, cancellationToken);
+
+                    // Track successful retry
+                    if (isRetry)
+                    {
+                        Interlocked.Increment(ref _retriesSucceeded);
+                    }
+
+                    return response;
                 }
                 catch (FaultException<OrganizationServiceFault> faultEx)
                     when (ServiceProtectionException.IsServiceProtectionError(faultEx.Detail.ErrorCode))
                 {
+                    // Track retry attempt (next iteration will be a retry)
+                    Interlocked.Increment(ref _retriesAttempted);
+                    isRetry = true;
+
                     // Throttle was already recorded by PooledClient via callback.
                     // Log and retry - GetClientAsync will wait for non-throttled connection.
                     _logger.LogDebug(
@@ -1204,6 +1334,22 @@ namespace PPDS.Dataverse.Pooling
                     // Loop continues - GetClientAsync will wait for a non-throttled connection
                 }
             }
+        }
+
+        /// <inheritdoc />
+        public Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
+        {
+            if (_seedsInitialized)
+            {
+                return Task.CompletedTask;
+            }
+
+            // Initialization already happens in constructor, but this provides
+            // an explicit entry point for callers who need to ensure it's done.
+            // In practice, _seedsInitialized will always be true here.
+            InitializeSeedsAndDiscoverDop();
+            _seedsInitialized = true;
+            return Task.CompletedTask;
         }
 
         /// <inheritdoc />

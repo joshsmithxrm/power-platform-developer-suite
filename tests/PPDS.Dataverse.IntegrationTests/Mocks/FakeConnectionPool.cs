@@ -31,6 +31,11 @@ public class FakeConnectionPool : IDataverseConnectionPool
     public bool IsEnabled => true;
     public int SourceCount => 1;
 
+    public IReadOnlyList<SeedInitializationResult> InitializationResults => new List<SeedInitializationResult>
+    {
+        new() { ConnectionName = _connectionName, Success = true, DiscoveredDop = _recommendedParallelism }
+    };
+
     public BatchParallelismCoordinator BatchCoordinator
     {
         get
@@ -97,6 +102,9 @@ public class FakeConnectionPool : IDataverseConnectionPool
     public void RecordAuthFailure() { }
     public void RecordConnectionFailure() { }
     public void InvalidateSeed(string connectionName) { }
+
+    public Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 
     public void Dispose()
     {
