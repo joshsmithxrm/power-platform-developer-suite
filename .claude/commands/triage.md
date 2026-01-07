@@ -161,9 +161,48 @@ Legend: ✓ = has value, - = missing
 
 **STOP HERE - Ask user if they want to proceed with triage**
 
-### 5. Generate Triage Template
+### 5. Autonomous Analysis (Preferred)
 
-If user confirms, generate an editable markdown table:
+Rather than asking the user to fill in a template, Claude should autonomously analyze issues and determine field values:
+
+1. **Read each issue** - Fetch issue body/details for context
+2. **Analyze complexity** - Based on scope, files affected, dependencies
+3. **Determine values** - Apply consistent criteria:
+
+| Field | How to Determine |
+|-------|-----------------|
+| **Type** | From title prefix (feat=feature, fix=bug, docs, chore, refactor) |
+| **Priority** | P0=blocker/security, P1=user-facing/blocking, P2=important, P3=nice-to-have |
+| **Size** | XS=<1hr, S=1-4hr, M=1-2days, L=3-5days, XL=1+week |
+| **Status** | Todo (default), In Progress (if branch exists), Done (if closed) |
+| **Target** | Based on strategic value and dependencies (see below) |
+
+**Target Assignment Criteria:**
+
+| Target | When to Assign |
+|--------|---------------|
+| **This Week** | Blockers, critical bugs, quick wins needed immediately |
+| **Next** | High value, dependencies resolved, well-defined scope |
+| **CLI v1.0.0** | Required for GA release (per issue #233 scope) |
+| **Q1 2026** | Important but not blocking GA, post-v1 roadmap |
+| **(empty)** | Backlog - future consideration, low priority, needs design |
+
+4. **Present proposed values** for user confirmation:
+
+```markdown
+## Proposed Triage Values
+
+| Issue | Type | Priority | Size | Status | Target | Rationale |
+|-------|------|----------|------|--------|--------|-----------|
+| #224 | feature | P2-Medium | M | Todo | CLI v1.0.0 | Data migration Phase 3 |
+| #223 | feature | P3-Low | L | Todo | Q1 2026 | Post-v1, needs design |
+```
+
+5. **Confirm with user** before applying - show summary and wait for approval
+
+### 6. Generate Triage Template (Fallback - Manual Mode)
+
+If user prefers manual input, generate an editable markdown table:
 
 ```markdown
 ## Triage Input
@@ -202,7 +241,7 @@ Paste the completed table when ready.
 - Title contains "daemon" or "serve" → suggest `area:daemon`
 - Has label `epic:*` or `phase:*` → suggest as parent issue candidate
 
-### 6. Parse and Validate Input
+### 7. Parse and Validate Input
 
 When user pastes completed table:
 
@@ -235,7 +274,7 @@ When user pastes completed table:
 
 4. Show validation errors if any
 
-### 7. Show Confirmation Summary
+### 8. Show Confirmation Summary
 
 Present summary of changes:
 
@@ -258,7 +297,7 @@ Proceed with these changes? (yes/no)
 💡 Tip: When you move an issue to Status=In Progress, remember to assign yourself!
 ```
 
-### 8. Execute Updates
+### 9. Execute Updates
 
 For each issue:
 
@@ -315,7 +354,7 @@ gh api graphql -f query='
 
 **Important:** Need to get the project item ID first. When adding to project, the response includes the item ID.
 
-### 9. Report Results
+### 10. Report Results
 
 ```markdown
 ## Triage Complete
@@ -391,7 +430,45 @@ Examples:
 - To clean up backlog
 - When priorities shift and need re-evaluation
 
+### 11. Suggest Work Batches
+
+After triage, suggest logical groupings for `/plan-work`:
+
+```markdown
+## Suggested Work Batches
+
+Based on dependencies and scope:
+
+1. **meta-process** (This Week): #238, #233
+   - Define v1 scope before other work
+
+2. **bugs-critical** (Next): #199, #200, #202
+   - User-facing issues
+
+3. **tui-foundation** (Next): #234
+   - Unblocks TUI batch
+
+4. **tui-enhancements** (CLI v1.0.0): #204, #205, #206, #207, #208
+   - Single worktree, related changes
+
+5. **phase-3-traces** (CLI v1.0.0): #140, #152, #153, #154, #155, #156, #157, #158
+   - Complete before Phase 4
+
+6. **phase-4-webresources** (CLI v1.0.0): #141, #159, #160, #161, #162, #163
+   - Depends on Phase 3
+
+7. **plugin-registration** (CLI v1.0.0): #70, #66, #67, #68, #63, #65
+   - Extension migration support
+
+Run: `/plan-work --batch meta-process` to start first batch
+```
+
+**Batch Naming Convention:**
+- Use kebab-case: `phase-3-traces`, `tui-enhancements`
+- Group by: phase, feature area, or strategic theme
+
 ## Related
 
 - **ROADMAP.md**: Field definitions, sizing guidelines, priority criteria
 - **Project**: https://github.com/users/joshsmithxrm/projects/3
+- **/plan-work**: Create worktrees from batch groups

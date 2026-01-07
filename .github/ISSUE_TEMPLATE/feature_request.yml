@@ -65,3 +65,30 @@ body:
         - Blocks #456
     validations:
       required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority (optional - will be set during triage)
+      description: How urgent is this feature?
+      options:
+        - P0-Critical (blocking, security)
+        - P1-High (user-facing, blocking other work)
+        - P2-Medium (important feature)
+        - P3-Low (nice to have)
+    validations:
+      required: false
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size Estimate (optional)
+      description: Rough effort estimate
+      options:
+        - XS (< 1 hour)
+        - S (1-4 hours)
+        - M (1-2 days)
+        - L (3-5 days)
+        - XL (1+ week)
+    validations:
+      required: false

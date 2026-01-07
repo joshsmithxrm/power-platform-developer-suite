@@ -32,6 +32,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Accept `IProgressReporter` for operations >1 second | All UIs need feedback for long operations (ADR-0025) |
 | Include ErrorCode in `PpdsException` | Enables programmatic handling (retry, re-auth) (ADR-0026) |
 | Make new user data accessible via `ppds serve` | VS Code extension needs same data as CLI/TUI |
+| Link related issues in PR body | Use "Closes #123" or "Relates to #456" |
 
 ---
 

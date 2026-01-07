@@ -64,3 +64,30 @@ body:
       render: shell
     validations:
       required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (optional - will be set during triage)
+      description: How severe is this bug?
+      options:
+        - P0-Critical (crash, data loss, security)
+        - P1-High (major functionality broken)
+        - P2-Medium (functionality impaired)
+        - P3-Low (minor issue, workaround exists)
+    validations:
+      required: false
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Fix Complexity (optional)
+      description: Rough estimate of fix effort
+      options:
+        - XS (< 1 hour)
+        - S (1-4 hours)
+        - M (1-2 days)
+        - L (3-5 days)
+        - XL (1+ week)
+    validations:
+      required: false
