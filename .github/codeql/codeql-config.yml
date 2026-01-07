@@ -1,14 +1,30 @@
 # CodeQL Configuration
-# Excludes test code from security analysis to reduce false positives.
 # See: https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning
+# Query filter docs: https://github.blog/changelog/2022-08-31-code-scanning-customize-your-codeql-analysis-using-query-filters/
 
 name: "PPDS SDK CodeQL Config"
 
 paths-ignore:
-  # Test projects - Path.Combine and similar alerts are false positives in test context
+  # Test projects - excluded from security analysis
   - tests/**
   - '**/*Tests/**'
   - '**/*.Tests/**'
 
 queries:
   - uses: security-and-quality
+
+# Disable style rules that conflict with project conventions
+# See .github/CODE_SCANNING.md for rationale
+query-filters:
+  - exclude:
+      id:
+        # LINQ style suggestions - conflicts with ADR-0024 (prefer explicit foreach)
+        - cs/linq/missed-where
+        - cs/linq/missed-select
+        # Style preferences - not quality issues
+        - cs/missed-ternary-operator
+        - cs/nested-if-statements
+        # CLI patterns - intentional top-level exception handlers
+        - cs/catch-of-all-exceptions
+        # Path handling - all paths are controlled inputs in CLI context
+        - cs/path-combine
