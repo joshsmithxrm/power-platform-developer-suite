@@ -105,6 +105,7 @@ internal sealed class SqlQueryScreen : Window
         Add(queryFrame, _filterFrame, _resultsTable, _statusLabel);
 
         // Load profile and environment info (fire-and-forget with error handling)
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
         _ = LoadProfileInfoAsync().ContinueWith(t =>
         {
             if (t.IsFaulted && t.Exception != null)
@@ -115,6 +116,7 @@ internal sealed class SqlQueryScreen : Window
                 });
             }
         }, TaskScheduler.Default);
+#pragma warning restore PPDS013
 
         // Set up keyboard shortcuts
         SetupKeyboardShortcuts();
