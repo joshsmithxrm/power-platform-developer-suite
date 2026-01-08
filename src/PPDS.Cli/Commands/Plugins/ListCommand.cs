@@ -2,12 +2,10 @@ using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Registration;
-using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -79,9 +77,7 @@ public static class ListCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken);
 
-            var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
-            var logger = serviceProvider.GetRequiredService<ILogger<PluginRegistrationService>>();
-            var registrationService = new PluginRegistrationService(pool, logger);
+            var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
 
             if (!globalOptions.IsJsonMode)
             {
@@ -228,7 +224,7 @@ public static class ListCommand
     }
 
     private static async Task PopulateTypesAsync(
-        PluginRegistrationService registrationService,
+        IPluginRegistrationService registrationService,
         List<PluginTypeInfo> types,
         List<TypeOutput> typeOutputs)
     {

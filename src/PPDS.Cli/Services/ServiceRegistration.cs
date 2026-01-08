@@ -3,7 +3,9 @@ using Microsoft.Extensions.Logging;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Query;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Services;
 
@@ -26,6 +28,14 @@ public static class ServiceRegistration
     {
         // Query services
         services.AddTransient<ISqlQueryService, SqlQueryService>();
+
+        // Plugin registration service - requires connection pool
+        services.AddTransient<IPluginRegistrationService>(sp =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var logger = sp.GetRequiredService<ILogger<PluginRegistrationService>>();
+            return new PluginRegistrationService(pool, logger);
+        });
 
         // Connection service - requires profile-based token provider and environment ID
         // Registered as factory because it needs runtime values from ResolvedConnectionInfo
