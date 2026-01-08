@@ -28,6 +28,11 @@ namespace PPDS.Cli.Tui;
 /// </remarks>
 internal sealed class InteractiveSession : IAsyncDisposable
 {
+    /// <summary>
+    /// Timeout for service provider disposal to prevent hanging on exit.
+    /// </summary>
+    private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(2);
+
     private string _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly ProfileStore _profileStore;
@@ -444,7 +449,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
             // Microsoft's ServiceClient can hang during disposal if there are pending HTTP requests
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var cts = new CancellationTokenSource(DisposeTimeout);
                 var disposeTask = _serviceProvider.DisposeAsync().AsTask();
 
                 // Wait with timeout - if it doesn't complete, force-abandon

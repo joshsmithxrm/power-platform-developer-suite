@@ -213,10 +213,10 @@ public class InteractiveSessionTests : IAsyncLifetime
     {
         var tasks = Enumerable.Range(0, 10).Select(i => Task.Run(() =>
         {
-            var ps = _session.GetProfileService();
-            var es = _session.GetEnvironmentService();
-            var ts = _session.GetThemeService();
-            var store = _session.GetProfileStore();
+            _ = _session.GetProfileService();
+            _ = _session.GetEnvironmentService();
+            _ = _session.GetThemeService();
+            _ = _session.GetProfileStore();
         }));
 
         await Task.WhenAll(tasks);

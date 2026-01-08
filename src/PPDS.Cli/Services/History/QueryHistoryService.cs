@@ -110,7 +110,6 @@ public sealed class QueryHistoryService : IQueryHistoryService
         }
 
         var history = await LoadHistoryAsync(environmentUrl, cancellationToken);
-        var patternLower = pattern.ToLowerInvariant();
 
         return history
             .Where(e => e.Sql.Contains(pattern, StringComparison.OrdinalIgnoreCase))

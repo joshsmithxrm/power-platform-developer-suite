@@ -131,7 +131,7 @@ public sealed class EnvironmentService : IEnvironmentService
             if (!result.Success)
             {
                 // Check if it's a not-found vs other error
-                if (result.ErrorMessage?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true)
+                if (result.ErrorMessage?.Contains("not found", StringComparison.OrdinalIgnoreCase) is true)
                 {
                     throw new PpdsNotFoundException("Environment", identifier);
                 }

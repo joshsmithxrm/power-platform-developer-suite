@@ -311,7 +311,7 @@ public sealed class ProfileService : IProfileService
             try
             {
                 // Authenticate
-                var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken, forceInteractive: true);
+                using var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken, forceInteractive: true);
 
                 // Populate profile from auth result
                 profile.Username = provider.Identity;
@@ -340,8 +340,6 @@ public sealed class ProfileService : IProfileService
                 {
                     await ResolveEnvironmentAsync(profile, request.Environment, isServicePrincipal, provider, client, cloud, authMethod, cancellationToken);
                 }
-
-                client.Dispose();
             }
             catch (AuthenticationException ex)
             {

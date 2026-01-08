@@ -12,6 +12,11 @@ namespace PPDS.Cli.Tui;
 /// </summary>
 internal sealed class PpdsApplication : IDisposable
 {
+    /// <summary>
+    /// Timeout for session disposal to prevent hanging on exit.
+    /// </summary>
+    private static readonly TimeSpan SessionDisposeTimeout = TimeSpan.FromSeconds(3);
+
     private readonly string? _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private ProfileStore? _profileStore;
@@ -79,9 +84,9 @@ internal sealed class PpdsApplication : IDisposable
             if (_session != null)
             {
                 var disposeTask = _session.DisposeAsync().AsTask();
-                if (!disposeTask.Wait(TimeSpan.FromSeconds(3)))
+                if (!disposeTask.Wait(SessionDisposeTimeout))
                 {
-                    TuiDebugLog.Log("Session disposal timed out after 3s - forcing exit");
+                    TuiDebugLog.Log($"Session disposal timed out after {SessionDisposeTimeout.TotalSeconds}s - forcing exit");
                 }
                 else
                 {
@@ -100,7 +105,7 @@ internal sealed class PpdsApplication : IDisposable
         if (_session != null)
         {
             var disposeTask = _session.DisposeAsync().AsTask();
-            disposeTask.Wait(TimeSpan.FromSeconds(3)); // Don't hang forever
+            disposeTask.Wait(SessionDisposeTimeout); // Don't hang forever
         }
 #pragma warning restore PPDS012
     }

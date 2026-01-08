@@ -102,9 +102,11 @@ public static class ProfileServiceFactory
                         profile.HomeAccountId = p.HomeAccountId;
                     }).ConfigureAwait(false);
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Swallow - profile update is best-effort
+                    // Log for diagnostics but don't fail the connection
+                    System.Diagnostics.Debug.WriteLine($"Profile update failed: {ex.Message}");
                 }
             });
         };

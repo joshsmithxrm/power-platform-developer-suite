@@ -135,19 +135,19 @@ internal sealed class ExportDialog : Dialog
         var extension = format == 0 ? "csv" : "tsv";
         var filter = format == 0 ? "CSV files (*.csv)" : "TSV files (*.tsv)";
 
-        var saveDialog = new SaveDialog("Export to File", filter)
+        string filePath;
+        using (var saveDialog = new SaveDialog("Export to File", filter))
         {
-            AllowedFileTypes = new[] { $".{extension}" }
-        };
+            saveDialog.AllowedFileTypes = new[] { $".{extension}" };
+            Application.Run(saveDialog);
 
-        Application.Run(saveDialog);
+            if (saveDialog.Canceled || saveDialog.FilePath == null)
+            {
+                return;
+            }
 
-        if (saveDialog.Canceled || saveDialog.FilePath == null)
-        {
-            return;
+            filePath = saveDialog.FilePath.ToString() ?? string.Empty;
         }
-
-        var filePath = saveDialog.FilePath.ToString();
         if (string.IsNullOrWhiteSpace(filePath))
         {
             return;

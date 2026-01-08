@@ -97,7 +97,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithEmptyTable_ReturnsEmpty()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
 
         var result = _service.FormatForClipboard(table);
 
@@ -107,7 +107,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithHeaders_IncludesHeaders()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, includeHeaders: true);
 
@@ -117,7 +117,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithoutHeaders_ExcludesHeaders()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, includeHeaders: false);
 
@@ -127,7 +127,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithSelectedRows_IncludesOnlySelectedRows()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, selectedRows: new[] { 1 }, includeHeaders: false);
 
@@ -137,7 +137,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithSelectedColumns_IncludesOnlySelectedColumns()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, selectedColumns: new[] { 0 }, includeHeaders: true);
 
@@ -148,7 +148,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithMultipleRows_SeparatesWithNewlines()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, includeHeaders: false);
 
@@ -159,7 +159,7 @@ public class ExportServiceTests
     [Fact]
     public void FormatForClipboard_WithInvalidRowIndex_SkipsInvalidRow()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
 
         var result = _service.FormatForClipboard(table, selectedRows: new[] { 0, 999 }, includeHeaders: false);
 
@@ -174,7 +174,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithSimpleTable_WritesCsv()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
         using var stream = new MemoryStream();
 
         await _service.ExportCsvAsync(table, stream);
@@ -188,7 +188,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithoutHeaders_ExcludesHeaders()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
         using var stream = new MemoryStream();
         var options = new ExportOptions { IncludeHeaders = false };
 
@@ -202,7 +202,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithCommaInValue_QuotesField()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Name", typeof(string));
         table.Rows.Add("Smith, John");
 
@@ -217,7 +217,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithQuotesInValue_EscapesQuotes()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Name", typeof(string));
         table.Rows.Add("John \"Johnny\" Doe");
 
@@ -232,7 +232,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithNewlineInValue_QuotesField()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Address", typeof(string));
         table.Rows.Add("123 Main St\nApt 4");
 
@@ -247,7 +247,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithCancellation_ThrowsOperationCanceledException()
     {
-        var table = CreateLargeTable(1000);
+        using var table = CreateLargeTable(1000);
         using var stream = new MemoryStream();
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -259,7 +259,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithProgress_ReportsProgress()
     {
-        var table = CreateLargeTable(200);
+        using var table = CreateLargeTable(200);
         using var stream = new MemoryStream();
         var mockProgress = new Mock<IOperationProgress>();
 
@@ -272,7 +272,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithDateTime_FormatsCorrectly()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Date", typeof(DateTime));
         table.Rows.Add(new DateTime(2024, 1, 15, 10, 30, 0));
 
@@ -292,7 +292,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithNull_WritesEmpty()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Name", typeof(string));
         table.Rows.Add(DBNull.Value);
 
@@ -311,7 +311,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportTsvAsync_WithSimpleTable_WritesTsv()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
         using var stream = new MemoryStream();
 
         await _service.ExportTsvAsync(table, stream);
@@ -324,7 +324,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportTsvAsync_WithTabInValue_QuotesField()
     {
-        var table = new DataTable();
+        using var table = new DataTable();
         table.Columns.Add("Name", typeof(string));
         table.Rows.Add("Smith\tJohn");
 
@@ -343,7 +343,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithSelectedRows_ExportsOnlySelectedRows()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
         using var stream = new MemoryStream();
         var options = new ExportOptions
         {
@@ -361,7 +361,7 @@ public class ExportServiceTests
     [Fact]
     public async Task ExportCsvAsync_WithSelectedColumns_ExportsOnlySelectedColumns()
     {
-        var table = CreateTestTable();
+        using var table = CreateTestTable();
         using var stream = new MemoryStream();
         var options = new ExportOptions
         {
