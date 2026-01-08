@@ -32,6 +32,12 @@ This file tracks incremental UX improvements during TUI development iterations.
 
 ## Done
 
+- [x] **Auth prompt on first query instead of startup** (fixed: 2026-01-07, #292)
+  - **Root cause:** `InitializeAsync()` claimed to "warm pool" but only created DI container
+  - Pool's `GetSeedClientAsync()` (which triggers auth) wasn't called until first query
+  - **Fix:** Added `WarmPoolAsync()` that calls `pool.EnsureInitializedAsync()` during startup
+  - Auth now happens at TUI launch, not first query
+
 - [x] **Pool invalidated unexpectedly after profile/environment switch** (fixed: 2026-01-07, ADR-0018)
   - **Root cause:** `MainWindow.SetEnvironmentAsync()` called `_session.InvalidateAsync()` directly
     instead of `_session.SetEnvironmentAsync()`, so `EnvironmentChanged` event never fired

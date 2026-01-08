@@ -97,7 +97,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
             // Fire-and-forget warming - don't block TUI startup
             // Errors are logged but don't prevent TUI from starting
 #pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = GetServiceProviderAsync(profile.Environment.Url, cancellationToken)
+            _ = WarmPoolAsync(profile.Environment.Url, cancellationToken)
                 .ContinueWith(t =>
                 {
                     if (t.IsFaulted)
@@ -116,6 +116,25 @@ internal sealed class InteractiveSession : IAsyncDisposable
         {
             TuiDebugLog.Log("No environment configured - skipping connection warming");
         }
+    }
+
+    /// <summary>
+    /// Actually warms the connection pool by initializing all seed connections.
+    /// This triggers authentication (if needed) during TUI startup rather than first query.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL to warm.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task WarmPoolAsync(string environmentUrl, CancellationToken cancellationToken)
+    {
+        TuiDebugLog.Log($"Warming pool (triggering auth if needed) for {environmentUrl}");
+
+        var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken)
+            .ConfigureAwait(false);
+
+        var pool = provider.GetRequiredService<IDataverseConnectionPool>();
+        await pool.EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+
+        TuiDebugLog.Log("Pool warmed - seeds initialized");
     }
 
     /// <summary>
