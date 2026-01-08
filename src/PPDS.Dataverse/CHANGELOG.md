@@ -122,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SQL deadlock retry (SQL error 1205)
 - Connection validation with background health checks
 - Security-first design: connection string redaction, sensitive data attributes
-- Targets: `net8.0`, `net10.0`
+- Targets: `net8.0`, `net9.0`, `net10.0`
 
 ### Changed
 

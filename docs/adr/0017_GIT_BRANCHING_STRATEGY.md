@@ -28,14 +28,14 @@ The power-platform-developer-suite repository uses git worktrees for parallel de
 
 Use worktrees for parallel, isolated work. Each worktree is a separate directory with its own branch.
 
-**Location:** `C:\VS\ppds\sdk-{branch-suffix}`
+**Location:** `{base}/ppds-{branch-suffix}` (sibling to main `ppds` folder)
 
 ```
-C:\VS\ppds\
-├── sdk/                    # Main repo (main or current work)
-├── sdk-plugin-traces/      # feature/plugin-traces
-├── sdk-tui-enhancements/   # feature/tui-enhancements
-└── sdk-file-format-adr/    # docs/file-format-policy
+{base}/
+├── ppds/                       # Main repo (main branch)
+├── ppds-plugin-traces/         # feature/plugin-traces
+├── ppds-tui-enhancements/      # feature/tui-enhancements
+└── ppds-file-format-adr/       # docs/file-format-policy
 ```
 
 **When to use worktrees:**

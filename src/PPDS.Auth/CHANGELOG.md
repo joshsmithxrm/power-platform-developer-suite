@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ICredentialProvider` abstraction for custom authentication methods
 - Platform-native token caching via MSAL
 - JWT claims parsing for identity information
-- Targets: `net8.0`, `net10.0`
+- Targets: `net8.0`, `net9.0`, `net10.0`
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.5...HEAD
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.4...Auth-v1.0.0-beta.5

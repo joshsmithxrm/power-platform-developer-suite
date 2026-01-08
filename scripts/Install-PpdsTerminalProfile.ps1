@@ -13,18 +13,19 @@
     Overwrite existing profile without prompting.
 
 .PARAMETER PpdsBasePath
-    Base path where PPDS repos are located. Defaults to C:\VS\ppds.
+    Base path where PPDS repos are located. Required parameter - no default.
 
 .EXAMPLE
-    .\Install-PpdsTerminalProfile.ps1
+    .\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "C:\Dev"
 
 .EXAMPLE
-    .\Install-PpdsTerminalProfile.ps1 -Force -PpdsBasePath "D:\Projects\ppds"
+    .\Install-PpdsTerminalProfile.ps1 -Force -PpdsBasePath "D:\Projects"
 #>
 [CmdletBinding()]
 param(
     [switch]$Force,
-    [string]$PpdsBasePath = "C:\VS\ppds"
+    [Parameter(Mandatory=$true)]
+    [string]$PpdsBasePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -126,13 +127,15 @@ function ppds {
 #region Quick Navigation
 <#
 .SYNOPSIS
-    Quickly navigate to PPDS worktrees.
+    Quickly navigate to PPDS repos.
 .DESCRIPTION
-    Without arguments, shows an interactive picker of all worktrees.
-    With an argument, jumps directly to that worktree.
+    Without arguments, shows an interactive picker of all ppds* folders.
+    With an argument, jumps directly to that folder (supports partial match or index).
 .EXAMPLE
     goto           # Interactive picker
-    goto sdk-tui   # Jump to sdk-tui-ux (partial match)
+    goto ppds-docs # Jump to ppds-docs (partial match)
+    goto 0         # Jump to first item (ppds)
+    goto 1         # Jump to second item (ppds-docs)
 #>
 function goto {
     param([string]`$Worktree)
@@ -142,23 +145,50 @@ function goto {
         return
     }
 
-    # Get all valid worktrees (has .git or src/PPDS.Cli)
-    `$worktrees = Get-ChildItem `$script:PpdsBasePath -Directory | Where-Object {
-        (Test-Path (Join-Path `$_.FullName ".git")) -or
-        (Test-Path (Join-Path `$_.FullName "src\PPDS.Cli"))
+    # Get all ppds* folders with custom sort order
+    `$priorityOrder = @('ppds', 'ppds-docs', 'ppds-alm', 'ppds-tools', 'ppds-demo')
+    `$allFolders = Get-ChildItem `$script:PpdsBasePath -Directory | Where-Object {
+        `$_.Name -like "ppds*"
     } | Select-Object -ExpandProperty Name
 
+    `$worktrees = @()
+    foreach (`$p in `$priorityOrder) {
+        if (`$allFolders -contains `$p) { `$worktrees += `$p }
+    }
+    `$worktrees += `$allFolders | Where-Object { `$_ -notin `$priorityOrder } | Sort-Object
+
+    # Support direct number access (goto 0, goto 1)
+    if (`$Worktree -match '^\d+`$') {
+        `$idx = [int]`$Worktree
+        if (`$idx -lt `$worktrees.Count) {
+            `$Worktree = `$worktrees[`$idx]
+        } else {
+            Write-Error "Index `$idx out of range (max: `$(`$worktrees.Count - 1))"
+            return
+        }
+    }
+
     if (-not `$Worktree) {
-        # Interactive picker
-        Write-Host "PPDS Worktrees:" -ForegroundColor Cyan
+        # Interactive picker with enhancements
+        Write-Host "PPDS Repos:" -ForegroundColor Cyan
         for (`$i = 0; `$i -lt `$worktrees.Count; `$i++) {
             `$wt = `$worktrees[`$i]
             `$wtPath = Join-Path `$script:PpdsBasePath `$wt
             `$branch = git -C `$wtPath branch --show-current 2>`$null
+
+            # Check for uncommitted changes (dirty indicator)
+            `$dirty = ""
+            `$status = git -C `$wtPath status --porcelain 2>`$null
+            if (`$status) { `$dirty = "*" }
+
+            # Color by type: Yellow for SDK (has PPDS.Cli), Cyan for others
+            `$isSDK = Test-Path (Join-Path `$wtPath "src\PPDS.Cli")
+            `$nameColor = if (`$isSDK) { "Yellow" } else { "Cyan" }
+
             Write-Host "  [`$i] " -NoNewline -ForegroundColor DarkGray
-            Write-Host `$wt -NoNewline -ForegroundColor Yellow
+            Write-Host `$wt -NoNewline -ForegroundColor `$nameColor
             if (`$branch) {
-                Write-Host " (`$branch)" -ForegroundColor DarkGray
+                Write-Host " (`$branch`$dirty)" -ForegroundColor DarkGray
             } else {
                 Write-Host ""
             }
@@ -166,7 +196,7 @@ function goto {
         Write-Host ""
         `$selection = Read-Host "Select (number or name)"
 
-        if (`$selection -match '^\d+$' -and [int]`$selection -lt `$worktrees.Count) {
+        if (`$selection -match '^\d+`$' -and [int]`$selection -lt `$worktrees.Count) {
             `$Worktree = `$worktrees[[int]`$selection]
         } else {
             `$Worktree = `$selection
@@ -184,7 +214,7 @@ function goto {
         Set-Location `$targetPath
         `$host.UI.RawUI.WindowTitle = "PPDS: `$Worktree"
     } else {
-        Write-Error "Worktree not found: `$Worktree"
+        Write-Error "Repo not found: `$Worktree"
     }
 }
 
@@ -194,7 +224,7 @@ Register-ArgumentCompleter -CommandName goto -ParameterName Worktree -ScriptBloc
 
     if (Test-Path `$script:PpdsBasePath) {
         Get-ChildItem `$script:PpdsBasePath -Directory |
-            Where-Object { `$_.Name -like "`$wordToComplete*" } |
+            Where-Object { `$_.Name -like "ppds*" -and `$_.Name -like "`$wordToComplete*" } |
             ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new(
                     `$_.Name,
@@ -265,7 +295,7 @@ Register-ArgumentCompleter -CommandName Start-PpdsWorkspace -ParameterName Workt
 
     if (Test-Path `$script:PpdsBasePath) {
         Get-ChildItem `$script:PpdsBasePath -Directory |
-            Where-Object { `$_.Name -like "`$wordToComplete*" } |
+            Where-Object { `$_.Name -like "ppds*" -and `$_.Name -like "`$wordToComplete*" } |
             ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new(
                     `$_.Name,

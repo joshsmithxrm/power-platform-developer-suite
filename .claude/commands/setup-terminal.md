@@ -15,16 +15,21 @@ Installs PowerShell functions for parallel PPDS development:
 
 ## Instructions
 
-Run the installer script from the SDK:
+Run the installer script from wherever you cloned the SDK, specifying your base path:
 
 ```powershell
-& C:\VS\ppds\sdk\scripts\Install-PpdsTerminalProfile.ps1
+& {path-to-ppds}\scripts\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "{your-base-path}"
+```
+
+Example:
+```powershell
+& C:\Dev\ppds\scripts\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "C:\Dev"
 ```
 
 If reinstalling/updating, add `-Force`:
 
 ```powershell
-& C:\VS\ppds\sdk\scripts\Install-PpdsTerminalProfile.ps1 -Force
+& {path-to-ppds}\scripts\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "{your-base-path}" -Force
 ```
 
 After installation, restart PowerShell or reload the profile:
@@ -33,23 +38,15 @@ After installation, restart PowerShell or reload the profile:
 . $PROFILE
 ```
 
-## Custom Base Path
-
-If your PPDS repos are not in `C:\VS\ppds`, specify the path:
-
-```powershell
-& C:\VS\ppds\sdk\scripts\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "D:\Projects\ppds"
-```
-
 ## Verification
 
 After installation, test the commands:
 
 ```powershell
-# Check ppds runs from worktree
-cd C:\VS\ppds\sdk
+# Navigate to your ppds folder
+cd {your-base-path}\ppds
 ppds --version
-# Should show: [ppds: sdk] followed by version
+# Should show: [ppds: ppds] followed by version
 
 # Test goto picker
 goto

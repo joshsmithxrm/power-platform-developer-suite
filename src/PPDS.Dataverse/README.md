@@ -271,6 +271,7 @@ Console.WriteLine(connection); // "DataverseConnection { Name = Primary, Url = h
 ## Target Frameworks
 
 - `net8.0`
+- `net9.0`
 - `net10.0`
 
 ## License

@@ -302,7 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Import options: bypass plugins, bypass flows, user mapping, strip owner fields, skip missing columns
 - System.CommandLine 2.0.1 stable
 - Packaged as .NET global tool (`ppds`)
-- Targets: `net10.0`
+- Targets: `net8.0`, `net9.0`, `net10.0`
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.11...HEAD
 [1.0.0-beta.11]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.10...Cli-v1.0.0-beta.11

@@ -111,7 +111,8 @@ dotnet tool install --global ppds --prerelease
 ## Version Status Check
 
 ```powershell
-# Check all repo versions from C:\VS\ppds
+# Check all repo versions from your PPDS base directory
+# Run this from your ppds parent folder (e.g., C:\Dev where ppds, ppds-docs, etc. live)
 Get-ChildItem -Directory | Where-Object { Test-Path "$($_.FullName)\.git" } | ForEach-Object {
     $name = $_.Name
     $tag = git -C $_.FullName describe --tags --abbrev=0 2>$null

@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Progress reporting with console and JSON output formats
 - Security-first design: connection string redaction, no PII in logs
 - DI integration via `AddDataverseMigration()` extension method
-- Targets: `net8.0`, `net10.0`
+- Targets: `net8.0`, `net9.0`, `net10.0`
 
 [Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.5...HEAD
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.4...Migration-v1.0.0-beta.5

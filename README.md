@@ -169,6 +169,65 @@ See [PPDS.Cli documentation](src/PPDS.Cli/README.md) for details.
 
 ---
 
+## Development
+
+### Prerequisites
+
+- .NET SDK 10.0+ (8.0 and 9.0 also supported)
+- Node.js 20+ (for extension development)
+- PowerShell 7+ (for scripts)
+
+### Opening the Project
+
+**Recommended:** Open `ppds.code-workspace` in VS Code for full-stack development.
+
+This provides:
+- .NET solution navigation with C# Dev Kit
+- Extension F5 debugging with correct path resolution
+- Unified build/test tasks for both .NET and TypeScript
+- Compound debugging for CLI + Extension integration testing
+
+**Alternatives:**
+- Open root folder for .NET-only development
+- Open `extension/` folder for extension-only development
+
+### Building
+
+```bash
+# Build .NET solution
+dotnet build PPDS.Sdk.sln
+
+# Build extension
+cd extension && npm run compile
+
+# Or use VS Code tasks: Ctrl+Shift+B
+```
+
+### Testing
+
+```bash
+# Unit tests (fast, no external dependencies)
+dotnet test --filter Category!=Integration
+
+# Integration tests (requires Dataverse connection)
+dotnet test --filter Category=Integration
+
+# TUI tests
+dotnet test --filter Category=TuiUnit
+```
+
+### Debugging (F5)
+
+| Configuration | Purpose |
+|---------------|---------|
+| `.NET: Debug TUI` | Launch interactive TUI |
+| `.NET: Debug CLI` | Debug CLI with custom args |
+| `.NET: Debug Daemon` | Run RPC daemon for extension |
+| `Extension: Run` | Launch extension dev host |
+| `Full-Stack: Daemon + Extension` | Debug both sides of RPC |
+
+---
+
 ## Architecture Decisions
 
 Key design decisions are documented as ADRs:

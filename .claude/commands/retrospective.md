@@ -8,8 +8,8 @@ Analyze a specific Claude Code session to extract learnings and improve workflow
 
 Examples:
 - `/retrospective` - Analyze current project's most recent session
-- `/retrospective C:\VS\.claude-worktrees\sdk\optimistic-almeida` - Specific worktree
-- `/retrospective sdk` - Shorthand for ppds/sdk
+- `/retrospective {base}\.claude-worktrees\ppds\optimistic-almeida` - Specific worktree
+- `/retrospective ppds` - Shorthand for main ppds repo
 
 ## Philosophy
 
