@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pre-commit validation hook for PPDS SDK.
+Pre-commit validation hook for PPDS.
 Runs dotnet build and test before allowing git commit.
 
 Note: This hook is only triggered for 'git commit' commands via the
@@ -60,7 +60,29 @@ def main():
                 print(test_result.stderr, file=sys.stderr)
             sys.exit(2)
 
-        print("✅ Build and unit tests passed", file=sys.stderr)
+        # Run extension lint if extension/ has changes or exists
+        extension_dir = os.path.join(project_dir, "extension")
+        if os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
+            lint_result = subprocess.run(
+                ["npm", "run", "lint"],
+                cwd=extension_dir,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                shell=True
+            )
+
+            if lint_result.returncode != 0:
+                print("❌ Extension lint failed. Fix before committing:", file=sys.stderr)
+                if lint_result.stdout:
+                    print(lint_result.stdout, file=sys.stderr)
+                if lint_result.stderr:
+                    print(lint_result.stderr, file=sys.stderr)
+                sys.exit(2)
+
+            print("✅ Extension lint passed", file=sys.stderr)
+
+        print("✅ All validations passed", file=sys.stderr)
         sys.exit(0)
 
     except FileNotFoundError:

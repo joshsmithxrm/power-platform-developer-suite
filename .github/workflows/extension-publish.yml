@@ -1,0 +1,61 @@
+name: Publish Extension
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (package only, no publish)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Only run on Extension-v* tags or manual dispatch
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/Extension-v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: Lint
+        working-directory: extension
+        run: npm run lint
+
+      - name: Build
+        working-directory: extension
+        run: npm run compile
+
+      - name: Package extension
+        working-directory: extension
+        run: npx vsce package --pre-release
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-vsix
+          path: extension/*.vsix
+          retention-days: 30
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+        working-directory: extension
+        run: npx vsce publish --pre-release -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}

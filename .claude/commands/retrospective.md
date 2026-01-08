@@ -8,8 +8,8 @@ Analyze a specific Claude Code session to extract learnings and improve workflow
 
 Examples:
 - `/retrospective` - Analyze current project's most recent session
-- `/retrospective C:\VS\.claude-worktrees\sdk\optimistic-almeida` - Specific worktree
-- `/retrospective sdk` - Shorthand for ppds/sdk
+- `/retrospective {base}\.claude-worktrees\ppds\optimistic-almeida` - Specific worktree
+- `/retrospective ppds` - Shorthand for main ppds repo
 
 ## Philosophy
 
@@ -45,7 +45,7 @@ C:\Users\[username]\.claude\projects\[encoded-path]\
 
 ```powershell
 # List recent sessions for a project
-$projectPath = "C--VS--claude-worktrees-sdk-optimistic-almeida"
+$projectPath = "C--Dev--ppds-optimistic-almeida"
 Get-ChildItem "C:\Users\$env:USERNAME\.claude\projects\$projectPath" -Filter "*.jsonl" |
     Sort-Object LastWriteTime -Descending |
     Select-Object Name, Length, LastWriteTime -First 5

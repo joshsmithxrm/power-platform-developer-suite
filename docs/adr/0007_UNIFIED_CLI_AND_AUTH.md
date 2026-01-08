@@ -6,7 +6,7 @@
 
 ## Context
 
-The PPDS SDK currently includes `PPDS.Migration.Cli` as a standalone CLI tool for data migration. As the ecosystem grows, we anticipate additional CLI functionality:
+PPDS currently includes `PPDS.Migration.Cli` as a standalone CLI tool for data migration. As the ecosystem grows, we anticipate additional CLI functionality:
 
 - Plugin registration management
 - Solution operations

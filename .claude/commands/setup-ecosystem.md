@@ -19,8 +19,9 @@ Interactive wizard that:
 ### Step 1: Choose Base Path
 
 Ask where to put repos (use AskUserQuestion):
-- Default: `C:\VS\ppds` (Windows) or `~/dev/ppds` (macOS/Linux)
+- Suggest common paths: `C:\Dev`, `D:\Projects`, `~/dev`, etc.
 - User can specify any path via "Other" option
+- No hardcoded default - always ask the user
 
 ### Step 2: Select Repositories
 
@@ -28,11 +29,11 @@ Multi-select (AskUserQuestion with multiSelect: true):
 
 | Option | Description |
 |--------|-------------|
-| `sdk` | NuGet packages & CLI (core) |
-| `extension` | VS Code extension |
-| `tools` | PowerShell module |
-| `alm` | CI/CD templates |
-| `demo` | Reference implementation |
+| `ppds` | SDK: NuGet packages & CLI (core) |
+| `ppds-docs` | Documentation site |
+| `ppds-alm` | CI/CD templates |
+| `ppds-tools` | PowerShell module |
+| `ppds-demo` | Reference implementation |
 
 ### Step 3: Developer Experience Options
 
@@ -56,11 +57,11 @@ For each selected repo:
 4. If not exists: Clone from GitHub
 
 ```bash
-git clone https://github.com/joshsmithxrm/ppds-sdk.git {base}/sdk
-git clone https://github.com/joshsmithxrm/power-platform-developer-suite.git {base}/extension
-git clone https://github.com/joshsmithxrm/ppds-tools.git {base}/tools
-git clone https://github.com/joshsmithxrm/ppds-alm.git {base}/alm
-git clone https://github.com/joshsmithxrm/ppds-demo.git {base}/demo
+git clone https://github.com/joshsmithxrm/power-platform-developer-suite.git {base}/ppds
+git clone https://github.com/joshsmithxrm/ppds-docs.git {base}/ppds-docs
+git clone https://github.com/joshsmithxrm/ppds-alm.git {base}/ppds-alm
+git clone https://github.com/joshsmithxrm/ppds-tools.git {base}/ppds-tools
+git clone https://github.com/joshsmithxrm/ppds-demo.git {base}/ppds-demo
 ```
 
 #### Create VS Code Workspace (if selected)
@@ -69,11 +70,11 @@ Generate `{base}/ppds.code-workspace`:
 ```json
 {
     "folders": [
-        { "path": "sdk" },
-        { "path": "extension" },
-        { "path": "tools" },
-        { "path": "alm" },
-        { "path": "demo" }
+        { "path": "ppds" },
+        { "path": "ppds-docs" },
+        { "path": "ppds-alm" },
+        { "path": "ppds-tools" },
+        { "path": "ppds-demo" }
     ],
     "settings": {}
 }
@@ -84,7 +85,7 @@ Only include folders that were actually cloned.
 
 Run the installer script:
 ```powershell
-& "{base}/sdk/scripts/Install-PpdsTerminalProfile.ps1" -PpdsBasePath "{base}"
+& "{base}/ppds/scripts/Install-PpdsTerminalProfile.ps1" -PpdsBasePath "{base}"
 ```
 
 This installs:
@@ -237,13 +238,13 @@ Next steps:
 
 ## Repository URLs
 
-| Shorthand | GitHub URL |
-|-----------|------------|
-| `sdk` | `https://github.com/joshsmithxrm/ppds-sdk.git` |
-| `extension` | `https://github.com/joshsmithxrm/power-platform-developer-suite.git` |
-| `tools` | `https://github.com/joshsmithxrm/ppds-tools.git` |
-| `alm` | `https://github.com/joshsmithxrm/ppds-alm.git` |
-| `demo` | `https://github.com/joshsmithxrm/ppds-demo.git` |
+| Folder | GitHub URL |
+|--------|------------|
+| `ppds` | `https://github.com/joshsmithxrm/power-platform-developer-suite.git` |
+| `ppds-docs` | `https://github.com/joshsmithxrm/ppds-docs.git` |
+| `ppds-alm` | `https://github.com/joshsmithxrm/ppds-alm.git` |
+| `ppds-tools` | `https://github.com/joshsmithxrm/ppds-tools.git` |
+| `ppds-demo` | `https://github.com/joshsmithxrm/ppds-demo.git` |
 
 ## Example Session
 
@@ -251,24 +252,24 @@ Next steps:
 User: /setup-ecosystem
 
 Claude: Where should PPDS repos live?
-[AskUserQuestion with default C:\VS\ppds]
+[AskUserQuestion with options: C:\Dev, D:\Projects, ~/dev, Other]
 
-User: C:\VS\ppds (default)
+User: C:\Dev
 
 Claude: Which repos do you need?
 [AskUserQuestion multiSelect]
 
-User: [selects sdk, extension]
+User: [selects ppds, ppds-docs]
 
 Claude: Which developer tools do you want?
 [AskUserQuestion multiSelect]
 
 User: [selects all: workspace, terminal, sound, status line]
 
-Claude: Setting up C:\VS\ppds...
+Claude: Setting up C:\Dev...
 
-Cloning sdk... done
-Cloning extension... done
+Cloning ppds... done
+Cloning ppds-docs... done
 Creating ppds.code-workspace... done
 Installing terminal profile... done
 Configuring sound notification... done
@@ -276,7 +277,7 @@ Setting up status line... done
 
 Setup complete!
 
-To open in VS Code: code "C:\VS\ppds\ppds.code-workspace"
+To open in VS Code: code "C:\Dev\ppds.code-workspace"
 Restart your terminal to load the profile.
 Restart Claude Code for hooks and status line to take effect.
 ```

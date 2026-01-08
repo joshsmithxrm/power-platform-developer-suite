@@ -14,7 +14,7 @@ Copy templates to your home directory for use across all projects:
 mkdir -p ~/.claude/ppds
 
 # Copy templates (from SDK repo)
-cp -r path/to/ppds-sdk/templates/claude/* ~/.claude/ppds/
+cp -r path/to/power-platform-developer-suite/templates/claude/* ~/.claude/ppds/
 ```
 
 **Windows (PowerShell):**
@@ -23,7 +23,7 @@ cp -r path/to/ppds-sdk/templates/claude/* ~/.claude/ppds/
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\ppds"
 
 # Copy templates (from SDK repo)
-Copy-Item -Path "C:\path\to\ppds-sdk\templates\claude\*" -Destination "$env:USERPROFILE\.claude\ppds" -Recurse
+Copy-Item -Path "C:\path\to\power-platform-developer-suite\templates\claude\*" -Destination "$env:USERPROFILE\.claude\ppds" -Recurse
 ```
 
 Then in any project's `CLAUDE.md`, add:
@@ -55,12 +55,12 @@ Link to SDK repo for automatic updates when you pull new SDK versions:
 
 **macOS/Linux:**
 ```bash
-ln -s /path/to/ppds-sdk/templates/claude/CONSUMER_GUIDE.md .claude/rules/ppds.md
+ln -s /path/to/power-platform-developer-suite/templates/claude/CONSUMER_GUIDE.md .claude/rules/ppds.md
 ```
 
 **Windows (requires admin):**
 ```powershell
-New-Item -ItemType SymbolicLink -Path ".claude\rules\ppds.md" -Target "C:\path\to\ppds-sdk\templates\claude\CONSUMER_GUIDE.md"
+New-Item -ItemType SymbolicLink -Path ".claude\rules\ppds.md" -Target "C:\path\to\power-platform-developer-suite\templates\claude\CONSUMER_GUIDE.md"
 ```
 
 ---

@@ -27,7 +27,7 @@ Security vulnerabilities should **not** be reported via public GitHub issues. Pu
 ### 2. Report Privately
 
 **Use GitHub's private vulnerability reporting:**
-1. Go to the [Security tab](https://github.com/joshsmithxrm/ppds-sdk/security)
+1. Go to the [Security tab](https://github.com/joshsmithxrm/power-platform-developer-suite/security)
 2. Click "Report a vulnerability"
 3. Fill out the form with details
 
@@ -166,10 +166,10 @@ We follow **coordinated disclosure**:
 
 ## Contact
 
-- **Security Issues**: [GitHub Private Vulnerability Reporting](https://github.com/joshsmithxrm/ppds-sdk/security/advisories/new)
-- **General Security Questions**: Open a [GitHub Discussion](https://github.com/joshsmithxrm/ppds-sdk/discussions)
-- **Non-Security Bugs**: Open a [GitHub Issue](https://github.com/joshsmithxrm/ppds-sdk/issues)
+- **Security Issues**: [GitHub Private Vulnerability Reporting](https://github.com/joshsmithxrm/power-platform-developer-suite/security/advisories/new)
+- **General Security Questions**: Open a [GitHub Discussion](https://github.com/joshsmithxrm/power-platform-developer-suite/discussions)
+- **Non-Security Bugs**: Open a [GitHub Issue](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
 
 ---
 
-**Thank you for helping keep PPDS SDK secure!**
+**Thank you for helping keep PPDS secure!**

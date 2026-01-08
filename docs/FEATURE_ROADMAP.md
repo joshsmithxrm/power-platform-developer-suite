@@ -1,12 +1,12 @@
-# PPDS SDK Roadmap
+# PPDS Feature Roadmap
 
 ## Epic: Extension Feature Parity
 
-**Goal:** SDK CLI parity with VS Code extension to enable CLI daemon migration (Extension issues #51-54).
+**Goal:** CLI parity with VS Code extension to enable CLI daemon migration (Extension issues #51-54).
 
 **Status:** In Progress
 
-**View Issues:** [Filter by phase label](https://github.com/joshsmithxrm/ppds-sdk/issues?q=is%3Aopen+label%3Aphase%3A1-core%2Cphase%3A2-connections%2Cphase%3A3-traces%2Cphase%3A4-webresources%2Cphase%3A5-migration)
+**View Issues:** [Filter by phase label](https://github.com/joshsmithxrm/power-platform-developer-suite/issues?q=is%3Aopen+label%3Aphase%3A1-core%2Cphase%3A2-connections%2Cphase%3A3-traces%2Cphase%3A4-webresources%2Cphase%3A5-migration)
 
 ---
 
@@ -26,7 +26,7 @@
 
 ## Phase 1: Core Commands
 
-**Epic:** [#137](https://github.com/joshsmithxrm/ppds-sdk/issues/137) (Solutions)
+**Epic:** [#137](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/137) (Solutions)
 
 **Scope:**
 - `ppds solutions` - list, get, export, import, components, publish, url

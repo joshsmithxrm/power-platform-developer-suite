@@ -1,6 +1,6 @@
 # PPDS Roadmap - Issue Triage & Project Management
 
-**The [PPDS Roadmap](https://github.com/users/joshsmithxrm/projects/3) is a public GitHub Project that tracks work across the PPDS SDK repository.**
+**The [PPDS Roadmap](https://github.com/users/joshsmithxrm/projects/3) is a public GitHub Project that tracks work across the PPDS repository.**
 
 This document provides complete guidelines for triaging issues, using project fields, and managing the roadmap effectively.
 
@@ -10,7 +10,7 @@ This document provides complete guidelines for triaging issues, using project fi
 
 | What | Where | Purpose |
 |------|-------|---------|
-| **All issues** | [GitHub Issues](https://github.com/joshsmithxrm/ppds-sdk/issues) | Discussion, reproduction steps, implementation details |
+| **All issues** | [GitHub Issues](https://github.com/joshsmithxrm/power-platform-developer-suite/issues) | Discussion, reproduction steps, implementation details |
 | **Roadmap** | [PPDS Roadmap Project](https://github.com/users/joshsmithxrm/projects/3) | Organized view with Type, Priority, Size, Status, Target |
 | **Triage command** | `/triage` | Systematic issue categorization |
 | **Feature roadmap** | [FEATURE_ROADMAP.md](FEATURE_ROADMAP.md) | Phase planning, extension parity epic |
@@ -293,7 +293,7 @@ Quick visual identification in GitHub search:
 ```
 
 **What it does:**
-1. Fetches all issues from ppds-sdk
+1. Fetches all issues from power-platform-developer-suite
 2. Cross-references with PPDS Roadmap project
 3. Identifies issues missing any field (Type, Priority, Size, Status, Target)
 4. Shows batch summary table

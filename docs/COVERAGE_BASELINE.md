@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document records the baseline code coverage for each PPDS SDK package, used to track progress toward the targets defined in [Issue #55](https://github.com/joshsmithxrm/ppds-sdk/issues/55).
+This document records the baseline code coverage for each PPDS package, used to track progress toward the targets defined in [Issue #55](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55).
 
 ## Current Baseline
 
@@ -38,12 +38,12 @@ This document records the baseline code coverage for each PPDS SDK package, used
 
 Coverage is collected using:
 - **Collector**: `coverlet.collector` via `dotnet test --collect:"XPlat Code Coverage"`
-- **Reporter**: [Codecov](https://codecov.io/gh/joshsmithxrm/ppds-sdk)
+- **Reporter**: [Codecov](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite)
 - **Frameworks**: Merged from net8.0, net9.0, net10.0 test runs
 
 ## Targets by Package
 
-From [Issue #55 - Integration Testing Infrastructure](https://github.com/joshsmithxrm/ppds-sdk/issues/55):
+From [Issue #55 - Integration Testing Infrastructure](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55):
 
 | Package | Unit Target | Integration Target | Rationale |
 |---------|-------------|-------------------|-----------|
@@ -78,7 +78,7 @@ CLI E2E tests currently cover:
 3. Export test exports that known data
 4. Workflow test validates round-trip
 
-See [Issue #104](https://github.com/joshsmithxrm/ppds-sdk/issues/104) for details.
+See [Issue #104](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/104) for details.
 
 ### Future: Coverage Gates
 - [ ] Enable patch coverage enforcement (80% for new code)
@@ -111,7 +111,7 @@ Coverage thresholds are configured in [`codecov.yml`](../codecov.yml):
 
 ## References
 
-- [Codecov Dashboard](https://codecov.io/gh/joshsmithxrm/ppds-sdk)
-- [Issue #55 - Integration Testing Infrastructure](https://github.com/joshsmithxrm/ppds-sdk/issues/55)
-- [Issue #84 - Code Coverage Reporting](https://github.com/joshsmithxrm/ppds-sdk/issues/84)
+- [Codecov Dashboard](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite)
+- [Issue #55 - Integration Testing Infrastructure](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/55)
+- [Issue #84 - Code Coverage Reporting](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/84)
 - [Demo Test Scripts](../demo/scripts/) - PowerShell scripts for manual CLI validation

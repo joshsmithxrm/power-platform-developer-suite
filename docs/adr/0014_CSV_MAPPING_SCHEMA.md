@@ -26,7 +26,7 @@ Mapping files use JSON with JSON Schema validation:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/csv-mapping.schema.json",
+  "$schema": "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/csv-mapping.schema.json",
   "version": "1.0",
   "entity": "ppds_city",
   "columns": { ... }

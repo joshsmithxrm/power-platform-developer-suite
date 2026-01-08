@@ -29,7 +29,7 @@ public static class CsvMappingSchema
     /// URL to the published JSON Schema for validation.
     /// </summary>
     public const string SchemaUrl =
-        "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/csv-mapping.schema.json";
+        "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/csv-mapping.schema.json";
 
     /// <summary>
     /// Checks if a mapping file version is compatible with this CLI version.

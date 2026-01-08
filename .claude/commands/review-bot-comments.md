@@ -14,13 +14,13 @@ Fetch BOTH PR comments AND code scanning alerts:
 
 ```bash
 # 1a. PR comments from bots
-gh api repos/joshsmithxrm/ppds-sdk/pulls/[PR]/comments \
+gh api repos/joshsmithxrm/power-platform-developer-suite/pulls/[PR]/comments \
   --jq '.[] | select(.user.login | test("gemini|Copilot|copilot|github-advanced")) | {id, user: .user.login, body: .body[:100], path, line}'
 
 # 1b. Code scanning alerts on the PR merge ref
 # IMPORTANT: Use refs/pull/[PR]/merge to get alerts introduced by the PR
 # Using just the branch name returns empty or wrong results!
-gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" \
+gh api "repos/joshsmithxrm/power-platform-developer-suite/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" \
   --jq '.[] | {number, rule: .rule.description, path: .most_recent_instance.location.path, line: .most_recent_instance.location.start_line, severity: .rule.severity}'
 ```
 
@@ -43,9 +43,9 @@ Autofix suggestions are NOT PR comments - they require different handling:
 | Action | Command |
 |--------|---------|
 | **Fix the code** | Alert auto-closes when CI runs on the fix |
-| **Dismiss as false positive** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="false positive" -f dismissed_comment="Reason"` |
-| **Dismiss as won't fix** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="won't fix" -f dismissed_comment="Reason"` |
-| **Dismiss as test code** | `gh api repos/joshsmithxrm/ppds-sdk/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="used in tests" -f dismissed_comment="Test code"` |
+| **Dismiss as false positive** | `gh api repos/joshsmithxrm/power-platform-developer-suite/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="false positive" -f dismissed_comment="Reason"` |
+| **Dismiss as won't fix** | `gh api repos/joshsmithxrm/power-platform-developer-suite/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="won't fix" -f dismissed_comment="Reason"` |
+| **Dismiss as test code** | `gh api repos/joshsmithxrm/power-platform-developer-suite/code-scanning/alerts/{number} -X PATCH -f state=dismissed -f dismissed_reason="used in tests" -f dismissed_comment="Test code"` |
 
 ### 2. Triage Each Comment
 
@@ -109,7 +109,7 @@ After changes are committed, reply to each bot comment. Do NOT batch responses i
 
 ```bash
 # Reply to a specific review comment (note: uses /replies endpoint)
-gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments/{comment_id}/replies \
+gh api repos/joshsmithxrm/power-platform-developer-suite/pulls/{pr}/comments/{comment_id}/replies \
   -f body="Fixed in abc123"
 ```
 
@@ -150,7 +150,7 @@ After addressing comments, resolve the threads so the PR can be merged:
 # Get thread IDs
 gh api graphql -f query='
 query {
-  repository(owner: "joshsmithxrm", name: "ppds-sdk") {
+  repository(owner: "joshsmithxrm", name: "power-platform-developer-suite") {
     pullRequest(number: {PR}) {
       reviewThreads(first: 20) {
         nodes {
@@ -180,18 +180,18 @@ Before completing, verify:
 
 **PR comments** - Every comment has a reply:
 ```bash
-gh api repos/joshsmithxrm/ppds-sdk/pulls/{pr}/comments --jq "length"
+gh api repos/joshsmithxrm/power-platform-developer-suite/pulls/{pr}/comments --jq "length"
 ```
 
 **Code scanning alerts** - All are fixed or dismissed:
 ```bash
-gh api "repos/joshsmithxrm/ppds-sdk/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" --jq "length"
+gh api "repos/joshsmithxrm/power-platform-developer-suite/code-scanning/alerts?ref=refs/pull/[PR]/merge&state=open" --jq "length"
 # Should return 0
 ```
 
 **Review threads** - All resolved:
 ```bash
-gh api graphql -f query='query { repository(owner: "joshsmithxrm", name: "ppds-sdk") { pullRequest(number: {PR}) { reviewThreads(first: 20) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+gh api graphql -f query='query { repository(owner: "joshsmithxrm", name: "power-platform-developer-suite") { pullRequest(number: {PR}) { reviewThreads(first: 20) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
 # Should return 0
 ```
 

@@ -50,23 +50,18 @@ Read and display the full contents of `.claude/session-prompt.md`:
 cat .claude/session-prompt.md
 ```
 
-### 4. Suggest Next Steps
+### 4. Enter Plan Mode
 
-Based on prompt content, suggest entering plan mode:
+After displaying session context, automatically enter plan mode:
 
 ```
-Ready to begin.
+Entering plan mode to verify and plan implementation...
+```
 
-Recommended: Enter plan mode to verify and plan implementation.
-
-The session prompt contains a verification checklist that should be
-completed before implementing. Plan mode will:
+Use the EnterPlanMode tool to begin planning. Plan mode will:
 1. Verify current code patterns match issue assumptions
 2. Check ADR compliance
 3. Create an implementation plan for approval
-
-Enter plan mode now? (or proceed directly with implementation)
-```
 
 ## Output Format
 
@@ -85,23 +80,11 @@ SESSION CONTEXT
 [Contents of .claude/session-prompt.md]
 
 --------------------------------------------------------------------------------
-NEXT STEPS
---------------------------------------------------------------------------------
 
-Recommended: Enter plan mode to verify and plan implementation.
-
-The session context includes:
-- Issue details and acceptance criteria
-- Verification checklist (patterns, ADRs, staleness)
-- Research hints for exploration
-
-Plan mode will help you:
-1. Verify the issue's approach against current codebase
-2. Create a detailed implementation plan
-3. Get approval before making changes
-
-Ready to enter plan mode?
+Entering plan mode to verify and plan implementation...
 ```
+
+Then use the EnterPlanMode tool.
 
 ## When to Use
 

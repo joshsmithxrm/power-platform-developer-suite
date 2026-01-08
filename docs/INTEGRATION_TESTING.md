@@ -1,6 +1,6 @@
 # Integration Testing Guide
 
-**Comprehensive guide to running and debugging integration tests in the PPDS SDK.**
+**Comprehensive guide to running and debugging integration tests in PPDS.**
 
 ---
 

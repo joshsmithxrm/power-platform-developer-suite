@@ -1,0 +1,63 @@
+{
+  "name": "power-platform-developer-suite",
+  "displayName": "Power Platform Developer Suite",
+  "description": "Comprehensive development tools for Microsoft Dataverse and Power Platform",
+  "version": "0.4.0-alpha.1",
+  "publisher": "JoshSmithXRM",
+  "preview": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "Power Platform",
+    "Dataverse",
+    "Dynamics 365",
+    "CRM",
+    "Microsoft"
+  ],
+  "activationEvents": [
+    "onCommand:ppds.listProfiles"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ppds.listProfiles",
+        "title": "PPDS: List Profiles"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src",
+    "test": "echo \"No tests yet\"",
+    "package": "vsce package --pre-release"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joshsmithxrm/power-platform-developer-suite.git"
+  },
+  "bugs": {
+    "url": "https://github.com/joshsmithxrm/power-platform-developer-suite/issues"
+  },
+  "homepage": "https://github.com/joshsmithxrm/power-platform-developer-suite#readme",
+  "license": "MIT",
+  "icon": "images/icon.png"
+}

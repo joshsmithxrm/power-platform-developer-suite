@@ -199,10 +199,10 @@ User: yes
 Claude: Creating releases...
 
 ✅ Created: PPDS.Auth v1.0.0-beta.4
-   https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Auth-v1.0.0-beta.4
+   https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Auth-v1.0.0-beta.4
 
 ✅ Created: PPDS.Cli v1.0.0-beta.6
-   https://github.com/joshsmithxrm/ppds-sdk/releases/tag/Cli-v1.0.0-beta.6
+   https://github.com/joshsmithxrm/power-platform-developer-suite/releases/tag/Cli-v1.0.0-beta.6
 
 ## Summary
 - 2 releases created

@@ -28,7 +28,7 @@ gh api graphql -f query='query { node(id: "PVT_kwHOAGk32c4BLj-0") { ... on Proje
 PROJECT_NUMBER=3
 PROJECT_ID=PVT_kwHOAGk32c4BLj-0
 REPO_OWNER=joshsmithxrm
-REPO_NAME=ppds-sdk
+REPO_NAME=power-platform-developer-suite
 
 # Field IDs
 TYPE_FIELD_ID=PVTSSF_lAHOAGk32c4BLj-0zg7GUbM
@@ -67,7 +67,7 @@ STATUS_DONE=98236657
 
 **Fetch all issues:**
 ```bash
-gh issue list --repo joshsmithxrm/ppds-sdk \
+gh issue list --repo joshsmithxrm/power-platform-developer-suite \
   --limit 1000 \
   --state ${STATE:-open} \
   --json number,title,state,url,labels,createdAt
@@ -303,7 +303,7 @@ For each issue:
 
 **If not in project:**
 ```bash
-gh project item-add 3 --owner joshsmithxrm --url https://github.com/joshsmithxrm/ppds-sdk/issues/{number}
+gh project item-add 3 --owner joshsmithxrm --url https://github.com/joshsmithxrm/power-platform-developer-suite/issues/{number}
 ```
 
 **Update fields via GraphQL API:**

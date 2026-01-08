@@ -1,6 +1,6 @@
 # Copilot Code Review Instructions
 
-This file guides GitHub Copilot's code review behavior for the PPDS SDK repository.
+This file guides GitHub Copilot's code review behavior for the PPDS repository.
 
 ## Architecture (ADRs 0015, 0024, 0025, 0026)
 

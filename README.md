@@ -1,10 +1,11 @@
-# PPDS SDK
+# Power Platform Developer Suite
 
-[![Build](https://github.com/joshsmithxrm/ppds-sdk/actions/workflows/build.yml/badge.svg)](https://github.com/joshsmithxrm/ppds-sdk/actions/workflows/build.yml)
-[![codecov](https://codecov.io/gh/joshsmithxrm/ppds-sdk/graph/badge.svg)](https://codecov.io/gh/joshsmithxrm/ppds-sdk)
+[![Build](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml/badge.svg)](https://github.com/joshsmithxrm/power-platform-developer-suite/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite/graph/badge.svg)](https://codecov.io/gh/joshsmithxrm/power-platform-developer-suite)
+[![Docs](https://img.shields.io/badge/docs-ppds--docs-blue)](https://joshsmithxrm.github.io/ppds-docs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-NuGet packages for Microsoft Dataverse development. Part of the [Power Platform Developer Suite](https://github.com/joshsmithxrm/power-platform-developer-suite) ecosystem.
+A comprehensive development platform for Microsoft Dataverse and Power Platform. Includes NuGet packages, CLI tool, VS Code extension, and TUI application.
 
 ## Packages
 
@@ -128,11 +129,19 @@ See [PPDS.Migration documentation](src/PPDS.Migration/README.md) for details.
 
 ## PPDS.Cli
 
-Unified CLI tool for Dataverse operations. Install as a .NET global tool:
+Interactive TUI and CLI tool for Dataverse operations. Install as a .NET global tool:
 
 ```bash
 dotnet tool install -g PPDS.Cli
 ```
+
+Running `ppds` without arguments launches the interactive TUI:
+
+```bash
+ppds  # Launches interactive TUI with guided workflows
+```
+
+Or run specific commands directly:
 
 ```bash
 # Create an auth profile (opens browser for login)
@@ -157,6 +166,65 @@ ppds data import --data data.zip --mode Upsert
 - `ppds query` - Execute queries (fetch, sql)
 
 See [PPDS.Cli documentation](src/PPDS.Cli/README.md) for details.
+
+---
+
+## Development
+
+### Prerequisites
+
+- .NET SDK 10.0+ (8.0 and 9.0 also supported)
+- Node.js 20+ (for extension development)
+- PowerShell 7+ (for scripts)
+
+### Opening the Project
+
+**Recommended:** Open `ppds.code-workspace` in VS Code for full-stack development.
+
+This provides:
+- .NET solution navigation with C# Dev Kit
+- Extension F5 debugging with correct path resolution
+- Unified build/test tasks for both .NET and TypeScript
+- Compound debugging for CLI + Extension integration testing
+
+**Alternatives:**
+- Open root folder for .NET-only development
+- Open `extension/` folder for extension-only development
+
+### Building
+
+```bash
+# Build .NET solution
+dotnet build PPDS.Sdk.sln
+
+# Build extension
+cd extension && npm run compile
+
+# Or use VS Code tasks: Ctrl+Shift+B
+```
+
+### Testing
+
+```bash
+# Unit tests (fast, no external dependencies)
+dotnet test --filter Category!=Integration
+
+# Integration tests (requires Dataverse connection)
+dotnet test --filter Category=Integration
+
+# TUI tests
+dotnet test --filter Category=TuiUnit
+```
+
+### Debugging (F5)
+
+| Configuration | Purpose |
+|---------------|---------|
+| `.NET: Debug TUI` | Launch interactive TUI |
+| `.NET: Debug CLI` | Debug CLI with custom args |
+| `.NET: Debug Daemon` | Run RPC daemon for extension |
+| `Extension: Run` | Launch extension dev host |
+| `Full-Stack: Daemon + Extension` | Debug both sides of RPC |
 
 ---
 
@@ -202,7 +270,7 @@ See [templates/claude/INSTALL.md](templates/claude/INSTALL.md) for installation 
 
 | Project | Description |
 |---------|-------------|
-| [power-platform-developer-suite](https://github.com/joshsmithxrm/power-platform-developer-suite) | VS Code extension |
+| [ppds-docs](https://joshsmithxrm.github.io/ppds-docs/) | Documentation site ([source](https://github.com/joshsmithxrm/ppds-docs)) |
 | [ppds-tools](https://github.com/joshsmithxrm/ppds-tools) | PowerShell deployment module |
 | [ppds-alm](https://github.com/joshsmithxrm/ppds-alm) | CI/CD pipeline templates |
 | [ppds-demo](https://github.com/joshsmithxrm/ppds-demo) | Reference implementation |

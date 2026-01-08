@@ -70,3 +70,12 @@ coverage/
 tests/PPDS.LiveTests/TestData/*.dll
 tests/PPDS.LiveTests/TestData/*.pdb
 tests/PPDS.LiveTests/TestData/registrations.json
+
+# Test data files (should not be in source control)
+cities.csv
+cities.json
+states.csv
+states.json
+
+# Gemini AI config (personal)
+.gemini/

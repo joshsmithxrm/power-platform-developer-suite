@@ -88,12 +88,12 @@ public static class ErrorOutput
     /// <summary>
     /// Documentation URL.
     /// </summary>
-    public const string DocumentationUrl = "https://github.com/joshsmithxrm/ppds-sdk";
+    public const string DocumentationUrl = "https://github.com/joshsmithxrm/power-platform-developer-suite";
 
     /// <summary>
     /// Issues URL.
     /// </summary>
-    public const string IssuesUrl = "https://github.com/joshsmithxrm/ppds-sdk/issues";
+    public const string IssuesUrl = "https://github.com/joshsmithxrm/power-platform-developer-suite/issues";
 
     /// <summary>
     /// Writes a formatted error message with version and documentation info.

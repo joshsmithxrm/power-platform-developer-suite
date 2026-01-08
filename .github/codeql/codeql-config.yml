@@ -2,7 +2,7 @@
 # See: https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning
 # Query filter docs: https://github.blog/changelog/2022-08-31-code-scanning-customize-your-codeql-analysis-using-query-filters/
 
-name: "PPDS SDK CodeQL Config"
+name: "PPDS CodeQL Config"
 
 paths-ignore:
   # Test projects - excluded from security analysis

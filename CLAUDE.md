@@ -1,4 +1,4 @@
-# CLAUDE.md - ppds-sdk
+# CLAUDE.md - Power Platform Developer Suite
 
 NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivity, migration tooling.
 
@@ -56,7 +56,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 ## 📁 Project Structure
 
 ```
-ppds-sdk/
+power-platform-developer-suite/
 ├── src/
 │   ├── PPDS.Plugins/        # Plugin attributes (PluginStep, PluginImage)
 │   ├── PPDS.Dataverse/      # Connection pool, bulk operations, metadata
@@ -67,6 +67,7 @@ ppds-sdk/
 │       ├── Commands/        # CLI command handlers
 │       ├── Services/        # Application Services (ADR-0015)
 │       └── Tui/             # Terminal.Gui application
+├── extension/               # VS Code extension (TypeScript)
 ├── tests/                   # Unit, integration, and live tests
 ├── docs/adr/                # Architecture Decision Records
 └── CHANGELOG.md

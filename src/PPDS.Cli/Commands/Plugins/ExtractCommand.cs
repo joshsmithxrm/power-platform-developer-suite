@@ -153,7 +153,7 @@ public static class ExtractCommand
 
                 config = new PluginRegistrationConfig
                 {
-                    Schema = "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/plugin-registration.schema.json",
+                    Schema = "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/plugin-registration.schema.json",
                     Version = existingConfig?.Version ?? "1.0",
                     GeneratedAt = DateTimeOffset.UtcNow,
                     Assemblies = [assemblyConfig],
@@ -164,7 +164,7 @@ public static class ExtractCommand
             {
                 config = new PluginRegistrationConfig
                 {
-                    Schema = "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/plugin-registration.schema.json",
+                    Schema = "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/plugin-registration.schema.json",
                     Version = "1.0",
                     GeneratedAt = DateTimeOffset.UtcNow,
                     Assemblies = [assemblyConfig]

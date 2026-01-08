@@ -18,7 +18,7 @@
     <PackageId>PPDS.Analyzers</PackageId>
     <Version>1.0.0</Version>
     <Authors>PPDS Team</Authors>
-    <Description>Roslyn analyzers for PPDS SDK architectural enforcement</Description>
+    <Description>Roslyn analyzers for PPDS architectural enforcement</Description>
     <PackageTags>analyzers;roslyn;ppds</PackageTags>
     <NoPackageAnalysis>true</NoPackageAnalysis>
   </PropertyGroup>

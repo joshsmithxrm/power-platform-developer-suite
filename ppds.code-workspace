@@ -1,0 +1,390 @@
+{
+  "folders": [
+    {
+      "name": "PPDS (Root)",
+      "path": "."
+    },
+    {
+      "name": "Extension",
+      "path": "extension"
+    }
+  ],
+  "settings": {
+    "dotnet.defaultSolution": "PPDS.Sdk.sln",
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true,
+      "**/node_modules": true,
+      "**/*.vsix": true
+    },
+    "search.exclude": {
+      "**/bin": true,
+      "**/obj": true,
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/coverage": true,
+      "**/*.vsix": true
+    },
+    "files.watcherExclude": {
+      "**/bin/**": true,
+      "**/obj/**": true,
+      "**/node_modules/**": true
+    },
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.eslint": "explicit"
+    },
+    "[csharp]": {
+      "editor.defaultFormatter": "ms-dotnettools.csharp"
+    },
+    "[typescript]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[jsonc]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[markdown]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-dotnettools.csdevkit",
+      "ms-dotnettools.csharp",
+      "ms-dotnettools.vscode-dotnet-runtime",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "ms-vscode.vscode-typescript-next",
+      "ms-vscode.powershell",
+      "editorconfig.editorconfig"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": ".NET: Debug TUI",
+        "type": "coreclr",
+        "request": "launch",
+        "preLaunchTask": "build-dotnet",
+        "program": "${workspaceFolder:PPDS (Root)}/src/PPDS.Cli/bin/Debug/net10.0/ppds.dll",
+        "args": [],
+        "cwd": "${workspaceFolder:PPDS (Root)}",
+        "console": "integratedTerminal",
+        "stopAtEntry": false
+      },
+      {
+        "name": ".NET: Debug CLI",
+        "type": "coreclr",
+        "request": "launch",
+        "preLaunchTask": "build-dotnet",
+        "program": "${workspaceFolder:PPDS (Root)}/src/PPDS.Cli/bin/Debug/net10.0/ppds.dll",
+        "args": ["${input:cliArgs}"],
+        "cwd": "${workspaceFolder:PPDS (Root)}",
+        "console": "integratedTerminal",
+        "stopAtEntry": false
+      },
+      {
+        "name": ".NET: Debug Daemon",
+        "type": "coreclr",
+        "request": "launch",
+        "preLaunchTask": "build-dotnet",
+        "program": "${workspaceFolder:PPDS (Root)}/src/PPDS.Cli/bin/Debug/net10.0/ppds.dll",
+        "args": ["serve"],
+        "cwd": "${workspaceFolder:PPDS (Root)}",
+        "console": "integratedTerminal",
+        "stopAtEntry": false
+      },
+      {
+        "name": ".NET: Attach to Process",
+        "type": "coreclr",
+        "request": "attach"
+      },
+      {
+        "name": "Extension: Run",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:Extension}"
+        ],
+        "outFiles": [
+          "${workspaceFolder:Extension}/dist/**/*.js"
+        ],
+        "preLaunchTask": "extension: compile"
+      },
+      {
+        "name": "Extension: Run (Watch Mode)",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:Extension}"
+        ],
+        "outFiles": [
+          "${workspaceFolder:Extension}/dist/**/*.js"
+        ],
+        "preLaunchTask": "extension: watch"
+      },
+      {
+        "name": "Extension: Run (No Build)",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:Extension}"
+        ],
+        "outFiles": [
+          "${workspaceFolder:Extension}/dist/**/*.js"
+        ]
+      },
+      {
+        "name": "Extension: Tests",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:Extension}",
+          "--extensionTestsPath=${workspaceFolder:Extension}/dist/test/suite/index"
+        ],
+        "outFiles": [
+          "${workspaceFolder:Extension}/dist/**/*.js"
+        ],
+        "preLaunchTask": "extension: compile"
+      },
+      {
+        "name": "Extension: Open Folder",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:Extension}",
+          "${input:folderToOpen}"
+        ],
+        "outFiles": [
+          "${workspaceFolder:Extension}/dist/**/*.js"
+        ],
+        "preLaunchTask": "extension: compile"
+      }
+    ],
+    "compounds": [
+      {
+        "name": "Full-Stack: Daemon + Extension",
+        "configurations": [".NET: Debug Daemon", "Extension: Run (No Build)"],
+        "stopAll": true,
+        "presentation": {
+          "order": 1
+        }
+      }
+    ],
+    "inputs": [
+      {
+        "id": "cliArgs",
+        "type": "promptString",
+        "description": "CLI arguments (e.g., 'auth list' or 'data export --help')",
+        "default": "auth list"
+      },
+      {
+        "id": "folderToOpen",
+        "type": "promptString",
+        "description": "Folder to open in Extension Development Host",
+        "default": "${userHome}"
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "build-dotnet",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["build", "PPDS.Sdk.sln", "--configuration", "Debug"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "silent",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "rebuild-dotnet",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["build", "PPDS.Sdk.sln", "--configuration", "Debug", "--no-incremental"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": "build",
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "test-dotnet-unit",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["test", "PPDS.Sdk.sln", "--filter", "Category!=Integration"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": "test",
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "test-dotnet-integration",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["test", "PPDS.Sdk.sln", "--filter", "Category=Integration"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": "test",
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "test-dotnet-tui",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["test", "PPDS.Sdk.sln", "--filter", "Category=TuiUnit"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": "test",
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "test-dotnet-all",
+        "type": "shell",
+        "command": "dotnet",
+        "args": ["test", "PPDS.Sdk.sln"],
+        "options": {
+          "cwd": "${workspaceFolder:PPDS (Root)}"
+        },
+        "group": {
+          "kind": "test",
+          "isDefault": true
+        },
+        "problemMatcher": "$msCompile",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "extension: compile",
+        "type": "npm",
+        "script": "compile",
+        "path": "extension",
+        "problemMatcher": "$tsc",
+        "group": "build",
+        "presentation": {
+          "reveal": "silent",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "extension: watch",
+        "type": "npm",
+        "script": "watch",
+        "path": "extension",
+        "problemMatcher": "$tsc-watch",
+        "isBackground": true,
+        "presentation": {
+          "reveal": "silent",
+          "panel": "dedicated"
+        }
+      },
+      {
+        "label": "extension: lint",
+        "type": "npm",
+        "script": "lint",
+        "path": "extension",
+        "problemMatcher": "$eslint-stylish",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "extension: package",
+        "type": "npm",
+        "script": "package",
+        "path": "extension",
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "extension: clean",
+        "type": "shell",
+        "command": "Remove-Item",
+        "args": ["-Recurse", "-Force", "-ErrorAction", "SilentlyContinue", "dist"],
+        "options": {
+          "cwd": "${workspaceFolder:Extension}",
+          "shell": {
+            "executable": "pwsh",
+            "args": ["-Command"]
+          }
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "reveal": "silent",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "build-all",
+        "dependsOn": ["build-dotnet", "extension: compile"],
+        "dependsOrder": "parallel",
+        "group": "build",
+        "problemMatcher": [],
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "script: generate-early-bound",
+        "type": "shell",
+        "command": "pwsh",
+        "args": ["-File", "${workspaceFolder:PPDS (Root)}/scripts/Generate-EarlyBoundModels.ps1"],
+        "problemMatcher": [],
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "script: install-local-cli",
+        "type": "shell",
+        "command": "pwsh",
+        "args": ["-File", "${workspaceFolder:PPDS (Root)}/scripts/Install-LocalCli.ps1"],
+        "problemMatcher": [],
+        "presentation": {
+          "reveal": "always",
+          "panel": "shared"
+        }
+      }
+    ]
+  }
+}

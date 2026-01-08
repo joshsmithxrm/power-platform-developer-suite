@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/plugin-registration.schema.json",
+  "$id": "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/plugin-registration.schema.json",
   "title": "PPDS Plugin Registration Configuration",
   "description": "Schema for plugin registration configuration files used by the PPDS CLI.",
   "type": "object",

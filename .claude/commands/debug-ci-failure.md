@@ -17,19 +17,19 @@ Examples:
 If no run-id provided, get most recent failure:
 
 ```bash
-gh run list --repo joshsmithxrm/ppds-sdk --status failure --limit 1 --json databaseId,headBranch,conclusion,name,updatedAt
+gh run list --repo joshsmithxrm/power-platform-developer-suite --status failure --limit 1 --json databaseId,headBranch,conclusion,name,updatedAt
 ```
 
 If run-id provided, get that specific run:
 
 ```bash
-gh run view [run-id] --repo joshsmithxrm/ppds-sdk --json conclusion,name,jobs
+gh run view [run-id] --repo joshsmithxrm/power-platform-developer-suite --json conclusion,name,jobs
 ```
 
 ### 2. Download Failed Logs
 
 ```bash
-gh run view [run-id] --repo joshsmithxrm/ppds-sdk --log-failed
+gh run view [run-id] --repo joshsmithxrm/power-platform-developer-suite --log-failed
 ```
 
 ### 3. Analyze Failure Patterns

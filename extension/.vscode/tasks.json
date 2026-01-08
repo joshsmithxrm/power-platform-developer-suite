@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "compile",
+      "problemMatcher": "$tsc",
+      "label": "npm: compile",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "type": "npm",
+      "script": "watch",
+      "problemMatcher": "$tsc-watch",
+      "label": "npm: watch",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "type": "npm",
+      "script": "lint",
+      "problemMatcher": "$eslint-stylish",
+      "label": "npm: lint",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "type": "npm",
+      "script": "package",
+      "label": "npm: package",
+      "detail": "Create .vsix package (pre-release)",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Clean",
+      "type": "shell",
+      "command": "rm -rf dist",
+      "windows": {
+        "command": "if exist dist rmdir /s /q dist"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Rebuild",
+      "dependsOn": ["Clean", "npm: compile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "npm ci",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

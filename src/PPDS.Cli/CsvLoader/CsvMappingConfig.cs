@@ -55,7 +55,7 @@ public sealed class CsvMappingConfig
     /// <summary>
     /// Schema URL for generated mapping files.
     /// </summary>
-    public const string SchemaUrl = "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/csv-mapping.schema.json";
+    public const string SchemaUrl = "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/csv-mapping.schema.json";
 }
 
 /// <summary>

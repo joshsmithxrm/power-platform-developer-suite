@@ -327,7 +327,7 @@ internal sealed class MainWindow : Window
         var assembly = typeof(MainWindow).Assembly;
         var version = assembly.GetName().Version?.ToString() ?? "Unknown";
         MessageBox.Query("About PPDS",
-            $"Power Platform Developer Suite\n\nVersion: {version}\n\nA multi-interface platform for Dataverse development.\n\nhttps://github.com/joshsmithxrm/ppds-sdk",
+            $"Power Platform Developer Suite\n\nVersion: {version}\n\nA multi-interface platform for Dataverse development.\n\nhttps://github.com/joshsmithxrm/power-platform-developer-suite",
             "OK");
     }
 

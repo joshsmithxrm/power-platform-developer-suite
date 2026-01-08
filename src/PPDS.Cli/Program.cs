@@ -55,7 +55,7 @@ public static class Program
         var rootCommand = new RootCommand(
             "PPDS CLI - Power Platform Developer Suite command-line tool" + Environment.NewLine +
             Environment.NewLine +
-            "Documentation: https://github.com/joshsmithxrm/ppds-sdk/blob/main/src/PPDS.Cli/README.md");
+            "Documentation: https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/src/PPDS.Cli/README.md");
 
         // Add command groups
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());

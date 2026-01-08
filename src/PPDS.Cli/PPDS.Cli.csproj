@@ -35,8 +35,8 @@
       with connection pooling.</Description>
     <PackageTags>dataverse;dynamics365;powerplatform;migration;cmt;cli;data-migration;ppds</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/joshsmithxrm/ppds-sdk</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/joshsmithxrm/ppds-sdk</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/joshsmithxrm/power-platform-developer-suite</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshsmithxrm/power-platform-developer-suite</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

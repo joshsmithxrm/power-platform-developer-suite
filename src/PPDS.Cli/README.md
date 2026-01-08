@@ -1,6 +1,6 @@
 # PPDS CLI
 
-Unified command-line tool for Dataverse operations. Part of the [PPDS SDK](../../README.md).
+Unified command-line tool for Dataverse operations. Part of [PPDS](../../README.md).
 
 ## Installation
 

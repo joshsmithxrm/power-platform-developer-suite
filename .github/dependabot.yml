@@ -49,3 +49,16 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # VS Code Extension (npm)
+  - package-ecosystem: "npm"
+    directory: "/extension"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "deps(extension)"

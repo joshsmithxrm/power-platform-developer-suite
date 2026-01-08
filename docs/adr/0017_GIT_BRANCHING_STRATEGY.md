@@ -6,7 +6,7 @@
 
 ## Context
 
-The ppds-sdk repository uses git worktrees for parallel development. Without documented conventions:
+The power-platform-developer-suite repository uses git worktrees for parallel development. Without documented conventions:
 - Branch names are inconsistent
 - Worktree locations vary
 - Unclear when to create worktrees vs branches
@@ -28,14 +28,14 @@ The ppds-sdk repository uses git worktrees for parallel development. Without doc
 
 Use worktrees for parallel, isolated work. Each worktree is a separate directory with its own branch.
 
-**Location:** `C:\VS\ppds\sdk-{branch-suffix}`
+**Location:** `{base}/ppds-{branch-suffix}` (sibling to main `ppds` folder)
 
 ```
-C:\VS\ppds\
-├── sdk/                    # Main repo (main or current work)
-├── sdk-plugin-traces/      # feature/plugin-traces
-├── sdk-tui-enhancements/   # feature/tui-enhancements
-└── sdk-file-format-adr/    # docs/file-format-policy
+{base}/
+├── ppds/                       # Main repo (main branch)
+├── ppds-plugin-traces/         # feature/plugin-traces
+├── ppds-tui-enhancements/      # feature/tui-enhancements
+└── ppds-file-format-adr/       # docs/file-format-policy
 ```
 
 **When to use worktrees:**
@@ -73,14 +73,14 @@ C:\VS\ppds\
 
 ```bash
 # Option 1: Issue-driven (recommended for tracked work)
-/plan-work 123          # In sdk/ orchestrator
-cd ../sdk-feature-x
+/plan-work 123          # In ppds/ orchestrator
+cd ../ppds-feature-x
 /start-work             # Displays session context
 # Enter plan mode to verify and plan
 
 # Option 2: Ad-hoc (for untracked work)
-/create-worktree "description"  # In sdk/ orchestrator
-cd ../sdk-xxx
+/create-worktree "description"  # In ppds/ orchestrator
+cd ../ppds-xxx
 # Enter plan mode to establish context
 
 # Work, commit, push
@@ -88,7 +88,7 @@ git push -u origin feature/{name}
 gh pr create
 
 # After PR merges, clean up
-/prune                  # Or: git worktree remove ../sdk-{name}
+/prune                  # Or: git worktree remove ../ppds-{name}
 ```
 
 ### Plan Mode as Session Context

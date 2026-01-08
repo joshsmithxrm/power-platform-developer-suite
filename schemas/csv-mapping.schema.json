@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/joshsmithxrm/ppds-sdk/main/schemas/csv-mapping.schema.json",
+  "$id": "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/csv-mapping.schema.json",
   "title": "PPDS CSV Mapping Configuration",
   "description": "Schema for CSV-to-Dataverse column mapping configuration files used by the ppds data load command.",
   "type": "object",

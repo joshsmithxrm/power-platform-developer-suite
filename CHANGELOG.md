@@ -1,4 +1,4 @@
-# PPDS SDK Changelog Index
+# PPDS Changelog Index
 
 This repository contains multiple packages with independent release cycles.
 
@@ -13,7 +13,7 @@ This repository contains multiple packages with independent release cycles.
 ## GitHub Releases
 
 For full release notes with each version, see:
-https://github.com/joshsmithxrm/ppds-sdk/releases
+https://github.com/joshsmithxrm/power-platform-developer-suite/releases
 
 ## Versioning
 

@@ -66,7 +66,7 @@ Related: [links to related issues if any]
 ### 3. Create Issue
 
 ```bash
-gh issue create --repo joshsmithxrm/ppds-sdk \
+gh issue create --repo joshsmithxrm/power-platform-developer-suite \
   --title "[type]: [title]" \
   --body "[body]" \
   --label "[labels]"
@@ -78,7 +78,7 @@ Capture the issue URL from output to extract issue number.
 
 ```bash
 gh project item-add 3 --owner joshsmithxrm \
-  --url https://github.com/joshsmithxrm/ppds-sdk/issues/{number}
+  --url https://github.com/joshsmithxrm/power-platform-developer-suite/issues/{number}
 ```
 
 Capture the project item ID from response.
@@ -183,7 +183,7 @@ gh issue comment {parent-number} --body "Child issue: #{number}"
 ```markdown
 ## Issue Created
 
-Created: https://github.com/joshsmithxrm/ppds-sdk/issues/{number}
+Created: https://github.com/joshsmithxrm/power-platform-developer-suite/issues/{number}
 
 Project fields set:
 - Type: feature
@@ -204,8 +204,7 @@ Next steps:
 
 | Shorthand | Full Repo Name |
 |-----------|----------------|
-| `extension` | `joshsmithxrm/power-platform-developer-suite` |
-| `sdk` | `joshsmithxrm/ppds-sdk` |
+| `ppds` | `joshsmithxrm/power-platform-developer-suite` |
 | `tools` | `joshsmithxrm/ppds-tools` |
 | `alm` | `joshsmithxrm/ppds-alm` |
 | `demo` | `joshsmithxrm/ppds-demo` |
@@ -274,7 +273,7 @@ User: yes
 
 Claude: Creating issue...
 
-Created: https://github.com/joshsmithxrm/ppds-sdk/issues/245
+Created: https://github.com/joshsmithxrm/power-platform-developer-suite/issues/245
 
 Project fields set:
 ✓ Type: feature

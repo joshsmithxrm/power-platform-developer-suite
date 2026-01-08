@@ -11,7 +11,7 @@ public static class DocsCommand
     /// <summary>
     /// URL to the CLI documentation.
     /// </summary>
-    public const string DocsUrl = "https://github.com/joshsmithxrm/ppds-sdk/blob/main/src/PPDS.Cli/README.md";
+    public const string DocsUrl = "https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/src/PPDS.Cli/README.md";
 
     /// <summary>
     /// Creates the 'docs' command.

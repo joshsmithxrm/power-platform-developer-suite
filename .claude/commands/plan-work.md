@@ -185,7 +185,7 @@ git worktree add -b <branch-name> ../<folder-name> main
 ```
 
 Naming convention:
-- Folder: `<repo>-<short-descriptor>` (e.g., `sdk-query`, `sdk-daemon`)
+- Folder: `ppds-<short-descriptor>` (e.g., `ppds-query`, `ppds-daemon`)
 - Branch: `feature/<descriptor>` or `fix/<descriptor>`
 
 ### 8. Update .gitignore
@@ -272,15 +272,15 @@ Worktrees Created
 
 | Folder | Branch | Issues | Prompt |
 |--------|--------|--------|--------|
-| ../sdk-query | feature/query-commands | #52 | .claude/session-prompt.md |
-| ../sdk-daemon | feature/daemon-improvements | #78, #79 | .claude/session-prompt.md |
+| ../ppds-query | feature/query-commands | #52 | .claude/session-prompt.md |
+| ../ppds-daemon | feature/daemon-improvements | #78, #79 | .claude/session-prompt.md |
 
 To start working:
 
-  cd ../sdk-query && claude
+  cd ../ppds-query && claude
   # Then paste: cat .claude/session-prompt.md
 
-  cd ../sdk-daemon && claude
+  cd ../ppds-daemon && claude
   # Then paste: cat .claude/session-prompt.md
 
 Note: .claude/session-prompt.md has been added to .gitignore
@@ -303,7 +303,7 @@ Note: .claude/session-prompt.md has been added to .gitignore
 
 **Issue not found:**
 ```
-Error: Issue #999 not found in joshsmithxrm/ppds-sdk
+Error: Issue #999 not found in joshsmithxrm/power-platform-developer-suite
 Continuing with remaining issues...
 ```
 

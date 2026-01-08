@@ -21,8 +21,8 @@
     <PackageTags>dataverse;dynamics365;powerplatform;authentication;cli;msal</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>Copyright (c) 2025 Josh Smith</Copyright>
-    <PackageProjectUrl>https://github.com/joshsmithxrm/ppds-sdk</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/joshsmithxrm/ppds-sdk.git</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/joshsmithxrm/power-platform-developer-suite</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshsmithxrm/power-platform-developer-suite.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 

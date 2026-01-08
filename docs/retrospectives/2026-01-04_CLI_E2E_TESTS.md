@@ -1,7 +1,7 @@
 # Session Retrospective: CLI E2E Tests
 
 **Date:** 2026-01-04
-**Project:** ppds-sdk
+**Project:** power-platform-developer-suite
 **Branch:** musing-goldwasser (worktree)
 **PR:** #117
 **Duration:** ~8 hours (02:10 - 10:09)
