@@ -54,7 +54,15 @@ Delete all branches whose remote tracking branch is gone:
 git branch -D <branch-name>
 ```
 
-### 6. Verify Final State
+### 6. Update Main Branch
+
+Pull main to stay up-to-date:
+
+```bash
+git pull
+```
+
+### 7. Verify Final State
 
 ```bash
 git branch -vv
@@ -87,8 +95,9 @@ list them so user can manually delete.
 2. Identify branches marked as "gone"
 3. Remove worktrees first (branches with worktrees can't be deleted)
 4. Delete the branches
-5. Report what was cleaned up and what remains
-6. Note any directories that need manual cleanup
+5. Pull main to stay up-to-date
+6. Report what was cleaned up and what remains
+7. Note any directories that need manual cleanup
 
 ## When to Use
 
