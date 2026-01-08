@@ -50,12 +50,12 @@ Output as markdown that can be:
 ## Session Handoff - 2025-01-15
 
 ### Repos Touched
-- sdk/ (feature/plugin-registration-cli)
-- extension/ (main)
+- ppds/ (feature/plugin-registration-cli)
+- ppds/extension/ (main)
 
 ### Completed
-- Created CLI commands issue (sdk#70)
-- Created extension migration issue (extension#95)
+- Created CLI commands issue (#70)
+- Created extension migration issue (#95)
 - Updated workspace settings for issue permissions
 
 ### In Progress
@@ -66,12 +66,12 @@ Output as markdown that can be:
 
 ### Next Steps
 1. Decide on extension .claude cleanup
-2. Start SDK CLI commands implementation
+2. Start CLI commands implementation
 3. Update extension to use CLI backend
 
 ### Key Decisions
 - Using process invocation (not daemon) for plugin registration
-- Extension becomes UI shell, SDK has logic
+- Extension becomes UI shell, core libraries have logic
 ```
 
 ## Notes

@@ -73,14 +73,14 @@ Use worktrees for parallel, isolated work. Each worktree is a separate directory
 
 ```bash
 # Option 1: Issue-driven (recommended for tracked work)
-/plan-work 123          # In sdk/ orchestrator
-cd ../sdk-feature-x
+/plan-work 123          # In ppds/ orchestrator
+cd ../ppds-feature-x
 /start-work             # Displays session context
 # Enter plan mode to verify and plan
 
 # Option 2: Ad-hoc (for untracked work)
-/create-worktree "description"  # In sdk/ orchestrator
-cd ../sdk-xxx
+/create-worktree "description"  # In ppds/ orchestrator
+cd ../ppds-xxx
 # Enter plan mode to establish context
 
 # Work, commit, push
@@ -88,7 +88,7 @@ git push -u origin feature/{name}
 gh pr create
 
 # After PR merges, clean up
-/prune                  # Or: git worktree remove ../sdk-{name}
+/prune                  # Or: git worktree remove ../ppds-{name}
 ```
 
 ### Plan Mode as Session Context

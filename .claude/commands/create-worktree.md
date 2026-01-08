@@ -59,16 +59,16 @@ Unless explicit flag provided, infer from description:
 - Remove special characters
 - Max 50 chars
 
-**Folder name:** `sdk-{short-slug}`
+**Folder name:** `ppds-{short-slug}`
 - Use 2-3 key words from description
-- Example: "add authentication caching" → `sdk-auth-caching`
+- Example: "add authentication caching" → `ppds-auth-caching`
 
 Example transformations:
 | Description | Branch | Folder |
 |-------------|--------|--------|
-| "add authentication caching" | `feature/add-authentication-caching` | `sdk-auth-caching` |
-| "fix null pointer in bulk ops" | `fix/null-pointer-bulk-ops` | `sdk-null-bulk-ops` |
-| "update ADR for file formats" | `docs/adr-file-formats` | `sdk-adr-file-formats` |
+| "add authentication caching" | `feature/add-authentication-caching` | `ppds-auth-caching` |
+| "fix null pointer in bulk ops" | `fix/null-pointer-bulk-ops` | `ppds-null-bulk-ops` |
+| "update ADR for file formats" | `docs/adr-file-formats` | `ppds-adr-file-formats` |
 
 ### 4. Validate
 
@@ -189,7 +189,7 @@ Options:
 
 **Folder already exists:**
 ```
-Error: Folder '../sdk-xyz' already exists.
+Error: Folder '../ppds-xyz' already exists.
 Use --name <different-name> to specify a different name.
 ```
 

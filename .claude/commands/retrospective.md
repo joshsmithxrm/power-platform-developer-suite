@@ -45,7 +45,7 @@ C:\Users\[username]\.claude\projects\[encoded-path]\
 
 ```powershell
 # List recent sessions for a project
-$projectPath = "C--VS--claude-worktrees-sdk-optimistic-almeida"
+$projectPath = "C--Dev--ppds-optimistic-almeida"
 Get-ChildItem "C:\Users\$env:USERNAME\.claude\projects\$projectPath" -Filter "*.jsonl" |
     Sort-Object LastWriteTime -Descending |
     Select-Object Name, Length, LastWriteTime -First 5

@@ -43,8 +43,8 @@ gh pr list --state open --json number,title,headRefName
 
 | Worktree | Branch | Issues | Last Activity |
 |----------|--------|--------|---------------|
-| sdk-logging-observability | feature/logging-observability | #266-280 | 2 hours ago |
-| sdk-tui-mvp | feature/tui-sql-mvp | #234 | 30 min ago |
+| ppds-logging-observability | feature/logging-observability | #266-280 | 2 hours ago |
+| ppds-tui-mvp | feature/tui-sql-mvp | #234 | 30 min ago |
 
 Open PRs: 2 (#283, #285)
 ```
@@ -94,8 +94,8 @@ gh api graphql -f query='
 - #290: VS Code extension scope (blocked by: TUI MVP not complete)
 
 ### Already In Progress
-- #266-280: Logging & Observability (sdk-logging-observability)
-- #234: TUI SQL table abstraction (sdk-tui-mvp)
+- #266-280: Logging & Observability (ppds-logging-observability)
+- #234: TUI SQL table abstraction (ppds-tui-mvp)
 ```
 
 ### 3. Group by Logical Area
@@ -222,16 +222,16 @@ Exit without creating anything. User can run `/plan-work` manually with specific
 
 | Folder | Branch | Issues |
 |--------|--------|--------|
-| sdk-service-extractions | feature/service-extractions | #254, #257, #259-265 |
-| sdk-mcp-server | feature/mcp-server | #281 |
-| sdk-plugin-traces | feature/plugin-traces | #140, #247 |
+| ppds-service-extractions | feature/service-extractions | #254, #257, #259-265 |
+| ppds-mcp-server | feature/mcp-server | #281 |
+| ppds-plugin-traces | feature/plugin-traces | #140, #247 |
 
 Session prompts created in each `.claude/session-prompt.md`
 
 To start:
-  cd ../sdk-service-extractions && claude
-  cd ../sdk-mcp-server && claude
-  cd ../sdk-plugin-traces && claude
+  cd ../ppds-service-extractions && claude
+  cd ../ppds-mcp-server && claude
+  cd ../ppds-plugin-traces && claude
 
 Then run /start-work in each session.
 ```
@@ -269,8 +269,8 @@ Consider:
 
 **Stale worktrees detected:**
 ```
-Warning: Worktree 'sdk-old-feature' has no commits in 14 days.
-Consider pruning with: git worktree remove ../sdk-old-feature
+Warning: Worktree 'ppds-old-feature' has no commits in 14 days.
+Consider pruning with: git worktree remove ../ppds-old-feature
 
 Excluding from "in progress" calculation.
 ```
@@ -310,8 +310,8 @@ You: /next-work
 
 Claude:
 ## Currently In Progress
-- sdk-logging-observability: L&O (#266-280)
-- sdk-tui-mvp: TUI SQL (#234)
+- ppds-logging-observability: L&O (#266-280)
+- ppds-tui-mvp: TUI SQL (#234)
 
 ## Recommended Next Workstreams
 
@@ -327,9 +327,9 @@ Claude:
 ## Worktrees Created
 | Folder | Branch | Issues |
 |--------|--------|--------|
-| sdk-service-extractions | feature/service-extractions | #254, #257, #259-265 |
-| sdk-mcp-server | feature/mcp-server | #281 |
-| sdk-plugin-traces | feature/plugin-traces | #140, #247 |
+| ppds-service-extractions | feature/service-extractions | #254, #257, #259-265 |
+| ppds-mcp-server | feature/mcp-server | #281 |
+| ppds-plugin-traces | feature/plugin-traces | #140, #247 |
 
-To start: cd ../sdk-service-extractions && claude
+To start: cd ../ppds-service-extractions && claude
 ```
