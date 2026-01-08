@@ -1,5 +1,7 @@
+using PPDS.Auth;
 using PPDS.Auth.Credentials;
-using PPDS.Cli.Interactive;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui;
@@ -10,8 +12,14 @@ namespace PPDS.Cli.Tui;
 /// </summary>
 internal sealed class PpdsApplication : IDisposable
 {
+    /// <summary>
+    /// Timeout for session disposal to prevent hanging on exit.
+    /// </summary>
+    private static readonly TimeSpan SessionDisposeTimeout = TimeSpan.FromSeconds(3);
+
     private readonly string? _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private ProfileStore? _profileStore;
     private InteractiveSession? _session;
     private bool _disposed;
 
@@ -28,11 +36,31 @@ internal sealed class PpdsApplication : IDisposable
     /// <returns>Exit code (0 for success).</returns>
     public int Run(CancellationToken cancellationToken = default)
     {
+        // Clear debug log for fresh session
+        TuiDebugLog.Clear();
+        TuiDebugLog.Log("TUI session starting");
+
+        // Create shared ProfileStore singleton for all local services
+        _profileStore = new ProfileStore();
+
         // Create session for connection pool reuse across screens
-        _session = new InteractiveSession(_profileName, _deviceCodeCallback);
+        _session = new InteractiveSession(_profileName, _profileStore, serviceProviderFactory: null, _deviceCodeCallback);
+
+        // Start warming the connection pool in the background
+        // This runs while Terminal.Gui initializes, so connection is ready faster
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling in InitializeAsync
+        _ = _session.InitializeAsync(cancellationToken);
+#pragma warning restore PPDS013
 
         // Register cancellation to request stop
         using var registration = cancellationToken.Register(() => Application.RequestStop());
+
+        // Suppress auth status messages that would corrupt Terminal.Gui display
+        // (AuthenticationOutput.Writer defaults to Console.WriteLine which Terminal.Gui captures)
+        AuthenticationOutput.Writer = null;
+
+        // Enable auth debug logging - redirect to TuiDebugLog for diagnostics
+        AuthDebugLog.Writer = msg => TuiDebugLog.Log($"[Auth] {msg}");
 
         Application.Init();
 
@@ -46,11 +74,25 @@ internal sealed class PpdsApplication : IDisposable
         finally
         {
             Application.Shutdown();
+            AuthDebugLog.Reset();  // Clean up auth debug logging
+            TuiDebugLog.Log("TUI shutdown, disposing session...");
+
             // Note: Sync-over-async is required here because Terminal.Gui's Application.Run()
             // is synchronous and we need to clean up the session before returning.
-            // The session disposal is fast (just releases pooled connections).
+            // Use timeout to prevent hanging if connection pool is stuck.
 #pragma warning disable PPDS012 // Terminal.Gui requires sync disposal
-            _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (_session != null)
+            {
+                var disposeTask = _session.DisposeAsync().AsTask();
+                if (!disposeTask.Wait(SessionDisposeTimeout))
+                {
+                    TuiDebugLog.Log($"Session disposal timed out after {SessionDisposeTimeout.TotalSeconds}s - forcing exit");
+                }
+                else
+                {
+                    TuiDebugLog.Log("Session disposed successfully");
+                }
+            }
 #pragma warning restore PPDS012
         }
     }
@@ -60,7 +102,11 @@ internal sealed class PpdsApplication : IDisposable
         if (_disposed) return;
         _disposed = true;
 #pragma warning disable PPDS012 // IDisposable.Dispose must be synchronous
-        _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_session != null)
+        {
+            var disposeTask = _session.DisposeAsync().AsTask();
+            disposeTask.Wait(SessionDisposeTimeout); // Don't hang forever
+        }
 #pragma warning restore PPDS012
     }
 }

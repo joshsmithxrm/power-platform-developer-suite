@@ -88,8 +88,31 @@ public static class ProfileServiceFactory
         // Create credential store for secure secret lookups (registered in DI for disposal)
         var credentialStore = new SecureCredentialStore();
 
+        // Callback to persist HomeAccountId after authentication
+        // This enables token cache reuse across sessions (ADR-0027)
+        Action<AuthProfile> onProfileUpdated = p =>
+        {
+            // Fire-and-forget with error swallowing - don't fail connection if persist fails
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await store.UpdateProfileAsync(p.DisplayIdentifier, profile =>
+                    {
+                        profile.HomeAccountId = p.HomeAccountId;
+                    }).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Swallow - profile update is best-effort
+                    // Log for diagnostics but don't fail the connection
+                    System.Diagnostics.Debug.WriteLine($"Profile update failed: {ex.Message}");
+                }
+            });
+        };
+
         var source = new ProfileConnectionSource(
-            profile, envUrl, 52, deviceCodeCallback, envDisplayName, credentialStore);
+            profile, envUrl, 52, deviceCodeCallback, envDisplayName, credentialStore, onProfileUpdated);
         var adapter = new ProfileConnectionSourceAdapter(source);
 
         var connectionInfo = new ResolvedConnectionInfo

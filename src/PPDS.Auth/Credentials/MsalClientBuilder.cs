@@ -48,6 +48,8 @@ internal static class MsalClientBuilder
         var cloudInstance = CloudEndpoints.GetAzureCloudInstance(cloud);
         var tenant = string.IsNullOrWhiteSpace(tenantId) ? "organizations" : tenantId;
 
+        AuthDebugLog.WriteLine($"[MsalClient] Creating client: cloud={cloud}, tenantId={tenantId ?? "(null)"}, authority={cloudInstance}/{tenant}");
+
         var builder = PublicClientApplicationBuilder
             .Create(MicrosoftPublicClientId)
             .WithAuthority(cloudInstance, tenant);
@@ -76,6 +78,12 @@ internal static class MsalClientBuilder
         {
             ProfilePaths.EnsureDirectoryExists();
 
+            var cacheFilePath = System.IO.Path.Combine(ProfilePaths.DataDirectory, ProfilePaths.TokenCacheFileName);
+            var cacheFileExists = System.IO.File.Exists(cacheFilePath);
+            var cacheFileSize = cacheFileExists ? new System.IO.FileInfo(cacheFilePath).Length : 0;
+
+            AuthDebugLog.WriteLine($"[MsalCache] Registering cache: path={cacheFilePath}, exists={cacheFileExists}, size={cacheFileSize} bytes");
+
             var storageProperties = new StorageCreationPropertiesBuilder(
                     ProfilePaths.TokenCacheFileName,
                     ProfilePaths.DataDirectory)
@@ -85,10 +93,12 @@ internal static class MsalClientBuilder
             var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties).ConfigureAwait(false);
             cacheHelper.RegisterCache(client.UserTokenCache);
 
+            AuthDebugLog.WriteLine("[MsalCache] Cache registered successfully");
             return cacheHelper;
         }
         catch (MsalCachePersistenceException ex)
         {
+            AuthDebugLog.WriteLine($"[MsalCache] Cache registration FAILED: {ex.Message}");
             if (warnOnFailure)
             {
                 AuthenticationOutput.WriteLine(

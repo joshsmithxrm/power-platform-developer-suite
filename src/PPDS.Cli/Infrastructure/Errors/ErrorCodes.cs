@@ -12,6 +12,24 @@ namespace PPDS.Cli.Infrastructure.Errors;
 public static class ErrorCodes
 {
     /// <summary>
+    /// Profile management errors.
+    /// </summary>
+    public static class Profile
+    {
+        /// <summary>The requested profile was not found.</summary>
+        public const string NotFound = "Profile.NotFound";
+
+        /// <summary>No active profile is configured.</summary>
+        public const string NoActiveProfile = "Profile.NoActiveProfile";
+
+        /// <summary>Profile name is already in use.</summary>
+        public const string NameInUse = "Profile.NameInUse";
+
+        /// <summary>Profile name is invalid.</summary>
+        public const string InvalidName = "Profile.InvalidName";
+    }
+
+    /// <summary>
     /// Authentication-related errors.
     /// </summary>
     public static class Auth
@@ -60,6 +78,9 @@ public static class ErrorCodes
 
         /// <summary>Environment URL is invalid or malformed.</summary>
         public const string InvalidEnvironmentUrl = "Connection.InvalidEnvironmentUrl";
+
+        /// <summary>Environment discovery failed.</summary>
+        public const string DiscoveryFailed = "Connection.DiscoveryFailed";
     }
 
     /// <summary>

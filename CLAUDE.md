@@ -12,7 +12,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Commit with failing tests | All tests must pass before merge |
 | Create new ServiceClient per request | 42,000x slower than Clone/pool pattern |
 | Guess parallelism values | Use `RecommendedDegreesOfParallelism` from server |
-| Hold single pooled client for multiple queries | Defeats pool parallelism; see `.claude/rules/DATAVERSE_PATTERNS.md` |
+| Hold single pooled client for multiple queries | Defeats pool parallelism; see ADR-0002 |
 | Use magic strings for generated entities | Use `EntityLogicalName` and `Fields.*` constants |
 | Use late-bound `Entity` for generated entity types | Use early-bound classes; compile-time safety |
 | Write CLI status messages to stdout | Use `Console.Error.WriteLine` for status; stdout is for data |
@@ -21,12 +21,13 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Write progress directly to console from services | Accept `IProgressReporter`; let UI render (ADR-0025) |
 | Throw raw exceptions from Application Services | Wrap in `PpdsException` with ErrorCode/UserMessage (ADR-0026) |
 | Use comma-separated issues in `Closes` | GitHub only auto-closes first; use separate `Closes #N` lines |
+| Add TUI service code without tests | Use MockServiceProviderFactory for testability (ADR-0028) |
 
 ## ALWAYS
 
 | Rule | Why |
 |------|-----|
-| Use connection pool for multi-request scenarios | See `.claude/rules/DATAVERSE_PATTERNS.md` |
+| Use connection pool for multi-request scenarios | See ADR-0002, ADR-0005 |
 | Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) | 5x faster than `ExecuteMultiple` |
 | Add new services to `RegisterDataverseServices()` | Keeps CLI and library DI in sync |
 | Use Application Services for all persistent state | Single code path for CLI/TUI/RPC (ADR-0024) |
@@ -35,6 +36,8 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Make new user data accessible via `ppds serve` | VS Code extension needs same data as CLI/TUI |
 | Link related issues in PR body | Use separate `Closes #N` per issue; comma syntax only closes first |
 | Use JSON for config files, JSONL for streaming | No YAML; consistency with CLI output (ADR-0016) |
+| Test TUI services with `Category=TuiUnit` | Enables autonomous iteration without manual testing (ADR-0028) |
+| Use `IServiceProviderFactory` in InteractiveSession | Required for mock injection in tests (ADR-0028) |
 
 ---
 
@@ -78,7 +81,7 @@ PPDS is a **multi-interface platform**, not just a CLI tool. The TUI is the prim
 │                      User Interfaces                         │
 ├───────────────┬───────────────┬───────────────┬─────────────┤
 │  CLI Commands │  TUI App      │  VS Code Ext  │  Future     │
-│  (ppds data)  │  (ppds -i)    │  (RPC client) │  (Web, etc) │
+│  (ppds data)  │  (ppds)       │  (RPC client) │  (Web, etc) │
 │               │               │               │             │
 │ Spectre.Console│ Terminal.Gui │  JSON-RPC     │             │
 ├───────────────┴───────────────┴───────────────┴─────────────┤
@@ -168,11 +171,23 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 | `/triage` | Batch triage issues |
 | `/ppds-help` | CLI quick reference |
 | `/setup-ecosystem` | Set up PPDS repos on new machine |
+| `/tui-test` | Run TUI unit and integration tests |
 
 Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 
-## Rules
+## Testing
 
-- `.claude/rules/DATAVERSE_PATTERNS.md` - Pool usage, parallelism
-- `.claude/rules/TESTING.md` - Test categories, CI behavior
-- `docs/adr/` - Architecture decisions
+| Category | Purpose | Filter |
+|----------|---------|--------|
+| Unit (default) | Fast tests, no external deps | `--filter Category!=Integration` |
+| `Integration` | Live Dataverse tests | `--filter Category=Integration` |
+| `TuiUnit` | TUI session lifecycle | `--filter Category=TuiUnit` |
+
+Pre-commit hook runs unit tests (~10s). See ADR-0028 (TUI), ADR-0029 (full strategy).
+
+## Documentation
+
+- `docs/adr/` - Architecture Decision Records (detailed patterns, "why" context)
+- CLAUDE.md - Brief reminders (<100 tokens each), auto-loaded into all conversations
+
+**Guidance:** If you need examples, code snippets, or rationale → create/update an ADR. CLAUDE.md is for one-liner "don't do X" rules only.

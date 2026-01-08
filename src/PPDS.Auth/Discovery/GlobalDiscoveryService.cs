@@ -166,24 +166,32 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
         return async (string resource) =>
         {
             var scopes = new[] { $"{discoveryUri.GetLeftPart(UriPartial.Authority)}/.default" };
+            AuthDebugLog.WriteLine($"[GlobalDiscovery] GetToken: resource={resource}");
 
             // Try to find the correct account for silent acquisition
             var account = await FindAccountAsync().ConfigureAwait(false);
 
             if (account != null)
             {
+                AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
                 try
                 {
                     var silentResult = await _msalClient!
                         .AcquireTokenSilent(scopes, account)
                         .ExecuteAsync(cancellationToken)
                         .ConfigureAwait(false);
+                    AuthDebugLog.WriteLine("  Silent acquisition SUCCEEDED");
                     return silentResult.AccessToken;
                 }
-                catch (MsalUiRequiredException)
+                catch (MsalUiRequiredException ex)
                 {
                     // Need interactive auth
+                    AuthDebugLog.WriteLine($"  Silent acquisition FAILED: MsalUiRequiredException - {ex.Message}");
                 }
+            }
+            else
+            {
+                AuthDebugLog.WriteLine("  No account found for silent auth - skipping to interactive");
             }
 
             // Use the explicit auth method - no automatic fallback.
@@ -193,6 +201,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             if (_preferredAuthMethod == AuthMethod.DeviceCode)
             {
                 // Device code flow - user explicitly requested this
+                AuthDebugLog.WriteLine("  Starting device code authentication...");
                 result = await _msalClient!
                     .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
                     {
@@ -222,6 +231,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             else if (_preferredAuthMethod == AuthMethod.InteractiveBrowser)
             {
                 // Interactive browser flow
+                AuthDebugLog.WriteLine("  Starting interactive browser authentication...");
                 if (!InteractiveBrowserCredentialProvider.IsAvailable())
                 {
                     throw new InvalidOperationException(

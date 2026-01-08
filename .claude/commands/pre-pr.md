@@ -96,20 +96,32 @@ public void Add_FirstProfile_SetsAsActive()
 
 **If README is outdated:** Update it and amend the commit before proceeding.
 
-### 7. Design Doc Cleanup
+### 7. Design Doc & Iteration Scaffolding Cleanup
 
-Remove the `.claude/design.md` file before creating the PR. This file is used for development context but should not be included in the PR to main.
+Remove iteration scaffolding files before creating the PR. These files are used for development context but should not be included in the PR to main.
+
+**Files to remove:**
+- `.claude/design.md` - Design document for the current work
+- `docs/tui/POLISH_TRACKER.md` - TUI polish iteration tracker
 
 ```bash
-# Check if design.md exists
+# Remove design doc if it exists
 if [ -f .claude/design.md ]; then
-  # Remove and commit the removal
   git rm .claude/design.md
-  git commit -m "chore: remove design doc before PR"
 fi
+
+# Remove TUI polish tracker if it exists
+if [ -f docs/tui/POLISH_TRACKER.md ]; then
+  git rm docs/tui/POLISH_TRACKER.md
+  # Remove empty directory if no other files
+  rmdir docs/tui 2>/dev/null || true
+fi
+
+# Commit the cleanup if any files were removed
+git diff --cached --quiet || git commit -m "chore: remove iteration scaffolding before PR"
 ```
 
-**Note:** The design doc is intentionally committed to the branch for portability - any developer can pick up the work with full context. We remove it only when merging to main.
+**Note:** These files are intentionally committed to branches for portability - any developer can pick up the work with full context. We remove them only when merging to main.
 
 ### 8. Base Branch Check & Push
 
@@ -157,7 +169,7 @@ Pre-PR Validation
 [✓] No TODOs found
 [✗] Missing tests for: EnvironmentResolutionService, ProfileValidator
 [✓] CLI README: Command structure matches (or N/A if no CLI changes)
-[✓] Design doc: Removed .claude/design.md (or N/A if not present)
+[✓] Scaffolding: Removed .claude/design.md, docs/tui/POLISH_TRACKER.md (or N/A)
 [✓] Base branch: Up to date with origin/main (or "Behind by N commits - rebasing...")
 
 Missing tests is a blocker. Writing tests now...

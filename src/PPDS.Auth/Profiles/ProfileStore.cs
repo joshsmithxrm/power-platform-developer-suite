@@ -212,6 +212,33 @@ public sealed class ProfileStore : IDisposable
     }
 
     /// <summary>
+    /// Updates a specific profile using an update action.
+    /// </summary>
+    /// <param name="profileName">The name of the profile to update.</param>
+    /// <param name="updateAction">Action to apply to the profile.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if the profile was found and updated, false otherwise.</returns>
+    public async Task<bool> UpdateProfileAsync(
+        string profileName,
+        Action<AuthProfile> updateAction,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(updateAction);
+
+        var collection = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        var profile = collection.GetByName(profileName);
+
+        if (profile == null)
+        {
+            return false;
+        }
+
+        updateAction(profile);
+        await SaveAsync(collection, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
     /// Deletes the profile storage file and clears the cache.
     /// </summary>
     public void Delete()

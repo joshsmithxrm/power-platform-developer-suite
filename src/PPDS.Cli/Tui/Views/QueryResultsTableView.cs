@@ -86,6 +86,11 @@ internal sealed class QueryResultsTableView : FrameView
     }
 
     /// <summary>
+    /// Gets the underlying DataTable for export operations.
+    /// </summary>
+    public DataTable? GetDataTable() => _dataTable.Rows.Count > 0 ? _dataTable : null;
+
+    /// <summary>
     /// Loads query results into the table, replacing any existing data.
     /// </summary>
     public void LoadResults(QueryResult result)
@@ -146,6 +151,58 @@ internal sealed class QueryResultsTableView : FrameView
         PagingCookie = null;
         CurrentPageNumber = 1;
         _statusLabel.Text = "No data";
+    }
+
+    /// <summary>
+    /// Applies a filter to the results. Pass null or empty string to clear filter.
+    /// </summary>
+    /// <param name="filterText">Text to search for in any string column.</param>
+    public void ApplyFilter(string? filterText)
+    {
+        if (_dataTable.Rows.Count == 0)
+            return;
+
+        if (string.IsNullOrWhiteSpace(filterText))
+        {
+            _dataTable.DefaultView.RowFilter = string.Empty;
+            UpdateStatus();
+            return;
+        }
+
+        // Build filter expression: search all string columns
+        var conditions = new List<string>();
+        var escaped = EscapeFilterValue(filterText);
+
+        foreach (DataColumn column in _dataTable.Columns)
+        {
+            // Only filter string columns
+            if (column.DataType == typeof(string))
+            {
+                conditions.Add($"[{column.ColumnName}] LIKE '%{escaped}%'");
+            }
+        }
+
+        if (conditions.Count > 0)
+        {
+            _dataTable.DefaultView.RowFilter = string.Join(" OR ", conditions);
+            var filteredCount = _dataTable.DefaultView.Count;
+            var totalCount = _dataTable.Rows.Count;
+            _statusLabel.Text = $"Showing {filteredCount} of {totalCount} rows (filtered by: {filterText})";
+        }
+    }
+
+    /// <summary>
+    /// Escapes special characters in filter text for DataView.RowFilter LIKE expressions.
+    /// </summary>
+    private static string EscapeFilterValue(string value)
+    {
+        // Escape special characters: ', *, %, [, ]
+        return value
+            .Replace("'", "''")
+            .Replace("[", "[[]")
+            .Replace("]", "[]]")
+            .Replace("*", "[*]")
+            .Replace("%", "[%]");
     }
 
     private void SetupKeyboardShortcuts()

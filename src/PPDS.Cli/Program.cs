@@ -19,7 +19,9 @@ using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
-using PPDS.Cli.Interactive;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Tui;
+using Spectre.Console;
 
 namespace PPDS.Cli;
 
@@ -38,17 +40,16 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        // Write version header for diagnostic context (skip for help/version/interactive)
-        if (args.Length > 0 && !args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
+        // No arguments = launch TUI directly (first-class experience)
+        if (args.Length == 0)
         {
-            ErrorOutput.WriteVersionHeader();
+            return LaunchTui();
         }
 
-        // Handle -i/--interactive shortcuts before System.CommandLine
-        // (The 'interactive' subcommand goes through normal command processing)
-        if (IsInteractiveShortcut(args))
+        // Write version header for diagnostic context (skip for help/version/interactive)
+        if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
         {
-            return await InteractiveCli.RunAsync();
+            ErrorOutput.WriteVersionHeader();
         }
 
         var rootCommand = new RootCommand(
@@ -99,26 +100,55 @@ public static class Program
     /// Determines if the CLI should run in interactive mode (for version header skip).
     /// </summary>
     /// <param name="args">Command line arguments.</param>
-    /// <returns>True if interactive mode was requested via any method.</returns>
+    /// <returns>True if interactive mode was requested.</returns>
     private static bool IsInteractiveMode(string[] args)
     {
         if (args.Length == 0)
             return false;
 
         var firstArg = args[0].ToLowerInvariant();
-        return firstArg is "interactive" or "-i" or "--interactive";
+        return firstArg == "interactive";
     }
 
     /// <summary>
-    /// Determines if the CLI was invoked with -i or --interactive shortcut.
-    /// The 'interactive' subcommand is handled by System.CommandLine.
+    /// Launches the Terminal.Gui TUI application.
     /// </summary>
-    private static bool IsInteractiveShortcut(string[] args)
+    /// <returns>Exit code (0 for success).</returns>
+    private static int LaunchTui()
     {
-        if (args.Length == 0)
-            return false;
+        // Check if we're in a TTY environment
+        if (!AnsiConsole.Profile.Capabilities.Interactive)
+        {
+            Console.Error.WriteLine("Error: Interactive mode requires a terminal (TTY).");
+            Console.Error.WriteLine("This may occur in CI/CD pipelines, redirected input, or non-interactive shells.");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Use standard CLI commands instead:");
+            Console.Error.WriteLine("  ppds auth list       - List profiles");
+            Console.Error.WriteLine("  ppds auth select     - Select a profile");
+            Console.Error.WriteLine("  ppds env list        - List environments");
+            Console.Error.WriteLine("  ppds env select      - Select an environment");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Or run 'ppds --help' for full command list.");
+            return ExitCodes.Failure;
+        }
 
-        var firstArg = args[0].ToLowerInvariant();
-        return firstArg is "-i" or "--interactive";
+        try
+        {
+            using var app = new PpdsApplication(
+                profileName: null, // Uses active profile
+                deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback);
+
+            return app.Run(CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancelled - not an error
+            return ExitCodes.Success;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"Interactive mode error: {ex.Message}");
+            return ExitCodes.Failure;
+        }
     }
 }

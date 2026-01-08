@@ -215,12 +215,14 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
 
         var scopes = new[] { $"{resource}/.default" };
         AuthenticationResult result;
+        AuthDebugLog.WriteLine($"[PowerPlatform] GetTokenWithMsalAsync: resource={resource}");
 
         // Try silent acquisition first
         var account = await MsalAccountHelper.FindAccountAsync(_msalClient!, _homeAccountId, _tenantId, _username).ConfigureAwait(false);
 
         if (account != null)
         {
+            AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
             try
             {
                 result = await _msalClient!
@@ -228,6 +230,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
                     .ExecuteAsync(cancellationToken)
                     .ConfigureAwait(false);
 
+                AuthDebugLog.WriteLine("  Silent acquisition SUCCEEDED");
                 return new PowerPlatformToken
                 {
                     AccessToken = result.AccessToken,
@@ -236,15 +239,21 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
                     Identity = result.Account?.Username
                 };
             }
-            catch (MsalUiRequiredException)
+            catch (MsalUiRequiredException ex)
             {
                 // Silent failed, need interactive
+                AuthDebugLog.WriteLine($"  Silent acquisition FAILED: MsalUiRequiredException - {ex.Message}");
             }
+        }
+        else
+        {
+            AuthDebugLog.WriteLine("  No account found for silent auth - skipping to interactive");
         }
 
         // Try interactive browser if available
         if (InteractiveBrowserCredentialProvider.IsAvailable())
         {
+            AuthDebugLog.WriteLine("  Starting interactive browser authentication...");
             AuthenticationOutput.WriteLine();
             AuthenticationOutput.WriteLine($"Opening browser for authentication to {resource}...");
 
@@ -275,6 +284,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
         }
 
         // Fall back to device code
+        AuthDebugLog.WriteLine("  Starting device code authentication...");
         AuthenticationOutput.WriteLine();
         AuthenticationOutput.WriteLine($"Authentication required for {resource}");
 

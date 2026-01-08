@@ -189,6 +189,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     private async Task<string> GetTokenAsync(string environmentUrl, bool forceInteractive, CancellationToken cancellationToken)
     {
         var scopes = new[] { $"{environmentUrl}/.default" };
+        AuthDebugLog.WriteLine($"GetTokenAsync: url={environmentUrl}, forceInteractive={forceInteractive}");
 
         // For profile creation, skip silent auth and go straight to interactive
         if (!forceInteractive)
@@ -196,30 +197,41 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             // Try to get token silently from cache first
             if (_cachedResult != null && _cachedResult.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
             {
+                AuthDebugLog.WriteLine("  Using in-memory cached token (expires " + _cachedResult.ExpiresOn.ToString("HH:mm:ss") + ")");
                 return _cachedResult.AccessToken;
             }
+
+            AuthDebugLog.WriteLine("  In-memory cache miss or expired, attempting silent acquisition...");
 
             // Try to find the correct account for silent acquisition
             var account = await FindAccountAsync().ConfigureAwait(false);
 
             if (account != null)
             {
+                AuthDebugLog.WriteLine($"  Found account for silent auth: {account.Username}");
                 try
                 {
                     _cachedResult = await _msalClient!
                         .AcquireTokenSilent(scopes, account)
                         .ExecuteAsync(cancellationToken)
                         .ConfigureAwait(false);
+                    AuthDebugLog.WriteLine("  Silent acquisition SUCCEEDED");
                     return _cachedResult.AccessToken;
                 }
-                catch (MsalUiRequiredException)
+                catch (MsalUiRequiredException ex)
                 {
                     // Silent acquisition failed, need interactive
+                    AuthDebugLog.WriteLine($"  Silent acquisition FAILED: MsalUiRequiredException - {ex.Message}");
                 }
+            }
+            else
+            {
+                AuthDebugLog.WriteLine("  No account found for silent auth - skipping to interactive");
             }
         }
 
         // Interactive browser authentication
+        AuthDebugLog.WriteLine("  Starting interactive browser authentication...");
         AuthenticationOutput.WriteLine();
         AuthenticationOutput.WriteLine("Opening browser for authentication...");
 

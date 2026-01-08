@@ -28,6 +28,7 @@ public sealed class ProfileConnectionSource : IDisposable
     private readonly string? _environmentDisplayName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly ISecureCredentialStore? _credentialStore;
+    private readonly Action<AuthProfile>? _onProfileUpdated;
     private readonly int _maxPoolSize;
 
     private volatile ServiceClient? _seedClient;
@@ -65,13 +66,15 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
     /// <param name="environmentDisplayName">Optional environment display name for connection naming.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
+    /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
     public ProfileConnectionSource(
         AuthProfile profile,
         string environmentUrl,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         string? environmentDisplayName = null,
-        ISecureCredentialStore? credentialStore = null)
+        ISecureCredentialStore? credentialStore = null,
+        Action<AuthProfile>? onProfileUpdated = null)
     {
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
 
@@ -83,6 +86,7 @@ public sealed class ProfileConnectionSource : IDisposable
         _deviceCodeCallback = deviceCodeCallback;
         _environmentDisplayName = environmentDisplayName;
         _credentialStore = credentialStore;
+        _onProfileUpdated = onProfileUpdated;
 
         // Format: "identity@environment" when environment name is available
         // Token-provider-based auth doesn't populate ConnectedOrgFriendlyName,
@@ -99,13 +103,15 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="maxPoolSize">Maximum pool size.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
+    /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
     /// <returns>A new connection source.</returns>
     /// <exception cref="InvalidOperationException">If the profile has no environment.</exception>
     public static ProfileConnectionSource FromProfile(
         AuthProfile profile,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
-        ISecureCredentialStore? credentialStore = null)
+        ISecureCredentialStore? credentialStore = null,
+        Action<AuthProfile>? onProfileUpdated = null)
     {
         if (profile == null)
             throw new ArgumentNullException(nameof(profile));
@@ -123,7 +129,8 @@ public sealed class ProfileConnectionSource : IDisposable
             maxPoolSize,
             deviceCodeCallback,
             profile.Environment.DisplayName,
-            credentialStore);
+            credentialStore,
+            onProfileUpdated);
     }
 
     /// <summary>
@@ -175,6 +182,10 @@ public sealed class ProfileConnectionSource : IDisposable
                     .WaitAsync(connCts.Token)
                     .GetAwaiter()
                     .GetResult();
+
+                // Persist HomeAccountId if it changed after authentication
+                // This enables token cache reuse across sessions
+                TryUpdateHomeAccountId();
 
                 return _seedClient;
             }
@@ -249,6 +260,10 @@ public sealed class ProfileConnectionSource : IDisposable
                     .CreateServiceClientAsync(_environmentUrl, connCts.Token)
                     .ConfigureAwait(false);
 
+                // Persist HomeAccountId if it changed after authentication
+                // This enables token cache reuse across sessions
+                TryUpdateHomeAccountId();
+
                 return _seedClient;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -271,6 +286,27 @@ public sealed class ProfileConnectionSource : IDisposable
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Updates the profile's HomeAccountId if it changed after authentication.
+    /// This enables MSAL token cache reuse across sessions.
+    /// </summary>
+    private void TryUpdateHomeAccountId()
+    {
+        if (_provider == null || _onProfileUpdated == null)
+            return;
+
+        var newHomeAccountId = _provider.HomeAccountId;
+        if (string.IsNullOrEmpty(newHomeAccountId))
+            return;
+
+        // Only update if it's different (avoids unnecessary file writes)
+        if (string.Equals(_profile.HomeAccountId, newHomeAccountId, StringComparison.Ordinal))
+            return;
+
+        _profile.HomeAccountId = newHomeAccountId;
+        _onProfileUpdated(_profile);
     }
 
     /// <summary>

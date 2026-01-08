@@ -2,7 +2,10 @@ using System.CommandLine;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Tui;
+using PPDS.Cli.Tui.Infrastructure;
 using Spectre.Console;
+using TuiApp = Terminal.Gui.Application;
+using MessageBox = Terminal.Gui.MessageBox;
 
 namespace PPDS.Cli.Commands;
 
@@ -39,9 +42,27 @@ public static class InteractiveCommand
 
             try
             {
+                // TUI-aware device code callback - shows MessageBox instead of console output
+                // NOTE: Cannot use nested Application.Run() as Terminal.Gui event loops aren't reentrant
                 using var app = new PpdsApplication(
                     profileName: null, // Uses active profile
-                    deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback);
+                    deviceCodeCallback: info => TuiApp.MainLoop?.Invoke(() =>
+                    {
+                        TuiDebugLog.Log($"Device code auth requested: {info.UserCode}");
+
+                        // Auto-copy code to clipboard for convenience
+                        var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
+
+                        // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
+                        MessageBox.Query(
+                            "Authentication Required",
+                            $"Visit: {info.VerificationUrl}\n\n" +
+                            $"Enter code: {info.UserCode}{copied}\n\n" +
+                            "Complete authentication in browser, then press OK.",
+                            "OK");
+
+                        TuiDebugLog.Log("Device code dialog closed");
+                    }));
 
                 return Task.FromResult(app.Run(cancellationToken));
             }

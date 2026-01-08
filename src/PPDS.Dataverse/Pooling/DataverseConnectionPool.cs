@@ -1396,30 +1396,67 @@ namespace PPDS.Dataverse.Pooling
 
             _validationCts.Cancel();
 
+            // Wait for validation task with timeout - don't block forever if it's stuck
             try
             {
-                await _validationTask.ConfigureAwait(false);
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                await _validationTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                // Expected
+                // Expected - either from _validationCts or timeout
+            }
+            catch (TimeoutException)
+            {
+                // Validation task didn't complete in time - continue with disposal
+                _logger.LogWarning("Validation task did not complete within timeout during disposal");
             }
 
+            // Dispose pooled clients (fire-and-forget each to avoid blocking)
             foreach (var pool in _pools.Values)
             {
                 while (pool.TryDequeue(out var client))
                 {
-                    client.ForceDispose();
+                    // ForceDispose synchronously - ServiceClient.Dispose can block
+                    // Use Task.Run to avoid blocking if one client hangs
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            client.ForceDispose();
+                        }
+                        catch
+                        {
+                            // Swallow disposal errors
+                        }
+                    });
                 }
             }
 
             // Clear seed cache (sources will dispose the actual clients)
             _seedClients.Clear();
 
-            // Dispose sources (which dispose their clients)
-            foreach (var source in _sources)
+            // Dispose sources in parallel to avoid sequential blocking
+            var disposeTasks = _sources.Select(source => Task.Run(() =>
             {
-                source.Dispose();
+                try
+                {
+                    source.Dispose();
+                }
+                catch
+                {
+                    // Swallow disposal errors
+                }
+            })).ToArray();
+
+            // Wait for source disposal with timeout
+            try
+            {
+                await Task.WhenAll(disposeTasks).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Source disposal did not complete within timeout");
             }
 
             _batchCoordinator?.Dispose();

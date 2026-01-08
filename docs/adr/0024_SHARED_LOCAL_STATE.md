@@ -9,7 +9,7 @@
 PPDS is a multi-interface platform with multiple UIs accessing the same user data:
 
 1. **CLI Commands** (`ppds auth list`) - Traditional command-line
-2. **TUI Application** (`ppds -i`) - Terminal.Gui interactive mode
+2. **TUI Application** (`ppds`) - Terminal.Gui interactive mode (default)
 3. **VS Code Extension** - Connects via `ppds serve` JSON-RPC daemon
 4. **Future UIs** - Web, desktop app, etc.
 

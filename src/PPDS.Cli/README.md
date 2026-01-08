@@ -28,8 +28,8 @@ ppds data export --schema schema.xml --output data.zip
 ## Command Structure
 
 ```
-ppds
-├── interactive           Launch interactive TUI mode (-i, --interactive)
+ppds                      (default: launches TUI)
+├── interactive           Launch interactive TUI mode (also: -i, --interactive)
 ├── auth                  Authentication profile management
 ├── env                   Environment discovery and selection
 ├── data                  Data operations (export, import, copy, load, update, delete, schema, users)
@@ -50,12 +50,14 @@ ppds
 
 ---
 
-## Interactive Mode
+## Interactive Mode (Default)
 
-Launch the interactive TUI for guided profile/environment selection and SQL querying:
+Bare `ppds` launches the interactive TUI - this is the primary user experience:
 
 ```bash
-ppds interactive    # or ppds -i / ppds --interactive
+ppds                # Default - launches TUI
+ppds interactive    # Explicit subcommand (same result)
+ppds -i             # Short flag (same result)
 ```
 
 **Features:**
