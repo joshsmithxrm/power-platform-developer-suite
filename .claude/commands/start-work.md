@@ -1,67 +1,87 @@
 # Start Work
 
-Begin a work session in a prepared worktree by reading the session prompt.
+Begin a work session by fetching GitHub issues and creating a session prompt.
 
 ## Usage
 
-`/start-work`
+`/start-work <issue-numbers...>`
 
-No arguments - reads context from the current directory.
+Examples:
+- `/start-work 200 202` - Fetch issues #200 and #202, create session prompt
+- `/start-work 276 277 278 279 280` - Fetch multiple related issues
+
+## Arguments
+
+`$ARGUMENTS` - Space-separated issue numbers (required for new sessions)
 
 ## Process
 
-### 1. Check for Session Prompt
+### 1. Parse Arguments
 
-Look for `.claude/session-prompt.md` in the current directory.
+If issue numbers provided, go to step 2.
 
-If not found:
+If no arguments:
+- Check if `.claude/session-prompt.md` exists
+- If exists: read and display it, then enter plan mode
+- If not exists: show usage error
+
 ```
-No session prompt found at .claude/session-prompt.md
+No session prompt found and no issue numbers provided.
 
-Options:
-1. For issue-driven work: Use /plan-work to create worktree with session prompt
-2. For ad-hoc work: Use /create-worktree to set up worktree, then enter plan mode
-3. Or manually create .claude/session-prompt.md with your context
+Usage: /start-work <issue-numbers>
+Example: /start-work 200 202
 
-Tip: Plan mode is the recommended way to establish session context.
-     Enter plan mode and describe what you're working on.
+Tip: /next-work provides issue numbers in its output.
 ```
 
-### 2. Show Branch Context
+### 2. Fetch Issue Details
 
-Display current branch and working directory status:
+For each issue number:
+
+```bash
+gh issue view <number> --json number,title,body,labels
+```
+
+### 3. Write Session Prompt
+
+Create `.claude/session-prompt.md` with fetched issue context:
+
+```markdown
+# Session: <inferred-title-from-issues>
+
+## Issues
+- #<num>: <title>
+- #<num>: <title>
+
+## Context
+
+<issue body content, cleaned up>
+
+## First Steps
+1. Explore the codebase to understand current implementation
+2. Enter plan mode to design the approach
+```
+
+### 4. Show Branch Context
 
 ```bash
 git branch --show-current
 git status --short
 ```
 
-Output format:
+Output:
 ```
-Branch: feature/phase1-cli-commands
-Status: Clean (or: 3 uncommitted changes)
-```
-
-### 3. Display Session Prompt
-
-Read and display the full contents of `.claude/session-prompt.md`:
-
-```bash
-cat .claude/session-prompt.md
+Branch: feature/import-bugs
+Status: Clean
 ```
 
-### 4. Enter Plan Mode
+### 5. Display Session Prompt
 
-After displaying session context, automatically enter plan mode:
+Output the generated session prompt content.
 
-```
-Entering plan mode to verify and plan implementation...
-```
+### 6. Enter Plan Mode
 
-Use the EnterPlanMode tool to begin planning. Plan mode will:
-1. Verify current code patterns match issue assumptions
-2. Check ADR compliance
-3. Create an implementation plan for approval
+Use the EnterPlanMode tool to begin planning.
 
 ## Output Format
 
@@ -70,34 +90,31 @@ Use the EnterPlanMode tool to begin planning. Plan mode will:
 WORK SESSION
 ================================================================================
 
-Branch: feature/phase1-cli-commands
+Branch: feature/import-bugs
 Status: Clean
 
 --------------------------------------------------------------------------------
 SESSION CONTEXT
 --------------------------------------------------------------------------------
 
-[Contents of .claude/session-prompt.md]
+[Generated session prompt content]
 
 --------------------------------------------------------------------------------
 
 Entering plan mode to verify and plan implementation...
 ```
 
-Then use the EnterPlanMode tool.
-
 ## When to Use
 
-- Starting a new Claude Code session in a prepared worktree
-- Resuming work after a break
-- Onboarding to a worktree created by someone else
+- Starting a new Claude session in a worktree after `/next-work`
+- Resuming work after a break (no arguments if session-prompt.md exists)
+- Setting up a worktree for specific issues
 
 ## Related Commands
 
 | Command | Purpose |
 |---------|---------|
-| `/plan-work` | Triage issues, create worktrees with session prompts |
-| `/create-worktree` | Create worktree for ad-hoc work (no issue required) |
+| `/next-work` | Get recommendations and create worktrees |
+| `/create-worktree` | Create worktree for ad-hoc work |
 | `/pre-pr` | Validate before creating PR |
 | `/handoff` | Generate context summary for next session |
-| `/prune` | Clean up merged worktrees |
