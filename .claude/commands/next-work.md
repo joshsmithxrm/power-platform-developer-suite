@@ -22,9 +22,19 @@ Examples:
 
 ### 1. Check Current State
 
+**Fetch all remote branches (for multi-machine awareness):**
+```bash
+git fetch --all --prune
+```
+
 **List active worktrees:**
 ```bash
 git worktree list
+```
+
+**List remote branches:**
+```bash
+git branch -r
 ```
 
 **List open PRs:**
@@ -33,18 +43,32 @@ gh pr list --state open --json number,title,headRefName
 ```
 
 **Infer in-progress work:**
-- Worktree branches that aren't `main`
-- Match branch names to issues (e.g., `feature/plugin-traces` → #140)
+- Local worktrees that aren't `main`
+- Remote branches with issue numbers in name (e.g., `origin/fix/200-202-import-bugs` → #200, #202)
+- PRs linked to issues
 - Note: Some worktrees may be stale - check last commit date
+
+**Branch naming convention for issue tracking:**
+Branches include issue numbers: `<type>/<issues>-<description>`
+- `fix/200-202-import-bugs` → issues #200, #202
+- `feature/276-280-import-observability` → issues #276-280
+
+This enables multi-machine awareness without extra infrastructure.
 
 **Output:**
 ```markdown
 ## Currently In Progress
 
+### Local Worktrees
 | Worktree | Branch | Issues | Last Activity |
 |----------|--------|--------|---------------|
-| ppds-logging-observability | feature/logging-observability | #266-280 | 2 hours ago |
-| ppds-tui-mvp | feature/tui-sql-mvp | #234 | 30 min ago |
+| ppds-logging-observability | feature/266-280-logging | #266-280 | 2 hours ago |
+
+### Remote Branches (other machines)
+| Branch | Issues |
+|--------|--------|
+| origin/fix/200-202-import-bugs | #200, #202 |
+| origin/feature/276-280-import-observability | #276-280 |
 
 Open PRs: 2 (#283, #285)
 ```
@@ -167,20 +191,20 @@ Based on v1.0 milestone, current progress, and dependencies:
 **Issues:** #254, #257, #259, #260, #261, #262, #263, #264, #265
 **Why:** Enables TUI panels AND MCP tools. Unblocks two other workstreams.
 **Effort:** 9 issues, but mechanical pattern (ADR-0015). Can batch.
-**Branch:** `feature/service-extractions`
+**Branch:** `feature/254-265-service-extractions`
 
 ### 2. MCP Server (HIGH VALUE)
 **Issues:** #281
 **Why:** Claude Code integration - high visibility, well-defined scope.
 **Effort:** 1 large issue with clear phases. Can start infrastructure now.
-**Branch:** `feature/mcp-server`
+**Branch:** `feature/281-mcp-server`
 **Note:** Some tools need services from #1, but can build infra in parallel.
 
 ### 3. Plugin Traces (QUICK WIN)
 **Issues:** #140, #247
 **Why:** Complete new feature, small scope, useful for debugging.
 **Effort:** 2 issues, straightforward implementation.
-**Branch:** `feature/plugin-traces`
+**Branch:** `feature/140-247-plugin-traces`
 
 ---
 
@@ -197,13 +221,11 @@ Create these 3 worktrees? (yes / modify / skip)
 ### 6. Handle User Response
 
 **If "yes" or confirmed:**
-Create worktrees and session prompts using `/plan-work` logic:
+Create worktrees only (no file creation to avoid permission prompts):
 
 ```bash
-# For each recommended workstream:
-git worktree add -b <branch> ../<folder> main
-mkdir -p ../<folder>/.claude
-# Generate session-prompt.md with issues, context, first steps
+git fetch origin main
+git worktree add -b <branch> ../<folder> origin/main
 ```
 
 **If "modify":**
@@ -217,23 +239,26 @@ Exit without creating anything. User can run `/plan-work` manually with specific
 
 ### 7. Output Summary
 
+Include issue numbers so user can pass them to /start-work:
+
 ```markdown
 ## Worktrees Created
 
 | Folder | Branch | Issues |
 |--------|--------|--------|
-| ppds-service-extractions | feature/service-extractions | #254, #257, #259-265 |
-| ppds-mcp-server | feature/mcp-server | #281 |
-| ppds-plugin-traces | feature/plugin-traces | #140, #247 |
-
-Session prompts created in each `.claude/session-prompt.md`
+| ppds-254-265-service-extractions | feature/254-265-service-extractions | #254-265 |
+| ppds-281-mcp-server | feature/281-mcp-server | #281 |
+| ppds-140-247-plugin-traces | feature/140-247-plugin-traces | #140, #247 |
 
 To start:
-  cd ../ppds-service-extractions && claude
-  cd ../ppds-mcp-server && claude
-  cd ../ppds-plugin-traces && claude
+  cd ../ppds-254-265-service-extractions && claude
+  /start-work 254 257 259 260 261 262 263 264 265
 
-Then run /start-work in each session.
+  cd ../ppds-281-mcp-server && claude
+  /start-work 281
+
+  cd ../ppds-140-247-plugin-traces && claude
+  /start-work 140 247
 ```
 
 ## Behavior Summary
@@ -244,8 +269,8 @@ Then run /start-work in each session.
 4. Group ready issues by logical area
 5. Rank and recommend top N workstreams
 6. **STOP for user confirmation**
-7. Create worktrees and session prompts
-8. Output summary with next steps
+7. Create worktrees (git commands only, no file creation)
+8. Output summary with issue numbers for /start-work
 
 ## Edge Cases
 
@@ -299,7 +324,7 @@ If automatic grouping is wrong, user can say "modify" and manually adjust.
 |---------|-------------|
 | `/next-work` | "What should I work on?" - Get recommendations |
 | `/plan-work 52 78` | "I know what I want" - Create worktrees for specific issues |
-| `/start-work` | "I'm in a worktree" - Read the session prompt |
+| `/start-work 52 78` | "I'm in a worktree" - Fetch issues and create session prompt |
 | `/triage` | "Issues need categorization" - Add labels/milestones |
 | `/handoff` | "I'm done for now" - Generate context for next session |
 
@@ -310,12 +335,18 @@ You: /next-work
 
 Claude:
 ## Currently In Progress
-- ppds-logging-observability: L&O (#266-280)
-- ppds-tui-mvp: TUI SQL (#234)
+
+### Local Worktrees
+(none)
+
+### Remote Branches (other machines)
+| Branch | Issues |
+|--------|--------|
+| origin/feature/266-280-logging | #266-280 |
 
 ## Recommended Next Workstreams
 
-1. **Service Extractions** - #254, #257, #259-265 (enables TUI + MCP)
+1. **Service Extractions** - #254-265 (enables TUI + MCP)
 2. **MCP Server** - #281 (Claude Code integration)
 3. **Plugin Traces** - #140, #247 (quick win, debugging)
 
@@ -327,9 +358,11 @@ Claude:
 ## Worktrees Created
 | Folder | Branch | Issues |
 |--------|--------|--------|
-| ppds-service-extractions | feature/service-extractions | #254, #257, #259-265 |
-| ppds-mcp-server | feature/mcp-server | #281 |
-| ppds-plugin-traces | feature/plugin-traces | #140, #247 |
+| ppds-254-265-service-extractions | feature/254-265-service-extractions | #254-265 |
+| ppds-281-mcp-server | feature/281-mcp-server | #281 |
+| ppds-140-247-plugin-traces | feature/140-247-plugin-traces | #140, #247 |
 
-To start: cd ../ppds-service-extractions && claude
+To start:
+  cd ../ppds-254-265-service-extractions && claude
+  /start-work 254 257 259 260 261 262 263 264 265
 ```
