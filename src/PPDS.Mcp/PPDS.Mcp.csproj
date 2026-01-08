@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>PPDS.Mcp</RootNamespace>
+    <AssemblyName>ppds-mcp-server</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NU1702: PPDS.Plugins targets net462 (required for Dataverse plugin sandbox) but is
+         referenced transitively from net8.0+. The package contains only attributes/enums with
+         no framework-specific APIs, so cross-framework reference is safe. -->
+    <NoWarn>$(NoWarn);NU1702</NoWarn>
+
+    <!-- MinVer Configuration -->
+    <MinVerTagPrefix>Mcp-v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+
+    <!-- .NET Tool Configuration -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>ppds-mcp-server</ToolCommandName>
+    <PackageId>PPDS.Mcp</PackageId>
+    <Authors>Josh Smith</Authors>
+    <Company>Power Platform Developer Suite</Company>
+    <Description>MCP server exposing Power Platform capabilities for AI assistant integration.
+      Enables Claude Code and other MCP clients to query Dataverse, analyze plugins, and explore
+      metadata through natural language.</Description>
+    <PackageTags>dataverse;dynamics365;powerplatform;mcp;claude;ai;ppds;model-context-protocol</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/joshsmithxrm/ppds-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshsmithxrm/ppds-sdk</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PPDS.Mcp.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="0.2.0-preview.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
+    <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
+    <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+    <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
+    <!-- PPDS architectural enforcement analyzers -->
+    <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
