@@ -86,6 +86,33 @@ public static class ListCommand
             Description = "Filter by plugin step ID"
         };
 
+        // Quick filter shortcuts
+        var lastHourOption = new Option<bool>("--last-hour")
+        {
+            Description = "Show traces from the last hour"
+        };
+
+        var last24hOption = new Option<bool>("--last-24h")
+        {
+            Description = "Show traces from the last 24 hours"
+        };
+
+        var asyncOnlyOption = new Option<bool>("--async-only")
+        {
+            Description = "Show only asynchronous traces"
+        };
+
+        var recursiveOption = new Option<bool>("--recursive")
+        {
+            Description = "Show only nested traces (depth > 1)"
+        };
+
+        // Record filter (#247)
+        var recordOption = new Option<string?>("--record")
+        {
+            Description = "Filter by record (format: entity or entity/guid, e.g., account or account/12345678-...)"
+        };
+
         // Filter file support (#155)
         var filterFileOption = new Option<FileInfo?>("--filter")
         {
@@ -121,6 +148,11 @@ public static class ListCommand
             correlationIdOption,
             requestIdOption,
             stepIdOption,
+            lastHourOption,
+            last24hOption,
+            asyncOnlyOption,
+            recursiveOption,
+            recordOption,
             filterFileOption,
             topOption,
             orderByOption
@@ -174,6 +206,49 @@ public static class ListCommand
             else if (successOnly)
             {
                 filter = filter with { HasException = false };
+            }
+
+            // Apply quick filter shortcuts
+            if (parseResult.GetValue(lastHourOption))
+            {
+                filter = filter with { CreatedAfter = DateTime.UtcNow.AddHours(-1) };
+            }
+            if (parseResult.GetValue(last24hOption))
+            {
+                filter = filter with { CreatedAfter = DateTime.UtcNow.AddHours(-24) };
+            }
+            if (parseResult.GetValue(asyncOnlyOption))
+            {
+                filter = filter with { Mode = PluginTraceMode.Asynchronous };
+            }
+            if (parseResult.GetValue(recursiveOption))
+            {
+                filter = filter with { MinDepth = 2 };
+            }
+
+            // Apply record filter (#247)
+            var record = parseResult.GetValue(recordOption);
+            var recordResult = PluginTracesCommandGroup.ParseRecordOption(record);
+            if (!recordResult.Success)
+            {
+                var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+                var error = new StructuredError(
+                    ErrorCodes.Validation.InvalidArguments,
+                    recordResult.ErrorMessage!);
+
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteError(error);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: {recordResult.ErrorMessage}");
+                }
+                return ExitCodes.InvalidArguments;
+            }
+            if (!string.IsNullOrEmpty(recordResult.EntityName))
+            {
+                filter = filter with { PrimaryEntity = recordResult.EntityName };
             }
 
             // Load filter from file if specified (#155)

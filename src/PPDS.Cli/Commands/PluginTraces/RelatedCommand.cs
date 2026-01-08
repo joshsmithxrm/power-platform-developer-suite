@@ -32,10 +32,17 @@ public static class RelatedCommand
             DefaultValueFactory = _ => 1000
         };
 
-        var command = new Command("related", "Get plugin traces related by correlation ID")
+        // Record filter (#247)
+        var recordOption = new Option<string?>("--record")
+        {
+            Description = "Filter by record (format: entity or entity/guid, e.g., account or account/12345678-...)"
+        };
+
+        var command = new Command("related", "Get plugin traces related by correlation ID or record")
         {
             traceIdArgument,
             correlationIdOption,
+            recordOption,
             topOption,
             PluginTracesCommandGroup.ProfileOption,
             PluginTracesCommandGroup.EnvironmentOption
@@ -47,12 +54,13 @@ public static class RelatedCommand
         {
             var traceId = parseResult.GetValue(traceIdArgument);
             var correlationId = parseResult.GetValue(correlationIdOption);
+            var record = parseResult.GetValue(recordOption);
             var top = parseResult.GetValue(topOption);
             var profile = parseResult.GetValue(PluginTracesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginTracesCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(traceId, correlationId, top, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(traceId, correlationId, record, top, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -61,6 +69,7 @@ public static class RelatedCommand
     private static async Task<int> ExecuteAsync(
         Guid? traceId,
         Guid? correlationId,
+        string? record,
         int top,
         string? profile,
         string? environment,
@@ -69,10 +78,10 @@ public static class RelatedCommand
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
-        // Validate that either traceId or correlationId is provided
-        if (!traceId.HasValue && !correlationId.HasValue)
+        // Validate that at least one lookup method is provided
+        if (!traceId.HasValue && !correlationId.HasValue && string.IsNullOrEmpty(record))
         {
-            var message = "Either trace-id or --correlation-id must be provided.";
+            var message = "Either trace-id, --correlation-id, or --record must be provided.";
             var error = new StructuredError(
                 ErrorCodes.Validation.InvalidArguments,
                 message);
@@ -87,6 +96,26 @@ public static class RelatedCommand
             }
             return ExitCodes.InvalidArguments;
         }
+
+        // Parse record option if provided (#247)
+        var recordResult = PluginTracesCommandGroup.ParseRecordOption(record);
+        if (!recordResult.Success)
+        {
+            var error = new StructuredError(
+                ErrorCodes.Validation.InvalidArguments,
+                recordResult.ErrorMessage!);
+
+            if (globalOptions.IsJsonMode)
+            {
+                writer.WriteError(error);
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {recordResult.ErrorMessage}");
+            }
+            return ExitCodes.InvalidArguments;
+        }
+        string? recordEntity = recordResult.EntityName;
 
         try
         {
@@ -107,8 +136,80 @@ public static class RelatedCommand
                 Console.Error.WriteLine();
             }
 
+            List<PluginTraceInfo> traces;
+            Guid? lookupCorrelationId = correlationId;
+
+            // Handle record-based lookup (#247)
+            if (!string.IsNullOrEmpty(recordEntity))
+            {
+                // List traces for the specified entity
+                var filter = new PluginTraceFilter { PrimaryEntity = recordEntity };
+                traces = await traceService.ListAsync(filter, top, cancellationToken);
+
+                if (traces.Count == 0)
+                {
+                    if (globalOptions.IsJsonMode)
+                    {
+                        writer.WriteSuccess(new RecordOutput
+                        {
+                            Entity = recordEntity,
+                            Traces = []
+                        });
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"No traces found for entity: {recordEntity}");
+                    }
+                    return ExitCodes.Success;
+                }
+
+                if (globalOptions.IsJsonMode)
+                {
+                    var output = new RecordOutput
+                    {
+                        Entity = recordEntity,
+                        Traces = traces.Select(t => new TraceOutput
+                        {
+                            Id = t.Id,
+                            TypeName = t.TypeName,
+                            MessageName = t.MessageName,
+                            PrimaryEntity = t.PrimaryEntity,
+                            Mode = t.Mode.ToString(),
+                            Depth = t.Depth,
+                            CreatedOn = t.CreatedOn,
+                            DurationMs = t.DurationMs,
+                            HasException = t.HasException
+                        }).ToList()
+                    };
+                    writer.WriteSuccess(output);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Traces for entity: {recordEntity}");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"{"#",-3} {"Depth",-5} {"Type",-35} {"Message",-12} {"Duration",-10} {"Status",-6}");
+                    Console.Error.WriteLine(new string('-', 75));
+
+                    int idx = 1;
+                    foreach (var trace in traces)
+                    {
+                        var type = Truncate(trace.TypeName, 35);
+                        var message = Truncate(trace.MessageName ?? "-", 12);
+                        var duration = trace.DurationMs.HasValue ? $"{trace.DurationMs}ms" : "-";
+                        var status = trace.HasException ? "Error" : "OK";
+
+                        Console.Error.WriteLine($"{idx,-3} {trace.Depth,-5} {type,-35} {message,-12} {duration,-10} {status,-6}");
+                        idx++;
+                    }
+
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"Total: {traces.Count} trace(s)");
+                }
+
+                return ExitCodes.Success;
+            }
+
             // If traceId provided, look up its correlation ID
-            var lookupCorrelationId = correlationId;
             if (traceId.HasValue && !correlationId.HasValue)
             {
                 var trace = await traceService.GetAsync(traceId.Value, cancellationToken);
@@ -152,7 +253,7 @@ public static class RelatedCommand
                 }
             }
 
-            var traces = await traceService.GetRelatedAsync(lookupCorrelationId!.Value, top, cancellationToken);
+            traces = await traceService.GetRelatedAsync(lookupCorrelationId!.Value, top, cancellationToken);
 
             if (traces.Count == 0)
             {
@@ -236,6 +337,15 @@ public static class RelatedCommand
     {
         [JsonPropertyName("correlationId")]
         public Guid CorrelationId { get; set; }
+
+        [JsonPropertyName("traces")]
+        public List<TraceOutput> Traces { get; set; } = [];
+    }
+
+    private sealed class RecordOutput
+    {
+        [JsonPropertyName("entity")]
+        public string Entity { get; set; } = "";
 
         [JsonPropertyName("traces")]
         public List<TraceOutput> Traces { get; set; } = [];

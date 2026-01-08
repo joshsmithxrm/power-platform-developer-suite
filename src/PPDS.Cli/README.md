@@ -34,6 +34,7 @@ ppds
 ├── env                   Environment discovery and selection
 ├── data                  Data operations (export, import, copy, load, update, delete, schema, users)
 ├── plugins               Plugin registration management
+├── plugintraces          Browse and manage plugin trace logs
 ├── query                 Execute FetchXML and SQL queries
 ├── metadata              Browse entity and attribute metadata
 ├── solutions             Manage Power Platform solutions
@@ -703,6 +704,162 @@ Manage security roles.
 | `ppds roles show <role>` | Show role details and assigned users |
 | `ppds roles assign <role> --user <user>` | Assign a role to a user |
 | `ppds roles remove <role> --user <user>` | Remove a role from a user |
+
+### `ppds plugintraces`
+
+Browse and manage plugin trace logs for debugging plugin executions.
+
+| Command | Description |
+|---------|-------------|
+| `ppds plugintraces list` | List plugin traces with filtering |
+| `ppds plugintraces get <trace-id>` | Get full trace details |
+| `ppds plugintraces related [trace-id]` | Find related traces by correlation ID or record |
+| `ppds plugintraces timeline [trace-id]` | View hierarchical execution timeline |
+| `ppds plugintraces delete [trace-id]` | Delete plugin traces |
+| `ppds plugintraces settings get` | Get current plugin trace settings |
+| `ppds plugintraces settings set <value>` | Set plugin trace settings (Off, Exception, All) |
+
+#### List
+
+List plugin traces with optional filtering:
+
+```bash
+# List recent traces
+ppds plugintraces list
+
+# Filter by plugin type
+ppds plugintraces list --type "MyPlugin.AccountPlugin"
+
+# Filter by message
+ppds plugintraces list --message Create
+
+# Filter by entity
+ppds plugintraces list --entity account
+
+# Show only errors
+ppds plugintraces list --errors-only
+
+# Quick time filters
+ppds plugintraces list --last-hour
+ppds plugintraces list --last-24h
+
+# Filter by execution mode
+ppds plugintraces list --async-only       # Only async plugins
+ppds plugintraces list --mode Synchronous # Only sync plugins
+
+# Show only nested traces (depth > 1)
+ppds plugintraces list --recursive
+
+# Filter by record (entity name)
+ppds plugintraces list --record account
+
+# Combine filters
+ppds plugintraces list --entity account --errors-only --last-24h --top 50
+```
+
+Options:
+- `--type`, `-t` - Filter by plugin type name (contains)
+- `--message`, `-m` - Filter by message name (Create, Update, Delete, etc.)
+- `--entity` - Filter by primary entity
+- `--mode` - Filter by mode (Synchronous, Asynchronous)
+- `--errors-only` - Show only traces with exceptions
+- `--since` - Show traces created after this date/time
+- `--until` - Show traces created before this date/time
+- `--last-hour` - Show traces from the last hour
+- `--last-24h` - Show traces from the last 24 hours
+- `--async-only` - Show only asynchronous traces
+- `--recursive` - Show only nested traces (depth > 1)
+- `--record` - Filter by record (entity name)
+- `--filter`, `-f` - Path to filter file (JSON)
+- `--top`, `-n` - Maximum results (default: 50)
+- `--profile`, `-p` - Profile name
+- `--environment`, `-e` - Override environment URL
+
+#### Get
+
+Get full details for a specific trace:
+
+```bash
+ppds plugintraces get 00000000-0000-0000-0000-000000000001
+```
+
+Returns trace details including message block, exception details, configuration, and secure configuration.
+
+#### Related
+
+Find traces related by correlation ID (same transaction) or record:
+
+```bash
+# From a trace ID (looks up its correlation ID)
+ppds plugintraces related 00000000-0000-0000-0000-000000000001
+
+# By correlation ID directly
+ppds plugintraces related --correlation-id 00000000-0000-0000-0000-000000000002
+
+# By record (entity name)
+ppds plugintraces related --record account
+```
+
+Options:
+- `--correlation-id`, `-c` - Look up by correlation ID
+- `--record` - Filter by record (entity name)
+- `--top`, `-n` - Maximum results (default: 1000)
+
+#### Timeline
+
+View hierarchical execution timeline for correlated traces:
+
+```bash
+# From a trace ID
+ppds plugintraces timeline 00000000-0000-0000-0000-000000000001
+
+# By correlation ID
+ppds plugintraces timeline --correlation-id 00000000-0000-0000-0000-000000000002
+```
+
+Shows nested execution tree with depth indicators, timing, and status.
+
+#### Delete
+
+Delete plugin traces:
+
+```bash
+# Single trace
+ppds plugintraces delete 00000000-0000-0000-0000-000000000001
+
+# Multiple traces by ID
+ppds plugintraces delete --ids id1,id2,id3
+
+# Delete traces older than a date
+ppds plugintraces delete --older-than "2024-01-01"
+
+# Delete all traces (requires --force)
+ppds plugintraces delete --all --force
+
+# Preview without deleting
+ppds plugintraces delete --older-than "2024-01-01" --dry-run
+```
+
+Options:
+- `--ids` - Comma-separated list of trace IDs
+- `--older-than` - Delete traces older than this date
+- `--all` - Delete all traces
+- `--dry-run` - Preview without deleting
+- `--force` - Skip confirmation prompt
+
+#### Settings
+
+Manage plugin trace logging settings:
+
+```bash
+# Get current setting
+ppds plugintraces settings get
+
+# Set trace level
+ppds plugintraces settings set Off        # Disable tracing
+ppds plugintraces settings set Exception  # Trace only exceptions
+ppds plugintraces settings set All        # Trace all executions
+```
 
 ---
 

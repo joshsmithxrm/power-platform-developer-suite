@@ -151,6 +151,46 @@ public class PluginTracesCommandGroupTests
         Assert.NotNull(option);
     }
 
+    [Fact]
+    public void ListSubcommand_HasLastHourOption()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var option = listCommand.Options.FirstOrDefault(o => o.Name == "--last-hour");
+        Assert.NotNull(option);
+    }
+
+    [Fact]
+    public void ListSubcommand_HasLast24hOption()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var option = listCommand.Options.FirstOrDefault(o => o.Name == "--last-24h");
+        Assert.NotNull(option);
+    }
+
+    [Fact]
+    public void ListSubcommand_HasAsyncOnlyOption()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var option = listCommand.Options.FirstOrDefault(o => o.Name == "--async-only");
+        Assert.NotNull(option);
+    }
+
+    [Fact]
+    public void ListSubcommand_HasRecursiveOption()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var option = listCommand.Options.FirstOrDefault(o => o.Name == "--recursive");
+        Assert.NotNull(option);
+    }
+
+    [Fact]
+    public void ListSubcommand_HasRecordOption()
+    {
+        var listCommand = _command.Subcommands.First(c => c.Name == "list");
+        var option = listCommand.Options.FirstOrDefault(o => o.Name == "--record");
+        Assert.NotNull(option);
+    }
+
     #endregion
 
     #region Get Subcommand Tests
@@ -240,6 +280,14 @@ public class PluginTracesCommandGroupTests
     {
         var relatedCommand = _command.Subcommands.First(c => c.Name == "related");
         var option = relatedCommand.Options.FirstOrDefault(o => o.Name == "--top");
+        Assert.NotNull(option);
+    }
+
+    [Fact]
+    public void RelatedSubcommand_HasRecordOption()
+    {
+        var relatedCommand = _command.Subcommands.First(c => c.Name == "related");
+        var option = relatedCommand.Options.FirstOrDefault(o => o.Name == "--record");
         Assert.NotNull(option);
     }
 
