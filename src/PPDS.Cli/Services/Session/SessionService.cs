@@ -314,7 +314,32 @@ public sealed class SessionService : ISessionService
         _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
+        // Also write to worktree so worker can read without permission issues
+        await WriteWorktreeStateAsync(session, cancellationToken);
+
         _logger.LogInformation("Message forwarded to session {SessionId}", sessionId);
+    }
+
+    /// <summary>
+    /// Writes session state to the worktree for worker access.
+    /// </summary>
+    private async Task WriteWorktreeStateAsync(SessionState session, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(session.WorktreePath))
+        {
+            return;
+        }
+
+        var statePath = Path.Combine(session.WorktreePath, "session-state.json");
+        var state = new
+        {
+            status = session.Status.ToString().ToLowerInvariant(),
+            forwardedMessage = session.ForwardedMessage,
+            lastHeartbeat = session.LastHeartbeat
+        };
+
+        var json = JsonSerializer.Serialize(state, JsonOptions);
+        await File.WriteAllTextAsync(statePath, json, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -554,30 +579,44 @@ public sealed class SessionService : ISessionService
 
             {body}
 
-            ## Instructions
+            ## Workflow
 
-            You are an autonomous worker implementing this issue. Follow these guidelines:
+            ### Phase 1: Planning
+            1. Read and understand the issue requirements
+            2. Explore the codebase to understand existing patterns
+            3. Create a detailed implementation plan
+            4. Write your plan to `.claude/worker-plan.md`
 
-            1. **Status Updates**: Call `ppds session update --id {issueNumber} --status working` periodically
-            2. **When Stuck**: Call `ppds session update --id {issueNumber} --status stuck --reason "description"`
-            3. **When Complete**: Run `/ship` to create PR, then call `ppds session update --id {issueNumber} --status complete`
+            ### Phase 2: Check for Messages
+            Before implementing, check for forwarded messages:
+            - Read `session-state.json` (at worktree root) if it exists
+            - If `forwardedMessage` field exists, incorporate it
+            - Then continue to implementation
 
-            4. **Check for Messages**: Read `~/.ppds/sessions/work-{issueNumber}.json` for forwarded messages from orchestrator
+            ### Phase 3: Implementation
+            1. Follow your plan in `.claude/worker-plan.md`
+            2. Build: `dotnet build`
+            3. Test: `dotnet test --filter "Category!=Integration"`
+            4. Create PR via `/ship`
 
-            5. **Follow PPDS Patterns**: Refer to CLAUDE.md for coding standards
+            ### Status Updates (Optional)
+            Try to update status, but continue if it fails:
+            - `ppds session update --id {issueNumber} --status planning`
+            - `ppds session update --id {issueNumber} --status working`
+            - `ppds session update --id {issueNumber} --status complete`
+            - `ppds session update --id {issueNumber} --status stuck --reason "description"`
+            If the command fails, note it and continue - the work is more important than status tracking.
 
-            6. **Domain Gates**: Escalate (set stuck) for:
-               - Auth/Security decisions
-               - Performance-critical code
-               - Breaking changes
-               - Data migration
+            ### Domain Gates (set stuck if possible, otherwise note in PR)
+            - Auth/Security decisions
+            - Performance-critical code
+            - Breaking changes
+            - Data migration
 
-            ## Verification
-
-            Before marking complete:
-            - [ ] Build passes: `dotnet build`
-            - [ ] Tests pass: `dotnet test --filter "Category!=Integration"`
-            - [ ] Code follows CLAUDE.md guidelines
+            ## Reference
+            - Follow CLAUDE.md for coding standards
+            - Build must pass before shipping
+            - Tests must pass before shipping
             """;
 
         await File.WriteAllTextAsync(promptPath, prompt, cancellationToken);
@@ -609,21 +648,36 @@ public sealed class SessionService : ISessionService
             .Take(10)
             .ToList();
 
-        // Get diff stats
+        // Get diff stats (try HEAD~1 first, fall back to unstaged diff)
         var diffInfo = new ProcessStartInfo
         {
             FileName = "git",
-            Arguments = "diff --stat HEAD~1 2>/dev/null || git diff --stat",
+            Arguments = "diff --stat HEAD~1",
             UseShellExecute = false,
             RedirectStandardOutput = true,
+            RedirectStandardError = true,
             CreateNoWindow = true,
             WorkingDirectory = worktreePath
         };
 
         using var diffProcess = Process.Start(diffInfo);
-        var diffOutput = diffProcess != null
-            ? await diffProcess.StandardOutput.ReadToEndAsync(cancellationToken)
-            : "";
+        var diffOutput = "";
+        if (diffProcess != null)
+        {
+            diffOutput = await diffProcess.StandardOutput.ReadToEndAsync(cancellationToken);
+            await diffProcess.WaitForExitAsync(cancellationToken);
+
+            // If HEAD~1 failed (no commits), try unstaged diff
+            if (diffProcess.ExitCode != 0 || string.IsNullOrWhiteSpace(diffOutput))
+            {
+                diffInfo.Arguments = "diff --stat";
+                using var fallbackProcess = Process.Start(diffInfo);
+                if (fallbackProcess != null)
+                {
+                    diffOutput = await fallbackProcess.StandardOutput.ReadToEndAsync(cancellationToken);
+                }
+            }
+        }
 
         // Parse insertions/deletions from last line
         var insertions = 0;

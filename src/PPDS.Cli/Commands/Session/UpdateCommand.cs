@@ -23,7 +23,7 @@ public static class UpdateCommand
 
         var statusOption = new Option<string>("--status", "-s")
         {
-            Description = "New status: working, stuck, paused, complete",
+            Description = "New status: planning, planning_complete, working, stuck, paused, complete",
             Required = true
         };
 

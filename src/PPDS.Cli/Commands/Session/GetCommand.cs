@@ -136,6 +136,24 @@ public static class GetCommand
                         }
                     }
                 }
+
+                // Show worker plan if exists
+                var planPath = Path.Combine(session.WorktreePath, ".claude", "worker-plan.md");
+                if (File.Exists(planPath))
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("  Worker Plan:");
+                    var planContent = File.ReadAllText(planPath);
+                    var lines = planContent.Split('\n').Take(20);
+                    foreach (var line in lines)
+                    {
+                        Console.WriteLine($"    {line.TrimEnd()}");
+                    }
+                    if (planContent.Split('\n').Length > 20)
+                    {
+                        Console.WriteLine($"    ... (truncated, see full plan at {planPath})");
+                    }
+                }
             }
 
             return ExitCodes.Success;

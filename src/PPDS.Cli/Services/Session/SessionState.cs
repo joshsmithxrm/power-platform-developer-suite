@@ -77,6 +77,16 @@ public enum SessionStatus
     Registered,
 
     /// <summary>
+    /// Worker is exploring codebase and creating plan.
+    /// </summary>
+    Planning,
+
+    /// <summary>
+    /// Worker has written plan, continuing to implementation.
+    /// </summary>
+    PlanningComplete,
+
+    /// <summary>
     /// Worker actively implementing.
     /// </summary>
     Working,

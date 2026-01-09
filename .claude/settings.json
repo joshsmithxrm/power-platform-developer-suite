@@ -116,7 +116,10 @@
       "Bash(gh release view:*)",
       "Bash(gh label list:*)",
       "Bash(gh project:*)",
-      "WebSearch"
+      "WebSearch",
+      "Skill(/ship:*)",
+      "Skill(/test:*)",
+      "Skill(/commit:*)"
     ],
     "deny": [
       "Bash(git push --force:*)",
