@@ -5,6 +5,7 @@
 **Issue**: #{ISSUE_NUMBER} - {ISSUE_TITLE}
 **Branch**: {BRANCH_NAME}
 **Worktree**: {WORKTREE_PATH}
+**Session ID**: {ISSUE_NUMBER}
 **Related**: {RELATED_ISSUES}
 
 ### Issue Description
@@ -12,53 +13,49 @@
 
 ---
 
-## Session File Contract
+## Status Reporting
 
-You MUST update your session status file at key points using Bash tool with PowerShell.
+Report your status using `ppds session update`. The orchestrator monitors these updates.
 
-### Session File Location
-`~/.ppds/sessions/work-{ISSUE_NUMBER}.json`
+### Status Commands
 
-### Status Updates
-
-**At start of each iteration:**
-```powershell
-$s = @{id='work-{ISSUE_NUMBER}';status='working';issue='#{ISSUE_NUMBER}';branch='{BRANCH_NAME}';worktree='{WORKTREE_PATH}';started='{STARTED_ISO}';lastUpdate=(Get-Date -Format o);stuck=$null} | ConvertTo-Json
-$s | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+**Report working (send as heartbeat each iteration):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
 ```
 
-**When stuck (after 5 failed attempts OR domain gate):**
-```powershell
-$s = Get-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json" | ConvertFrom-Json
-$s.status = 'stuck'
-$s.lastUpdate = (Get-Date -Format o)
-$s.stuck = @{reason='DESCRIBE_BLOCKER';context='WHAT_YOU_TRIED';options=@('option1','option2');since=(Get-Date -Format o)}
-$s | ConvertTo-Json -Depth 3 | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+**Report stuck (domain gate or repeated failure):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "DESCRIBE_BLOCKER: context and options"
 ```
 
-**When PR ready:**
-```powershell
-$s = Get-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json" | ConvertFrom-Json
-$s.status = 'pr_ready'
-$s.lastUpdate = (Get-Date -Format o)
-$s.prUrl = 'PR_URL_HERE'
-$s.stuck = $null
-$s | ConvertTo-Json | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+**Report complete (PR created):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status complete --pr "https://github.com/.../pull/N"
 ```
 
-### Checking for Human Guidance
+### Checking for Guidance
 
-If your status is 'stuck', check if human provided guidance:
-```powershell
-$s = Get-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json" | ConvertFrom-Json
-if ($s.guidance) { Write-Output "Human guidance: $($s.guidance)" }
+If stuck, poll for human guidance:
+```bash
+ppds session get {ISSUE_NUMBER} --json
 ```
 
-If guidance exists, follow it, then clear guidance and set status back to 'working'.
+Look for `forwardedMessage` field. If present, apply guidance and resume:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
+```
 
 ---
 
 ## Your Workflow
+
+### At Start of Each Iteration
+1. Report heartbeat:
+   ```bash
+   ppds session update --id {ISSUE_NUMBER} --status working
+   ```
+2. Check for forwarded messages if previously stuck
 
 ### Phase 1: Plan
 1. Read the issue thoroughly
@@ -80,7 +77,7 @@ Run tests using `/test` command (auto-detects test type):
 
 **Test-Fix Loop Rules:**
 - Max 5 attempts on same failure before escalating
-- If stuck 3x on SAME error, update status to 'stuck'
+- If stuck 3x on SAME error, report stuck status
 
 ### Phase 4: Ship
 Run `/ship` command which handles:
@@ -94,7 +91,7 @@ Run `/ship` command which handles:
 
 ## Domain Gates (MUST ESCALATE)
 
-Stop and set status='stuck' when touching:
+Stop and report stuck when touching:
 
 | Gate | Examples |
 |------|----------|
@@ -103,7 +100,10 @@ Stop and set status='stuck' when touching:
 | **Breaking changes** | Public API modifications, removing/renaming exports |
 | **Data migration** | Schema changes, data transformation logic |
 
-Set stuck.reason to describe the gate and what decision you need.
+Report stuck with clear reason:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "Auth/Security: Token refresh approach. Options: sliding (15min) or fixed (1hr) expiration"
+```
 
 ---
 
@@ -124,7 +124,10 @@ When:
 - PR is created AND CI is green
 - OR PR is created AND you've made 3 CI fix attempts
 
-Before outputting, update session file to status='pr_ready'.
+Before outputting, report complete:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status complete --pr "PR_URL_HERE"
+```
 
 ### Stuck: Output `<promise>STUCK_NEEDS_HUMAN</promise>`
 When:
@@ -133,7 +136,10 @@ When:
 - Same CI failure 3x
 - Requirements unclear, cannot proceed
 
-Before outputting, update session file to status='stuck' with context.
+Before outputting, report stuck:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "DESCRIBE_BLOCKER"
+```
 
 ### Blocked: Output `<promise>BLOCKED_EXTERNAL</promise>`
 When:
@@ -141,17 +147,20 @@ When:
 - Need infrastructure/access you don't have
 - External dependency issue
 
-Before outputting, update session file to status='blocked'.
+Report stuck with external reason:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "BLOCKED: Waiting for PR #X to merge"
+```
 
 ---
 
 ## Important Rules
 
-1. **Never guess** - If unclear, set stuck and ask
+1. **Never guess** - If unclear, report stuck and ask
 2. **No scope creep** - Only implement what the issue asks
 3. **Test everything** - If you change it, test it
 4. **Document gates** - Always explain WHY you're stuck
-5. **Check guidance** - At start of each iteration, check if human provided guidance in session file
+5. **Heartbeat regularly** - Send working status each iteration
 
 ---
 

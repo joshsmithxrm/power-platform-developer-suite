@@ -759,6 +759,360 @@ public class RpcMethodHandler
     }
 
     #endregion
+
+    #region Session Methods
+
+    /// <summary>
+    /// Spawns a new worker session for a GitHub issue.
+    /// Creates worktree, starts worker terminal, registers session.
+    /// </summary>
+    [JsonRpcMethod("session/spawn")]
+    public async Task<SessionSpawnResponse> SessionSpawnAsync(
+        int issueNumber,
+        CancellationToken cancellationToken = default)
+    {
+        if (issueNumber <= 0)
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                "Issue number must be a positive integer");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        if (!spawner.IsAvailable())
+        {
+            throw new RpcException(
+                ErrorCodes.Operation.NotSupported,
+                "Windows Terminal (wt.exe) is not available");
+        }
+
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        var session = await service.SpawnAsync(issueNumber, cancellationToken: cancellationToken);
+
+        return new SessionSpawnResponse
+        {
+            SessionId = session.Id,
+            IssueNumber = session.IssueNumber,
+            IssueTitle = session.IssueTitle,
+            Status = session.Status.ToString().ToLowerInvariant(),
+            Branch = session.Branch,
+            WorktreePath = session.WorktreePath,
+            StartedAt = session.StartedAt
+        };
+    }
+
+    /// <summary>
+    /// Lists all active worker sessions.
+    /// </summary>
+    [JsonRpcMethod("session/list")]
+    public async Task<SessionListResponse> SessionListAsync(CancellationToken cancellationToken = default)
+    {
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        var sessions = await service.ListAsync(cancellationToken);
+
+        return new SessionListResponse
+        {
+            Sessions = sessions.Select(s => new SessionInfo
+            {
+                SessionId = s.Id,
+                IssueNumber = s.IssueNumber,
+                IssueTitle = s.IssueTitle,
+                Status = s.Status.ToString().ToLowerInvariant(),
+                Branch = s.Branch,
+                WorktreePath = s.WorktreePath,
+                StartedAt = s.StartedAt,
+                LastHeartbeat = s.LastHeartbeat,
+                StuckReason = s.StuckReason,
+                ForwardedMessage = s.ForwardedMessage,
+                PullRequestUrl = s.PullRequestUrl,
+                IsStale = DateTimeOffset.UtcNow - s.LastHeartbeat > Services.Session.SessionService.StaleThreshold
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Gets detailed state for a specific session.
+    /// </summary>
+    [JsonRpcMethod("session/get")]
+    public async Task<SessionGetResponse> SessionGetAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        var session = await service.GetAsync(sessionId, cancellationToken);
+        if (session == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Session.NotFound,
+                $"Session '{sessionId}' not found");
+        }
+
+        var worktreeStatus = await service.GetWorktreeStatusAsync(sessionId, cancellationToken);
+
+        return new SessionGetResponse
+        {
+            SessionId = session.Id,
+            IssueNumber = session.IssueNumber,
+            IssueTitle = session.IssueTitle,
+            Status = session.Status.ToString().ToLowerInvariant(),
+            Branch = session.Branch,
+            WorktreePath = session.WorktreePath,
+            StartedAt = session.StartedAt,
+            LastHeartbeat = session.LastHeartbeat,
+            StuckReason = session.StuckReason,
+            ForwardedMessage = session.ForwardedMessage,
+            PullRequestUrl = session.PullRequestUrl,
+            IsStale = DateTimeOffset.UtcNow - session.LastHeartbeat > Services.Session.SessionService.StaleThreshold,
+            Worktree = worktreeStatus != null ? new WorktreeStatusDto
+            {
+                FilesChanged = worktreeStatus.FilesChanged,
+                Insertions = worktreeStatus.Insertions,
+                Deletions = worktreeStatus.Deletions,
+                LastCommitMessage = worktreeStatus.LastCommitMessage,
+                LastTestRun = worktreeStatus.LastTestRun,
+                TestsPassing = worktreeStatus.TestsPassing,
+                ChangedFiles = worktreeStatus.ChangedFiles.ToList()
+            } : null
+        };
+    }
+
+    /// <summary>
+    /// Updates session status (called by workers).
+    /// </summary>
+    [JsonRpcMethod("session/update")]
+    public async Task<SessionUpdateResponse> SessionUpdateAsync(
+        string sessionId,
+        string status,
+        string? reason = null,
+        string? prUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'status' parameter is required");
+        }
+
+        if (!Enum.TryParse<Services.Session.SessionStatus>(status, true, out var sessionStatus))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"Invalid status '{status}'. Valid values: registered, working, stuck, paused, complete, cancelled");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.UpdateAsync(sessionId, sessionStatus, reason, prUrl, cancellationToken);
+
+        return new SessionUpdateResponse
+        {
+            SessionId = sessionId,
+            Status = status.ToLowerInvariant(),
+            Updated = true
+        };
+    }
+
+    /// <summary>
+    /// Pauses a worker session.
+    /// </summary>
+    [JsonRpcMethod("session/pause")]
+    public async Task<SessionActionResponse> SessionPauseAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.PauseAsync(sessionId, cancellationToken);
+
+        return new SessionActionResponse
+        {
+            SessionId = sessionId,
+            Action = "pause",
+            Success = true
+        };
+    }
+
+    /// <summary>
+    /// Resumes a paused worker session.
+    /// </summary>
+    [JsonRpcMethod("session/resume")]
+    public async Task<SessionActionResponse> SessionResumeAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.ResumeAsync(sessionId, cancellationToken);
+
+        return new SessionActionResponse
+        {
+            SessionId = sessionId,
+            Action = "resume",
+            Success = true
+        };
+    }
+
+    /// <summary>
+    /// Cancels a worker session and optionally cleans up its worktree.
+    /// </summary>
+    [JsonRpcMethod("session/cancel")]
+    public async Task<SessionActionResponse> SessionCancelAsync(
+        string sessionId,
+        bool keepWorktree = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.CancelAsync(sessionId, keepWorktree, cancellationToken);
+
+        return new SessionActionResponse
+        {
+            SessionId = sessionId,
+            Action = "cancel",
+            Success = true
+        };
+    }
+
+    /// <summary>
+    /// Cancels all active worker sessions.
+    /// </summary>
+    [JsonRpcMethod("session/cancelAll")]
+    public async Task<SessionCancelAllResponse> SessionCancelAllAsync(
+        bool keepWorktrees = false,
+        CancellationToken cancellationToken = default)
+    {
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        var count = await service.CancelAllAsync(keepWorktrees, cancellationToken);
+
+        return new SessionCancelAllResponse
+        {
+            CancelledCount = count,
+            Success = true
+        };
+    }
+
+    /// <summary>
+    /// Forwards a message to a worker session.
+    /// </summary>
+    [JsonRpcMethod("session/forward")]
+    public async Task<SessionActionResponse> SessionForwardAsync(
+        string sessionId,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'message' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.ForwardAsync(sessionId, message, cancellationToken);
+
+        return new SessionActionResponse
+        {
+            SessionId = sessionId,
+            Action = "forward",
+            Success = true
+        };
+    }
+
+    /// <summary>
+    /// Records a heartbeat from a worker.
+    /// </summary>
+    [JsonRpcMethod("session/heartbeat")]
+    public async Task<SessionActionResponse> SessionHeartbeatAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sessionId' parameter is required");
+        }
+
+        var spawner = new Services.Session.WindowsTerminalWorkerSpawner();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Services.Session.SessionService>.Instance;
+        var service = new Services.Session.SessionService(spawner, logger);
+
+        await service.HeartbeatAsync(sessionId, cancellationToken);
+
+        return new SessionActionResponse
+        {
+            SessionId = sessionId,
+            Action = "heartbeat",
+            Success = true
+        };
+    }
+
+    #endregion
 }
 
 #region Response DTOs
@@ -1268,6 +1622,169 @@ public class ProfilesInvalidateResponse
     /// </summary>
     [JsonPropertyName("invalidated")]
     public bool Invalidated { get; set; }
+}
+
+/// <summary>
+/// Response for session/spawn method.
+/// </summary>
+public class SessionSpawnResponse
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonPropertyName("issueNumber")]
+    public int IssueNumber { get; set; }
+
+    [JsonPropertyName("issueTitle")]
+    public string IssueTitle { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("branch")]
+    public string Branch { get; set; } = "";
+
+    [JsonPropertyName("worktreePath")]
+    public string WorktreePath { get; set; } = "";
+
+    [JsonPropertyName("startedAt")]
+    public DateTimeOffset StartedAt { get; set; }
+}
+
+/// <summary>
+/// Response for session/list method.
+/// </summary>
+public class SessionListResponse
+{
+    [JsonPropertyName("sessions")]
+    public List<SessionInfo> Sessions { get; set; } = [];
+}
+
+/// <summary>
+/// Session information summary.
+/// </summary>
+public class SessionInfo
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonPropertyName("issueNumber")]
+    public int IssueNumber { get; set; }
+
+    [JsonPropertyName("issueTitle")]
+    public string IssueTitle { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("branch")]
+    public string Branch { get; set; } = "";
+
+    [JsonPropertyName("worktreePath")]
+    public string WorktreePath { get; set; } = "";
+
+    [JsonPropertyName("startedAt")]
+    public DateTimeOffset StartedAt { get; set; }
+
+    [JsonPropertyName("lastHeartbeat")]
+    public DateTimeOffset LastHeartbeat { get; set; }
+
+    [JsonPropertyName("stuckReason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StuckReason { get; set; }
+
+    [JsonPropertyName("forwardedMessage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ForwardedMessage { get; set; }
+
+    [JsonPropertyName("pullRequestUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PullRequestUrl { get; set; }
+
+    [JsonPropertyName("isStale")]
+    public bool IsStale { get; set; }
+}
+
+/// <summary>
+/// Response for session/get method with detailed worktree status.
+/// </summary>
+public class SessionGetResponse : SessionInfo
+{
+    [JsonPropertyName("worktree")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorktreeStatusDto? Worktree { get; set; }
+}
+
+/// <summary>
+/// Git worktree status DTO.
+/// </summary>
+public class WorktreeStatusDto
+{
+    [JsonPropertyName("filesChanged")]
+    public int FilesChanged { get; set; }
+
+    [JsonPropertyName("insertions")]
+    public int Insertions { get; set; }
+
+    [JsonPropertyName("deletions")]
+    public int Deletions { get; set; }
+
+    [JsonPropertyName("lastCommitMessage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastCommitMessage { get; set; }
+
+    [JsonPropertyName("lastTestRun")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastTestRun { get; set; }
+
+    [JsonPropertyName("testsPassing")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? TestsPassing { get; set; }
+
+    [JsonPropertyName("changedFiles")]
+    public List<string> ChangedFiles { get; set; } = [];
+}
+
+/// <summary>
+/// Response for session/update method.
+/// </summary>
+public class SessionUpdateResponse
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("updated")]
+    public bool Updated { get; set; }
+}
+
+/// <summary>
+/// Response for session action methods (pause, resume, cancel, forward, heartbeat).
+/// </summary>
+public class SessionActionResponse
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+/// <summary>
+/// Response for session/cancelAll method.
+/// </summary>
+public class SessionCancelAllResponse
+{
+    [JsonPropertyName("cancelledCount")]
+    public int CancelledCount { get; set; }
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
 }
 
 #endregion

@@ -6,42 +6,44 @@ You are a PPDS worker session implementing GitHub issue #{ISSUE_NUMBER}.
 - **Title**: {ISSUE_TITLE}
 - **Body**: {ISSUE_BODY}
 - **Branch**: {BRANCH_NAME}
+- **Session ID**: {ISSUE_NUMBER}
 
-## Session File
-Location: `~/.ppds/sessions/work-{ISSUE_NUMBER}.json`
+## Status Reporting
 
-Update this file at the start of your work and when status changes.
+Report your status using `ppds session update`. The orchestrator monitors these updates.
+
+### Status Commands
+
+**Report working (send periodically as heartbeat):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
+```
+
+**Report stuck (domain gate or repeated failure):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "Auth decision needed - token refresh approach unclear"
+```
+
+**Report complete (PR created):**
+```bash
+ppds session update --id {ISSUE_NUMBER} --status complete --pr "https://github.com/.../pull/N"
+```
 
 ## Workflow
 
-### 1. Initialize Session
-```powershell
-$session = @{
-    id = "work-{ISSUE_NUMBER}"
-    status = "working"
-    issue = "#{ISSUE_NUMBER}"
-    branch = "{BRANCH_NAME}"
-    started = (Get-Date -Format "o")
-    lastUpdate = (Get-Date -Format "o")
-    stuck = $null
-    guidance = $null
-    cancelRequested = $false
-    prUrl = $null
-} | ConvertTo-Json
-$session | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+### 1. Initialize (Start of Session)
+Report that you're working:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
 ```
 
-### 2. Check for Guidance/Cancellation
-Before major work, check if orchestrator sent guidance or cancel:
-```powershell
-$session = Get-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json" | ConvertFrom-Json
-if ($session.cancelRequested) {
-    # Exit gracefully
-}
-if ($session.guidance) {
-    # Apply guidance, then clear it
-}
+### 2. Check for Forwarded Messages
+Before major work, check if orchestrator sent guidance:
+```bash
+ppds session get {ISSUE_NUMBER} --json
 ```
+
+Look for `forwardedMessage` field. If present, apply the guidance.
 
 ### 3. Implement
 Follow PPDS patterns from CLAUDE.md:
@@ -49,6 +51,11 @@ Follow PPDS patterns from CLAUDE.md:
 - Use connection pool for multi-request scenarios
 - Accept `IProgressReporter` for long operations
 - Wrap errors in `PpdsException`
+
+**Heartbeat:** Update status every few minutes to show you're alive:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
+```
 
 ### 4. Domain Gates
 STOP and escalate (set stuck status) when touching:
@@ -58,19 +65,19 @@ STOP and escalate (set stuck status) when touching:
 - **Data migration** - Schema changes
 
 To escalate:
-```powershell
-$session.status = "stuck"
-$session.stuck = @{
-    reason = "Auth/Security decision needed"
-    context = "Token refresh approach unclear"
-    options = @("sliding", "fixed")
-    since = (Get-Date -Format "o")
-}
-$session.lastUpdate = (Get-Date -Format "o")
-$session | ConvertTo-Json -Depth 3 | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+```bash
+ppds session update --id {ISSUE_NUMBER} --status stuck --reason "Auth/Security: Token refresh approach unclear. Options: sliding expiration or fixed timeout"
 ```
 
-Then WAIT. The orchestrator will provide guidance.
+Then WAIT. Poll for forwarded message:
+```bash
+ppds session get {ISSUE_NUMBER} --json
+```
+
+When `forwardedMessage` appears, apply guidance and resume work:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
+```
 
 ### 5. Test
 Run `/test` command. If tests fail:
@@ -80,12 +87,9 @@ Run `/test` command. If tests fail:
 ### 6. Ship
 Run `/ship` command to commit, push, create PR.
 
-On success, update session:
-```powershell
-$session.status = "pr_ready"
-$session.prUrl = "https://github.com/.../pull/N"
-$session.lastUpdate = (Get-Date -Format "o")
-$session | ConvertTo-Json -Depth 3 | Set-Content "$env:USERPROFILE/.ppds/sessions/work-{ISSUE_NUMBER}.json"
+On success, report complete:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status complete --pr "https://github.com/.../pull/N"
 ```
 
 ## Status Values
@@ -93,15 +97,25 @@ $session | ConvertTo-Json -Depth 3 | Set-Content "$env:USERPROFILE/.ppds/session
 | Status | Meaning |
 |--------|---------|
 | `working` | Actively implementing |
-| `stuck` | Needs human guidance (check `stuck` object) |
-| `pr_ready` | PR created, work complete |
-| `blocked` | External dependency blocking |
-| `cancelled` | User requested cancellation |
+| `stuck` | Needs human guidance (include reason) |
+| `complete` | PR created, work complete |
+| `paused` | Paused by orchestrator |
+| `cancelled` | Cancelled by orchestrator |
 
 ## Heartbeat
-Update `lastUpdate` periodically so orchestrator knows you're alive:
-```powershell
-$session.lastUpdate = (Get-Date -Format "o")
+
+The orchestrator checks for stale sessions (no update in 90+ seconds). Send heartbeat updates:
+```bash
+ppds session update --id {ISSUE_NUMBER} --status working
 ```
 
-If no update for 10+ minutes, orchestrator may flag you as stale/crashed.
+If no heartbeat for 90+ seconds, orchestrator may flag you as stale/crashed.
+
+## Pause Handling
+
+If orchestrator pauses you, your next status update will show the session is paused. Check status:
+```bash
+ppds session get {ISSUE_NUMBER} --json
+```
+
+If status is `paused`, wait and poll periodically until resumed.
