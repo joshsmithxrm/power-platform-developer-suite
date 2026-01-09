@@ -172,10 +172,12 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 |---------|---------|
 | `/design` | Design conversation for new feature |
 | `/design-ui` | Reference-driven UI design with wireframes |
-| `/plan-work` | Orchestrate parallel work sessions |
+| `/orchestrate` | Orchestrate parallel work sessions |
 | `/start-work` | Begin work session from issues |
+| `/commit` | Phase-aware intermediate commit |
 | `/test` | Run tests with auto-detection |
 | `/ship` | Validate, commit, PR, handle CI/bot feedback |
+| `/create-worktree` | Quick worktree + Claude session |
 | `/triage` | Batch triage issues |
 | `/spec` | Generate contributor-ready implementation guides |
 | `/create-issue` | Create GitHub issue with triage |

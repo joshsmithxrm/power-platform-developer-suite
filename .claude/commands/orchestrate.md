@@ -87,7 +87,14 @@ ppds session list
 
 Output format:
 ```
-Active Sessions (3):
+Active Sessions (4):
+
+[~] #100 - PLANNING (5m) - Add login page
+    Branch: issue-100, Worktree: ../ppds-issue-100
+
+[P] #101 - PLAN READY (2m) - Refactor auth service
+    Branch: issue-101, Worktree: ../ppds-issue-101
+    → Review plan with: ppds session get 101
 
 [*] #123 - WORKING (45m) - Add export button
     Branch: issue-123, Worktree: ../ppds-issue-123
@@ -102,11 +109,33 @@ Active Sessions (3):
 ```
 
 Icons:
+- `[ ]` registered (starting up)
+- `[~]` planning (exploring codebase)
+- `[P]` plan ready (needs review)
 - `[*]` working
 - `[!]` stuck (needs guidance)
 - `[+]` complete (PR ready)
 - `[||]` paused
 - `[?]` stale (no heartbeat in 90+ seconds)
+- `[x]` cancelled
+
+## Plan Review Flow
+
+When a session shows `[P]` (plan ready):
+
+1. **Review the plan:**
+   ```bash
+   ppds session get <id>
+   ```
+   This shows the worker's plan, files to modify, and approach.
+
+2. **If plan looks good:** Worker automatically proceeds to implementation
+
+3. **If plan needs adjustment:**
+   ```bash
+   ppds session forward <id> "Instead of X, consider Y approach"
+   ```
+   Worker receives guidance and adjusts plan.
 
 ## Detailed Session Status
 

@@ -99,13 +99,31 @@ EOF
 )"
 ```
 
-### 5. Wait for CI and Auto-Fix
+### 5. Wait for All Automated Reviews
 
-After PR creation, check CI status:
+After PR creation, poll for all automated reviewers to complete:
 
 ```bash
+# 1. Wait for CI to complete
 gh pr checks --watch
+
+# 2. Poll for Copilot review
+gh api repos/{owner}/{repo}/pulls/{pr}/reviews \
+  --jq '.[] | select(.user.login | test("copilot|github-copilot"))'
+
+# 3. Poll for Gemini review
+gh api repos/{owner}/{repo}/pulls/{pr}/reviews \
+  --jq '.[] | select(.user.login | test("gemini|google-gemini"))'
+
+# 4. Check for CodeQL alerts
+gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{pr}/merge&state=open"
 ```
+
+**Wait until ALL of these complete before proceeding to fix issues:**
+- GitHub Actions CI
+- Copilot review comments (if enabled)
+- Gemini Code Assist review (if enabled)
+- CodeQL security scan
 
 **If CI fails (up to 3 attempts):**
 

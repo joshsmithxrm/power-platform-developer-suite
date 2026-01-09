@@ -7,7 +7,7 @@ What happens inside each worker session from start to PR.
 ```
 /start-work <issue-numbers>
     ↓
-Create session status file (status: working)
+Create session status file (status: registered → planning)
     ↓
 Fetch issue context
     ↓
@@ -15,15 +15,21 @@ Enter plan mode
     ↓
 Design implementation approach
     ↓
-Exit plan mode, begin implementation
+/commit (planning checkpoint)
     ↓
-Implement → /test → fix → repeat until green
+Exit plan mode, begin implementation (status: planning_complete → working)
     ↓
-Self-verify (Ralph Wiggum)
+Implement → /commit (implementation checkpoint)
+    ↓
+/test → fix → repeat until green
+    ↓
+/commit (tests passing checkpoint)
+    ↓
+Self-verify
     ↓
 /ship (autonomous CI-fix and bot-comment handling)
     ↓
-Update session status (status: pr_ready)
+Update session status (status: complete)
 ```
 
 ## Domain Gates
@@ -65,7 +71,22 @@ If stuck on same failure 3x:
     - Wait for guidance
 ```
 
-## Self-Verification (Ralph Wiggum)
+## Phase Commits
+
+Use `/commit` at natural checkpoints to create recovery points:
+
+| Phase | Commit Message Pattern | When |
+|-------|----------------------|------|
+| Planning | `chore(issue-N): planning complete` | After plan file written |
+| Implementation | `feat/fix(scope): description` | After implementation, before tests |
+| Tests passing | `test(scope): add tests for X` | After tests pass |
+
+**Why commit at phases:**
+- Creates recovery checkpoints if session crashes
+- Makes code review easier (incremental commits)
+- Aligns with session status transitions
+
+## Self-Verification
 
 Before shipping, verify the work:
 
