@@ -1,8 +1,10 @@
 using System.CommandLine;
+using Microsoft.Extensions.Logging.Abstractions;
 using Nerdbank.Streams;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Session;
 using StreamJsonRpc;
 
 namespace PPDS.Cli.Commands.Serve;
@@ -44,8 +46,14 @@ public static class ServeCommand
         // Create the pool manager with daemon lifetime - caches connection pools across RPC calls
         await using var poolManager = new DaemonConnectionPoolManager();
 
+        // Create the session service for worker session management
+        // This is a singleton that caches sessions in memory, so we create it once for the daemon lifetime
+        var workerSpawner = new WindowsTerminalWorkerSpawner();
+        var sessionLogger = NullLogger<SessionService>.Instance;
+        var sessionService = new SessionService(workerSpawner, sessionLogger);
+
         // Create the RPC target that handles method calls
-        var handler = new RpcMethodHandler(poolManager);
+        var handler = new RpcMethodHandler(poolManager, sessionService);
 
         // Attach JSON-RPC to the duplex stream with our handler
         using var rpc = JsonRpc.Attach(duplexStream, handler);

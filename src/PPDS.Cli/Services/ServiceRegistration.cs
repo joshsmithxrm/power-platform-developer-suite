@@ -9,6 +9,7 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Services.Session;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Pooling;
 
@@ -53,6 +54,10 @@ public static class ServiceRegistration
 
         // TUI theming
         services.AddSingleton<ITuiThemeService, TuiThemeService>();
+
+        // Session orchestration services
+        services.AddSingleton<IWorkerSpawner, WindowsTerminalWorkerSpawner>();
+        services.AddSingleton<ISessionService, SessionService>();
 
         // Connection service - requires profile-based token provider and environment ID
         // Registered as factory because it needs runtime values from ResolvedConnectionInfo

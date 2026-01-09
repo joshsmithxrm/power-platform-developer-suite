@@ -99,13 +99,91 @@ EOF
 )"
 ```
 
-### 5. Wait for CI and Auto-Fix
+### 5. Wait for Required CI Checks
 
-After PR creation, check CI status:
+After PR creation, poll only REQUIRED checks (don't wait for optional ones):
+
+**Required checks (must pass):**
+- `build` or `build-status`
+- `test` or `test-status`
+- `extension`
+- `Analyze C#` (CodeQL)
+- `dependency-review`
+
+**Optional checks (don't block):**
+- `Integration Tests` - requires live Dataverse credentials
+- `claude`, `claude-review` - optional AI review
+- `codecov/*` - informational coverage
+
+**Polling approach:**
+```bash
+# Get SHA of PR head commit
+SHA=$(gh pr view {pr} --json headRefOid --jq '.headRefOid')
+
+# Poll required checks every 30 seconds until all complete
+gh api repos/{owner}/{repo}/commits/$SHA/check-runs \
+  --jq '.check_runs[] | select(.name | test("^(build|test|extension|Analyze|CodeQL|dependency)"))
+        | {name: .name, status: .status, conclusion: .conclusion}'
+```
+
+**Important:** Do NOT use `gh pr checks --watch` - it waits for ALL checks including optional ones.
+
+**Timeout:** If required checks don't complete within 15 minutes, update session status to `Shipping` and continue to bot review phase.
+
+### 5b. Wait for Bot Reviews (parallel to CI)
+
+Bot reviews can complete before or after CI. Check for them independently:
 
 ```bash
-gh pr checks --watch
+# List bot reviewers who have commented
+gh api repos/{owner}/{repo}/pulls/{pr}/comments \
+  --jq '[.[] | .user.login] | unique | map(select(test("gemini|copilot|Copilot|github-advanced"))) | .[]'
+
+# Also check for CodeQL alerts
+gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{pr}/merge&state=open"
 ```
+
+**Expected bots:**
+- `gemini-code-assist` - Gemini code review
+- `copilot-pull-request-reviewer` - Copilot review
+- `github-advanced-security` - Code scanning alerts
+
+**Timing:**
+- Minimum wait: 3 minutes after PR creation (bots need time to analyze)
+- Maximum wait: If no bot comments after 10 minutes, proceed anyway (bots may be disabled)
+
+Update session status to `ReviewsInProgress` once at least one bot has commented.
+
+### 6. Enumerate ALL Bot Reviewers
+
+**CRITICAL: Before addressing ANY comments, enumerate all reviewers:**
+
+```bash
+# List all reviewers and their comment counts
+gh api repos/{owner}/{repo}/pulls/{pr}/comments \
+  --jq '[.[] | .user.login] | group_by(.) | map({reviewer: .[0], count: length}) | .[]'
+```
+
+**Checklist - confirm you have captured comments from ALL:**
+- [ ] Copilot (user.login contains "Copilot" or "copilot")
+- [ ] Gemini (user.login contains "gemini")
+- [ ] Any other bot reviewers shown in the list
+
+**For EACH reviewer with comments, fetch their full feedback:**
+
+```bash
+# Copilot comments
+gh api repos/{owner}/{repo}/pulls/{pr}/comments \
+  --jq '.[] | select(.user.login | test("Copilot|copilot")) | {id: .id, file: .path, line: .line, body: .body}'
+
+# Gemini comments
+gh api repos/{owner}/{repo}/pulls/{pr}/comments \
+  --jq '.[] | select(.user.login | test("gemini")) | {id: .id, file: .path, line: .line, body: .body}'
+```
+
+**DO NOT proceed to fix issues until you have explicitly reviewed comments from EVERY bot reviewer listed.**
+
+### 7. Handle CI Failures
 
 **If CI fails (up to 3 attempts):**
 
@@ -127,20 +205,9 @@ gh run view [run-id] --log-failed
 
 After 3 failed attempts, update session status to `stuck` and escalate.
 
-### 6. Handle Bot Comments
+### 8. Address Bot Comments
 
-After CI passes (or while waiting), check for bot comments:
-
-```bash
-# PR comments from bots
-gh api repos/{owner}/{repo}/pulls/{pr}/comments \
-  --jq '.[] | select(.user.login | test("gemini|Copilot|copilot|github-advanced"))'
-
-# Code scanning alerts
-gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{pr}/merge&state=open"
-```
-
-**For each finding, determine verdict:**
+Using the comments enumerated in step 6, for each finding determine verdict:
 
 | Verdict | Action |
 |---------|--------|
@@ -167,7 +234,7 @@ gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies \
 gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "ID"}) { thread { isResolved } } }'
 ```
 
-### 7. Update Session Status
+### 9. Update Session Status
 
 After all checks pass:
 

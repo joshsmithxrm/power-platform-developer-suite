@@ -5,6 +5,7 @@ using PPDS.Auth.Credentials;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Session;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 
@@ -27,7 +28,8 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var mockSessionService = new Mock<ISessionService>();
+        var handler = new RpcMethodHandler(mockPoolManager.Object, mockSessionService.Object);
 
         // Act
         var result = handler.ProfilesInvalidate("dev");
@@ -46,7 +48,8 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var mockSessionService = new Mock<ISessionService>();
+        var handler = new RpcMethodHandler(mockPoolManager.Object, mockSessionService.Object);
 
         // Act
         var act = () => handler.ProfilesInvalidate(profileName!);
@@ -61,7 +64,8 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var mockSessionService = new Mock<ISessionService>();
+        var handler = new RpcMethodHandler(mockPoolManager.Object, mockSessionService.Object);
 
         // Act
         try
@@ -160,12 +164,29 @@ public class RpcMethodHandlerPoolTests
     [Fact]
     public void Constructor_ThrowsArgumentNullException_WhenPoolManagerIsNull()
     {
+        // Arrange
+        var mockSessionService = new Mock<ISessionService>();
+
         // Act
-        var act = () => new RpcMethodHandler(null!);
+        var act = () => new RpcMethodHandler(null!, mockSessionService.Object);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
             .Which.ParamName.Should().Be("poolManager");
+    }
+
+    [Fact]
+    public void Constructor_ThrowsArgumentNullException_WhenSessionServiceIsNull()
+    {
+        // Arrange
+        var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
+
+        // Act
+        var act = () => new RpcMethodHandler(mockPoolManager.Object, null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>()
+            .Which.ParamName.Should().Be("sessionService");
     }
 
     #endregion

@@ -7,17 +7,19 @@ How multiple Claude sessions work together on parallel workstreams.
 The orchestrator pattern enables working on multiple issues simultaneously:
 
 ```
-/plan-work
+/orchestrate
     ↓
-Orchestrator analyzes project state
+List issues and discuss priorities
     ↓
-Proposes N parallel workstreams
+Spawn workers for selected issues
     ↓
-Human approves/adjusts
+Workers enter planning phase
     ↓
-Opens N terminal tabs, each with /start-work
+Review worker plans at planning_complete
     ↓
-Each session works autonomously until /ship
+Workers implement autonomously
+    ↓
+Each session ships via /ship
     ↓
 Human reviews PRs
 ```
@@ -43,10 +45,14 @@ Sessions coordinate via status files in `~/.ppds/sessions/`:
 
 | Status | Meaning | Human Action |
 |--------|---------|--------------|
+| `registered` | Worktree created, worker starting | None |
+| `planning` | Worker exploring codebase | None |
+| `planning_complete` | Plan ready for review | Review plan |
 | `working` | Session is making progress | None |
 | `stuck` | Session needs input | Provide guidance |
-| `pr_ready` | PR created, ready for review | Review PR |
-| `blocked` | Waiting on external dependency | Resolve blocker |
+| `paused` | Human paused the session | Resume when ready |
+| `complete` | PR created, work done | Review PR |
+| `cancelled` | Session cancelled | None |
 
 ### Stuck Sessions
 

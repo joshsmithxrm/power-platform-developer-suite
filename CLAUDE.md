@@ -22,6 +22,8 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Throw raw exceptions from Application Services | Wrap in `PpdsException` with ErrorCode/UserMessage (ADR-0026) |
 | Use comma-separated issues in `Closes` | GitHub only auto-closes first; use separate `Closes #N` lines |
 | Add TUI service code without tests | Use MockServiceProviderFactory for testability (ADR-0028) |
+| Use bash-specific syntax in C# process commands | `2>/dev/null`, `||`, pipes don't work on Windows; handle errors in code |
+| File issues in wrong repo | Issues belong in target repo (ppds-docs issues in ppds-docs, not ppds) |
 
 ## ALWAYS
 
@@ -38,6 +40,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Use JSON for config files, JSONL for streaming | No YAML; consistency with CLI output (ADR-0016) |
 | Test TUI services with `Category=TuiUnit` | Enables autonomous iteration without manual testing (ADR-0028) |
 | Use `IServiceProviderFactory` in InteractiveSession | Required for mock injection in tests (ADR-0028) |
+| Wait for required CI checks only in /ship | `Integration Tests` requires live Dataverse (ADR-0029) |
 
 ---
 
@@ -170,10 +173,12 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 |---------|---------|
 | `/design` | Design conversation for new feature |
 | `/design-ui` | Reference-driven UI design with wireframes |
-| `/plan-work` | Orchestrate parallel work sessions |
+| `/orchestrate` | Orchestrate parallel work sessions |
 | `/start-work` | Begin work session from issues |
+| `/commit` | Phase-aware intermediate commit |
 | `/test` | Run tests with auto-detection |
 | `/ship` | Validate, commit, PR, handle CI/bot feedback |
+| `/create-worktree` | Quick worktree + Claude session |
 | `/triage` | Batch triage issues |
 | `/spec` | Generate contributor-ready implementation guides |
 | `/create-issue` | Create GitHub issue with triage |
@@ -196,6 +201,20 @@ Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 | `TuiUnit` | TUI session lifecycle | `--filter Category=TuiUnit` |
 
 Pre-commit hook runs unit tests (~10s). See ADR-0028 (TUI), ADR-0029 (full strategy).
+
+## CI Check Classification
+
+`/ship` should only block on required checks:
+
+| Required (must pass) | Optional (informational) |
+|----------------------|--------------------------|
+| build, build-status | Integration Tests |
+| test, test-status | claude, claude-review |
+| extension | codecov/patch |
+| Analyze C# (CodeQL) | |
+| dependency-review | |
+
+Integration Tests runs against live Dataverse - failures don't block PR merge.
 
 ## Documentation
 
