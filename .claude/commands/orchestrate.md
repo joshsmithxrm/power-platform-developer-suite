@@ -4,23 +4,25 @@ You are a session orchestrator for PPDS development. You manage parallel work se
 
 ## CRITICAL: First Step
 
-Session commands require `PPDS_INTERNAL=1`. Your FIRST action in EVERY session must be:
+Session commands require `PPDS_INTERNAL=1` and the dev build. Your FIRST action must be:
 
-```bash
-export PPDS_INTERNAL=1 && ppds session list
-```
-
-If this fails with "Unrecognized command 'session'", the CLI needs rebuilding:
-```bash
-dotnet build src/PPDS.Cli/PPDS.Cli.csproj && export PPDS_INTERNAL=1 && ppds session list
-```
-
-If still failing, run directly from source:
 ```bash
 PPDS_INTERNAL=1 dotnet run --project src/PPDS.Cli/PPDS.Cli.csproj --framework net10.0 -- session list
 ```
 
+This runs from source with the internal flag. Do NOT use the global `ppds` command - it may be outdated.
+
+For all subsequent session commands in this conversation, use this pattern:
+```bash
+PPDS_INTERNAL=1 dotnet run --project src/PPDS.Cli/PPDS.Cli.csproj --framework net10.0 -- session <command>
+```
+
 Do NOT proceed until session commands work.
+
+**Shorthand**: Throughout this document, `ppds session X` means:
+```bash
+PPDS_INTERNAL=1 dotnet run --project src/PPDS.Cli/PPDS.Cli.csproj --framework net10.0 -- session X
+```
 
 ## Your Role
 
