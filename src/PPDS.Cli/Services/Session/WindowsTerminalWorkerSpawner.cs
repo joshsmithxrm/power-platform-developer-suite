@@ -39,15 +39,17 @@ public sealed class WindowsTerminalWorkerSpawner : IWorkerSpawner
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // Build the Claude command
-        // Sets PPDS_INTERNAL=1 so workers can use session commands, then runs Claude
-        // Uses /ralph-loop with the prompt file
-        var claudeCommand = $"$env:PPDS_INTERNAL='1'; claude '/ralph-loop --file \\\"{request.PromptFilePath}\\\" --max-iterations {request.MaxIterations} --completion-promise PR_READY'";
+        // Write a launcher script to avoid quote escaping issues with wt -> powershell
+        var launcherPath = Path.Combine(request.WorkingDirectory, ".claude", "start-worker.ps1");
+        var launcherContent = $@"$env:PPDS_INTERNAL = '1'
+claude '/ralph-loop --file ""{request.PromptFilePath}"" --max-iterations {request.MaxIterations} --completion-promise PR_READY'
+";
+        File.WriteAllText(launcherPath, launcherContent);
 
         // Build Windows Terminal arguments:
-        // wt -w 0 nt -d "<working-dir>" --title "Issue #N" powershell -NoExit -Command "<claude-command>"
+        // wt -w 0 nt -d "<working-dir>" --title "Issue #N" pwsh -NoExit -File "<launcher>"
         var terminalTitle = $"Issue #{request.IssueNumber}";
-        var wtArgs = $"-w 0 nt -d \"{request.WorkingDirectory}\" --title \"{terminalTitle}\" powershell -NoExit -Command \"{claudeCommand}\"";
+        var wtArgs = $"-w 0 nt -d \"{request.WorkingDirectory}\" --title \"{terminalTitle}\" pwsh -NoExit -File \"{launcherPath}\"";
 
         var startInfo = new ProcessStartInfo
         {
