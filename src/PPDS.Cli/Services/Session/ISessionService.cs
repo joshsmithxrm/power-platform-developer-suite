@@ -120,8 +120,16 @@ public interface ISessionService
     /// <param name="sessionId">Session identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <remarks>
+    /// <para>
     /// Workers should call this every 30 seconds to prove they're alive.
     /// Sessions are marked stale after 90 seconds without heartbeat.
+    /// </para>
+    /// <para>
+    /// <b>Important:</b> Heartbeats are tracked in-memory only and are not persisted to disk
+    /// to avoid excessive I/O. After an orchestrator restart, all sessions will appear stale
+    /// until workers send a new heartbeat. Workers should also send status updates (not just
+    /// heartbeats) periodically to ensure state survives restarts.
+    /// </para>
     /// </remarks>
     Task HeartbeatAsync(string sessionId, CancellationToken cancellationToken = default);
 

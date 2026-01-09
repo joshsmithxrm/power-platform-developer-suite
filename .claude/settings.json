@@ -2,6 +2,8 @@
   "permissions": {
     "allow": [
       "Bash",
+      "Edit",
+      "Write",
       "WebSearch",
       "Skill(/ship:*)",
       "Skill(/test:*)",

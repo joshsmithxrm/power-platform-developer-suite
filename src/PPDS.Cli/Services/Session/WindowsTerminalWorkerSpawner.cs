@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace PPDS.Cli.Services.Session;
 
@@ -8,6 +10,24 @@ namespace PPDS.Cli.Services.Session;
 public sealed class WindowsTerminalWorkerSpawner : IWorkerSpawner
 {
     private const string WindowsTerminalPath = "wt.exe";
+    private readonly ILogger<WindowsTerminalWorkerSpawner> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WindowsTerminalWorkerSpawner"/> class.
+    /// </summary>
+    public WindowsTerminalWorkerSpawner()
+        : this(NullLogger<WindowsTerminalWorkerSpawner>.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WindowsTerminalWorkerSpawner"/> class.
+    /// </summary>
+    /// <param name="logger">Logger for diagnostic output.</param>
+    public WindowsTerminalWorkerSpawner(ILogger<WindowsTerminalWorkerSpawner> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     /// <inheritdoc />
     public bool IsAvailable()
@@ -28,16 +48,18 @@ public sealed class WindowsTerminalWorkerSpawner : IWorkerSpawner
             process?.WaitForExit(5000);
             return process?.ExitCode == 0;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Windows Terminal availability check failed");
             return false;
         }
     }
 
     /// <inheritdoc />
-    public Task<SpawnedWorker> SpawnAsync(WorkerSpawnRequest request, CancellationToken cancellationToken = default)
+    public async Task<SpawnedWorker> SpawnAsync(WorkerSpawnRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Write a launcher script to avoid quote escaping issues with wt -> powershell
         var launcherPath = Path.Combine(request.WorkingDirectory, ".claude", "start-worker.ps1");
@@ -46,7 +68,9 @@ Write-Host 'Worker session for issue #{request.IssueNumber}' -ForegroundColor Cy
 Write-Host ''
 claude --permission-mode acceptEdits ""Read .claude/session-prompt.md and implement issue #{request.IssueNumber}. Start by understanding the issue, then implement the fix.""
 ";
-        File.WriteAllText(launcherPath, launcherContent);
+        await File.WriteAllTextAsync(launcherPath, launcherContent, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Build Windows Terminal arguments:
         // wt -w 0 nt -d "<working-dir>" --title "Issue #N" pwsh -NoExit -File "<launcher>"
@@ -61,13 +85,19 @@ claude --permission-mode acceptEdits ""Read .claude/session-prompt.md and implem
             CreateNoWindow = false
         };
 
-        var process = Process.Start(startInfo);
+        // Start the process and capture its ID before disposing
+        // The Process object is just a handle - the actual terminal continues running independently
+        int? processId;
+        using (var process = Process.Start(startInfo))
+        {
+            processId = process?.Id;
+        }
 
-        return Task.FromResult(new SpawnedWorker
+        return new SpawnedWorker
         {
             SessionId = request.SessionId,
-            ProcessId = process?.Id,
+            ProcessId = processId,
             TerminalTitle = terminalTitle
-        });
+        };
     }
 }

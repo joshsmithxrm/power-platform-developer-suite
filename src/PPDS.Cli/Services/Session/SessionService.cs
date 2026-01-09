@@ -136,13 +136,11 @@ public sealed class SessionService : ISessionService
             throw;
         }
 
-        // Update status to working
-        session = session with
-        {
-            Status = SessionStatus.Working,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
-        _sessions[sessionId] = session;
+        // Update status to working (atomic update to avoid race conditions)
+        session = _sessions.AddOrUpdate(
+            sessionId,
+            session with { Status = SessionStatus.Working, LastHeartbeat = DateTimeOffset.UtcNow },
+            (_, existing) => existing with { Status = SessionStatus.Working, LastHeartbeat = DateTimeOffset.UtcNow });
         await PersistSessionAsync(session, cancellationToken);
 
         // Write initial state to worktree so worker can check for messages
@@ -183,20 +181,23 @@ public sealed class SessionService : ISessionService
         string? prUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.ContainsKey(sessionId))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        session = session with
-        {
-            Status = status,
-            StuckReason = status == SessionStatus.Stuck ? reason : null,
-            PullRequestUrl = prUrl ?? session.PullRequestUrl,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        var session = _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with
+            {
+                Status = status,
+                StuckReason = status == SessionStatus.Stuck ? reason : null,
+                PullRequestUrl = prUrl ?? existing.PullRequestUrl,
+                LastHeartbeat = DateTimeOffset.UtcNow
+            });
 
-        _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
         _logger.LogInformation(
@@ -209,23 +210,26 @@ public sealed class SessionService : ISessionService
     /// <inheritdoc />
     public async Task PauseAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out var existingSession))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        if (session.Status == SessionStatus.Paused)
+        if (existingSession.Status == SessionStatus.Paused)
         {
             return; // Already paused
         }
 
-        session = session with
-        {
-            Status = SessionStatus.Paused,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        var session = _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with
+            {
+                Status = SessionStatus.Paused,
+                LastHeartbeat = DateTimeOffset.UtcNow
+            });
 
-        _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
         _logger.LogInformation("Session {SessionId} paused", sessionId);
@@ -234,23 +238,26 @@ public sealed class SessionService : ISessionService
     /// <inheritdoc />
     public async Task ResumeAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out var existingSession))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        if (session.Status != SessionStatus.Paused)
+        if (existingSession.Status != SessionStatus.Paused)
         {
             return; // Not paused
         }
 
-        session = session with
-        {
-            Status = SessionStatus.Working,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        var session = _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with
+            {
+                Status = SessionStatus.Working,
+                LastHeartbeat = DateTimeOffset.UtcNow
+            });
 
-        _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
         _logger.LogInformation("Session {SessionId} resumed", sessionId);
@@ -262,18 +269,21 @@ public sealed class SessionService : ISessionService
         bool keepWorktree = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.ContainsKey(sessionId))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        session = session with
-        {
-            Status = SessionStatus.Cancelled,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        var session = _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with
+            {
+                Status = SessionStatus.Cancelled,
+                LastHeartbeat = DateTimeOffset.UtcNow
+            });
 
-        _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
         if (!keepWorktree && Directory.Exists(session.WorktreePath))
@@ -314,18 +324,21 @@ public sealed class SessionService : ISessionService
         string message,
         CancellationToken cancellationToken = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.ContainsKey(sessionId))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        session = session with
-        {
-            ForwardedMessage = message,
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        var session = _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with
+            {
+                ForwardedMessage = message,
+                LastHeartbeat = DateTimeOffset.UtcNow
+            });
 
-        _sessions[sessionId] = session;
         await PersistSessionAsync(session, cancellationToken);
 
         // Also write to worktree so worker can read without permission issues
@@ -345,32 +358,44 @@ public sealed class SessionService : ISessionService
         }
 
         var statePath = Path.Combine(session.WorktreePath, "session-state.json");
-        var state = new
+        var state = new WorktreeSessionState
         {
-            status = session.Status.ToString().ToLowerInvariant(),
-            forwardedMessage = session.ForwardedMessage,
-            lastHeartbeat = session.LastHeartbeat
+            Status = session.Status,
+            ForwardedMessage = session.ForwardedMessage,
+            LastHeartbeat = session.LastHeartbeat
         };
 
         var json = JsonSerializer.Serialize(state, JsonOptions);
         await File.WriteAllTextAsync(statePath, json, cancellationToken);
     }
 
-    /// <inheritdoc />
-    public async Task HeartbeatAsync(string sessionId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Session state written to worktree for worker access.
+    /// Uses same JsonOptions as main session persistence for consistency.
+    /// </summary>
+    private sealed record WorktreeSessionState
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        public SessionStatus Status { get; init; }
+        public string? ForwardedMessage { get; init; }
+        public DateTimeOffset LastHeartbeat { get; init; }
+    }
+
+    /// <inheritdoc />
+    public Task HeartbeatAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        if (!_sessions.ContainsKey(sessionId))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
         }
 
-        session = session with
-        {
-            LastHeartbeat = DateTimeOffset.UtcNow
-        };
+        // Atomic update to avoid race conditions
+        _sessions.AddOrUpdate(
+            sessionId,
+            _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
+            (_, existing) => existing with { LastHeartbeat = DateTimeOffset.UtcNow });
 
-        _sessions[sessionId] = session;
         // Don't persist heartbeats to disk to avoid excessive I/O
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
