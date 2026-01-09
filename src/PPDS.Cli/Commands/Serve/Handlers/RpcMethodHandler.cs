@@ -906,7 +906,7 @@ public class RpcMethodHandler
         {
             throw new RpcException(
                 ErrorCodes.Validation.InvalidArguments,
-                $"Invalid status '{status}'. Valid values: registered, planning, planningcomplete, working, stuck, paused, complete, cancelled");
+                $"Invalid status '{status}'. Valid values: registered, planning, planningcomplete, working, shipping, reviewsinprogress, prready, stuck, paused, complete, cancelled");
         }
 
         await _sessionService.UpdateAsync(sessionId, sessionStatus, reason, prUrl, cancellationToken);
