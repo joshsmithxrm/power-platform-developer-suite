@@ -40,6 +40,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Use JSON for config files, JSONL for streaming | No YAML; consistency with CLI output (ADR-0016) |
 | Test TUI services with `Category=TuiUnit` | Enables autonomous iteration without manual testing (ADR-0028) |
 | Use `IServiceProviderFactory` in InteractiveSession | Required for mock injection in tests (ADR-0028) |
+| Wait for required CI checks only in /ship | `Integration Tests` requires live Dataverse (ADR-0029) |
 
 ---
 
@@ -200,6 +201,20 @@ Hook: `pre-commit-validate.py` runs build + unit tests on commit (~10s)
 | `TuiUnit` | TUI session lifecycle | `--filter Category=TuiUnit` |
 
 Pre-commit hook runs unit tests (~10s). See ADR-0028 (TUI), ADR-0029 (full strategy).
+
+## CI Check Classification
+
+`/ship` should only block on required checks:
+
+| Required (must pass) | Optional (informational) |
+|----------------------|--------------------------|
+| build, build-status | Integration Tests |
+| test, test-status | claude, claude-review |
+| extension | codecov/patch |
+| Analyze C# (CodeQL) | |
+| dependency-review | |
+
+Integration Tests runs against live Dataverse - failures don't block PR merge.
 
 ## Documentation
 

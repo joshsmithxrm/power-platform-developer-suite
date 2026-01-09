@@ -99,19 +99,60 @@ EOF
 )"
 ```
 
-### 5. Wait for All Automated Reviews
+### 5. Wait for Required CI Checks
 
-After PR creation, poll for all automated reviewers to complete:
+After PR creation, poll only REQUIRED checks (don't wait for optional ones):
+
+**Required checks (must pass):**
+- `build` or `build-status`
+- `test` or `test-status`
+- `extension`
+- `Analyze C#` (CodeQL)
+- `dependency-review`
+
+**Optional checks (don't block):**
+- `Integration Tests` - requires live Dataverse credentials
+- `claude`, `claude-review` - optional AI review
+- `codecov/*` - informational coverage
+
+**Polling approach:**
+```bash
+# Get SHA of PR head commit
+SHA=$(gh pr view {pr} --json headRefOid --jq '.headRefOid')
+
+# Poll required checks every 30 seconds until all complete
+gh api repos/{owner}/{repo}/commits/$SHA/check-runs \
+  --jq '.check_runs[] | select(.name | test("^(build|test|extension|Analyze|CodeQL|dependency)"))
+        | {name: .name, status: .status, conclusion: .conclusion}'
+```
+
+**Important:** Do NOT use `gh pr checks --watch` - it waits for ALL checks including optional ones.
+
+**Timeout:** If required checks don't complete within 15 minutes, update session status to `Shipping` and continue to bot review phase.
+
+### 5b. Wait for Bot Reviews (parallel to CI)
+
+Bot reviews can complete before or after CI. Check for them independently:
 
 ```bash
-# 1. Wait for CI to complete
-gh pr checks --watch
+# List bot reviewers who have commented
+gh api repos/{owner}/{repo}/pulls/{pr}/comments \
+  --jq '[.[] | .user.login] | unique | map(select(test("gemini|copilot|Copilot|github-advanced"))) | .[]'
 
-# 2. Check for CodeQL alerts
+# Also check for CodeQL alerts
 gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{pr}/merge&state=open"
 ```
 
-**Wait until CI and CodeQL complete before proceeding.**
+**Expected bots:**
+- `gemini-code-assist` - Gemini code review
+- `copilot-pull-request-reviewer` - Copilot review
+- `github-advanced-security` - Code scanning alerts
+
+**Timing:**
+- Minimum wait: 3 minutes after PR creation (bots need time to analyze)
+- Maximum wait: If no bot comments after 10 minutes, proceed anyway (bots may be disabled)
+
+Update session status to `ReviewsInProgress` once at least one bot has commented.
 
 ### 6. Enumerate ALL Bot Reviewers
 

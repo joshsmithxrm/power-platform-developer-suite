@@ -92,6 +92,21 @@ public enum SessionStatus
     Working,
 
     /// <summary>
+    /// PR created, waiting for required CI checks.
+    /// </summary>
+    Shipping,
+
+    /// <summary>
+    /// CI passed, addressing bot review comments.
+    /// </summary>
+    ReviewsInProgress,
+
+    /// <summary>
+    /// All bot comments addressed, PR ready for human review.
+    /// </summary>
+    PrReady,
+
+    /// <summary>
     /// Worker hit a domain gate or repeated failure, needs human guidance.
     /// </summary>
     Stuck,
