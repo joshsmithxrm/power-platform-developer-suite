@@ -2,6 +2,10 @@
 // Demonstrates: BulkOperationExecutor usage, pool DOP, parallel batching
 // Related: ADR-0002, ADR-0005, CLAUDE.md "Use bulk APIs"
 // Source: src/PPDS.Dataverse/BulkOperations/BulkOperationExecutor.cs
+// NOTE: This is an illustrative pattern showing key concepts. For exact API
+// signatures and method names, refer to the source files. The patterns here
+// demonstrate the correct approach (get client inside loop, use pool DOP,
+// handle partial failures) rather than exact copy-paste code.
 
 // KEY PRINCIPLES:
 // 1. Use pool.GetTotalRecommendedParallelism() - never guess parallelism
@@ -43,6 +47,12 @@ public class BulkOperationExample
             {
                 var result = await ExecuteBatchAsync(entityLogicalName, batch, cancellationToken);
                 successCount += result.SuccessCount;
+
+                // PATTERN: Aggregate failed records from sequential execution too
+                foreach (var failed in result.FailedRecords)
+                {
+                    failedRecords.Add(failed);
+                }
             }
         }
         else
@@ -90,13 +100,43 @@ public class BulkOperationExample
 
         try
         {
+            var batchList = batch.ToList();
             var request = new CreateMultipleRequest
             {
-                Targets = new EntityCollection(batch.ToList())
+                Targets = new EntityCollection(batchList)
             };
 
-            var response = await client.ExecuteAsync(request, cancellationToken);
-            return new BatchResult { SuccessCount = batch.Count() };
+            // PATTERN: Cast response to specific type to access Results
+            var response = (CreateMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
+
+            // PATTERN: Handle partial failures - CreateMultiple can succeed partially
+            // Check each response item for faults
+            var failedInBatch = new List<FailedRecord>();
+            var successInBatch = 0;
+
+            if (response.Responses != null)
+            {
+                foreach (var responseItem in response.Responses)
+                {
+                    if (responseItem.Fault != null)
+                    {
+                        // Map failed item back using RequestIndex
+                        var originalEntity = batchList[responseItem.RequestIndex];
+                        failedInBatch.Add(new FailedRecord(originalEntity, responseItem.Fault));
+                    }
+                    else
+                    {
+                        successInBatch++;
+                    }
+                }
+            }
+            else
+            {
+                // All succeeded (older API versions may not return Responses)
+                successInBatch = batchList.Count;
+            }
+
+            return new BatchResult { SuccessCount = successInBatch, FailedRecords = failedInBatch };
         }
         catch (FaultException<OrganizationServiceFault> ex)
         {

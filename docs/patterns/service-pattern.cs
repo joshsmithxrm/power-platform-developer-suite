@@ -2,6 +2,9 @@
 // Demonstrates: IProgressReporter, PpdsException, DI registration
 // Related: ADR-0015, ADR-0025, ADR-0026
 // Source: src/PPDS.Cli/Services/*, src/PPDS.Cli/Infrastructure/Errors/PpdsException.cs
+// NOTE: This is an illustrative pattern showing key concepts. The actual
+// IProgressReporter interface has different method signatures (ReportProgress,
+// ReportPhase, ReportWarning, ReportInfo). See source files for exact APIs.
 
 // KEY PRINCIPLES:
 // 1. Services own business logic - UIs are dumb views

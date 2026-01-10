@@ -106,5 +106,5 @@ At the end of refinement, summarize:
 
 ## Related
 
-- [Meta-Monitoring](../workflows/terminology.md#115-meta-monitoring)
-- [Trust Calibration](../workflows/terminology.md#117-trust-calibration)
+- [Meta-Monitoring](../workflows/terminology.md#meta-monitoring)
+- [Trust Calibration](../workflows/terminology.md#trust-calibration)

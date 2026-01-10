@@ -2,6 +2,9 @@
 // Demonstrates: Pool acquisition inside loops, DOP from server, semaphore gating
 // Related: ADR-0002, ADR-0005, CLAUDE.md "Use connection pool"
 // Source: src/PPDS.Dataverse/Pooling/DataverseConnectionPool.cs
+// NOTE: This is an illustrative pattern. The actual IPooledClient interface
+// uses non-generic ExecuteAsync returning OrganizationResponse (requires cast).
+// See source files for exact API signatures.
 
 // KEY PRINCIPLES:
 // 1. Get client INSIDE parallel loop - don't hold slots during entire batch

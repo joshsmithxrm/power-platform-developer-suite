@@ -2,6 +2,9 @@
 // Demonstrates: Output routing, dual modes, exception mapping, exit codes
 // Related: ADR-0008, ADR-0009, CLAUDE.md "Write CLI status to stderr"
 // Source: src/PPDS.Cli/Commands/Connections/ListCommand.cs
+// NOTE: This is an illustrative pattern. The actual ExitCodes class has
+// additional codes (PartialSuccess, ConnectionError, MappingRequired, etc.).
+// See src/PPDS.Cli/Infrastructure/ExitCodes.cs for exact values.
 
 // KEY PRINCIPLES:
 // 1. Data to stdout, status/errors to stderr
