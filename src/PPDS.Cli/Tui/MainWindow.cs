@@ -70,6 +70,7 @@ internal sealed class MainWindow : Window
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("Switch _Profile...", "Select a different authentication profile", () => ShowProfileSelector()),
                 new("Switch _Environment...", "Select a different environment", () => ShowEnvironmentSelector()),
+                new("View Profile _Details...", "Show profile details (who am I)", () => ShowProfileDetails(), shortcut: Key.CtrlMask | Key.I),
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("_Quit", "Exit the application", () => RequestStop(), shortcut: Key.CtrlMask | Key.Q)
             }),
@@ -145,6 +146,10 @@ internal sealed class MainWindow : Window
                     e.Handled = true;
                     break;
                 // F3 disabled - Data Migration coming soon
+                case Key.CtrlMask | Key.I:
+                    ShowProfileDetails();
+                    e.Handled = true;
+                    break;
             }
         };
     }
@@ -211,7 +216,7 @@ internal sealed class MainWindow : Window
     private void ShowProfileSelector()
     {
         var service = _session.GetProfileService();
-        var dialog = new ProfileSelectorDialog(service);
+        var dialog = new ProfileSelectorDialog(service, _session);
 
         Application.Run(dialog);
 
@@ -284,6 +289,12 @@ internal sealed class MainWindow : Window
             }, TaskScheduler.Default);
 #pragma warning restore PPDS013
         }
+    }
+
+    private void ShowProfileDetails()
+    {
+        var dialog = new ProfileDetailsDialog(_session);
+        Application.Run(dialog);
     }
 
     private void ShowEnvironmentSelector()
@@ -361,6 +372,7 @@ internal sealed class MainWindow : Window
         MessageBox.Query("Keyboard Shortcuts",
             "Global Shortcuts:\n" +
             "  F2       - SQL Query\n" +
+            "  Ctrl+I   - Profile Details\n" +
             "  Ctrl+Q   - Quit\n\n" +
             "Table Navigation:\n" +
             "  Arrows   - Navigate cells\n" +

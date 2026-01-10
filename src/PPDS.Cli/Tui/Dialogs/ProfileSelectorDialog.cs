@@ -11,6 +11,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 internal sealed class ProfileSelectorDialog : Dialog
 {
     private readonly IProfileService _profileService;
+    private readonly InteractiveSession? _session;
     private readonly ListView _listView;
     private readonly Label _detailLabel;
     private readonly Label _hintLabel;
@@ -32,9 +33,12 @@ internal sealed class ProfileSelectorDialog : Dialog
     /// <summary>
     /// Creates a new profile selector dialog.
     /// </summary>
-    public ProfileSelectorDialog(IProfileService profileService) : base("Select Profile")
+    /// <param name="profileService">The profile service for profile operations.</param>
+    /// <param name="session">Optional session for showing profile details dialog.</param>
+    public ProfileSelectorDialog(IProfileService profileService, InteractiveSession? session = null) : base("Select Profile")
     {
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
+        _session = session;
 
         Width = 60;
         Height = 18;
@@ -79,7 +83,7 @@ internal sealed class ProfileSelectorDialog : Dialog
             Y = Pos.Bottom(_detailLabel),
             Width = Dim.Fill() - 2,
             Height = 1,
-            Text = "F2 to rename | Del to delete",
+            Text = "F2 rename | Del delete | Ctrl+D details",
             ColorScheme = TuiColorPalette.StatusBar_Default
         };
 
@@ -222,6 +226,32 @@ internal sealed class ProfileSelectorDialog : Dialog
             ShowRenameDialog();
             e.Handled = true;
         }
+        else if (e.KeyEvent.Key == (Key.CtrlMask | Key.D))
+        {
+            ShowProfileDetailsDialog();
+            e.Handled = true;
+        }
+    }
+
+    private void ShowProfileDetailsDialog()
+    {
+        if (_session == null)
+        {
+            // Session not available - show simple message
+            MessageBox.Query("Details", "Profile details require session context.", "OK");
+            return;
+        }
+
+        if (_listView.SelectedItem < 0 || _listView.SelectedItem >= _profiles.Count)
+        {
+            return;
+        }
+
+        // Show the profile details dialog
+        // Note: This shows the active profile details, not the selected list item
+        // (The selected list item would require loading the full AuthProfile)
+        var dialog = new ProfileDetailsDialog(_session);
+        Application.Run(dialog);
     }
 
     private void ShowRenameDialog()

@@ -1,0 +1,398 @@
+using PPDS.Auth.Cloud;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Tui.Infrastructure;
+using Terminal.Gui;
+
+namespace PPDS.Cli.Tui.Dialogs;
+
+/// <summary>
+/// Dialog for displaying detailed profile information.
+/// Equivalent to the 'ppds auth who' CLI command.
+/// </summary>
+internal sealed class ProfileDetailsDialog : Dialog
+{
+    private readonly InteractiveSession _session;
+    private readonly Label _profileNameLabel;
+    private readonly Label _identityLabel;
+    private readonly Label _authMethodLabel;
+    private readonly Label _cloudLabel;
+    private readonly Label _tenantLabel;
+    private readonly Label _authorityLabel;
+    private readonly Label _tokenStatusLabel;
+    private readonly Label _createdLabel;
+    private readonly Label _lastUsedLabel;
+    private readonly Label _environmentLabel;
+    private readonly Label _environmentUrlLabel;
+
+    /// <summary>
+    /// Creates a new profile details dialog.
+    /// </summary>
+    /// <param name="session">The interactive session for accessing profile data.</param>
+    public ProfileDetailsDialog(InteractiveSession session) : base("Profile Details")
+    {
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+
+        Width = 68;
+        Height = 20;
+        ColorScheme = TuiColorPalette.Default;
+
+        const int labelWidth = 14;
+        const int valueX = 16;
+
+        // Profile name (header)
+        var profileHeaderLabel = new Label("Profile:")
+        {
+            X = 1,
+            Y = 1,
+            Width = labelWidth
+        };
+        _profileNameLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 1,
+            Width = Dim.Fill() - 2
+        };
+
+        // Separator
+        var separator = new Label(new string('─', 64))
+        {
+            X = 1,
+            Y = 2
+        };
+
+        // Identity
+        var identityHeaderLabel = new Label("Identity:")
+        {
+            X = 1,
+            Y = 3,
+            Width = labelWidth
+        };
+        _identityLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 3,
+            Width = Dim.Fill() - 2
+        };
+
+        // Auth Method
+        var authMethodHeaderLabel = new Label("Auth Method:")
+        {
+            X = 1,
+            Y = 4,
+            Width = labelWidth
+        };
+        _authMethodLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 4,
+            Width = Dim.Fill() - 2
+        };
+
+        // Cloud
+        var cloudHeaderLabel = new Label("Cloud:")
+        {
+            X = 1,
+            Y = 5,
+            Width = labelWidth
+        };
+        _cloudLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 5,
+            Width = Dim.Fill() - 2
+        };
+
+        // Tenant
+        var tenantHeaderLabel = new Label("Tenant:")
+        {
+            X = 1,
+            Y = 6,
+            Width = labelWidth
+        };
+        _tenantLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 6,
+            Width = Dim.Fill() - 2
+        };
+
+        // Authority
+        var authorityHeaderLabel = new Label("Authority:")
+        {
+            X = 1,
+            Y = 7,
+            Width = labelWidth
+        };
+        _authorityLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 7,
+            Width = Dim.Fill() - 2
+        };
+
+        // Token Status
+        var tokenHeaderLabel = new Label("Token Status:")
+        {
+            X = 1,
+            Y = 9,
+            Width = labelWidth
+        };
+        _tokenStatusLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 9,
+            Width = Dim.Fill() - 2
+        };
+
+        // Created
+        var createdHeaderLabel = new Label("Created:")
+        {
+            X = 1,
+            Y = 10,
+            Width = labelWidth
+        };
+        _createdLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 10,
+            Width = Dim.Fill() - 2
+        };
+
+        // Last Used
+        var lastUsedHeaderLabel = new Label("Last Used:")
+        {
+            X = 1,
+            Y = 11,
+            Width = labelWidth
+        };
+        _lastUsedLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 11,
+            Width = Dim.Fill() - 2
+        };
+
+        // Environment
+        var envHeaderLabel = new Label("Environment:")
+        {
+            X = 1,
+            Y = 13,
+            Width = labelWidth
+        };
+        _environmentLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 13,
+            Width = Dim.Fill() - 2
+        };
+
+        // URL
+        var urlHeaderLabel = new Label("URL:")
+        {
+            X = 1,
+            Y = 14,
+            Width = labelWidth
+        };
+        _environmentUrlLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 14,
+            Width = Dim.Fill() - 2
+        };
+
+        // Buttons
+        var refreshButton = new Button("_Refresh")
+        {
+            X = Pos.Center() - 10,
+            Y = Pos.AnchorEnd(1)
+        };
+        refreshButton.Clicked += OnRefreshClicked;
+
+        var closeButton = new Button("_Close")
+        {
+            X = Pos.Center() + 3,
+            Y = Pos.AnchorEnd(1)
+        };
+        closeButton.Clicked += () => Application.RequestStop();
+
+        Add(
+            profileHeaderLabel, _profileNameLabel,
+            separator,
+            identityHeaderLabel, _identityLabel,
+            authMethodHeaderLabel, _authMethodLabel,
+            cloudHeaderLabel, _cloudLabel,
+            tenantHeaderLabel, _tenantLabel,
+            authorityHeaderLabel, _authorityLabel,
+            tokenHeaderLabel, _tokenStatusLabel,
+            createdHeaderLabel, _createdLabel,
+            lastUsedHeaderLabel, _lastUsedLabel,
+            envHeaderLabel, _environmentLabel,
+            urlHeaderLabel, _environmentUrlLabel,
+            refreshButton, closeButton
+        );
+
+        // Handle Escape to close
+        KeyPress += (e) =>
+        {
+            if (e.KeyEvent.Key == Key.Esc)
+            {
+                Application.RequestStop();
+                e.Handled = true;
+            }
+        };
+
+        // Load profile data asynchronously
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
+        _ = LoadProfileAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted && t.Exception != null)
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    _profileNameLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
+                });
+            }
+        }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+    }
+
+    private async Task LoadProfileAsync()
+    {
+        var store = _session.GetProfileStore();
+        var collection = await store.LoadAsync(CancellationToken.None);
+        var profile = collection.ActiveProfile;
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            if (profile == null)
+            {
+                _profileNameLabel.Text = "(No active profile)";
+                _identityLabel.Text = "-";
+                _authMethodLabel.Text = "-";
+                _cloudLabel.Text = "-";
+                _tenantLabel.Text = "-";
+                _authorityLabel.Text = "-";
+                _tokenStatusLabel.Text = "-";
+                _createdLabel.Text = "-";
+                _lastUsedLabel.Text = "-";
+                _environmentLabel.Text = "-";
+                _environmentUrlLabel.Text = "-";
+                return;
+            }
+
+            UpdateDisplay(profile);
+        });
+    }
+
+    private void UpdateDisplay(AuthProfile profile)
+    {
+        // Profile name
+        _profileNameLabel.Text = profile.DisplayIdentifier;
+
+        // Identity (username or app ID)
+        _identityLabel.Text = profile.IdentityDisplay;
+
+        // Auth method
+        _authMethodLabel.Text = profile.AuthMethod.ToString();
+
+        // Cloud
+        _cloudLabel.Text = profile.Cloud.ToString();
+
+        // Tenant
+        _tenantLabel.Text = profile.TenantId ?? "(not specified)";
+
+        // Authority
+        var authority = profile.Authority ?? CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId);
+        _authorityLabel.Text = TruncateUrl(authority, 48);
+
+        // Token status with color
+        UpdateTokenStatus(profile);
+
+        // Created
+        _createdLabel.Text = profile.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+
+        // Last used
+        _lastUsedLabel.Text = profile.LastUsedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "(never)";
+
+        // Environment
+        if (profile.HasEnvironment)
+        {
+            _environmentLabel.Text = profile.Environment!.DisplayName;
+            _environmentUrlLabel.Text = TruncateUrl(profile.Environment.Url, 48);
+        }
+        else
+        {
+            _environmentLabel.Text = "(no environment selected)";
+            _environmentUrlLabel.Text = "-";
+        }
+    }
+
+    private void UpdateTokenStatus(AuthProfile profile)
+    {
+        if (!profile.TokenExpiresOn.HasValue)
+        {
+            _tokenStatusLabel.Text = "Unknown";
+            _tokenStatusLabel.ColorScheme = TuiColorPalette.Default;
+            return;
+        }
+
+        var expiresOn = profile.TokenExpiresOn.Value;
+        var now = DateTimeOffset.UtcNow;
+
+        if (expiresOn < now)
+        {
+            // Expired
+            _tokenStatusLabel.Text = "Expired";
+            _tokenStatusLabel.ColorScheme = TuiColorPalette.Error;
+        }
+        else
+        {
+            var remaining = expiresOn - now;
+            string timeRemaining;
+
+            if (remaining.TotalDays >= 1)
+            {
+                timeRemaining = $"{(int)remaining.TotalDays} day(s)";
+            }
+            else if (remaining.TotalHours >= 1)
+            {
+                timeRemaining = $"{(int)remaining.TotalHours} hour(s)";
+            }
+            else
+            {
+                timeRemaining = $"{(int)remaining.TotalMinutes} minute(s)";
+            }
+
+            _tokenStatusLabel.Text = $"Valid (expires in {timeRemaining})";
+            _tokenStatusLabel.ColorScheme = TuiColorPalette.Success;
+        }
+    }
+
+    private static string TruncateUrl(string url, int maxLength)
+    {
+        if (string.IsNullOrEmpty(url) || url.Length <= maxLength)
+        {
+            return url;
+        }
+
+        return url.Substring(0, maxLength - 3) + "...";
+    }
+
+    private void OnRefreshClicked()
+    {
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
+        _ = LoadProfileAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted && t.Exception != null)
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    MessageBox.ErrorQuery("Refresh Failed",
+                        t.Exception.InnerException?.Message ?? t.Exception.Message,
+                        "OK");
+                });
+            }
+        }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+    }
+}
