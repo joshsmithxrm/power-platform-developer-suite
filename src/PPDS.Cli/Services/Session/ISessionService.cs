@@ -63,6 +63,18 @@ public interface ISessionService
     Task<SessionState?> GetAsync(string sessionId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets a session by its associated pull request number.
+    /// </summary>
+    /// <param name="prNumber">Pull request number.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Session state, or null if no session has this PR.</returns>
+    /// <remarks>
+    /// Enables lookup by PR number for humans who interact with PRs rather than issues.
+    /// The PR URL must have been recorded via UpdateAsync with prUrl parameter.
+    /// </remarks>
+    Task<SessionState?> GetByPullRequestAsync(int prNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Updates session status (called by workers).
     /// </summary>
     /// <param name="sessionId">Session identifier.</param>

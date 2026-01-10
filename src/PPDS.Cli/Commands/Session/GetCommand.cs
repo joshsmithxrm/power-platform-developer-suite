@@ -15,30 +15,39 @@ public static class GetCommand
 {
     public static Command Create()
     {
-        var sessionArg = new Argument<string>("session")
+        var sessionArg = new Argument<string?>("session")
         {
-            Description = "Session ID (issue number)"
+            Description = "Session ID (issue number)",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+
+        var prOption = new Option<int?>("--pr", "-p")
+        {
+            Description = "Lookup session by pull request number"
         };
 
         var command = new Command("get", "Get detailed status of a worker session")
         {
-            sessionArg
+            sessionArg,
+            prOption
         };
 
         GlobalOptions.AddToCommand(command);
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var sessionId = parseResult.GetValue(sessionArg)!;
+            var sessionId = parseResult.GetValue(sessionArg);
+            var prNumber = parseResult.GetValue(prOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
-            return await ExecuteAsync(sessionId, globalOptions, cancellationToken);
+            return await ExecuteAsync(sessionId, prNumber, globalOptions, cancellationToken);
         });
 
         return command;
     }
 
     private static async Task<int> ExecuteAsync(
-        string sessionId,
+        string? sessionId,
+        int? prNumber,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -46,17 +55,40 @@ public static class GetCommand
 
         try
         {
+            // Validate arguments
+            if (string.IsNullOrEmpty(sessionId) && prNumber == null)
+            {
+                throw new ArgumentException("Either session ID or --pr option is required");
+            }
+            if (!string.IsNullOrEmpty(sessionId) && prNumber != null)
+            {
+                throw new ArgumentException("Cannot specify both session ID and --pr option");
+            }
+
             var spawner = new WindowsTerminalWorkerSpawner();
             var logger = NullLogger<SessionService>.Instance;
             var service = new SessionService(spawner, logger);
 
-            var session = await service.GetAsync(sessionId, cancellationToken);
-            if (session == null)
+            SessionState? session;
+            if (prNumber != null)
             {
-                throw new KeyNotFoundException($"Session '{sessionId}' not found");
+                session = await service.GetByPullRequestAsync(prNumber.Value, cancellationToken);
+                if (session == null)
+                {
+                    throw new KeyNotFoundException($"No session found with PR #{prNumber}");
+                }
+                sessionId = session.Id;
+            }
+            else
+            {
+                session = await service.GetAsync(sessionId!, cancellationToken);
+                if (session == null)
+                {
+                    throw new KeyNotFoundException($"Session '{sessionId}' not found");
+                }
             }
 
-            var worktreeStatus = await service.GetWorktreeStatusAsync(sessionId, cancellationToken);
+            var worktreeStatus = await service.GetWorktreeStatusAsync(session.Id, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
