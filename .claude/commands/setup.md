@@ -155,15 +155,17 @@ if ($branch) {
 }
 ```
 
-3. Add statusLine config to `~/.claude/settings.json` with absolute path:
+3. Add statusLine config to `~/.claude/settings.json` using the user's home directory:
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "pwsh -NoProfile -File C:/Users/USERNAME/.claude/statusline.ps1"
+    "command": "pwsh -NoProfile -File ~/.claude/statusline.ps1"
   }
 }
 ```
+
+> **Note:** Use `~` for cross-platform compatibility. On Windows, Claude Code expands `~` to `$env:USERPROFILE`.
 
 ### Step 5: Summary
 

@@ -22,8 +22,9 @@ cp -r path/to/power-platform-developer-suite/templates/claude/* ~/.claude/ppds/
 # Create PPDS directory in Claude config
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\ppds"
 
-# Copy templates (from SDK repo)
-Copy-Item -Path "C:\path\to\power-platform-developer-suite\templates\claude\*" -Destination "$env:USERPROFILE\.claude\ppds" -Recurse
+# Copy templates (from SDK repo - adjust path to your clone location)
+$sdkPath = "path\to\power-platform-developer-suite"  # <-- Set this to your SDK location
+Copy-Item -Path "$sdkPath\templates\claude\*" -Destination "$env:USERPROFILE\.claude\ppds" -Recurse
 ```
 
 Then in any project's `CLAUDE.md`, add:
@@ -60,7 +61,9 @@ ln -s /path/to/power-platform-developer-suite/templates/claude/CONSUMER_GUIDE.md
 
 **Windows (requires admin):**
 ```powershell
-New-Item -ItemType SymbolicLink -Path ".claude\rules\ppds.md" -Target "C:\path\to\power-platform-developer-suite\templates\claude\CONSUMER_GUIDE.md"
+# Adjust path to your SDK clone location
+$sdkPath = "path\to\power-platform-developer-suite"  # <-- Set this to your SDK location
+New-Item -ItemType SymbolicLink -Path ".claude\rules\ppds.md" -Target "$sdkPath\templates\claude\CONSUMER_GUIDE.md"
 ```
 
 ---

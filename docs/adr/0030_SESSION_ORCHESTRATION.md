@@ -77,7 +77,7 @@ All commands require `PPDS_INTERNAL=1` environment variable (automatically set f
   "issueTitle": "Add export button",
   "status": "working",
   "branch": "issue-123",
-  "worktreePath": "C:/VS/ppds-issue-123",
+  "worktreePath": "<repo-parent>/ppds-issue-123",
   "startedAt": "2025-01-08T10:30:00Z",
   "lastHeartbeat": "2025-01-08T11:15:00Z",
   "completedAt": null,

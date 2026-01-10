@@ -34,7 +34,7 @@ Sessions coordinate via status files in `~/.ppds/sessions/`:
   "status": "working",
   "issue": "#123",
   "branch": "fix/auth-bug",
-  "worktree": "C:/VS/ppds-auth-bug",
+  "worktree": "<repo-parent>/ppds-auth-bug",
   "started": "2025-01-08T10:30:00Z",
   "lastUpdate": "2025-01-08T11:15:00Z",
   "stuck": null

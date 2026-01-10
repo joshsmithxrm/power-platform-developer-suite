@@ -202,10 +202,13 @@ public class DataSchemaCommandE2ETests : CliE2ETestBase
     [CliE2EFact]
     public async Task DataSchema_InvalidOutputDirectory_Fails()
     {
+        // Use a guaranteed-nonexistent path in temp directory (cross-platform)
+        var nonexistentPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(), "schema.xml");
+
         var result = await RunCliAsync(
             "data", "schema",
             "--entities", "account",
-            "--output", @"C:\nonexistent\directory\schema.xml");
+            "--output", nonexistentPath);
 
         result.ExitCode.Should().NotBe(0);
         (result.StdOut + result.StdErr).Should().ContainAny("directory", "does not exist", "Error");
