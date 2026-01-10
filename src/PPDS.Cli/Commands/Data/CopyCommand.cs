@@ -231,6 +231,7 @@ public static class CopyCommand
                 verbose,
                 debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
+                beforeInteractiveAuth: null,
                 cancellationToken);
 
             if (outputFormat != OutputFormat.Json)

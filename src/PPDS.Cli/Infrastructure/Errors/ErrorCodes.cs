@@ -54,6 +54,9 @@ public static class ErrorCodes
 
         /// <summary>Certificate file not found or invalid.</summary>
         public const string CertificateError = "Auth.CertificateError";
+
+        /// <summary>User declined authentication when prompted.</summary>
+        public const string Declined = "Auth.Declined";
     }
 
     /// <summary>

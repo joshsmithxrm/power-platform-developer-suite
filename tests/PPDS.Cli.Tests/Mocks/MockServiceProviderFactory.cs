@@ -53,6 +53,7 @@ public sealed class MockServiceProviderFactory : IServiceProviderFactory
         string? profileName,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
         _creationLog.Add(new ProviderCreationRecord(

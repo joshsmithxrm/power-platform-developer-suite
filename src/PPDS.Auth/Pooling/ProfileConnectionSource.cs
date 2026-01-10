@@ -27,6 +27,7 @@ public sealed class ProfileConnectionSource : IDisposable
     private readonly string _environmentUrl;
     private readonly string? _environmentDisplayName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private readonly ISecureCredentialStore? _credentialStore;
     private readonly Action<AuthProfile>? _onProfileUpdated;
     private readonly int _maxPoolSize;
@@ -64,6 +65,8 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="environmentUrl">The Dataverse environment URL.</param>
     /// <param name="maxPoolSize">Maximum pool size (default: 52 per Microsoft recommendations).</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="environmentDisplayName">Optional environment display name for connection naming.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
@@ -72,6 +75,7 @@ public sealed class ProfileConnectionSource : IDisposable
         string environmentUrl,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         string? environmentDisplayName = null,
         ISecureCredentialStore? credentialStore = null,
         Action<AuthProfile>? onProfileUpdated = null)
@@ -84,6 +88,7 @@ public sealed class ProfileConnectionSource : IDisposable
         _environmentUrl = environmentUrl.TrimEnd('/');
         _maxPoolSize = maxPoolSize;
         _deviceCodeCallback = deviceCodeCallback;
+        _beforeInteractiveAuth = beforeInteractiveAuth;
         _environmentDisplayName = environmentDisplayName;
         _credentialStore = credentialStore;
         _onProfileUpdated = onProfileUpdated;
@@ -102,6 +107,8 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="profile">The authentication profile (must have environment set).</param>
     /// <param name="maxPoolSize">Maximum pool size.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
     /// <returns>A new connection source.</returns>
@@ -110,6 +117,7 @@ public sealed class ProfileConnectionSource : IDisposable
         AuthProfile profile,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         ISecureCredentialStore? credentialStore = null,
         Action<AuthProfile>? onProfileUpdated = null)
     {
@@ -128,6 +136,7 @@ public sealed class ProfileConnectionSource : IDisposable
             profile.Environment!.Url,
             maxPoolSize,
             deviceCodeCallback,
+            beforeInteractiveAuth,
             profile.Environment.DisplayName,
             credentialStore,
             onProfileUpdated);
@@ -161,7 +170,7 @@ public sealed class ProfileConnectionSource : IDisposable
             {
                 using var credCts = new CancellationTokenSource(CredentialProviderTimeout);
                 _provider = System.Threading.Tasks.Task.Run(() =>
-                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, credCts.Token))
+                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token))
                     .WaitAsync(credCts.Token)
                     .GetAwaiter()
                     .GetResult();
@@ -240,7 +249,7 @@ public sealed class ProfileConnectionSource : IDisposable
                 credCts.CancelAfter(CredentialProviderTimeout);
 
                 _provider = await CredentialProviderFactory.CreateAsync(
-                    _profile, _credentialStore, _deviceCodeCallback, credCts.Token)
+                    _profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

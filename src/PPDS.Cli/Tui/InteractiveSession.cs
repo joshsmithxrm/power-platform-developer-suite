@@ -35,6 +35,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
     private string _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private readonly ProfileStore _profileStore;
     private readonly IServiceProviderFactory _serviceProviderFactory;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -66,16 +67,20 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <param name="profileStore">Shared profile store instance.</param>
     /// <param name="serviceProviderFactory">Factory for creating service providers (null for default).</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     public InteractiveSession(
         string? profileName,
         ProfileStore profileStore,
         IServiceProviderFactory? serviceProviderFactory = null,
-        Action<DeviceCodeInfo>? deviceCodeCallback = null)
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
     {
         _profileName = profileName ?? string.Empty;
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
+        _beforeInteractiveAuth = beforeInteractiveAuth;
     }
 
     /// <summary>
@@ -235,6 +240,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
                 string.IsNullOrEmpty(_profileName) ? null : _profileName,
                 environmentUrl,
                 _deviceCodeCallback,
+                _beforeInteractiveAuth,
                 cancellationToken).ConfigureAwait(false);
 
             _currentEnvironmentUrl = environmentUrl;

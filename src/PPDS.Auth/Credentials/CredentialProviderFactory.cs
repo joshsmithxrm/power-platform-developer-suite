@@ -28,12 +28,15 @@ public static class CredentialProviderFactory
     /// <param name="profile">The auth profile.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A credential provider for the profile's auth method.</returns>
     public static async Task<ICredentialProvider> CreateAsync(
         AuthProfile profile,
         ISecureCredentialStore? credentialStore = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
         if (profile == null)
@@ -46,8 +49,8 @@ public static class CredentialProviderFactory
 
         return profile.AuthMethod switch
         {
-            AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile),
-            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback),
+            AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth),
+            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback, beforeInteractiveAuth),
             AuthMethod.ClientSecret => await CreateClientSecretProviderAsync(
                 profile, credentialStore, envSecret, cancellationToken).ConfigureAwait(false),
             AuthMethod.CertificateFile => await CreateCertificateFileProviderAsync(
@@ -70,6 +73,8 @@ public static class CredentialProviderFactory
     /// </summary>
     /// <param name="profile">The auth profile.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <returns>A credential provider for the profile's auth method.</returns>
     /// <remarks>
     /// This overload does not support secure credential store lookups.
@@ -77,7 +82,8 @@ public static class CredentialProviderFactory
     /// </remarks>
     public static ICredentialProvider Create(
         AuthProfile profile,
-        Action<DeviceCodeInfo>? deviceCodeCallback = null)
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
     {
         if (profile == null)
             throw new ArgumentNullException(nameof(profile));
@@ -89,8 +95,8 @@ public static class CredentialProviderFactory
 
         return profile.AuthMethod switch
         {
-            AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile),
-            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback),
+            AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth),
+            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback, beforeInteractiveAuth),
             AuthMethod.ClientSecret => CreateClientSecretProviderSync(profile, envSecret),
             AuthMethod.CertificateFile => CertificateFileCredentialProvider.FromProfile(profile, null),
             AuthMethod.CertificateStore => CertificateStoreCredentialProvider.FromProfile(profile),
@@ -198,11 +204,12 @@ public static class CredentialProviderFactory
     /// </summary>
     private static ICredentialProvider CreateInteractiveProvider(
         AuthProfile profile,
-        Action<DeviceCodeInfo>? deviceCodeCallback)
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
     {
         if (InteractiveBrowserCredentialProvider.IsAvailable())
         {
-            return InteractiveBrowserCredentialProvider.FromProfile(profile);
+            return InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth);
         }
         else
         {

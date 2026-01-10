@@ -14,12 +14,14 @@ public sealed class ProfileBasedServiceProviderFactory : IServiceProviderFactory
         string? profileName,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
         return ProfileServiceFactory.CreateFromProfileAsync(
             profileName,
             environmentUrl,
             deviceCodeCallback: deviceCodeCallback,
+            beforeInteractiveAuth: beforeInteractiveAuth,
             cancellationToken: cancellationToken);
     }
 }
