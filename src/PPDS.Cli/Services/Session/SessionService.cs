@@ -157,6 +157,8 @@ public sealed class SessionService : ISessionService
     /// <inheritdoc />
     public Task<IReadOnlyList<SessionState>> ListAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Refresh from disk in case other processes updated
         LoadSessionsFromDisk();
 
@@ -173,6 +175,8 @@ public sealed class SessionService : ISessionService
     /// <inheritdoc />
     public Task<SessionListResult> ListWithCleanupInfoAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Refresh from disk in case other processes updated
         LoadSessionsFromDisk();
 
@@ -204,14 +208,26 @@ public sealed class SessionService : ISessionService
 
         foreach (var session in orphanedSessions)
         {
-            if (_sessions.TryRemove(session.Id, out _))
+            if (_sessions.TryRemove(session.Id, out var removedSession))
             {
-                DeleteSessionFile(session.Id);
-                cleanedIssueNumbers.Add(session.IssueNumber);
-                _logger.LogInformation(
-                    "Cleaned up orphaned session #{IssueNumber} (worktree no longer exists at {WorktreePath})",
-                    session.IssueNumber,
-                    session.WorktreePath);
+                try
+                {
+                    DeleteSessionFile(session.Id);
+                    cleanedIssueNumbers.Add(session.IssueNumber);
+                    _logger.LogInformation(
+                        "Cleaned up orphaned session #{IssueNumber} (worktree no longer exists at {WorktreePath})",
+                        session.IssueNumber,
+                        session.WorktreePath);
+                }
+                catch (Exception ex)
+                {
+                    // Re-add the session so cleanup can be retried on next list
+                    _sessions.TryAdd(removedSession.Id, removedSession);
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to delete session file for orphaned session #{IssueNumber}. Will retry on next list.",
+                        session.IssueNumber);
+                }
             }
         }
 
