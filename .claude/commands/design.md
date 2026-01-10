@@ -138,7 +138,39 @@ Now engage in the design conversation:
 - Explore options with the user
 - Consider tradeoffs
 - Create artifacts as needed
-- File issues when design is complete
+- Complete the design plan
+
+### 6. After Plan Approval
+
+**STOP. Do not implement directly.**
+
+Design sessions produce **plans and issues**, not code. After the user approves your design plan:
+
+1. **Create GitHub issues** for each implementation phase using `/create-issue`
+2. **Add wave labels** (`wave:1`, `wave:2`) for parallel execution
+3. **Offer to dispatch workers** via `/orchestrate`
+4. **End the design session** - implementation happens in worker sessions
+
+```
+Design Session Flow:
+  Explore → Analyze → Plan → [GATE] → Create Issues → Dispatch Workers
+                               ↑
+                        You are here after plan approval
+```
+
+**Exception:** Trivial fixes (typos, single-line changes) may be implemented directly with explicit user approval.
+
+## Scoping Session Checklist
+
+Before proposing new work, design sessions MUST complete this checklist:
+
+- [ ] **Check existing milestone** - Run `gh issue list --milestone "<milestone>" --state all` to see existing work
+- [ ] **Search for duplicates** - Run `gh issue list --search "<feature-keywords>" --limit 20`
+- [ ] **Scope alignment** - Explicitly confirm if TUI/Extension/CLI should have feature parity
+- [ ] **Platform-specific vs shared** - Identify features unique to one interface (e.g., notebooks are VS Code-only)
+- [ ] **Design for orchestration** - Plan wave labels and include query patterns for worker dispatch
+- [ ] **Integrate existing backlog** - Consider labeling existing open issues into wave structure
+- [ ] **Session boundary clarity** - Be explicit: what happens THIS session vs FUTURE worker sessions
 
 ## When to Use
 

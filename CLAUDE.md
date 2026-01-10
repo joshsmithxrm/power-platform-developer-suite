@@ -26,6 +26,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | File issues in wrong repo | Issues belong in target repo (ppds-docs issues in ppds-docs, not ppds) |
 | Start implementation without plan citations | Cite `docs/patterns/` or ADRs in plan's "Patterns I'll Follow" section |
 | Omit "What I'm NOT Doing" from plans | Explicit boundaries prevent scope creep; required for approval |
+| Implement in design sessions | Design sessions produce plans and issues; workers implement |
 
 ## ALWAYS
 
@@ -45,6 +46,7 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Wait for required CI checks only in /ship | `Integration Tests` requires live Dataverse (ADR-0029) |
 | Check `docs/patterns/` before implementing | Canonical patterns exist; cite them in plan |
 | Restate issue understanding in plan | "My Understanding" section catches drift before implementation |
+| Create issues after `/design` plan approval | Enables parallel workers; maintains orchestration visibility |
 
 ---
 
