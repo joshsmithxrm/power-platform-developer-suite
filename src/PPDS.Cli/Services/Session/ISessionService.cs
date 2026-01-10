@@ -82,7 +82,8 @@ public interface ISessionService
     /// <param name="reason">Reason for status change (required for Stuck).</param>
     /// <param name="prUrl">Pull request URL (for Complete status).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task UpdateAsync(
+    /// <returns>The updated session state.</returns>
+    Task<SessionState> UpdateAsync(
         string sessionId,
         SessionStatus status,
         string? reason = null,

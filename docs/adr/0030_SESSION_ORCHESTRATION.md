@@ -80,6 +80,8 @@ All commands require `PPDS_INTERNAL=1` environment variable (automatically set f
   "worktreePath": "C:/VS/ppds-issue-123",
   "startedAt": "2025-01-08T10:30:00Z",
   "lastHeartbeat": "2025-01-08T11:15:00Z",
+  "completedAt": null,
+  "completionReason": null,
   "stuckReason": null,
   "forwardedMessage": null,
   "pullRequestUrl": null,
@@ -93,21 +95,18 @@ All commands require `PPDS_INTERNAL=1` environment variable (automatically set f
 }
 ```
 
-### Session Status Values
+### Session Status Values (Simplified)
 
 | Status | Meaning | Icon |
 |--------|---------|------|
-| `Registered` | Worktree created, worker starting | `[ ]` |
 | `Planning` | Worker exploring codebase, creating plan | `[~]` |
-| `PlanningComplete` | Plan ready for review | `[P]` |
 | `Working` | Actively implementing | `[*]` |
-| `Shipping` | PR created, waiting for CI | `[^]` |
-| `ReviewsInProgress` | CI passed, addressing bot comments | `[R]` |
-| `PrReady` | All checks passed, ready for human review | `[+]` |
+| `Shipping` | PR created, in review pipeline | `[^]` |
 | `Stuck` | Needs human guidance | `[!]` |
-| `Paused` | Human requested pause | `[||]` |
-| `Complete` | Work done (PR merged) | `[+]` |
-| `Cancelled` | Session cancelled | `[x]` |
+| `Paused` | Human requested pause | `[-]` |
+| `Complete` | Work done (check `CompletionReason` for details) | `[+]` |
+
+**Simplified from 11 to 6 states** to reduce cognitive load. The old values (`Registered`, `PlanningComplete`, `ReviewsInProgress`, `PrReady`, `Cancelled`) are automatically migrated on read via the JSON converter.
 
 ### Status Reporting Requirements
 
@@ -116,15 +115,21 @@ Workers MUST report status at each phase transition. This is **not optional** - 
 | Transition | Command |
 |------------|---------|
 | Start planning | `ppds session update --id <issue> --status planning` |
-| Plan complete | `ppds session update --id <issue> --status planning_complete` |
 | Start implementing | `ppds session update --id <issue> --status working` |
 | Hit domain gate | `ppds session update --id <issue> --status stuck --reason "..."` |
 | PR created | Handled automatically by `/ship` |
 
 The `/ship` command automatically handles the final status updates:
 - `shipping` - when `/ship` starts
-- `reviews_in_progress` - when addressing bot comments
 - `complete` - when PR is ready for human review (includes `--pr <url>`)
+
+### Dynamic Tab Titles
+
+Windows Terminal tab titles update dynamically when workers report status via `ppds session update`. The title format is:
+- `{icon} #{issue}` - e.g., `* #329` (working)
+- `{icon} #{issue} -> PR #{pr}` - e.g., `+ #329 -> PR #330` (complete with PR)
+
+This provides at-a-glance visibility of session status across multiple terminal tabs.
 
 ### PR-Based Lookup
 
@@ -146,12 +151,12 @@ The `ppds session list` output shows both issue and PR numbers when a PR exists:
 Workers enter planning mode to explore the codebase before implementing:
 
 ```
-Registered → Planning → PlanningComplete → Working → Complete
-                                    ↓
-                                  Stuck (if domain gate hit)
+Planning → Working → Shipping → Complete
+    ↓         ↓         ↓
+  Stuck ← ← ← ← ← ← ← ←
 ```
 
-The orchestrator watches for `PlanningComplete` status and prompts for human review.
+Workers can transition to `Stuck` from any active state when hitting a domain gate.
 
 ### Worker Spawning
 
@@ -175,7 +180,7 @@ Sessions MUST escalate (set stuck status) when touching:
 Workers must send heartbeats (status updates). Orchestrator flags workers as stale after **90 seconds** without a heartbeat.
 
 ### Cancellation
-Set session status to `Cancelled`. Worker checks status at iteration start.
+Use `ppds session cancel <id>` to cancel a session. This sets status to `Complete` with `CompletionReason: "Cancelled by user"`.
 Use `--keep-worktree` flag to preserve worktree for debugging.
 
 ## Consequences

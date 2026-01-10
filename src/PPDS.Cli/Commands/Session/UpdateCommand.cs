@@ -23,7 +23,7 @@ public static class UpdateCommand
 
         var statusOption = new Option<string>("--status", "-s")
         {
-            Description = "New status: registered, planning, planning_complete, working, shipping, reviews_in_progress, pr_ready, stuck, paused, complete, cancelled",
+            Description = "New status: planning, working, shipping, stuck, paused, complete",
             Required = true
         };
 
@@ -74,7 +74,7 @@ public static class UpdateCommand
         {
             if (!Enum.TryParse<SessionStatus>(statusStr, true, out var status))
             {
-                throw new ArgumentException($"Invalid status '{statusStr}'. Valid values: registered, planning, planningcomplete, working, shipping, reviewsinprogress, prready, stuck, paused, complete, cancelled");
+                throw new ArgumentException($"Invalid status '{statusStr}'. Valid values: planning, working, shipping, stuck, paused, complete");
             }
 
             if (status == SessionStatus.Stuck && string.IsNullOrEmpty(reason))
@@ -86,7 +86,10 @@ public static class UpdateCommand
             var logger = NullLogger<SessionService>.Instance;
             var service = new SessionService(spawner, logger);
 
-            await service.UpdateAsync(sessionId, status, reason, prUrl, cancellationToken);
+            var session = await service.UpdateAsync(sessionId, status, reason, prUrl, cancellationToken);
+
+            // Update Windows Terminal tab title to reflect new status
+            EmitTabTitleUpdate(FormatTabTitle(session.IssueNumber, session.Status, session.PullRequestUrl));
 
             if (globalOptions.IsJsonMode)
             {
@@ -112,6 +115,39 @@ public static class UpdateCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Formats the Windows Terminal tab title for a session.
+    /// Format: "{icon} #{issue}" or "{icon} #{issue} -> PR #{pr}" when PR exists.
+    /// </summary>
+    private static string FormatTabTitle(int issueNumber, SessionStatus status, string? prUrl)
+    {
+        var icon = status switch
+        {
+            SessionStatus.Planning => "~",
+            SessionStatus.Working => "*",
+            SessionStatus.Shipping => "^",
+            SessionStatus.Stuck => "!",
+            SessionStatus.Paused => "-",
+            SessionStatus.Complete => "+",
+            _ => "-"
+        };
+
+        var prNumber = SessionService.ExtractPrNumber(prUrl);
+        return prNumber.HasValue
+            ? $"{icon} #{issueNumber} -> PR #{prNumber}"
+            : $"{icon} #{issueNumber}";
+    }
+
+    /// <summary>
+    /// Emits ANSI OSC escape sequence to update Windows Terminal tab title.
+    /// Uses stderr per PPDS convention (stdout is for data).
+    /// </summary>
+    private static void EmitTabTitleUpdate(string title)
+    {
+        // OSC 0 = set icon name and window title; BEL (0x07) terminates
+        Console.Error.Write($"\u001b]0;{title}\u0007");
     }
 
     #region Output Models

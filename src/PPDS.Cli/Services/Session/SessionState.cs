@@ -61,6 +61,17 @@ public sealed record SessionState
     public string? PullRequestUrl { get; init; }
 
     /// <summary>
+    /// When the session completed (null if not yet complete).
+    /// </summary>
+    public DateTimeOffset? CompletedAt { get; init; }
+
+    /// <summary>
+    /// Reason for completion (e.g., "PR merged", "Cancelled by user").
+    /// Only set when status is Complete.
+    /// </summary>
+    public string? CompletionReason { get; init; }
+
+    /// <summary>
     /// Git status summary for the worktree.
     /// </summary>
     public WorktreeStatus? WorktreeStatus { get; init; }
@@ -68,23 +79,15 @@ public sealed record SessionState
 
 /// <summary>
 /// Session lifecycle status.
+/// Simplified to 6 core states for clarity.
 /// </summary>
 public enum SessionStatus
 {
     /// <summary>
-    /// Worktree created, worker starting up.
-    /// </summary>
-    Registered,
-
-    /// <summary>
     /// Worker is exploring codebase and creating plan.
+    /// Encompasses: registered, exploring, plan written.
     /// </summary>
     Planning,
-
-    /// <summary>
-    /// Worker has written plan, continuing to implementation.
-    /// </summary>
-    PlanningComplete,
 
     /// <summary>
     /// Worker actively implementing.
@@ -92,19 +95,9 @@ public enum SessionStatus
     Working,
 
     /// <summary>
-    /// PR created, waiting for required CI checks.
+    /// PR created, in review pipeline (CI, bot review, ready for human).
     /// </summary>
     Shipping,
-
-    /// <summary>
-    /// CI passed, addressing bot review comments.
-    /// </summary>
-    ReviewsInProgress,
-
-    /// <summary>
-    /// All bot comments addressed, PR ready for human review.
-    /// </summary>
-    PrReady,
 
     /// <summary>
     /// Worker hit a domain gate or repeated failure, needs human guidance.
@@ -117,14 +110,10 @@ public enum SessionStatus
     Paused,
 
     /// <summary>
-    /// PR created and CI passed.
+    /// Terminal state - work done or cancelled.
+    /// Check CompletionReason for details.
     /// </summary>
-    Complete,
-
-    /// <summary>
-    /// Human cancelled the session.
-    /// </summary>
-    Cancelled
+    Complete
 }
 
 /// <summary>

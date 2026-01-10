@@ -100,17 +100,12 @@ public static class ListCommand
                         // active implementation is normal
                         var statusIcon = session.Status switch
                         {
-                            SessionStatus.Registered => "[ ]",
                             SessionStatus.Planning => "[~]",
-                            SessionStatus.PlanningComplete => "[P]",
                             SessionStatus.Working => "[*]",
                             SessionStatus.Shipping => "[^]",
-                            SessionStatus.ReviewsInProgress => "[R]",
-                            SessionStatus.PrReady => "[+]",
                             SessionStatus.Stuck => "[!]",
                             SessionStatus.Paused => "[-]",
                             SessionStatus.Complete => "[+]",
-                            SessionStatus.Cancelled => "[x]",
                             _ => "[?]"
                         };
 
@@ -123,9 +118,7 @@ public static class ListCommand
 
                         var isActiveSession = session.Status is SessionStatus.Working
                             or SessionStatus.Planning
-                            or SessionStatus.PlanningComplete
-                            or SessionStatus.Shipping
-                            or SessionStatus.ReviewsInProgress;
+                            or SessionStatus.Shipping;
 
                         var statusText = session.Status.ToString();
                         if (isActiveSession && timeSinceUpdate.TotalSeconds > LastUpdateDisplayThresholdSeconds)

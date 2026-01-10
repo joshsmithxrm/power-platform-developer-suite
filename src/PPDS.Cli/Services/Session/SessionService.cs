@@ -22,7 +22,7 @@ public sealed class SessionService : ISessionService
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        Converters = { new SessionStatusJsonConverter() }
     };
 
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new();
@@ -106,7 +106,7 @@ public sealed class SessionService : ISessionService
             Id = sessionId,
             IssueNumber = issueNumber,
             IssueTitle = issueInfo.Title,
-            Status = SessionStatus.Registered,
+            Status = SessionStatus.Planning,
             Branch = branchName,
             WorktreePath = worktreePath,
             StartedAt = now,
@@ -287,7 +287,7 @@ public sealed class SessionService : ISessionService
     }
 
     /// <inheritdoc />
-    public async Task UpdateAsync(
+    public async Task<SessionState> UpdateAsync(
         string sessionId,
         SessionStatus status,
         string? reason = null,
@@ -308,7 +308,11 @@ public sealed class SessionService : ISessionService
                 Status = status,
                 StuckReason = status == SessionStatus.Stuck ? reason : null,
                 PullRequestUrl = prUrl ?? existing.PullRequestUrl,
-                LastHeartbeat = DateTimeOffset.UtcNow
+                LastHeartbeat = DateTimeOffset.UtcNow,
+                CompletedAt = IsTerminalStatus(status) && existing.CompletedAt == null
+                    ? DateTimeOffset.UtcNow
+                    : existing.CompletedAt,
+                CompletionReason = IsTerminalStatus(status) ? reason : existing.CompletionReason
             });
 
         await PersistSessionAsync(session, cancellationToken);
@@ -318,7 +322,15 @@ public sealed class SessionService : ISessionService
             sessionId,
             status,
             reason != null ? $": {reason}" : "");
+
+        return session;
     }
+
+    /// <summary>
+    /// Returns true if the status is a terminal state (Complete).
+    /// </summary>
+    private static bool IsTerminalStatus(SessionStatus status) =>
+        status is SessionStatus.Complete;
 
     /// <inheritdoc />
     public async Task PauseAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -393,7 +405,9 @@ public sealed class SessionService : ISessionService
             _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
             (_, existing) => existing with
             {
-                Status = SessionStatus.Cancelled,
+                Status = SessionStatus.Complete,
+                CompletedAt = DateTimeOffset.UtcNow,
+                CompletionReason = "Cancelled by user",
                 LastHeartbeat = DateTimeOffset.UtcNow
             });
 
@@ -421,7 +435,7 @@ public sealed class SessionService : ISessionService
 
         foreach (var session in sessions)
         {
-            if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Registered)
+            if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Planning or SessionStatus.Shipping)
             {
                 await CancelAsync(session.Id, keepWorktrees, cancellationToken);
                 count++;
@@ -646,10 +660,8 @@ public sealed class SessionService : ISessionService
                 if (persisted != null)
                 {
                     var session = persisted.ToSessionState();
-                    // Only load active sessions (excludes Complete and Cancelled)
-                    if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Registered
-                        or SessionStatus.Planning or SessionStatus.PlanningComplete
-                        or SessionStatus.Shipping or SessionStatus.ReviewsInProgress or SessionStatus.PrReady)
+                    // Only load active sessions (excludes Complete)
+                    if (session.Status is not SessionStatus.Complete)
                     {
                         _sessions[session.Id] = session;
                     }
@@ -1045,6 +1057,8 @@ public sealed class SessionService : ISessionService
         public string? StuckReason { get; init; }
         public string? ForwardedMessage { get; init; }
         public string? PullRequestUrl { get; init; }
+        public DateTimeOffset? CompletedAt { get; init; }
+        public string? CompletionReason { get; init; }
 
         public SessionState ToSessionState() => new()
         {
@@ -1058,7 +1072,9 @@ public sealed class SessionService : ISessionService
             LastHeartbeat = LastHeartbeat,
             StuckReason = StuckReason,
             ForwardedMessage = ForwardedMessage,
-            PullRequestUrl = PullRequestUrl
+            PullRequestUrl = PullRequestUrl,
+            CompletedAt = CompletedAt,
+            CompletionReason = CompletionReason
         };
 
         public static PersistedSession FromSessionState(SessionState state) => new()
@@ -1073,9 +1089,50 @@ public sealed class SessionService : ISessionService
             LastHeartbeat = state.LastHeartbeat,
             StuckReason = state.StuckReason,
             ForwardedMessage = state.ForwardedMessage,
-            PullRequestUrl = state.PullRequestUrl
+            PullRequestUrl = state.PullRequestUrl,
+            CompletedAt = state.CompletedAt,
+            CompletionReason = state.CompletionReason
         };
     }
 
     #endregion
+}
+
+/// <summary>
+/// JSON converter that migrates old session status values to the new simplified enum.
+/// </summary>
+internal sealed class SessionStatusJsonConverter : JsonConverter<SessionStatus>
+{
+    public override SessionStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        if (string.IsNullOrEmpty(value))
+        {
+            return SessionStatus.Planning;
+        }
+
+        // Map old status values to new simplified enum
+        return value.ToLowerInvariant() switch
+        {
+            "registered" => SessionStatus.Planning,
+            "planning" => SessionStatus.Planning,
+            "planningcomplete" => SessionStatus.Planning,
+            "working" => SessionStatus.Working,
+            "shipping" => SessionStatus.Shipping,
+            "reviewsinprogress" => SessionStatus.Shipping,
+            "prready" => SessionStatus.Shipping,
+            "stuck" => SessionStatus.Stuck,
+            "paused" => SessionStatus.Paused,
+            "complete" => SessionStatus.Complete,
+            "cancelled" => SessionStatus.Complete,
+            _ => Enum.TryParse<SessionStatus>(value, true, out var status) ? status : SessionStatus.Planning
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, SessionStatus value, JsonSerializerOptions options)
+    {
+        // Write using camelCase naming
+        var name = value.ToString();
+        writer.WriteStringValue(char.ToLowerInvariant(name[0]) + name[1..]);
+    }
 }
