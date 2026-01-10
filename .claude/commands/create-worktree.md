@@ -18,7 +18,8 @@ Create a git worktree and open a new Claude session for ad-hoc work.
 
 1. Creates a new git worktree at `../ppds-{name}`
 2. Creates a new branch `{name}` from current HEAD
-3. Opens a new Claude session in that directory
+3. Configures trust (creates `.claude/settings.local.json`)
+4. Opens a new Claude session with bypass permissions enabled
 
 ## Process
 
@@ -33,19 +34,36 @@ Create a git worktree and open a new Claude session for ad-hoc work.
 # Get parent directory of current repo
 PARENT_DIR=$(dirname "$(pwd)")
 REPO_NAME=$(basename "$(pwd)")
+WORKTREE_PATH="${PARENT_DIR}/${REPO_NAME}-{name}"
 
 # Create worktree
-git worktree add "${PARENT_DIR}/${REPO_NAME}-{name}" -b {name}
+git worktree add "${WORKTREE_PATH}" -b {name}
 ```
 
-### 3. Open Claude Session
+### 3. Configure Trust
+
+Create `settings.local.json` to enable autonomous startup without permission prompts:
+
+```bash
+# Create .claude directory and settings.local.json
+mkdir -p "${WORKTREE_PATH}/.claude"
+cat > "${WORKTREE_PATH}/.claude/settings.local.json" << 'EOF'
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+}
+EOF
+```
+
+### 4. Open Claude Session
 
 ```bash
 # Windows Terminal (Windows)
-wt -w 0 nt -d "${PARENT_DIR}/${REPO_NAME}-{name}" --title "{name}" pwsh -NoExit -Command "claude"
+wt -w 0 nt -d "${WORKTREE_PATH}" --title "{name}" pwsh -NoExit -Command "claude --permission-mode bypassPermissions"
 
 # Or for macOS/Linux (future)
-# open -a "Terminal" "${PARENT_DIR}/${REPO_NAME}-{name}"
+# open -a "Terminal" "${WORKTREE_PATH}"
 ```
 
 ## Output
@@ -56,7 +74,8 @@ Create Worktree
 [✓] Name validated: design-auth
 [✓] Worktree created: ../ppds-design-auth
 [✓] Branch created: design-auth
-[✓] Claude session opened
+[✓] Trust configured: .claude/settings.local.json
+[✓] Claude session opened (bypass mode)
 
 You can now work in the new session.
 To clean up later: git worktree remove ../ppds-design-auth
@@ -71,6 +90,24 @@ To clean up later: git worktree remove ../ppds-design-auth
 | Branch naming | User-provided name | issue-{number} |
 | GitHub integration | None | Fetches issue context |
 | Human oversight | None | Plan review, guidance relay |
+| Trust configuration | Same | Same |
+
+## Security
+
+This skill creates `.claude/settings.local.json` with `defaultMode: bypassPermissions`.
+
+**Why this is safe:**
+- Project-level `.claude/settings.json` deny/allow rules are still enforced
+- Dangerous commands (`git push --force`, `git clean`, etc.) remain blocked
+- Human PR review is required before any merge
+- The file is git-ignored and scoped to that worktree only
+
+**Security layers (same as orchestration):**
+| Layer | Mechanism |
+|-------|-----------|
+| 1 | `settings.local.json` - pre-accepts bypass mode only |
+| 2 | `settings.json` - blocks dangerous operations |
+| 3 | Human PR review - final gate |
 
 ## When to Use
 
