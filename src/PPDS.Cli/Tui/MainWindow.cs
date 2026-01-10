@@ -18,7 +18,7 @@ internal sealed class MainWindow : Window
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession _session;
     private readonly ITuiThemeService _themeService;
-    private readonly Label _statusLabel;
+    private readonly Button _statusButton;
 
     public MainWindow(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
     {
@@ -36,8 +36,9 @@ internal sealed class MainWindow : Window
         // Apply dark theme to the main window
         ColorScheme = TuiColorPalette.Default;
 
-        // Status bar at bottom - starts with default/unknown color, updated when environment loads
-        _statusLabel = new Label
+        // Status bar at bottom - clickable button to open environment details
+        // Starts with default/unknown color, updated when environment loads
+        _statusButton = new Button
         {
             X = 0,
             Y = Pos.AnchorEnd(1),
@@ -45,10 +46,11 @@ internal sealed class MainWindow : Window
             Height = 1,
             ColorScheme = TuiColorPalette.StatusBar_Default
         };
+        _statusButton.Clicked += () => ShowEnvironmentDetails();
 
         SetupMenu();
         ShowMainMenu();
-        Add(_statusLabel);
+        Add(_statusButton);
 
         // Load initial profile info
         LoadProfileInfoAsync();
@@ -69,10 +71,15 @@ internal sealed class MainWindow : Window
                 dataMigrationItem,
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("Switch _Profile...", "Select a different authentication profile", () => ShowProfileSelector()),
-                new("Switch _Environment...", "Select a different environment", () => ShowEnvironmentSelector()),
                 new("View Profile _Details...", "Show profile details (who am I)", () => ShowProfileDetails(), shortcut: Key.CtrlMask | Key.I),
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("_Quit", "Exit the application", () => RequestStop(), shortcut: Key.CtrlMask | Key.Q)
+            }),
+            new("_Environment", new MenuItem[]
+            {
+                new("_View Details...", "Show environment and organization details", () => ShowEnvironmentDetails(), shortcut: Key.CtrlMask | Key.E),
+                new("", "", () => {}, null, null, Key.Null), // Separator
+                new("_Switch Environment...", "Select a different environment", () => ShowEnvironmentSelector()),
             }),
             new("_Tools", new MenuItem[]
             {
@@ -150,6 +157,10 @@ internal sealed class MainWindow : Window
                     ShowProfileDetails();
                     e.Handled = true;
                     break;
+                case Key.CtrlMask | Key.E:
+                    ShowEnvironmentDetails();
+                    e.Handled = true;
+                    break;
             }
         };
     }
@@ -193,14 +204,14 @@ internal sealed class MainWindow : Window
     {
         if (error != null)
         {
-            _statusLabel.Text = $" {error}";
-            _statusLabel.ColorScheme = TuiColorPalette.Error;
+            _statusButton.Text = $" {error}";
+            _statusButton.ColorScheme = TuiColorPalette.Error;
             return;
         }
 
         // Detect environment type and update color scheme
         var envType = _themeService.DetectEnvironmentType(_environmentUrl);
-        _statusLabel.ColorScheme = _themeService.GetStatusBarScheme(envType);
+        _statusButton.ColorScheme = _themeService.GetStatusBarScheme(envType);
 
         // Build status text with environment type label
         var profilePart = _profileName != null ? $"Profile: {_profileName}" : "No profile";
@@ -210,7 +221,19 @@ internal sealed class MainWindow : Window
         var envLabel = _themeService.GetEnvironmentLabel(envType);
         var labelPart = !string.IsNullOrEmpty(envLabel) ? $" [{envLabel}]" : "";
 
-        _statusLabel.Text = $" {profilePart} | {envPart}{labelPart}";
+        _statusButton.Text = $" {profilePart} | {envPart}{labelPart} (Click for details)";
+    }
+
+    private void ShowEnvironmentDetails()
+    {
+        if (_environmentUrl == null)
+        {
+            MessageBox.ErrorQuery("No Environment", "Please select an environment first.", "OK");
+            return;
+        }
+
+        using var dialog = new EnvironmentDetailsDialog(_session, _environmentUrl, _environmentName);
+        Application.Run(dialog);
     }
 
     private void ShowProfileSelector()
@@ -373,14 +396,14 @@ internal sealed class MainWindow : Window
             "Global Shortcuts:\n" +
             "  F2       - SQL Query\n" +
             "  Ctrl+I   - Profile Details\n" +
+            "  Ctrl+E   - Environment Details\n" +
             "  Ctrl+Q   - Quit\n\n" +
             "Table Navigation:\n" +
             "  Arrows   - Navigate cells\n" +
             "  PgUp/Dn  - Page up/down\n" +
             "  Home/End - First/last row\n" +
             "  /        - Filter results\n" +
-            "  Ctrl+C   - Copy cell\n" +
-            "  Ctrl+E   - Export\n",
+            "  Ctrl+C   - Copy cell\n",
             "OK");
     }
 }
