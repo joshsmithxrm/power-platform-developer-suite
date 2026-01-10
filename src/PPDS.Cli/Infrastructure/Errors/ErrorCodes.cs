@@ -172,4 +172,19 @@ public static class ErrorCodes
         /// <summary>Invalid session status transition.</summary>
         public const string InvalidTransition = "Session.InvalidTransition";
     }
+
+    /// <summary>
+    /// External service errors.
+    /// </summary>
+    public static class External
+    {
+        /// <summary>GitHub API call failed.</summary>
+        public const string GitHubApiError = "External.GitHubApiError";
+
+        /// <summary>GitHub authentication failed.</summary>
+        public const string GitHubAuthError = "External.GitHubAuthError";
+
+        /// <summary>External service is unavailable.</summary>
+        public const string ServiceUnavailable = "External.ServiceUnavailable";
+    }
 }

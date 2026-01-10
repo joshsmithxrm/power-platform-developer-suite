@@ -1,5 +1,6 @@
 using System.CommandLine;
 using PPDS.Cli.Commands.Auth;
+using PPDS.Cli.Commands.Backlog;
 using PPDS.Cli.Commands.Connections;
 using PPDS.Cli.Commands.ConnectionReferences;
 using PPDS.Cli.Commands.Data;
@@ -60,6 +61,7 @@ public static class Program
 
         // Add command groups
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());
+        rootCommand.Subcommands.Add(BacklogCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.CreateOrgAlias()); // 'org' alias for 'env'
         rootCommand.Subcommands.Add(DataCommandGroup.Create());
