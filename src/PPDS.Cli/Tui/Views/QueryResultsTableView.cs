@@ -15,9 +15,11 @@ internal sealed class QueryResultsTableView : FrameView
     private readonly Label _statusLabel;
 
     private DataTable _dataTable;
+    private Dictionary<string, QueryColumnType> _columnTypes = new();
     private QueryResult? _lastResult;
     private string? _environmentUrl;
     private bool _isLoadingMore;
+    private bool _guidColumnsHidden;
 
     /// <summary>
     /// Raised when the user scrolls to the end and more records are available.
@@ -96,8 +98,12 @@ internal sealed class QueryResultsTableView : FrameView
     public void LoadResults(QueryResult result)
     {
         _lastResult = result;
-        _dataTable = ConvertToDataTable(result);
+        var (table, columnTypes) = QueryResultConverter.ToDataTableWithTypes(result);
+        _dataTable = table;
+        _columnTypes = columnTypes;
         _tableView.Table = _dataTable;
+
+        ApplyColumnSizing();
 
         MoreRecordsAvailable = result.MoreRecords;
         PagingCookie = result.PagingCookie;
@@ -223,6 +229,11 @@ internal sealed class QueryResultsTableView : FrameView
 
                 case Key.CtrlMask | Key.O:
                     OpenInBrowser();
+                    e.Handled = true;
+                    break;
+
+                case Key.CtrlMask | Key.H:
+                    ToggleGuidColumns();
                     e.Handled = true;
                     break;
 
@@ -382,9 +393,90 @@ internal sealed class QueryResultsTableView : FrameView
     {
         var rowCount = _dataTable.Rows.Count;
         var moreText = MoreRecordsAvailable ? " (more available)" : "";
-        _statusLabel.Text = $"{rowCount} rows{moreText} | Ctrl+C: copy | Ctrl+U: copy URL | Ctrl+O: open";
+        var guidText = _guidColumnsHidden ? " | GUIDs hidden (Ctrl+H)" : "";
+        _statusLabel.Text = $"{rowCount} rows{moreText}{guidText} | Ctrl+C: copy | Ctrl+U: copy URL | Ctrl+O: open";
     }
 
-    private static DataTable ConvertToDataTable(QueryResult result) =>
-        QueryResultConverter.ToDataTable(result);
+    /// <summary>
+    /// Applies type-aware column sizing based on the column data types.
+    /// </summary>
+    private void ApplyColumnSizing()
+    {
+        _tableView.Style.ColumnStyles.Clear();
+
+        foreach (DataColumn column in _dataTable.Columns)
+        {
+            if (!_columnTypes.TryGetValue(column.ColumnName, out var dataType))
+            {
+                continue;
+            }
+
+            var style = GetColumnStyle(dataType);
+            if (style != null)
+            {
+                // Apply hidden state for GUID columns if toggled
+                if (_guidColumnsHidden && dataType == QueryColumnType.Guid)
+                {
+                    style.Visible = false;
+                }
+
+                _tableView.Style.ColumnStyles[column] = style;
+            }
+        }
+
+        _tableView.SetNeedsDisplay();
+    }
+
+    /// <summary>
+    /// Gets the appropriate column style for a given data type.
+    /// </summary>
+    private static TableView.ColumnStyle? GetColumnStyle(QueryColumnType dataType)
+    {
+        return dataType switch
+        {
+            // GUID columns: fixed width of 38 (36 chars + 2 for padding)
+            QueryColumnType.Guid => new TableView.ColumnStyle { MinWidth = 38, MaxWidth = 38 },
+
+            // DateTime columns: fixed width of 20 (yyyy-MM-dd HH:mm:ss + padding)
+            QueryColumnType.DateTime => new TableView.ColumnStyle { MinWidth = 20, MaxWidth = 20 },
+
+            // Boolean columns: fixed width of 5 (Yes/No)
+            QueryColumnType.Boolean => new TableView.ColumnStyle { MinWidth = 5, MaxWidth = 5 },
+
+            // Integer columns: constrained width
+            QueryColumnType.Integer or QueryColumnType.BigInt =>
+                new TableView.ColumnStyle { MinWidth = 8, MaxWidth = 20 },
+
+            // Decimal/currency columns: constrained width
+            QueryColumnType.Decimal or QueryColumnType.Double or QueryColumnType.Money =>
+                new TableView.ColumnStyle { MinWidth = 10, MaxWidth = 20 },
+
+            // Lookup columns: moderate flexibility
+            QueryColumnType.Lookup => new TableView.ColumnStyle { MinWidth = 15, MaxWidth = 50 },
+
+            // OptionSet columns: constrained width
+            QueryColumnType.OptionSet or QueryColumnType.MultiSelectOptionSet =>
+                new TableView.ColumnStyle { MinWidth = 10, MaxWidth = 30 },
+
+            // String/Memo columns: flexible, minimum width only
+            QueryColumnType.String or QueryColumnType.Memo =>
+                new TableView.ColumnStyle { MinWidth = 10 },
+
+            // Unknown or other types: no specific styling
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Toggles visibility of GUID columns.
+    /// </summary>
+    private void ToggleGuidColumns()
+    {
+        _guidColumnsHidden = !_guidColumnsHidden;
+        ApplyColumnSizing();
+        UpdateStatus();
+
+        var message = _guidColumnsHidden ? "GUID columns hidden" : "GUID columns visible";
+        _statusLabel.Text = message;
+    }
 }

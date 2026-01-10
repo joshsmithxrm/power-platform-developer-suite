@@ -13,12 +13,23 @@ internal static class QueryResultConverter
     /// </summary>
     public static DataTable ToDataTable(QueryResult result)
     {
-        var table = new DataTable();
+        return ToDataTableWithTypes(result).Table;
+    }
 
-        // Add columns
+    /// <summary>
+    /// Converts a QueryResult to a DataTable with all values formatted as strings,
+    /// also returning column type metadata for display optimization.
+    /// </summary>
+    public static (DataTable Table, Dictionary<string, QueryColumnType> ColumnTypes) ToDataTableWithTypes(QueryResult result)
+    {
+        var table = new DataTable();
+        var columnTypes = new Dictionary<string, QueryColumnType>();
+
+        // Add columns and track their types
         foreach (var column in result.Columns)
         {
             table.Columns.Add(column.LogicalName, typeof(string));
+            columnTypes[column.LogicalName] = column.DataType;
         }
 
         // Add rows
@@ -35,7 +46,7 @@ internal static class QueryResultConverter
             table.Rows.Add(row);
         }
 
-        return table;
+        return (table, columnTypes);
     }
 
     /// <summary>
