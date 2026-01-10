@@ -51,6 +51,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/ralph-hook.py"
+          }
+        ]
+      }
     ]
   }
 }
