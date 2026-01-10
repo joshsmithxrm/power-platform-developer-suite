@@ -1617,7 +1617,9 @@ namespace PPDS.Dataverse.BulkOperations
         private static string FormatCleanFaultMessage(FaultException<OrganizationServiceFault> faultEx)
         {
             var fault = faultEx.Detail;
-            var message = fault?.Message ?? faultEx.Message;
+            // Use IsNullOrEmpty to handle both null and empty string cases,
+            // ensuring we fall back to faultEx.Message if fault.Message is empty.
+            var message = !string.IsNullOrEmpty(fault?.Message) ? fault!.Message : faultEx.Message;
             var errorCode = fault?.ErrorCode ?? 0;
             return $"{message} (ErrorCode: 0x{errorCode:X8})";
         }
