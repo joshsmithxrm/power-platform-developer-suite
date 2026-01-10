@@ -2,6 +2,13 @@
 
 NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivity, migration tooling.
 
+## Repository
+
+| Property | Value |
+|----------|-------|
+| Owner | joshsmithxrm |
+| Repo | power-platform-developer-suite |
+
 ## NEVER
 
 | Rule | Why |
