@@ -13,12 +13,14 @@ internal sealed class EnvironmentSelectorDialog : Dialog
 {
     private readonly IEnvironmentService _environmentService;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly TextField _filterField;
     private readonly ListView _listView;
     private readonly Label _statusLabel;
     private readonly TextField _urlField;
     private readonly Button _selectButton;
 
-    private IReadOnlyList<EnvironmentSummary> _environments = Array.Empty<EnvironmentSummary>();
+    private IReadOnlyList<EnvironmentSummary> _allEnvironments = Array.Empty<EnvironmentSummary>();
+    private IReadOnlyList<EnvironmentSummary> _filteredEnvironments = Array.Empty<EnvironmentSummary>();
     private EnvironmentSummary? _selectedEnvironment;
     private bool _useManualUrl;
     private string? _manualUrl;
@@ -49,14 +51,29 @@ internal sealed class EnvironmentSelectorDialog : Dialog
         _deviceCodeCallback = deviceCodeCallback;
 
         Width = 70;
-        Height = 20;
+        Height = 22;
         ColorScheme = TuiColorPalette.Default;
+
+        // Filter field
+        var filterLabel = new Label("Filter:")
+        {
+            X = 1,
+            Y = 1
+        };
+
+        _filterField = new TextField
+        {
+            X = Pos.Right(filterLabel) + 1,
+            Y = 1,
+            Width = Dim.Fill() - 2
+        };
+        _filterField.TextChanged += OnFilterChanged;
 
         // Environment list
         var listFrame = new FrameView("Discovered Environments")
         {
             X = 1,
-            Y = 1,
+            Y = 3,
             Width = Dim.Fill() - 2,
             Height = 10
         };
@@ -115,7 +132,7 @@ internal sealed class EnvironmentSelectorDialog : Dialog
         };
         cancelButton.Clicked += () => { Application.RequestStop(); };
 
-        Add(listFrame, urlLabel, _urlField, _statusLabel, _selectButton, cancelButton);
+        Add(filterLabel, _filterField, listFrame, urlLabel, _urlField, _statusLabel, _selectButton, cancelButton);
 
         // Discover environments asynchronously (fire-and-forget with error handling)
 #pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
@@ -136,8 +153,8 @@ internal sealed class EnvironmentSelectorDialog : Dialog
     {
         try
         {
-            _environments = await _environmentService.DiscoverEnvironmentsAsync(_deviceCodeCallback);
-            UpdateListView();
+            _allEnvironments = await _environmentService.DiscoverEnvironmentsAsync(_deviceCodeCallback);
+            ApplyFilter();
         }
         catch (PpdsException ex)
         {
@@ -149,13 +166,43 @@ internal sealed class EnvironmentSelectorDialog : Dialog
         }
     }
 
+    private void OnFilterChanged(NStack.ustring obj)
+    {
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        var filterText = _filterField.Text?.ToString()?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrEmpty(filterText))
+        {
+            _filteredEnvironments = _allEnvironments;
+        }
+        else
+        {
+            _filteredEnvironments = _allEnvironments
+                .Where(env => MatchesFilter(env, filterText))
+                .ToList();
+        }
+
+        UpdateListView();
+    }
+
+    private static bool MatchesFilter(EnvironmentSummary env, string filter)
+    {
+        return (env.DisplayName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (env.Url?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (env.Type?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
     private void UpdateListView()
     {
         Application.MainLoop?.Invoke(() =>
         {
             var items = new List<string>();
 
-            foreach (var env in _environments)
+            foreach (var env in _filteredEnvironments)
             {
                 var typeText = env.Type != null ? $"[{env.Type}]" : "";
                 var regionText = env.Region != null ? $"({env.Region})" : "";
@@ -168,22 +215,26 @@ internal sealed class EnvironmentSelectorDialog : Dialog
             }
 
             _listView.SetSource(items);
-            _statusLabel.Text = $"Found {_environments.Count} environment(s)";
+
+            if (_allEnvironments.Count == _filteredEnvironments.Count)
+            {
+                _statusLabel.Text = $"Found {_allEnvironments.Count} environment(s)";
+            }
+            else
+            {
+                _statusLabel.Text = $"Showing {_filteredEnvironments.Count} of {_allEnvironments.Count} environments";
+            }
         });
     }
 
     private void OnSelectedItemChanged(ListViewItemEventArgs args)
     {
-        // Clear URL field when selecting from list
-        if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _environments.Count)
+        // Show URL of selected environment (only if not typing a manual URL)
+        if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _filteredEnvironments.Count)
         {
-            if (!string.IsNullOrEmpty(_urlField.Text?.ToString()))
+            if (string.IsNullOrEmpty(_urlField.Text?.ToString()))
             {
-                // Don't clear if user is typing a URL
-            }
-            else
-            {
-                var env = _environments[_listView.SelectedItem];
+                var env = _filteredEnvironments[_listView.SelectedItem];
                 _statusLabel.Text = env.Url;
             }
         }
@@ -196,9 +247,9 @@ internal sealed class EnvironmentSelectorDialog : Dialog
         {
             _statusLabel.Text = "Will connect to URL directly";
         }
-        else if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _environments.Count)
+        else if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _filteredEnvironments.Count)
         {
-            var env = _environments[_listView.SelectedItem];
+            var env = _filteredEnvironments[_listView.SelectedItem];
             _statusLabel.Text = env.Url;
         }
     }
@@ -220,10 +271,10 @@ internal sealed class EnvironmentSelectorDialog : Dialog
             _selectedEnvironment = null;
             Application.RequestStop();
         }
-        else if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _environments.Count)
+        else if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _filteredEnvironments.Count)
         {
             // Use selected environment
-            _selectedEnvironment = _environments[_listView.SelectedItem];
+            _selectedEnvironment = _filteredEnvironments[_listView.SelectedItem];
             _useManualUrl = false;
             _manualUrl = null;
             Application.RequestStop();
