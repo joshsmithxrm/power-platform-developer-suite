@@ -40,24 +40,39 @@ public static class ListCommand
             var logger = NullLogger<SessionService>.Instance;
             var service = new SessionService(spawner, logger);
 
-            var sessions = await service.ListAsync(cancellationToken);
+            var result = await service.ListWithCleanupInfoAsync(cancellationToken);
+            var sessions = result.Sessions;
+
+            // Report any cleaned up orphaned sessions
+            if (result.CleanedIssueNumbers.Count > 0 && !globalOptions.IsJsonMode)
+            {
+                foreach (var issueNumber in result.CleanedIssueNumbers)
+                {
+                    Console.Error.WriteLine($"Cleaned up orphaned session #{issueNumber}");
+                }
+                Console.Error.WriteLine();
+            }
 
             if (globalOptions.IsJsonMode)
             {
-                var output = sessions.Select(s => new SessionListItem
+                var output = new SessionListOutput
                 {
-                    SessionId = s.Id,
-                    IssueNumber = s.IssueNumber,
-                    IssueTitle = s.IssueTitle,
-                    Status = s.Status.ToString().ToLowerInvariant(),
-                    Branch = s.Branch,
-                    WorktreePath = s.WorktreePath,
-                    StartedAt = s.StartedAt,
-                    LastHeartbeat = s.LastHeartbeat,
-                    StuckReason = s.StuckReason,
-                    PullRequestUrl = s.PullRequestUrl,
-                    IsStale = DateTimeOffset.UtcNow - s.LastHeartbeat > SessionService.StaleThreshold
-                }).ToList();
+                    Sessions = sessions.Select(s => new SessionListItem
+                    {
+                        SessionId = s.Id,
+                        IssueNumber = s.IssueNumber,
+                        IssueTitle = s.IssueTitle,
+                        Status = s.Status.ToString().ToLowerInvariant(),
+                        Branch = s.Branch,
+                        WorktreePath = s.WorktreePath,
+                        StartedAt = s.StartedAt,
+                        LastHeartbeat = s.LastHeartbeat,
+                        StuckReason = s.StuckReason,
+                        PullRequestUrl = s.PullRequestUrl,
+                        IsStale = DateTimeOffset.UtcNow - s.LastHeartbeat > SessionService.StaleThreshold
+                    }).ToList(),
+                    CleanedIssueNumbers = result.CleanedIssueNumbers.ToList()
+                };
 
                 writer.WriteSuccess(output);
             }
@@ -129,6 +144,15 @@ public static class ListCommand
     }
 
     #region Output Models
+
+    private sealed class SessionListOutput
+    {
+        [JsonPropertyName("sessions")]
+        public List<SessionListItem> Sessions { get; set; } = [];
+
+        [JsonPropertyName("cleanedIssueNumbers")]
+        public List<int> CleanedIssueNumbers { get; set; } = [];
+    }
 
     private sealed class SessionListItem
     {

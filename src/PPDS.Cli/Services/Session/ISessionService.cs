@@ -36,7 +36,23 @@ public interface ISessionService
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of session states.</returns>
+    /// <remarks>
+    /// This method also performs lazy cleanup of orphaned sessions (where the worktree
+    /// no longer exists). Use <see cref="ListWithCleanupInfoAsync"/> if you need to
+    /// report which sessions were cleaned up.
+    /// </remarks>
     Task<IReadOnlyList<SessionState>> ListAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists all active and recently completed sessions, with information about cleaned up sessions.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing sessions and any cleaned up issue numbers.</returns>
+    /// <remarks>
+    /// Orphaned sessions (where the worktree no longer exists) are automatically cleaned up.
+    /// The result includes the issue numbers of any sessions that were removed.
+    /// </remarks>
+    Task<SessionListResult> ListWithCleanupInfoAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets detailed state for a specific session.

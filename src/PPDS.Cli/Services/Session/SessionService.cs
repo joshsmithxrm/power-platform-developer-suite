@@ -157,14 +157,94 @@ public sealed class SessionService : ISessionService
     /// <inheritdoc />
     public Task<IReadOnlyList<SessionState>> ListAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Refresh from disk in case other processes updated
         LoadSessionsFromDisk();
+
+        // Clean up orphaned sessions (worktree no longer exists)
+        CleanOrphanedSessions();
 
         var sessions = _sessions.Values
             .OrderBy(s => s.IssueNumber)
             .ToList();
 
         return Task.FromResult<IReadOnlyList<SessionState>>(sessions);
+    }
+
+    /// <inheritdoc />
+    public Task<SessionListResult> ListWithCleanupInfoAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Refresh from disk in case other processes updated
+        LoadSessionsFromDisk();
+
+        // Clean up orphaned sessions (worktree no longer exists)
+        var cleanedIssueNumbers = CleanOrphanedSessions();
+
+        var sessions = _sessions.Values
+            .OrderBy(s => s.IssueNumber)
+            .ToList();
+
+        return Task.FromResult(new SessionListResult(sessions, cleanedIssueNumbers));
+    }
+
+    /// <summary>
+    /// Removes session records whose worktree paths no longer exist.
+    /// </summary>
+    /// <returns>List of issue numbers for cleaned up sessions.</returns>
+    /// <remarks>
+    /// This implements lazy cleanup: when /prune or manual deletion removes a worktree,
+    /// the session record becomes orphaned garbage. We clean it up next time someone lists sessions.
+    /// Sessions with existing worktrees are preserved even if stale (work may be recoverable).
+    /// </remarks>
+    private IReadOnlyList<int> CleanOrphanedSessions()
+    {
+        // Find orphaned sessions using testable static helper
+        var orphanedSessions = FindOrphanedSessions(_sessions.Values);
+
+        var cleanedIssueNumbers = new List<int>();
+
+        foreach (var session in orphanedSessions)
+        {
+            if (_sessions.TryRemove(session.Id, out var removedSession))
+            {
+                try
+                {
+                    DeleteSessionFile(session.Id);
+                    cleanedIssueNumbers.Add(session.IssueNumber);
+                    _logger.LogInformation(
+                        "Cleaned up orphaned session #{IssueNumber} (worktree no longer exists at {WorktreePath})",
+                        session.IssueNumber,
+                        session.WorktreePath);
+                }
+                catch (Exception ex)
+                {
+                    // Re-add the session so cleanup can be retried on next list
+                    _sessions.TryAdd(removedSession.Id, removedSession);
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to delete session file for orphaned session #{IssueNumber}. Will retry on next list.",
+                        session.IssueNumber);
+                }
+            }
+        }
+
+        return cleanedIssueNumbers;
+    }
+
+    /// <summary>
+    /// Identifies sessions whose worktree paths no longer exist.
+    /// </summary>
+    /// <param name="sessions">Sessions to check.</param>
+    /// <returns>List of sessions whose worktrees are missing.</returns>
+    /// <remarks>
+    /// This is extracted as a static method for testability.
+    /// </remarks>
+    internal static IReadOnlyList<SessionState> FindOrphanedSessions(IEnumerable<SessionState> sessions)
+    {
+        return sessions.Where(s => !Directory.Exists(s.WorktreePath)).ToList();
     }
 
     /// <inheritdoc />

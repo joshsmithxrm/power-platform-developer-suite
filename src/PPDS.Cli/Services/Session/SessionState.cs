@@ -167,3 +167,12 @@ public sealed record WorktreeStatus
     /// </summary>
     public IReadOnlyList<string> ChangedFiles { get; init; } = [];
 }
+
+/// <summary>
+/// Result of listing sessions with cleanup information.
+/// </summary>
+/// <param name="Sessions">Active sessions after cleanup.</param>
+/// <param name="CleanedIssueNumbers">Issue numbers of sessions that were cleaned up because their worktrees no longer exist.</param>
+public sealed record SessionListResult(
+    IReadOnlyList<SessionState> Sessions,
+    IReadOnlyList<int> CleanedIssueNumbers);
