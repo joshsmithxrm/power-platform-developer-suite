@@ -78,9 +78,13 @@ public sealed class SessionService : ISessionService
             throw new PpdsException(ErrorCodes.Session.AlreadyExists, $"Session for issue #{issueNumber} already exists");
         }
 
-        // Phase 1: Fetch issue from GitHub
+        // Phase 1: Fetch issue from GitHub and get repo info
         progress.ReportPhase("Fetching", $"Getting issue #{issueNumber} from GitHub...");
         var issueInfo = await FetchIssueAsync(issueNumber, cancellationToken);
+
+        // Get GitHub owner/repo from git remote
+        var remoteUrl = await GetGitHubRemoteAsync(cancellationToken);
+        var (gitHubOwner, gitHubRepo) = ParseGitHubUrl(remoteUrl);
 
         // Phase 2: Create worktree
         // Use the repo folder name so each repo gets its own worktree namespace
@@ -93,7 +97,7 @@ public sealed class SessionService : ISessionService
 
         // Phase 3: Write worker prompt
         progress.ReportPhase("Preparing", "Writing session prompt...");
-        var promptPath = await WriteWorkerPromptAsync(worktreePath, issueNumber, issueInfo.Title, issueInfo.Body, cancellationToken);
+        var promptPath = await WriteWorkerPromptAsync(worktreePath, issueNumber, issueInfo.Title, issueInfo.Body, gitHubOwner, gitHubRepo, branchName, cancellationToken);
 
         // Phase 4: Register session
         var now = DateTimeOffset.UtcNow;
@@ -432,6 +436,91 @@ public sealed class SessionService : ISessionService
         return null;
     }
 
+    /// <summary>
+    /// Gets the GitHub remote URL from the repository.
+    /// </summary>
+    private async Task<string> GetGitHubRemoteAsync(CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = "remote get-url origin",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = _repoRoot
+        };
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start git process");
+
+        // Read both streams asynchronously to avoid deadlocks
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+
+        if (process.ExitCode != 0)
+        {
+            var error = await errorTask;
+            var errorMessage = string.IsNullOrWhiteSpace(error)
+                ? "No additional git error output."
+                : error.Trim();
+            throw new InvalidOperationException(
+                $"Failed to get git remote URL from repository at '{_repoRoot}'. " +
+                "Ensure this directory is a git repository with a remote named 'origin' configured. " +
+                $"Git exited with code {process.ExitCode}. Git error: {errorMessage}");
+        }
+
+        return (await outputTask).Trim();
+    }
+
+    /// <summary>
+    /// Parses a GitHub URL to extract owner and repo name.
+    /// Supports both HTTPS and SSH formats.
+    /// </summary>
+    /// <param name="remoteUrl">The git remote URL.</param>
+    /// <returns>Tuple of (owner, repo).</returns>
+    /// <exception cref="ArgumentException">If the URL cannot be parsed.</exception>
+    internal static (string Owner, string Repo) ParseGitHubUrl(string remoteUrl)
+    {
+        if (string.IsNullOrWhiteSpace(remoteUrl))
+        {
+            throw new ArgumentException("Remote URL cannot be empty", nameof(remoteUrl));
+        }
+
+        // Remove trailing .git if present
+        var url = remoteUrl.Trim();
+        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url[..^4];
+        }
+
+        // Extract path portion from URL (HTTPS or SSH format)
+        string? path = null;
+        if (url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase))
+        {
+            path = url["https://github.com/".Length..];
+        }
+        else if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
+        {
+            path = url["git@github.com:".Length..];
+        }
+
+        // Parse owner/repo from path
+        if (path != null)
+        {
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+            {
+                return (parts[0], parts[1]);
+            }
+        }
+
+        throw new ArgumentException($"Cannot parse GitHub URL: {remoteUrl}", nameof(remoteUrl));
+    }
+
     private void LoadSessionsFromDisk()
     {
         if (!Directory.Exists(_sessionsDir))
@@ -603,6 +692,9 @@ public sealed class SessionService : ISessionService
         int issueNumber,
         string title,
         string body,
+        string gitHubOwner,
+        string gitHubRepo,
+        string branchName,
         CancellationToken cancellationToken)
     {
         // Write to .claude/session-prompt.md in the worktree
@@ -612,6 +704,25 @@ public sealed class SessionService : ISessionService
         var promptPath = Path.Combine(claudeDir, "session-prompt.md");
         var prompt = $"""
             # Session: Issue #{issueNumber}
+
+            ## Repository Context
+
+            **IMPORTANT:** For all GitHub operations (CLI and MCP tools), use these values:
+            - Owner: `{gitHubOwner}`
+            - Repo: `{gitHubRepo}`
+            - Issue: `#{issueNumber}`
+            - Branch: `{branchName}`
+
+            Examples:
+            ```bash
+            gh issue view {issueNumber} --repo {gitHubOwner}/{gitHubRepo}
+            gh pr create --repo {gitHubOwner}/{gitHubRepo} ...
+            ```
+
+            For MCP GitHub tools:
+            ```
+            mcp__github__get_issue(owner: "{gitHubOwner}", repo: "{gitHubRepo}", issue_number: {issueNumber})
+            ```
 
             ## Issue
             **{title}**
