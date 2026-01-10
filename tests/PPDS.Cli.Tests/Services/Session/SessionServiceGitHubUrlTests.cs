@@ -128,4 +128,71 @@ public class SessionServiceGitHubUrlTests
     }
 
     #endregion
+
+    #region ExtractPrNumber Tests
+
+    [Fact]
+    public void ExtractPrNumber_StandardUrl_ReturnsPrNumber()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/123");
+        Assert.Equal(123, prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_UrlWithFilesPath_ReturnsPrNumber()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/456/files");
+        Assert.Equal(456, prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_UrlWithFragment_ReturnsPrNumber()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/789#discussion_r12345");
+        Assert.Equal(789, prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_UrlWithQueryParams_ReturnsPrNumber()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/101?diff=unified");
+        Assert.Equal(101, prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_NullUrl_ReturnsNull()
+    {
+        var prNumber = SessionService.ExtractPrNumber(null);
+        Assert.Null(prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_EmptyUrl_ReturnsNull()
+    {
+        var prNumber = SessionService.ExtractPrNumber("");
+        Assert.Null(prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_UrlWithoutPull_ReturnsNull()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/issues/123");
+        Assert.Null(prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_UrlWithNonNumericPr_ReturnsNull()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/abc");
+        Assert.Null(prNumber);
+    }
+
+    [Fact]
+    public void ExtractPrNumber_LargePrNumber_ReturnsPrNumber()
+    {
+        var prNumber = SessionService.ExtractPrNumber("https://github.com/owner/repo/pull/999999");
+        Assert.Equal(999999, prNumber);
+    }
+
+    #endregion
 }

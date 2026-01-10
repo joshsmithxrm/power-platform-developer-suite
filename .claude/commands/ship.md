@@ -13,6 +13,8 @@ Complete work: validate, commit, push, create PR, and handle CI/bot feedback aut
 ```
 /ship
     ↓
+Detect session context (set status: shipping)
+    ↓
 Pre-PR Validation (absorbed from /pre-pr)
     ↓
 Commit changes
@@ -25,12 +27,32 @@ Wait for CI
     ↓
 If CI fails: Debug and fix (up to 3 attempts)
     ↓
-If bot comments: Triage and address
+If bot comments: Triage and address (set status: reviews_in_progress)
     ↓
-Update session status to pr_ready
+Update session status: complete (with PR URL)
 ```
 
 ## Process
+
+### 0. Session Context Detection
+
+**Check if running in a worker session:**
+```bash
+# Check for session prompt file
+if [ -f ".claude/session-prompt.md" ]; then
+  # Extract issue number from session prompt (first line format: "# Session: Issue #NNN")
+  ISSUE_NUMBER=$(head -1 .claude/session-prompt.md | grep -oP '#\K\d+')
+  echo "Running in session context for issue #$ISSUE_NUMBER"
+
+  # Update status to shipping
+  ppds session update --id "$ISSUE_NUMBER" --status shipping
+fi
+```
+
+If running in a session, status updates will be called at key phases:
+- `shipping` - at start of /ship
+- `reviews_in_progress` - when handling bot comments
+- `complete` - when PR is ready for human review
 
 ### 1. Pre-PR Validation
 
@@ -152,7 +174,13 @@ gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{pr}/merge&state
 - Minimum wait: 3 minutes after PR creation (bots need time to analyze)
 - Maximum wait: If no bot comments after 10 minutes, proceed anyway (bots may be disabled)
 
-Update session status to `ReviewsInProgress` once at least one bot has commented.
+Update session status to `ReviewsInProgress` once at least one bot has commented:
+
+```bash
+if [ -n "$ISSUE_NUMBER" ]; then
+  ppds session update --id "$ISSUE_NUMBER" --status reviews_in_progress
+fi
+```
 
 ### 6. Enumerate ALL Bot Reviewers
 
@@ -236,16 +264,19 @@ gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "ID"})
 
 ### 9. Update Session Status
 
-After all checks pass:
+After all checks pass, update session status via CLI (if in session context):
 
-Update `~/.ppds/sessions/work-{issue}.json`:
-```json
-{
-  "status": "pr_ready",
-  "pr": "https://github.com/.../pull/123",
-  "lastUpdate": "<ISO-timestamp>"
-}
+```bash
+if [ -n "$ISSUE_NUMBER" ]; then
+  # Get PR URL
+  PR_URL=$(gh pr view --json url --jq '.url')
+
+  # Update session to complete with PR URL
+  ppds session update --id "$ISSUE_NUMBER" --status complete --pr "$PR_URL"
+fi
 ```
+
+**Important:** Use the CLI command, not direct JSON editing. This ensures proper heartbeat updates and orchestrator visibility.
 
 ## Output
 
@@ -262,9 +293,9 @@ Ship
 [⏳] Waiting for CI...
 [✓] CI: PASS
 [✓] Bot comments: 2 addressed
-[✓] Session status updated: pr_ready
+[✓] Session status updated: complete
 
-Ready for review!
+Ready for human review!
 ```
 
 ## Autonomous Limits

@@ -74,6 +74,7 @@ public static class ListCommand
                         LastHeartbeat = s.LastHeartbeat,
                         StuckReason = s.StuckReason,
                         PullRequestUrl = s.PullRequestUrl,
+                        PullRequestNumber = ExtractPrNumber(s.PullRequestUrl),
                         IsStale = DateTimeOffset.UtcNow - s.LastHeartbeat > SessionService.StaleThreshold
                     }).ToList(),
                     CleanedIssueNumbers = result.CleanedIssueNumbers.ToList()
@@ -132,7 +133,11 @@ public static class ListCommand
                             statusText += $" (last update: {lastUpdateStr} ago)";
                         }
 
-                        Console.WriteLine($"  {statusIcon} #{session.IssueNumber} - {session.IssueTitle}");
+                        // Extract PR number from URL if present (format: .../pull/123)
+                        var prNumber = ExtractPrNumber(session.PullRequestUrl);
+                        var prSuffix = prNumber != null ? $" → PR #{prNumber}" : "";
+
+                        Console.WriteLine($"  {statusIcon} #{session.IssueNumber}{prSuffix} - {session.IssueTitle}");
                         Console.WriteLine($"      Status: {statusText} ({elapsedStr})");
                         Console.WriteLine($"      Branch: {session.Branch}");
 
@@ -217,9 +222,18 @@ public static class ListCommand
         [JsonPropertyName("pullRequestUrl")]
         public string? PullRequestUrl { get; set; }
 
+        [JsonPropertyName("pullRequestNumber")]
+        public int? PullRequestNumber { get; set; }
+
         [JsonPropertyName("isStale")]
         public bool IsStale { get; set; }
     }
 
     #endregion
+
+    /// <summary>
+    /// Extracts PR number from a GitHub PR URL.
+    /// Delegates to SessionService.ExtractPrNumber for consistency.
+    /// </summary>
+    private static int? ExtractPrNumber(string? prUrl) => SessionService.ExtractPrNumber(prUrl);
 }

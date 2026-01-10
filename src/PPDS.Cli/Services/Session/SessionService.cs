@@ -124,7 +124,9 @@ public sealed class SessionService : ISessionService
             IssueNumber = issueNumber,
             IssueTitle = issueInfo.Title,
             WorkingDirectory = worktreePath,
-            PromptFilePath = promptPath
+            PromptFilePath = promptPath,
+            GitHubOwner = gitHubOwner,
+            GitHubRepo = gitHubRepo
         };
 
         try
@@ -255,6 +257,33 @@ public sealed class SessionService : ISessionService
 
         _sessions.TryGetValue(sessionId, out var session);
         return Task.FromResult(session);
+    }
+
+    /// <inheritdoc />
+    public Task<SessionState?> GetByPullRequestAsync(int prNumber, CancellationToken cancellationToken = default)
+    {
+        // Load ALL sessions from disk, including those with PR-related statuses
+        // (Shipping, ReviewsInProgress, PrReady, Complete)
+        var allSessions = LoadAllSessionsFromDisk();
+
+        // Find session with matching PR number using robust parsing
+        var session = allSessions.FirstOrDefault(s => ExtractPrNumber(s.PullRequestUrl) == prNumber);
+
+        return Task.FromResult(session);
+    }
+
+    /// <summary>
+    /// Extracts PR number from a GitHub PR URL.
+    /// Handles various URL formats: /pull/123, /pull/123/files, /pull/123#discussion_r456
+    /// </summary>
+    internal static int? ExtractPrNumber(string? prUrl)
+    {
+        if (string.IsNullOrEmpty(prUrl))
+            return null;
+
+        // Use regex to robustly extract PR number from URL
+        var match = System.Text.RegularExpressions.Regex.Match(prUrl, @"/pull/(\d+)");
+        return match.Success && int.TryParse(match.Groups[1].Value, out var prNumber) ? prNumber : null;
     }
 
     /// <inheritdoc />
@@ -617,8 +646,10 @@ public sealed class SessionService : ISessionService
                 if (persisted != null)
                 {
                     var session = persisted.ToSessionState();
-                    // Only load active sessions
-                    if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Registered)
+                    // Only load active sessions (excludes Complete and Cancelled)
+                    if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Registered
+                        or SessionStatus.Planning or SessionStatus.PlanningComplete
+                        or SessionStatus.Shipping or SessionStatus.ReviewsInProgress or SessionStatus.PrReady)
                     {
                         _sessions[session.Id] = session;
                     }
@@ -629,6 +660,39 @@ public sealed class SessionService : ISessionService
                 _logger.LogWarning(ex, "Failed to load session from {File}", file);
             }
         }
+    }
+
+    /// <summary>
+    /// Loads ALL sessions from disk, including completed ones.
+    /// Used for PR lookup which needs to find completed sessions.
+    /// </summary>
+    private List<SessionState> LoadAllSessionsFromDisk()
+    {
+        var sessions = new List<SessionState>();
+
+        if (!Directory.Exists(_sessionsDir))
+        {
+            return sessions;
+        }
+
+        foreach (var file in Directory.GetFiles(_sessionsDir, "work-*.json"))
+        {
+            try
+            {
+                var json = File.ReadAllText(file);
+                var persisted = JsonSerializer.Deserialize<PersistedSession>(json, JsonOptions);
+                if (persisted != null)
+                {
+                    sessions.Add(persisted.ToSessionState());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load session from {File}", file);
+            }
+        }
+
+        return sessions;
     }
 
     private void LoadSessionFromDisk(string sessionId)
@@ -809,13 +873,28 @@ public sealed class SessionService : ISessionService
 
             {body}
 
+            ## Status Reporting
+
+            **Report status at each phase transition** so the orchestrator can track your progress:
+
+            | Phase | Command |
+            |-------|---------|
+            | Starting | `ppds session update --id {issueNumber} --status planning` |
+            | Plan complete | `ppds session update --id {issueNumber} --status planning_complete` |
+            | Implementing | `ppds session update --id {issueNumber} --status working` |
+            | Stuck | `ppds session update --id {issueNumber} --status stuck --reason "description"` |
+
+            **Note:** `/ship` automatically updates status to `shipping` → `reviews_in_progress` → `complete`.
+
             ## Workflow
 
             ### Phase 1: Planning
-            1. Read and understand the issue requirements
-            2. Explore the codebase to understand existing patterns
-            3. Create a detailed implementation plan
-            4. Write your plan to `.claude/worker-plan.md`
+            1. **First:** `ppds session update --id {issueNumber} --status planning`
+            2. Read and understand the issue requirements
+            3. Explore the codebase to understand existing patterns
+            4. Create a detailed implementation plan
+            5. Write your plan to `.claude/worker-plan.md`
+            6. **Then:** `ppds session update --id {issueNumber} --status planning_complete`
 
             ### Phase 2: Check for Messages
             Before implementing, check for forwarded messages:
@@ -824,24 +903,20 @@ public sealed class SessionService : ISessionService
             - Then continue to implementation
 
             ### Phase 3: Implementation
-            1. Follow your plan in `.claude/worker-plan.md`
-            2. Build: `dotnet build`
-            3. Test: `dotnet test --filter "Category!=Integration"`
-            4. Create PR via `/ship`
+            1. **First:** `ppds session update --id {issueNumber} --status working`
+            2. Follow your plan in `.claude/worker-plan.md`
+            3. Build: `dotnet build`
+            4. Test: `dotnet test --filter "Category!=Integration"`
+            5. Create PR via `/ship` (handles remaining status updates automatically)
 
-            ### Status Updates (Optional)
-            Try to update status, but continue if it fails:
-            - `ppds session update --id {issueNumber} --status planning`
-            - `ppds session update --id {issueNumber} --status working`
-            - `ppds session update --id {issueNumber} --status complete`
-            - `ppds session update --id {issueNumber} --status stuck --reason "description"`
-            If the command fails, note it and continue - the work is more important than status tracking.
-
-            ### Domain Gates (set stuck if possible, otherwise note in PR)
+            ### Domain Gates
+            If you encounter these, set status to `stuck` with a clear reason:
             - Auth/Security decisions
             - Performance-critical code
             - Breaking changes
             - Data migration
+
+            Example: `ppds session update --id {issueNumber} --status stuck --reason "Need auth decision: should we use JWT or session tokens?"`
 
             ## Reference
             - Follow CLAUDE.md for coding standards

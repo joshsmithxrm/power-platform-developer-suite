@@ -56,6 +56,16 @@ public sealed record WorkerSpawnRequest
     public required string PromptFilePath { get; init; }
 
     /// <summary>
+    /// GitHub repository owner (for GITHUB_REPOSITORY env var).
+    /// </summary>
+    public required string GitHubOwner { get; init; }
+
+    /// <summary>
+    /// GitHub repository name (for GITHUB_REPOSITORY env var).
+    /// </summary>
+    public required string GitHubRepo { get; init; }
+
+    /// <summary>
     /// Maximum iterations for the worker loop (default 50).
     /// </summary>
     public int MaxIterations { get; init; } = 50;

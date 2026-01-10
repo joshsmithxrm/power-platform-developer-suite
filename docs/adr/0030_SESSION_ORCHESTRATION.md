@@ -56,9 +56,11 @@ All commands require `PPDS_INTERNAL=1` environment variable (automatically set f
 | Command | Purpose |
 |---------|---------|
 | `ppds session spawn <issue>` | Create worktree, fetch issue, spawn worker |
-| `ppds session list` | List all active sessions with status |
+| `ppds session list` | List all active sessions with status and PR numbers |
 | `ppds session get <id>` | Detailed session info with git diff |
+| `ppds session get --pr <number>` | Lookup session by PR number |
 | `ppds session update --id <id> --status <status>` | Worker reports status |
+| `ppds session update --id <id> --status complete --pr <url>` | Complete with PR URL |
 | `ppds session pause <id>` | Pause worker without cancelling |
 | `ppds session resume <id>` | Resume paused worker |
 | `ppds session cancel <id>` | Cancel and cleanup worktree |
@@ -99,10 +101,45 @@ All commands require `PPDS_INTERNAL=1` environment variable (automatically set f
 | `Planning` | Worker exploring codebase, creating plan | `[~]` |
 | `PlanningComplete` | Plan ready for review | `[P]` |
 | `Working` | Actively implementing | `[*]` |
+| `Shipping` | PR created, waiting for CI | `[^]` |
+| `ReviewsInProgress` | CI passed, addressing bot comments | `[R]` |
+| `PrReady` | All checks passed, ready for human review | `[+]` |
 | `Stuck` | Needs human guidance | `[!]` |
 | `Paused` | Human requested pause | `[||]` |
-| `Complete` | PR created, work done | `[+]` |
+| `Complete` | Work done (PR merged) | `[+]` |
 | `Cancelled` | Session cancelled | `[x]` |
+
+### Status Reporting Requirements
+
+Workers MUST report status at each phase transition. This is **not optional** - status updates enable the orchestrator to track progress and detect stale sessions.
+
+| Transition | Command |
+|------------|---------|
+| Start planning | `ppds session update --id <issue> --status planning` |
+| Plan complete | `ppds session update --id <issue> --status planning_complete` |
+| Start implementing | `ppds session update --id <issue> --status working` |
+| Hit domain gate | `ppds session update --id <issue> --status stuck --reason "..."` |
+| PR created | Handled automatically by `/ship` |
+
+The `/ship` command automatically handles the final status updates:
+- `shipping` - when `/ship` starts
+- `reviews_in_progress` - when addressing bot comments
+- `complete` - when PR is ready for human review (includes `--pr <url>`)
+
+### PR-Based Lookup
+
+After a worker creates a PR, humans interact with PR numbers rather than issue numbers. The orchestrator supports lookup by either:
+
+```bash
+ppds session get 329        # By issue number
+ppds session get --pr 330   # By PR number
+```
+
+The `ppds session list` output shows both issue and PR numbers when a PR exists:
+```
+  [+] #329 → PR #330 - Add export button
+      Status: Complete (2h 15m)
+```
 
 ### Planning Phase
 
@@ -121,7 +158,11 @@ The orchestrator watches for `PlanningComplete` status and prompts for human rev
 The `WindowsTerminalWorkerSpawner` creates workers via:
 1. Creates launcher script at `.claude/start-worker.ps1`
 2. Launches Windows Terminal: `wt -w 0 nt -d "<worktree>" --title "Issue #N" pwsh -NoExit -File "<launcher>"`
-3. Launcher sets `PPDS_INTERNAL=1` and invokes Claude with permission mode
+3. Launcher sets environment variables:
+   - `PPDS_INTERNAL=1` - enables session commands
+   - `GITHUB_REPOSITORY={owner}/{repo}` - helps Claude Code infer correct repo for MCP GitHub tools
+
+**Note:** The `GITHUB_REPOSITORY` variable follows GitHub Actions convention. It helps mitigate an issue where Claude may infer incorrect owner/repo from folder names when making MCP GitHub tool calls.
 
 ### Domain Gates
 Sessions MUST escalate (set stuck status) when touching:

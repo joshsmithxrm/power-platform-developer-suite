@@ -86,8 +86,13 @@ public sealed class WindowsTerminalWorkerSpawner : IWorkerSpawner
         // - deny rules: block commands like git push --force, rm -rf, etc.
         // - allow rules: specific skills like /ship, /test, /commit
         // The final gate is human review of pull requests created by /ship (Claude never merges).
+        //
+        // GITHUB_REPOSITORY is set to help Claude infer the correct owner/repo for MCP GitHub tools.
+        // This matches the GitHub Actions environment variable convention.
         var launcherContent = $@"$env:PPDS_INTERNAL = '1'
+$env:GITHUB_REPOSITORY = '{request.GitHubOwner}/{request.GitHubRepo}'
 Write-Host 'Worker session for issue #{request.IssueNumber}' -ForegroundColor Cyan
+Write-Host ""Repository: $env:GITHUB_REPOSITORY"" -ForegroundColor DarkGray
 Write-Host ''
 claude --permission-mode bypassPermissions ""Read .claude/session-prompt.md and implement issue #{request.IssueNumber}. Start by understanding the issue, then implement the fix.""
 ";
