@@ -79,36 +79,53 @@ internal sealed class ProfileSelectorDialog : Dialog
             Y = Pos.Bottom(_detailLabel),
             Width = Dim.Fill() - 2,
             Height = 1,
-            Text = "F2 to rename",
+            Text = "F2 to rename | Del to delete",
             ColorScheme = TuiColorPalette.StatusBar_Default
         };
 
         // Buttons
         var selectButton = new Button("_Select")
         {
-            X = Pos.Center() - 20,
+            X = Pos.Center() - 24,
             Y = Pos.AnchorEnd(1)
         };
         selectButton.Clicked += OnSelectClicked;
 
         var createButton = new Button("Create _New")
         {
-            X = Pos.Center() - 5,
+            X = Pos.Center() - 9,
             Y = Pos.AnchorEnd(1)
         };
         createButton.Clicked += OnCreateClicked;
 
+        var deleteButton = new Button("_Delete")
+        {
+            X = Pos.Center() + 7,
+            Y = Pos.AnchorEnd(1)
+        };
+        deleteButton.Clicked += OnDeleteClicked;
+
         var cancelButton = new Button("_Cancel")
         {
-            X = Pos.Center() + 12,
+            X = Pos.Center() + 20,
             Y = Pos.AnchorEnd(1)
         };
         cancelButton.Clicked += () => { Application.RequestStop(); };
 
-        Add(listFrame, _detailLabel, _hintLabel, selectButton, createButton, cancelButton);
+        Add(listFrame, _detailLabel, _hintLabel, selectButton, createButton, deleteButton, cancelButton);
 
-        // F2 to rename selected profile
+        // Handle keyboard shortcuts
         KeyPress += OnKeyPress;
+
+        // Handle Delete key in list view
+        _listView.KeyPress += (e) =>
+        {
+            if (e.KeyEvent.Key == Key.DeleteChar)
+            {
+                OnDeleteClicked();
+                e.Handled = true;
+            }
+        };
 
         // Load profiles asynchronously (fire-and-forget with error handling)
 #pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
@@ -326,5 +343,55 @@ internal sealed class ProfileSelectorDialog : Dialog
 
             _detailLabel.Text = $"Renamed to '{newName}'";
         });
+    }
+
+    private void OnDeleteClicked()
+    {
+        if (_listView.SelectedItem < 0 || _listView.SelectedItem >= _profiles.Count)
+            return;
+
+        var profile = _profiles[_listView.SelectedItem];
+
+        // Cannot delete active profile
+        if (profile.IsActive)
+        {
+            MessageBox.ErrorQuery("Cannot Delete",
+                "Cannot delete the active profile.\n\nSwitch to a different profile first.",
+                "OK");
+            return;
+        }
+
+        // Show confirmation dialog
+        var result = MessageBox.Query("Confirm Delete",
+            $"Delete profile \"{profile.DisplayIdentifier}\"?\n\n" +
+            "This will remove the profile and its stored credentials.\n" +
+            "This action cannot be undone.",
+            "Delete", "Cancel");
+
+        if (result == 0) // "Delete" selected
+        {
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+            _ = DeleteProfileAsync(profile).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    Application.MainLoop?.Invoke(() =>
+                    {
+                        _detailLabel.Text = $"Error: {t.Exception?.InnerException?.Message ?? "Delete failed"}";
+                    });
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+        }
+    }
+
+    private async Task DeleteProfileAsync(ProfileSummary profile)
+    {
+        var deleted = await _profileService.DeleteProfileAsync(profile.DisplayIdentifier);
+
+        if (deleted)
+        {
+            await LoadProfilesAsync();
+        }
     }
 }
