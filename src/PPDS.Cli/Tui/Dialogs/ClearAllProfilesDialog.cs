@@ -195,7 +195,7 @@ internal sealed class ClearAllProfilesDialog : Dialog
 
     private async Task PerformClearAsync()
     {
-        await _profileService.ClearAllAsync();
+        await _profileService.ClearAllAsync(CancellationToken.None);
 
         Cleared = true;
 

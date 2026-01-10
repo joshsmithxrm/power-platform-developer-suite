@@ -343,7 +343,7 @@ internal sealed class MainWindow : Window
     private async Task ShowClearAllProfilesAsync()
     {
         var profileService = _session.GetProfileService();
-        var profiles = await profileService.GetProfilesAsync();
+        var profiles = await profileService.GetProfilesAsync(CancellationToken.None);
 
         if (profiles.Count == 0)
         {
