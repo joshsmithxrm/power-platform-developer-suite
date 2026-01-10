@@ -61,6 +61,22 @@ public sealed class WindowsTerminalWorkerSpawner : IWorkerSpawner
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Create settings.local.json to enable autonomous startup without confirmation prompt.
+        // The --permission-mode flag tells Claude to USE bypass mode, but without defaultMode
+        // in settings, Claude shows a confirmation prompt. This file sets defaultMode which
+        // tells Claude "this session has pre-accepted bypass mode" so it skips the prompt.
+        // SECURITY: Project-level settings.json deny/allow rules are still enforced.
+        var settingsLocalPath = Path.Combine(request.WorkingDirectory, ".claude", "settings.local.json");
+        var settingsLocalContent = """
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+}
+""";
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsLocalPath)!);
+        await File.WriteAllTextAsync(settingsLocalPath, settingsLocalContent, cancellationToken);
+
         // Write a launcher script to avoid quote escaping issues with wt -> powershell
         var launcherPath = Path.Combine(request.WorkingDirectory, ".claude", "start-worker.ps1");
 
