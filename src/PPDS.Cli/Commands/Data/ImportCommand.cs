@@ -294,7 +294,7 @@ public static class ImportCommand
                         ImportMode = importOptions.Mode.ToString(),
                         StripOwnerFields = importOptions.StripOwnerFields,
                         BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
-                        UserMappingProvided = importOptions.UserMappings != null
+                        UserMappingProvided = userMappingFile != null
                     };
 
                     await outputManager.WriteSummaryAsync(
