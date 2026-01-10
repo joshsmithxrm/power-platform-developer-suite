@@ -53,6 +53,18 @@ public interface IQueryHistoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets a specific history entry by ID.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL.</param>
+    /// <param name="entryId">The entry ID to retrieve.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The history entry, or null if not found.</returns>
+    Task<QueryHistoryEntry?> GetEntryByIdAsync(
+        string environmentUrl,
+        string entryId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes a specific history entry.
     /// </summary>
     /// <param name="environmentUrl">The environment URL.</param>

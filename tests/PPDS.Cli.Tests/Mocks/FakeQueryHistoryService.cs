@@ -64,6 +64,16 @@ public sealed class FakeQueryHistoryService : IQueryHistoryService
     }
 
     /// <inheritdoc />
+    public Task<QueryHistoryEntry?> GetEntryByIdAsync(
+        string environmentUrl,
+        string entryId,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = _entries.FirstOrDefault(e => e.Id == entryId);
+        return Task.FromResult(entry);
+    }
+
+    /// <inheritdoc />
     public Task<bool> DeleteEntryAsync(
         string environmentUrl,
         string entryId,

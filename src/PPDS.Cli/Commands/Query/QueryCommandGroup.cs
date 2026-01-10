@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Commands.Query.History;
 
 namespace PPDS.Cli.Commands.Query;
 
@@ -64,6 +65,7 @@ public static class QueryCommandGroup
 
         command.Subcommands.Add(FetchCommand.Create());
         command.Subcommands.Add(SqlCommand.Create());
+        command.Subcommands.Add(HistoryCommandGroup.Create());
 
         return command;
     }

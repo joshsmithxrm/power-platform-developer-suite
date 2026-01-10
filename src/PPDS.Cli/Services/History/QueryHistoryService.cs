@@ -118,6 +118,16 @@ public sealed class QueryHistoryService : IQueryHistoryService
     }
 
     /// <inheritdoc />
+    public async Task<QueryHistoryEntry?> GetEntryByIdAsync(
+        string environmentUrl,
+        string entryId,
+        CancellationToken cancellationToken = default)
+    {
+        var history = await LoadHistoryAsync(environmentUrl, cancellationToken);
+        return history.FirstOrDefault(e => e.Id == entryId);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> DeleteEntryAsync(
         string environmentUrl,
         string entryId,
