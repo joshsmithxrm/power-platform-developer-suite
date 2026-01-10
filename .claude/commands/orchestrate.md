@@ -197,17 +197,128 @@ ppds session cancel 123 --keep-worktree
 ## Session Lifecycle
 
 ```
-REGISTERED -> WORKING -> [STUCK|PAUSED] -> COMPLETE|CANCELLED
+REGISTERED -> PLANNING -> PLANNING_COMPLETE -> WORKING -> PR_READY -> MERGING -> COMPLETE
+                                    |              |           |
+                                    ↓              ↓           ↓
+                                  STUCK         STUCK       STUCK
 ```
 
-| State | Meaning |
-|-------|---------|
-| `registered` | Worktree created, worker starting |
-| `working` | Actively implementing, code changing |
-| `stuck` | Hit domain gate or repeated failure, needs human guidance |
-| `paused` | Human requested pause, worker idle |
-| `complete` | PR created and CI passed |
-| `cancelled` | Human cancelled, worktree cleaned up |
+| State | Meaning | Your Action |
+|-------|---------|-------------|
+| `registered` | Worktree created, worker starting | None |
+| `planning` | Exploring codebase, creating plan | None |
+| `planning_complete` | Plan ready for review | Review plan, approve or redirect |
+| `working` | Actively implementing | None |
+| `stuck` | Blocked, needs guidance | Provide guidance |
+| `pr_ready` | PR created, awaiting review | Review PR |
+| `merging` | PR approved, handling rebase/CI | None |
+| `complete` | PR merged | None |
+| `paused` | Human requested pause | Resume when ready |
+| `cancelled` | Human cancelled, cleaned up | None |
+
+## PR Review Flow
+
+When a session shows `pr_ready`:
+
+1. **Review PR:**
+   ```bash
+   ppds session get <id>
+   ```
+   Shows PR URL, files changed, and Review Agent summary (if available).
+
+2. **If PR looks good:**
+   - Say "approve 123" to approve
+   - Orchestrator handles rebase and merge mechanics
+
+3. **If changes needed:**
+   - Say "changes 123 'need better error handling'"
+   - Worker resumes to make changes
+
+## Post-Approval Mechanics
+
+After you approve a PR, the orchestrator handles:
+
+1. **Update branch with main:**
+   ```bash
+   gh pr update-branch <pr-number>
+   ```
+   - If conflict → worker resolves, back to PR review
+
+2. **Wait for CI:**
+   - If pass → continue to merge
+   - If fail → worker fixes, back to PR review
+
+3. **Merge PR:**
+   ```bash
+   gh pr merge <pr-number> --squash
+   ```
+
+4. **Cleanup:**
+   - Mark session complete
+   - Worktree queued for `/prune`
+
+**Key principle:** You review CODE. Orchestrator handles MECHANICS.
+
+## Commands (Complete Reference)
+
+| User Says | Action |
+|-----------|--------|
+| **Planning Phase** | |
+| "list issues" / "what's open?" | Show issues, bugs first |
+| "show 123" / "what's 123?" | Show issue details |
+| "plan 123" | Analyze issue, discuss approach |
+| **Worker Spawning** | |
+| "spawn 123" / "work on 123" | Create worktree, spawn worker |
+| "spawn 123, 124, 125" | Batch spawn |
+| **Status & Monitoring** | |
+| "status" / "dashboard" | Show all workers, PRs, stuck items |
+| "check 123" | Detailed status for one session |
+| **Plan Review** | |
+| "approve plan 123" | Worker proceeds to implementation |
+| "redirect 123 'use X instead'" | Worker re-plans with feedback |
+| **PR Review** | |
+| "review 123" | Show PR, Review Agent summary |
+| "approve 123" | Orchestrator handles merge mechanics |
+| "changes 123 'feedback'" | Worker resumes with your feedback |
+| **Problem Resolution** | |
+| "resolve 123" | Open stuck item for resolution |
+| "tell 123: 'guidance'" | Forward guidance to worker |
+| **Session Control** | |
+| "pause 123" | Pause worker |
+| "resume 123" | Resume paused worker |
+| "cancel 123" | Cancel and cleanup |
+
+## Dashboard View
+
+When showing status, present a dashboard like:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      ORCHESTRATOR STATUS                         │
+├─────────────────────────────────────────────────────────────────┤
+│  WORKERS (3 active)                                              │
+│  ├── #123 data-export    [working]      ████████░░ 80%          │
+│  ├── #124 plugin-deploy  [planning]     ██░░░░░░░░ 20%          │
+│  └── #125 tui-refresh    [working]      ██████░░░░ 60%          │
+│                                                                  │
+│  NEEDS PLAN REVIEW (1)                                          │
+│  └── #126 auth-refactor  Plan ready - "approve plan 126"        │
+│                                                                  │
+│  READY FOR PR REVIEW (2)                                        │
+│  ├── PR #45 → #120  Review: 1 must-fix, 2 filtered              │
+│  └── PR #46 → #121  Review: clean                               │
+│                                                                  │
+│  MERGING (1)                                                    │
+│  └── PR #44 → #119  rebasing... CI running...                   │
+│                                                                  │
+│  STUCK (1)                                                      │
+│  └── #122 auth-flow      [merge conflict on PR #43]             │
+│                                                                  │
+│  COMPLETED TODAY (2)                                            │
+│  ├── #118 → merged 10:32am                                      │
+│  └── #117 → merged 09:15am                                      │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Resilience
 

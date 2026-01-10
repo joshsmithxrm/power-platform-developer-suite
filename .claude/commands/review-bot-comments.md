@@ -1,10 +1,39 @@
-# Review Bot Comments
+# Review Bot Comments (Review Agent)
 
-Systematically address PR review comments from Copilot, Gemini, and CodeQL.
+Filter, categorize, and address PR review comments from Copilot, Gemini, and CodeQL.
 
 ## Usage
 
 `/review-bot-comments [pr-number]`
+
+## Review Agent Categories
+
+The goal is to reduce noise. Categorize each finding:
+
+| Category | Meaning | Your Action | Examples |
+|----------|---------|-------------|----------|
+| **MUST FIX** | Security issues, bugs, breaking changes | Fix before merge | SQL injection, null dereference, resource leak |
+| **SHOULD FIX** | Pattern violations, quality issues | Fix or justify | Missing Dispose, generic catch, unused code |
+| **CONSIDER** | Suggestions, minor improvements | Optional | Style preferences, LINQ alternatives |
+| **FILTERED** | Style noise, false positives | Ignored | Wrong suggestions, preference-only |
+
+**Output summary format:**
+```
+## Review Agent Summary - PR #XX
+
+MUST FIX (1):
+- [CodeQL] Foo.cs:42 - SQL injection vulnerability
+
+SHOULD FIX (2):
+- [Copilot] Bar.cs:10 - Resource not disposed
+- [Gemini] Baz.cs:25 - Generic catch clause
+
+CONSIDER (1):
+- [Copilot] Qux.cs:5 - Could use LINQ expression
+
+FILTERED (25):
+- Style preferences, false positives - see details below if needed
+```
 
 ## Process
 
@@ -49,14 +78,21 @@ Autofix suggestions are NOT PR comments - they require different handling:
 
 ### 2. Triage Each Comment
 
-For each bot comment, determine verdict and rationale:
+For each bot comment, categorize using Review Agent categories:
 
-| Verdict | Meaning |
-|---------|---------|
-| **Valid** | Bot is correct, code should be changed |
-| **False Positive** | Bot is wrong, explain why |
-| **Duplicate** | Same issue reported by another bot - still needs reply |
-| **Unclear** | Need to investigate before deciding |
+| Category | Criteria |
+|----------|----------|
+| **MUST FIX** | Security vulnerabilities, actual bugs, data loss risk, breaking changes |
+| **SHOULD FIX** | Pattern violations, quality issues (resource leaks, generic catch, unused code) |
+| **CONSIDER** | Valid suggestions that are optional (LINQ alternatives, naming) |
+| **FILTERED** | False positives, style-only, duplicate of higher-severity finding |
+
+**Categorization rules:**
+- CodeQL security findings → usually MUST FIX
+- Resource disposal → SHOULD FIX (verify interface first)
+- "Use LINQ" suggestions → usually CONSIDER or FILTERED
+- Style preferences → FILTERED
+- Duplicate findings (same file+line) → keep highest severity, mark others FILTERED
 
 **IMPORTANT:** Every comment needs a reply, including duplicates. Track all comment IDs to ensure none are missed.
 

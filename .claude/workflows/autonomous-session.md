@@ -32,6 +32,48 @@ Self-verify
 Update session status (status: complete)
 ```
 
+## Required Plan Structure
+
+At `planning_complete`, the plan must include these sections to verify alignment:
+
+```markdown
+## My Understanding
+[Restate the issue in your own words - forces alignment verification]
+
+## Patterns I'll Follow
+[Cite specific ADRs, code examples, CLAUDE.md rules]
+Example: "Following ADR-0002 connection pooling, using BulkOperationExecutor
+as shown in docs/patterns/bulk-operations.cs"
+
+## Approach
+[Implementation steps]
+
+## What I'm NOT Doing
+[Explicit scope boundaries - prevents scope creep]
+
+## Questions Before Proceeding
+[If any - catches confusion before work starts]
+```
+
+**Why this structure matters:**
+- **My Understanding**: You're not just restating the issue - you're proving you understood the SAME thing the human meant
+- **Patterns I'll Follow**: Makes your mental model visible; cites prove you found relevant context
+- **What I'm NOT Doing**: Explicit boundaries prevent well-intentioned scope creep
+- **Questions**: Catches confusion at plan phase, not PR review phase
+
+**Review criteria for humans:**
+| Check | Question |
+|-------|----------|
+| Understanding | Did Claude restate the problem correctly? |
+| Patterns | Are the cited patterns appropriate for this task? |
+| Scope | Is the boundary right-sized? |
+| Conflicts | Did Claude notice anything you missed? |
+
+**Outcomes:**
+- ✅ Approved → Worker proceeds to `working`
+- 🔄 Redirect → Worker re-plans with feedback
+- ⬅️ Needs design → Back to design phase (scope was wrong)
+
 ## Domain Gates
 
 During implementation, Claude pauses for human approval on:
