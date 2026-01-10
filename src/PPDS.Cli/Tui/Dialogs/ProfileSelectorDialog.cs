@@ -218,7 +218,7 @@ internal sealed class ProfileSelectorDialog : Dialog
         var currentName = profile.Name ?? string.Empty;
 
         // Create rename dialog
-        var dialog = new Dialog("Rename Profile")
+        using var dialog = new Dialog("Rename Profile")
         {
             Width = 50,
             Height = 8,
@@ -250,19 +250,19 @@ internal sealed class ProfileSelectorDialog : Dialog
             Y = Pos.AnchorEnd(1)
         };
 
-        var doRename = false;
+        var newName = string.Empty;
 
         okButton.Clicked += () =>
         {
-            var newName = textField.Text?.ToString()?.Trim() ?? string.Empty;
+            var nameFromTextField = textField.Text?.ToString()?.Trim() ?? string.Empty;
 
-            if (string.IsNullOrWhiteSpace(newName))
+            if (string.IsNullOrWhiteSpace(nameFromTextField))
             {
                 MessageBox.ErrorQuery("Validation Error", "Profile name cannot be empty.", "OK");
                 return;
             }
 
-            doRename = true;
+            newName = nameFromTextField;
             Application.RequestStop();
         };
 
@@ -286,9 +286,8 @@ internal sealed class ProfileSelectorDialog : Dialog
 
         Application.Run(dialog);
 
-        if (doRename)
+        if (!string.IsNullOrEmpty(newName))
         {
-            var newName = textField.Text?.ToString()?.Trim() ?? string.Empty;
             PerformRename(profile, newName);
         }
     }
@@ -318,6 +317,13 @@ internal sealed class ProfileSelectorDialog : Dialog
 
         Application.MainLoop?.Invoke(() =>
         {
+            // Re-select the renamed profile to maintain context for the user
+            var renamedProfileIndex = _profiles.ToList().FindIndex(p => p.Name == newName);
+            if (renamedProfileIndex >= 0)
+            {
+                _listView.SelectedItem = renamedProfileIndex;
+            }
+
             _detailLabel.Text = $"Renamed to '{newName}'";
         });
     }
