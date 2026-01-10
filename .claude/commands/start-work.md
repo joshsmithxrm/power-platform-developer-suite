@@ -102,6 +102,29 @@ Output the generated session prompt content.
 
 Use the EnterPlanMode tool to begin planning.
 
+**Required Plan Structure** (see [autonomous-session.md](../workflows/autonomous-session.md)):
+
+Your plan MUST include these sections:
+
+1. **My Understanding** - Restate the issue in your own words
+2. **Patterns I'll Follow** - Cite specific ADRs and pattern files:
+   - `docs/patterns/bulk-operations.cs` - For multi-record operations
+   - `docs/patterns/service-pattern.cs` - For Application Services
+   - `docs/patterns/tui-panel-pattern.cs` - For TUI development
+   - `docs/patterns/cli-command-pattern.cs` - For CLI commands
+   - `docs/patterns/connection-pool-pattern.cs` - For Dataverse connections
+3. **Approach** - Implementation steps
+4. **What I'm NOT Doing** - Explicit scope boundaries
+5. **Questions Before Proceeding** - If any
+
+**Example citation:**
+```
+Following the service layer pattern (docs/patterns/service-pattern.cs):
+- Accepting IProgressReporter for long operations
+- Throwing PpdsException with ErrorCode
+- Registering in AddCliApplicationServices()
+```
+
 ## Output Format
 
 ```

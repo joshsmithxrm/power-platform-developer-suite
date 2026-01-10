@@ -24,6 +24,8 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Add TUI service code without tests | Use MockServiceProviderFactory for testability (ADR-0028) |
 | Use bash-specific syntax in C# process commands | `2>/dev/null`, `||`, pipes don't work on Windows; handle errors in code |
 | File issues in wrong repo | Issues belong in target repo (ppds-docs issues in ppds-docs, not ppds) |
+| Start implementation without plan citations | Cite `docs/patterns/` or ADRs in plan's "Patterns I'll Follow" section |
+| Omit "What I'm NOT Doing" from plans | Explicit boundaries prevent scope creep; required for approval |
 
 ## ALWAYS
 
@@ -41,6 +43,8 @@ NuGet packages & CLI for Power Platform: plugin attributes, Dataverse connectivi
 | Test TUI services with `Category=TuiUnit` | Enables autonomous iteration without manual testing (ADR-0028) |
 | Use `IServiceProviderFactory` in InteractiveSession | Required for mock injection in tests (ADR-0028) |
 | Wait for required CI checks only in /ship | `Integration Tests` requires live Dataverse (ADR-0029) |
+| Check `docs/patterns/` before implementing | Canonical patterns exist; cite them in plan |
+| Restate issue understanding in plan | "My Understanding" section catches drift before implementation |
 
 ---
 
@@ -219,6 +223,7 @@ Integration Tests runs against live Dataverse - failures don't block PR merge.
 ## Documentation
 
 - `docs/adr/` - Architecture Decision Records (detailed patterns, "why" context)
+- `docs/patterns/` - Canonical code patterns (bulk ops, services, TUI, CLI, pooling)
 - CLAUDE.md - Brief reminders (<100 tokens each), auto-loaded into all conversations
 
-**Guidance:** If you need examples, code snippets, or rationale → create/update an ADR. CLAUDE.md is for one-liner "don't do X" rules only.
+**Guidance:** If you need examples, code snippets, or rationale → create/update an ADR or pattern file. CLAUDE.md is for one-liner "don't do X" rules only.
