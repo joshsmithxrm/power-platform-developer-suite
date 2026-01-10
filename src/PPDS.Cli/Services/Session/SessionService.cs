@@ -312,7 +312,9 @@ public sealed class SessionService : ISessionService
                 CompletedAt = IsTerminalStatus(status) && existing.CompletedAt == null
                     ? DateTimeOffset.UtcNow
                     : existing.CompletedAt,
-                CompletionReason = IsTerminalStatus(status) ? reason : existing.CompletionReason
+                CompletionReason = IsTerminalStatus(status) && existing.CompletedAt == null
+                    ? (reason ?? "Completed")
+                    : existing.CompletionReason
             });
 
         await PersistSessionAsync(session, cancellationToken);
@@ -435,7 +437,7 @@ public sealed class SessionService : ISessionService
 
         foreach (var session in sessions)
         {
-            if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Planning or SessionStatus.Shipping)
+            if (session.Status is not SessionStatus.Complete)
             {
                 await CancelAsync(session.Id, keepWorktrees, cancellationToken);
                 count++;
