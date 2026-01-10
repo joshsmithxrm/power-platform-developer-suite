@@ -888,8 +888,21 @@ namespace PPDS.Dataverse.BulkOperations
                 catch (Exception ex)
                 {
                     // Non-retryable error - convert to failure result
-                    _logger.LogError(ex, "{Operation} batch failed with non-retryable error. Entity: {Entity}, BatchSize: {BatchSize}",
-                        operationName, entityLogicalName, batch.Count);
+                    // For FaultException, log a clean single-line message to avoid duplication
+                    // from ToString() which includes nested FaultDetail with repeated message.
+                    // Full exception details available at Debug level for troubleshooting.
+                    if (ex is FaultException<OrganizationServiceFault> faultEx)
+                    {
+                        var cleanMessage = FormatCleanFaultMessage(faultEx);
+                        _logger.LogError("{Operation} batch failed. Entity: {Entity}, BatchSize: {BatchSize}. {Error}",
+                            operationName, entityLogicalName, batch.Count, cleanMessage);
+                        _logger.LogDebug(ex, "{Operation} full exception details for debugging.", operationName);
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "{Operation} batch failed with non-retryable error. Entity: {Entity}, BatchSize: {BatchSize}",
+                            operationName, entityLogicalName, batch.Count);
+                    }
 
                     // Create appropriate failure result based on batch type
                     if (batch is List<Entity> entityBatch)
@@ -1592,6 +1605,23 @@ namespace PPDS.Dataverse.BulkOperations
                 return faultEx.Detail.Message;
             }
             return ex.Message;
+        }
+
+        /// <summary>
+        /// Formats a clean, single-line error message from a FaultException.
+        /// Avoids the duplication that occurs in FaultException.ToString() where
+        /// the message appears multiple times due to nested FaultDetail structure.
+        /// </summary>
+        /// <param name="faultEx">The FaultException to format.</param>
+        /// <returns>Format: "{message} (ErrorCode: 0x{errorCode:X8})"</returns>
+        private static string FormatCleanFaultMessage(FaultException<OrganizationServiceFault> faultEx)
+        {
+            var fault = faultEx.Detail;
+            // Use IsNullOrEmpty to handle both null and empty string cases,
+            // ensuring we fall back to faultEx.Message if fault.Message is empty.
+            var message = !string.IsNullOrEmpty(fault?.Message) ? fault!.Message : faultEx.Message;
+            var errorCode = fault?.ErrorCode ?? 0;
+            return $"{message} (ErrorCode: 0x{errorCode:X8})";
         }
 
         /// <summary>
