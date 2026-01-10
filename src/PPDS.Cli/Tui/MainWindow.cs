@@ -233,8 +233,7 @@ internal sealed class MainWindow : Window
         }
         else if (dialog.CreateNewSelected)
         {
-            // Profile creation would require more complex flow - show message for now
-            MessageBox.Query("Create Profile", "Profile creation is available via CLI:\n\nppds auth create --name MyProfile", "OK");
+            ShowProfileCreation();
         }
     }
 
@@ -259,6 +258,32 @@ internal sealed class MainWindow : Window
         {
             UpdateStatus();
         });
+    }
+
+    private void ShowProfileCreation()
+    {
+        var profileService = _session.GetProfileService();
+        var envService = _session.GetEnvironmentService();
+
+        var dialog = new ProfileCreationDialog(profileService, envService, _deviceCodeCallback);
+        Application.Run(dialog);
+
+        if (dialog.CreatedProfile != null)
+        {
+            // Update to use the newly created profile
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+            _ = SetActiveProfileAsync(dialog.CreatedProfile).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    Application.MainLoop?.Invoke(() =>
+                    {
+                        MessageBox.ErrorQuery("Error", t.Exception?.InnerException?.Message ?? "Failed to switch to new profile", "OK");
+                    });
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+        }
     }
 
     private void ShowEnvironmentSelector()
