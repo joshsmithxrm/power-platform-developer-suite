@@ -16,24 +16,22 @@ public class InteractiveBrowserCredentialProviderTests
     [Fact]
     public void Constructor_WithDefaults_DoesNotThrow()
     {
-        var provider = new InteractiveBrowserCredentialProvider();
+        using var provider = new InteractiveBrowserCredentialProvider();
 
         provider.Should().NotBeNull();
         provider.AuthMethod.Should().Be(AuthMethod.InteractiveBrowser);
-        provider.Dispose();
     }
 
     [Fact]
     public void Constructor_WithAllParameters_DoesNotThrow()
     {
-        var provider = new InteractiveBrowserCredentialProvider(
+        using var provider = new InteractiveBrowserCredentialProvider(
             cloud: CloudEnvironment.Public,
             tenantId: "test-tenant",
             username: "user@example.com",
             homeAccountId: "account-id");
 
         provider.Should().NotBeNull();
-        provider.Dispose();
     }
 
     [Fact]
@@ -48,11 +46,10 @@ public class InteractiveBrowserCredentialProviderTests
             HomeAccountId = "gov-account-id"
         };
 
-        var provider = InteractiveBrowserCredentialProvider.FromProfile(profile);
+        using var provider = InteractiveBrowserCredentialProvider.FromProfile(profile);
 
         provider.Should().NotBeNull();
         provider.AuthMethod.Should().Be(AuthMethod.InteractiveBrowser);
-        provider.Dispose();
     }
 
     #endregion
@@ -70,7 +67,7 @@ public class InteractiveBrowserCredentialProviderTests
         Action<DeviceCodeInfo> callback = _ => { };
 
         // Act - DeviceCodeCredentialProvider accepts a callback
-        var provider = new DeviceCodeCredentialProvider(
+        using var provider = new DeviceCodeCredentialProvider(
             cloud: CloudEnvironment.Public,
             tenantId: null,
             username: null,
@@ -79,7 +76,6 @@ public class InteractiveBrowserCredentialProviderTests
 
         // Assert - The provider was created with a callback
         provider.Should().NotBeNull();
-        provider.Dispose();
     }
 
     /// <summary>
@@ -119,13 +115,12 @@ public class InteractiveBrowserCredentialProviderTests
                 return expectedResult;
             };
 
-            var provider = new InteractiveBrowserCredentialProvider(
+            using var provider = new InteractiveBrowserCredentialProvider(
                 cloud: CloudEnvironment.Public,
                 deviceCodeCallback: _ => { },
                 beforeInteractiveAuth: callback);
 
             provider.Should().NotBeNull();
-            provider.Dispose();
         }
     }
 
@@ -146,14 +141,13 @@ public class InteractiveBrowserCredentialProviderTests
         Action<DeviceCodeInfo> deviceCodeCallback = _ => { };
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult> beforeInteractiveAuth = _ => PreAuthDialogResult.OpenBrowser;
 
-        var provider = InteractiveBrowserCredentialProvider.FromProfile(
+        using var provider = InteractiveBrowserCredentialProvider.FromProfile(
             profile,
             deviceCodeCallback,
             beforeInteractiveAuth);
 
         provider.Should().NotBeNull();
         provider.AuthMethod.Should().Be(AuthMethod.InteractiveBrowser);
-        provider.Dispose();
     }
 
     #endregion

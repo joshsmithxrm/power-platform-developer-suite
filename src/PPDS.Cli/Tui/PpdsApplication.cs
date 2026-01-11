@@ -57,7 +57,8 @@ internal sealed class PpdsApplication : IDisposable
             }
 
             // Marshal to UI thread and wait for dialog result
-            var result = PreAuthDialogResult.OpenBrowser;
+            // Default to Cancel for fail-safe if dialog throws unexpectedly
+            var result = PreAuthDialogResult.Cancel;
             using var waitHandle = new ManualResetEventSlim(false);
             Application.MainLoop.Invoke(() =>
             {
