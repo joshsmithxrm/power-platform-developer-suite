@@ -97,20 +97,6 @@ public class PpdsAuthException : PpdsException
 }
 
 /// <summary>
-/// User declined authentication when prompted.
-/// </summary>
-public class PpdsAuthDeclinedException : PpdsAuthException
-{
-    /// <summary>
-    /// Creates a new auth declined exception.
-    /// </summary>
-    public PpdsAuthDeclinedException()
-        : base(ErrorCodes.Auth.Declined, "Authentication was declined by the user.")
-    {
-    }
-}
-
-/// <summary>
 /// Rate limiting (429) from Dataverse service protection.
 /// </summary>
 public class PpdsThrottleException : PpdsException

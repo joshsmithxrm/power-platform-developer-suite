@@ -166,39 +166,27 @@ public sealed class ProfileConnectionSource : IDisposable
             // Wrap in Task.Run to avoid deadlock in sync contexts (UI/ASP.NET)
             // by running async code on threadpool which has no sync context.
             // Add timeout to fail fast if credential store is unresponsive.
-            CancellationTokenSource? credCts = null;
+            using var credCts = new CancellationTokenSource(CredentialProviderTimeout);
             try
             {
-                credCts = new CancellationTokenSource(CredentialProviderTimeout);
                 _provider = System.Threading.Tasks.Task.Run(() =>
                     CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token))
                     .WaitAsync(credCts.Token)
                     .GetAwaiter()
                     .GetResult();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (credCts.IsCancellationRequested)
             {
-                // Only convert to TimeoutException if our timeout token was triggered.
-                // If not, this is a user-initiated cancellation which should propagate.
-                if (credCts?.IsCancellationRequested == true)
-                {
-                    throw new TimeoutException(
-                        $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
-                        "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
-                }
-
-                throw; // Re-throw user cancellation
+                throw new TimeoutException(
+                    $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
+                    "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
             }
-            finally
-            {
-                credCts?.Dispose();
-            }
+            // OperationCanceledException without filter match = user cancellation, propagates naturally
 
-            CancellationTokenSource? connCts = null;
+            // Create ServiceClient with timeout to fail fast if Dataverse is unreachable.
+            using var connCts = new CancellationTokenSource(ConnectionTimeout);
             try
             {
-                // Create ServiceClient with timeout to fail fast if Dataverse is unreachable.
-                connCts = new CancellationTokenSource(ConnectionTimeout);
                 _seedClient = System.Threading.Tasks.Task.Run(() =>
                     _provider.CreateServiceClientAsync(_environmentUrl, connCts.Token))
                     .WaitAsync(connCts.Token)
@@ -211,22 +199,20 @@ public sealed class ProfileConnectionSource : IDisposable
 
                 return _seedClient;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (connCts.IsCancellationRequested)
             {
                 _provider?.Dispose();
                 _provider = null;
-
-                // Only convert to TimeoutException if our timeout token was triggered.
-                // If not, this is a user-initiated cancellation (e.g., declined auth dialog)
-                // which should propagate to stop retries.
-                if (connCts?.IsCancellationRequested == true)
-                {
-                    throw new TimeoutException(
-                        $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
-                        "Check network connectivity and environment URL.");
-                }
-
-                throw; // Re-throw user cancellation
+                throw new TimeoutException(
+                    $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
+                    "Check network connectivity and environment URL.");
+            }
+            catch (OperationCanceledException)
+            {
+                // User cancellation (e.g., declined auth dialog) - clean up and propagate
+                _provider?.Dispose();
+                _provider = null;
+                throw;
             }
             catch (Exception ex)
             {
@@ -234,112 +220,6 @@ public sealed class ProfileConnectionSource : IDisposable
                 _provider = null;
                 throw new InvalidOperationException(
                     $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
-            }
-            finally
-            {
-                connCts?.Dispose();
-            }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Gets the seed ServiceClient asynchronously.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An authenticated, ready-to-use ServiceClient.</returns>
-    public async System.Threading.Tasks.Task<ServiceClient> GetSeedClientAsync(
-        CancellationToken cancellationToken = default)
-    {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(ProfileConnectionSource));
-
-        // Fast path if already created (volatile read)
-        if (_seedClient != null)
-            return _seedClient;
-
-        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            // Double-check after acquiring lock
-            if (_seedClient != null)
-                return _seedClient;
-
-            // Create credential provider with timeout to fail fast if credential store is unresponsive
-            CancellationTokenSource? credCts = null;
-            try
-            {
-                credCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                credCts.CancelAfter(CredentialProviderTimeout);
-
-                _provider = await CredentialProviderFactory.CreateAsync(
-                    _profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // Only convert to TimeoutException if our timeout token was triggered.
-                // If not, this is a user-initiated cancellation which should propagate.
-                if (credCts?.IsCancellationRequested == true)
-                {
-                    throw new TimeoutException(
-                        $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
-                        "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
-                }
-
-                throw; // Re-throw user cancellation
-            }
-            finally
-            {
-                credCts?.Dispose();
-            }
-
-            CancellationTokenSource? connCts = null;
-            try
-            {
-                // Create ServiceClient with timeout to fail fast if Dataverse is unreachable
-                connCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                connCts.CancelAfter(ConnectionTimeout);
-
-                _seedClient = await _provider
-                    .CreateServiceClientAsync(_environmentUrl, connCts.Token)
-                    .ConfigureAwait(false);
-
-                // Persist HomeAccountId if it changed after authentication
-                // This enables token cache reuse across sessions
-                TryUpdateHomeAccountId();
-
-                return _seedClient;
-            }
-            catch (OperationCanceledException)
-            {
-                // Only convert to TimeoutException if our timeout token was triggered.
-                // If not, this is a user-initiated cancellation which should propagate.
-                _provider?.Dispose();
-                _provider = null;
-
-                if (connCts?.IsCancellationRequested == true)
-                {
-                    throw new TimeoutException(
-                        $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
-                        "Check network connectivity and environment URL.");
-                }
-
-                throw; // Re-throw user cancellation
-            }
-            catch (Exception ex)
-            {
-                _provider?.Dispose();
-                _provider = null;
-                throw new InvalidOperationException(
-                    $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
-            }
-            finally
-            {
-                connCts?.Dispose();
             }
         }
         finally
