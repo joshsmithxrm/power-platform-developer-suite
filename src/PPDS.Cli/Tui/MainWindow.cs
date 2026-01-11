@@ -72,6 +72,7 @@ internal sealed class MainWindow : Window
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("Switch _Profile...", "Select a different authentication profile", () => ShowProfileSelector()),
                 new("View Profile _Details...", "Show profile details (who am I)", () => ShowProfileDetails(), shortcut: Key.CtrlMask | Key.I),
+                new("Clear All _Profiles...", "Delete all profiles and credentials", () => ShowClearAllProfiles()),
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("_Quit", "Exit the application", () => RequestStop(), shortcut: Key.CtrlMask | Key.Q)
             }),
@@ -318,6 +319,60 @@ internal sealed class MainWindow : Window
     {
         var dialog = new ProfileDetailsDialog(_session);
         Application.Run(dialog);
+    }
+
+    private void ShowClearAllProfiles()
+    {
+        // Get profile count first
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
+        _ = ShowClearAllProfilesAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted && t.Exception != null)
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    MessageBox.ErrorQuery("Error",
+                        t.Exception.InnerException?.Message ?? t.Exception.Message,
+                        "OK");
+                });
+            }
+        }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+    }
+
+    private async Task ShowClearAllProfilesAsync()
+    {
+        var profileService = _session.GetProfileService();
+        var profiles = await profileService.GetProfilesAsync(CancellationToken.None);
+
+        if (profiles.Count == 0)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                MessageBox.Query("No Profiles", "There are no profiles to clear.", "OK");
+            });
+            return;
+        }
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            var dialog = new ClearAllProfilesDialog(profileService, profiles.Count);
+            Application.Run(dialog);
+
+            if (dialog.Cleared)
+            {
+                // All profiles cleared - reset TUI state
+                _profileName = null;
+                _environmentName = null;
+                _environmentUrl = null;
+                UpdateStatus();
+
+                MessageBox.Query("Profiles Cleared",
+                    "All profiles and credentials have been cleared.\n\n" +
+                    "Use File > Switch Profile to create a new profile.",
+                    "OK");
+            }
+        });
     }
 
     private void ShowEnvironmentSelector()
