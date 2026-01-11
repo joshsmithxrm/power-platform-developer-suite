@@ -5,7 +5,6 @@ Set up PPDS development environment on a new machine.
 ## Usage
 
 `/setup` - Interactive wizard
-`/setup --terminal` - Just install terminal profile
 `/setup --update` - Update existing installation
 
 ## What It Does
@@ -13,8 +12,9 @@ Set up PPDS development environment on a new machine.
 Interactive wizard that:
 1. Clones PPDS repositories
 2. Creates VS Code workspace
-3. Installs terminal helpers (`ppds`, `goto`, `ppdsw`)
-4. Configures Claude notifications and status line
+3. Configures Claude notifications and status line
+
+> **Note:** For terminal customization (Oh My Posh, eza, bat, etc.), see the separate [dotfiles repo](https://github.com/joshsmithxrm/dotfiles).
 
 ## Process
 
@@ -44,7 +44,6 @@ Multi-select:
 | Option | Description |
 |--------|-------------|
 | VS Code workspace | Create `ppds.code-workspace` file |
-| Terminal profile | Install `ppds`, `goto`, `ppdsw` commands |
 | Sound notification | Play Windows sound when Claude finishes |
 | Status line | Show directory and git branch in Claude UI |
 
@@ -82,19 +81,6 @@ Generate `{base}/ppds.code-workspace`:
 }
 ```
 Only include folders that were actually cloned.
-
-#### Install Terminal Profile (if selected)
-
-Run the installer script:
-```powershell
-& "{base}/ppds/scripts/Install-PpdsTerminalProfile.ps1" -PpdsBasePath "{base}"
-```
-
-This installs:
-- `ppds` - Runs CLI from current worktree
-- `goto` - Quick navigation to worktrees with tab completion
-- `ppdsw` - Open new terminal tabs/panes per worktree
-- Custom prompt showing `[worktree:branch]`
 
 #### Setup Sound Notification (if selected)
 
@@ -178,27 +164,13 @@ Repositories cloned:
 
 Developer tools configured:
   - VS Code workspace: {base}/ppds.code-workspace
-  - Terminal profile: ppds, goto, ppdsw commands installed
   - Sound notification: Plays when Claude finishes
   - Status line: Shows directory and git branch
 
 Next steps:
   - Open workspace: code "{base}/ppds.code-workspace"
-  - Restart terminal to load profile
   - Restart Claude Code for hooks/status line
-```
-
-## Terminal Profile Only
-
-If `/setup --terminal` is used, skip repository cloning and just run:
-
-```powershell
-& {path-to-ppds}\scripts\Install-PpdsTerminalProfile.ps1 -PpdsBasePath "{base}" -Force
-```
-
-Then reload:
-```powershell
-. $PROFILE
+  - For terminal customization: https://github.com/joshsmithxrm/dotfiles
 ```
 
 ## Idempotent Behavior
@@ -209,7 +181,6 @@ Then reload:
 | Folder exists, is git repo | `git pull` to update |
 | Folder exists, not git repo | Warn and skip |
 | Workspace file exists | Ask to overwrite or skip |
-| Terminal profile exists | Reinstall with `-Force` |
 | settings.json exists | Merge new config (don't overwrite) |
 
 ## Repository URLs
@@ -227,13 +198,11 @@ Then reload:
 - Setting up a new development machine
 - Adding a new developer to the project
 - Updating tools after changes (`--update`)
-- Reinstalling terminal profile (`--terminal`)
 
 ## Verification
 
 After setup, test:
 ```powershell
 cd {base}\ppds
-ppds --version
-goto  # Should show worktree list
+dotnet run --project src/PPDS.Cli -- --version
 ```
