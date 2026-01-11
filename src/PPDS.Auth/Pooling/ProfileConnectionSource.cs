@@ -27,6 +27,7 @@ public sealed class ProfileConnectionSource : IDisposable
     private readonly string _environmentUrl;
     private readonly string? _environmentDisplayName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private readonly ISecureCredentialStore? _credentialStore;
     private readonly Action<AuthProfile>? _onProfileUpdated;
     private readonly int _maxPoolSize;
@@ -64,6 +65,8 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="environmentUrl">The Dataverse environment URL.</param>
     /// <param name="maxPoolSize">Maximum pool size (default: 52 per Microsoft recommendations).</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="environmentDisplayName">Optional environment display name for connection naming.</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
@@ -72,6 +75,7 @@ public sealed class ProfileConnectionSource : IDisposable
         string environmentUrl,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         string? environmentDisplayName = null,
         ISecureCredentialStore? credentialStore = null,
         Action<AuthProfile>? onProfileUpdated = null)
@@ -84,6 +88,7 @@ public sealed class ProfileConnectionSource : IDisposable
         _environmentUrl = environmentUrl.TrimEnd('/');
         _maxPoolSize = maxPoolSize;
         _deviceCodeCallback = deviceCodeCallback;
+        _beforeInteractiveAuth = beforeInteractiveAuth;
         _environmentDisplayName = environmentDisplayName;
         _credentialStore = credentialStore;
         _onProfileUpdated = onProfileUpdated;
@@ -102,6 +107,8 @@ public sealed class ProfileConnectionSource : IDisposable
     /// <param name="profile">The authentication profile (must have environment set).</param>
     /// <param name="maxPoolSize">Maximum pool size.</param>
     /// <param name="deviceCodeCallback">Optional callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="credentialStore">Optional secure credential store for looking up secrets.</param>
     /// <param name="onProfileUpdated">Optional callback invoked when profile metadata is updated (e.g., HomeAccountId after auth).</param>
     /// <returns>A new connection source.</returns>
@@ -110,6 +117,7 @@ public sealed class ProfileConnectionSource : IDisposable
         AuthProfile profile,
         int maxPoolSize = 52,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         ISecureCredentialStore? credentialStore = null,
         Action<AuthProfile>? onProfileUpdated = null)
     {
@@ -128,6 +136,7 @@ public sealed class ProfileConnectionSource : IDisposable
             profile.Environment!.Url,
             maxPoolSize,
             deviceCodeCallback,
+            beforeInteractiveAuth,
             profile.Environment.DisplayName,
             credentialStore,
             onProfileUpdated);
@@ -157,26 +166,27 @@ public sealed class ProfileConnectionSource : IDisposable
             // Wrap in Task.Run to avoid deadlock in sync contexts (UI/ASP.NET)
             // by running async code on threadpool which has no sync context.
             // Add timeout to fail fast if credential store is unresponsive.
+            using var credCts = new CancellationTokenSource(CredentialProviderTimeout);
             try
             {
-                using var credCts = new CancellationTokenSource(CredentialProviderTimeout);
                 _provider = System.Threading.Tasks.Task.Run(() =>
-                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, credCts.Token))
+                    CredentialProviderFactory.CreateAsync(_profile, _credentialStore, _deviceCodeCallback, _beforeInteractiveAuth, credCts.Token))
                     .WaitAsync(credCts.Token)
                     .GetAwaiter()
                     .GetResult();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (credCts.IsCancellationRequested)
             {
                 throw new TimeoutException(
                     $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
                     "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
             }
+            // OperationCanceledException without filter match = user cancellation, propagates naturally
 
+            // Create ServiceClient with timeout to fail fast if Dataverse is unreachable.
+            using var connCts = new CancellationTokenSource(ConnectionTimeout);
             try
             {
-                // Create ServiceClient with timeout to fail fast if Dataverse is unreachable.
-                using var connCts = new CancellationTokenSource(ConnectionTimeout);
                 _seedClient = System.Threading.Tasks.Task.Run(() =>
                     _provider.CreateServiceClientAsync(_environmentUrl, connCts.Token))
                     .WaitAsync(connCts.Token)
@@ -189,90 +199,20 @@ public sealed class ProfileConnectionSource : IDisposable
 
                 return _seedClient;
             }
+            catch (OperationCanceledException) when (connCts.IsCancellationRequested)
+            {
+                _provider?.Dispose();
+                _provider = null;
+                throw new TimeoutException(
+                    $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
+                    "Check network connectivity and environment URL.");
+            }
             catch (OperationCanceledException)
             {
+                // User cancellation (e.g., declined auth dialog) - clean up and propagate
                 _provider?.Dispose();
                 _provider = null;
-                throw new TimeoutException(
-                    $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
-                    "Check network connectivity and environment URL.");
-            }
-            catch (Exception ex)
-            {
-                _provider?.Dispose();
-                _provider = null;
-                throw new InvalidOperationException(
-                    $"Failed to create connection for profile '{_profile.DisplayIdentifier}': {ex.Message}", ex);
-            }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Gets the seed ServiceClient asynchronously.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An authenticated, ready-to-use ServiceClient.</returns>
-    public async System.Threading.Tasks.Task<ServiceClient> GetSeedClientAsync(
-        CancellationToken cancellationToken = default)
-    {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(ProfileConnectionSource));
-
-        // Fast path if already created (volatile read)
-        if (_seedClient != null)
-            return _seedClient;
-
-        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            // Double-check after acquiring lock
-            if (_seedClient != null)
-                return _seedClient;
-
-            // Create credential provider with timeout to fail fast if credential store is unresponsive
-            try
-            {
-                using var credCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                credCts.CancelAfter(CredentialProviderTimeout);
-
-                _provider = await CredentialProviderFactory.CreateAsync(
-                    _profile, _credentialStore, _deviceCodeCallback, credCts.Token)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException(
-                    $"Credential provider creation timed out after {CredentialProviderTimeout.TotalSeconds}s for profile '{_profile.DisplayIdentifier}'. " +
-                    "This may indicate credential store issues. Set PPDS_SPN_SECRET or PPDS_TEST_CLIENT_SECRET environment variable to bypass.");
-            }
-
-            try
-            {
-                // Create ServiceClient with timeout to fail fast if Dataverse is unreachable
-                using var connCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                connCts.CancelAfter(ConnectionTimeout);
-
-                _seedClient = await _provider
-                    .CreateServiceClientAsync(_environmentUrl, connCts.Token)
-                    .ConfigureAwait(false);
-
-                // Persist HomeAccountId if it changed after authentication
-                // This enables token cache reuse across sessions
-                TryUpdateHomeAccountId();
-
-                return _seedClient;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                _provider?.Dispose();
-                _provider = null;
-                throw new TimeoutException(
-                    $"Connection to Dataverse timed out after {ConnectionTimeout.TotalSeconds}s for '{_environmentUrl}'. " +
-                    "Check network connectivity and environment URL.");
+                throw;
             }
             catch (Exception ex)
             {

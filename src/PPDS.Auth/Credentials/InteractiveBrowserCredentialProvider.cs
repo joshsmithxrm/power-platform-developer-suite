@@ -24,6 +24,8 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     private readonly string? _tenantId;
     private readonly string? _username;
     private readonly string? _homeAccountId;
+    private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
+    private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
@@ -61,30 +63,46 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     /// <param name="tenantId">Optional tenant ID (defaults to "organizations" for multi-tenant).</param>
     /// <param name="username">Optional username for silent auth lookup.</param>
     /// <param name="homeAccountId">Optional MSAL home account identifier for precise account lookup.</param>
+    /// <param name="deviceCodeCallback">Optional callback for device code display (used for device code fallback).</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before opening browser for auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).
+    /// The callback receives a device code callback to use if device code is selected.</param>
     public InteractiveBrowserCredentialProvider(
         CloudEnvironment cloud = CloudEnvironment.Public,
         string? tenantId = null,
         string? username = null,
-        string? homeAccountId = null)
+        string? homeAccountId = null,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
     {
         _cloud = cloud;
         _tenantId = tenantId;
         _username = username;
         _homeAccountId = homeAccountId;
+        _deviceCodeCallback = deviceCodeCallback;
+        _beforeInteractiveAuth = beforeInteractiveAuth;
     }
 
     /// <summary>
     /// Creates a provider from an auth profile.
     /// </summary>
     /// <param name="profile">The auth profile.</param>
+    /// <param name="deviceCodeCallback">Optional callback for device code display (used for device code fallback).</param>
+    /// <param name="beforeInteractiveAuth">Optional callback invoked before opening browser for auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <returns>A new provider instance.</returns>
-    public static InteractiveBrowserCredentialProvider FromProfile(AuthProfile profile)
+    public static InteractiveBrowserCredentialProvider FromProfile(
+        AuthProfile profile,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
     {
         return new InteractiveBrowserCredentialProvider(
             profile.Cloud,
             profile.TenantId,
             profile.Username,
-            profile.HomeAccountId);
+            profile.HomeAccountId,
+            deviceCodeCallback,
+            beforeInteractiveAuth);
     }
 
     /// <summary>
@@ -232,6 +250,29 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
         // Interactive browser authentication
         AuthDebugLog.WriteLine("  Starting interactive browser authentication...");
+
+        // Invoke callback before opening browser (allows TUI to show dialog)
+        if (_beforeInteractiveAuth != null)
+        {
+            var dialogResult = _beforeInteractiveAuth(_deviceCodeCallback);
+            AuthDebugLog.WriteLine($"  Pre-auth dialog result: {dialogResult}");
+
+            switch (dialogResult)
+            {
+                case PreAuthDialogResult.Cancel:
+                    throw new OperationCanceledException("Authentication was declined by the user.");
+
+                case PreAuthDialogResult.UseDeviceCode:
+                    AuthDebugLog.WriteLine("  User selected device code fallback");
+                    return await GetTokenViaDeviceCodeAsync(environmentUrl, cancellationToken)
+                        .ConfigureAwait(false);
+
+                case PreAuthDialogResult.OpenBrowser:
+                    // Continue with browser auth below
+                    break;
+            }
+        }
+
         AuthenticationOutput.WriteLine();
         AuthenticationOutput.WriteLine("Opening browser for authentication...");
 
@@ -249,6 +290,49 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             throw new OperationCanceledException("Authentication was canceled by the user.", ex);
         }
 
+        AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
+        AuthenticationOutput.WriteLine();
+
+        return _cachedResult.AccessToken;
+    }
+
+    /// <summary>
+    /// Gets a token using device code flow as a fallback.
+    /// Called when user selects "Use Device Code" in the pre-auth dialog.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<string> GetTokenViaDeviceCodeAsync(string environmentUrl, CancellationToken cancellationToken)
+    {
+        if (_deviceCodeCallback == null)
+        {
+            throw new InvalidOperationException(
+                "Device code fallback requested but no device code callback was provided.");
+        }
+
+        var scopes = new[] { $"{environmentUrl}/.default" };
+
+        AuthDebugLog.WriteLine("  Starting device code authentication (fallback)...");
+
+        // Use device code flow with the provided callback
+        _cachedResult = await _msalClient!
+            .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
+            {
+                // Convert MSAL's DeviceCodeResult to our DeviceCodeInfo
+                var info = new DeviceCodeInfo(
+                    deviceCodeResult.UserCode,
+                    deviceCodeResult.VerificationUrl,
+                    deviceCodeResult.Message);
+
+                // Invoke the callback to display the code to the user
+                _deviceCodeCallback(info);
+
+                return Task.CompletedTask;
+            })
+            .ExecuteAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        AuthDebugLog.WriteLine($"  Device code authentication succeeded: {_cachedResult.Account.Username}");
         AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
         AuthenticationOutput.WriteLine();
 

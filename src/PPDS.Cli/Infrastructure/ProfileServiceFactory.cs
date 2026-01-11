@@ -54,6 +54,8 @@ public static class ProfileServiceFactory
     /// <param name="verbose">Enable verbose logging.</param>
     /// <param name="debug">Enable debug logging.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured service provider.</returns>
     public static async Task<ServiceProvider> CreateFromProfileAsync(
@@ -62,6 +64,7 @@ public static class ProfileServiceFactory
         bool verbose = false,
         bool debug = false,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
         var store = new ProfileStore();
@@ -112,7 +115,7 @@ public static class ProfileServiceFactory
         };
 
         var source = new ProfileConnectionSource(
-            profile, envUrl, 52, deviceCodeCallback, envDisplayName, credentialStore, onProfileUpdated);
+            profile, envUrl, 52, deviceCodeCallback, beforeInteractiveAuth, envDisplayName, credentialStore, onProfileUpdated);
         var adapter = new ProfileConnectionSourceAdapter(source);
 
         var connectionInfo = new ResolvedConnectionInfo
@@ -189,7 +192,7 @@ public static class ProfileServiceFactory
             return await CreateFromProfileAsync(
                 names.Count == 0 ? null : names[0],
                 environmentOverride, verbose, debug, deviceCodeCallback,
-                cancellationToken)
+                beforeInteractiveAuth: null, cancellationToken)
                 .ConfigureAwait(false);
         }
 

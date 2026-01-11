@@ -18,11 +18,14 @@ public interface IServiceProviderFactory
     /// <param name="profileName">Profile name (null for active profile).</param>
     /// <param name="environmentUrl">The environment URL to connect to.</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
+    /// <param name="beforeInteractiveAuth">Callback invoked before browser opens for interactive auth.
+    /// Returns the user's choice (OpenBrowser, UseDeviceCode, or Cancel).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured service provider with connection pool.</returns>
     Task<ServiceProvider> CreateAsync(
         string? profileName,
         string environmentUrl,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default);
 }

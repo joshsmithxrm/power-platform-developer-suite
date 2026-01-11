@@ -101,7 +101,7 @@ public sealed class EnvironmentResolutionService : IDisposable
 
             // Create credential provider using async factory (supports secure store lookups)
             _credentialProvider ??= await CredentialProviderFactory.CreateAsync(
-                _profile, _credentialStore, _deviceCodeCallback, cancellationToken)
+                _profile, _credentialStore, _deviceCodeCallback, beforeInteractiveAuth: null, cancellationToken)
                 .ConfigureAwait(false);
 
             // Connect to Dataverse and get org metadata

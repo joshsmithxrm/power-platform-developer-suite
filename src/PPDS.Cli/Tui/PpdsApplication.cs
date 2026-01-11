@@ -43,8 +43,43 @@ internal sealed class PpdsApplication : IDisposable
         // Create shared ProfileStore singleton for all local services
         _profileStore = new ProfileStore();
 
+        // Callback invoked before browser opens for interactive authentication.
+        // Shows a dialog giving user control: Open Browser, Use Device Code, or Cancel.
+        // Note: This callback is always invoked from a background thread (Task.Run in GetSeedClient),
+        // so we always marshal to the UI thread via MainLoop.Invoke.
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult> beforeInteractiveAuth = (deviceCodeCallback) =>
+        {
+            // Terminal.Gui not yet initialized - default to browser auth
+            if (Application.MainLoop == null)
+            {
+                TuiDebugLog.Log("Interactive auth triggered before TUI initialized - browser will open");
+                return PreAuthDialogResult.OpenBrowser;
+            }
+
+            // Marshal to UI thread and wait for dialog result
+            // Default to Cancel for fail-safe if dialog throws unexpectedly
+            var result = PreAuthDialogResult.Cancel;
+            using var waitHandle = new ManualResetEventSlim(false);
+            Application.MainLoop.Invoke(() =>
+            {
+                try
+                {
+                    var dialog = new Dialogs.PreAuthenticationDialog(deviceCodeCallback);
+                    Application.Run(dialog);
+                    result = dialog.Result;
+                    TuiDebugLog.Log($"Pre-auth dialog result: {result}");
+                }
+                finally
+                {
+                    waitHandle.Set();
+                }
+            });
+            waitHandle.Wait();
+            return result;
+        };
+
         // Create session for connection pool reuse across screens
-        _session = new InteractiveSession(_profileName, _profileStore, serviceProviderFactory: null, _deviceCodeCallback);
+        _session = new InteractiveSession(_profileName, _profileStore, serviceProviderFactory: null, _deviceCodeCallback, beforeInteractiveAuth);
 
         // Start warming the connection pool in the background
         // This runs while Terminal.Gui initializes, so connection is ready faster

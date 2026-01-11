@@ -667,8 +667,9 @@ namespace PPDS.Dataverse.Pooling
 
                         break; // Success
                     }
-                    catch (Exception ex) when (attempt < maxAttempts)
+                    catch (Exception ex) when (attempt < maxAttempts && ex is not OperationCanceledException)
                     {
+                        // Don't retry on user cancellation (OperationCanceledException) - let it propagate
                         lastException = ex;
                         // Use DEBUG for intermediate retries to reduce log noise
                         _logger.LogDebug(ex,
@@ -677,6 +678,11 @@ namespace PPDS.Dataverse.Pooling
 
                         // Exponential backoff: 1s, 2s
                         Thread.Sleep(1000 * attempt);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // User cancellation - don't retry, propagate immediately
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -980,6 +986,11 @@ namespace PPDS.Dataverse.Pooling
                         DiscoveredDop = dop
                     });
                 }
+                catch (OperationCanceledException)
+                {
+                    // User cancellation - propagate to stop pool initialization
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     var (reason, message) = ClassifyFailure(ex);
@@ -1065,6 +1076,11 @@ namespace PPDS.Dataverse.Pooling
                     {
                         var client = CreateNewConnection(source.Name);
                         pool.Enqueue(client);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // User cancellation - propagate to stop warming
+                        throw;
                     }
                     catch (Exception ex)
                     {
