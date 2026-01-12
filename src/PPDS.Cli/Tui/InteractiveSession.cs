@@ -122,49 +122,16 @@ internal sealed class InteractiveSession : IAsyncDisposable
         if (profile?.Environment?.Url != null)
         {
             _currentEnvironmentDisplayName = profile.Environment.DisplayName;
-            TuiDebugLog.Log($"Warming connection to {profile.Environment.DisplayName} ({profile.Environment.Url})");
+            TuiDebugLog.Log($"Environment configured: {profile.Environment.DisplayName} ({profile.Environment.Url}) - will connect on first query");
 
-            // Fire-and-forget warming - don't block TUI startup
-            // Errors are logged but don't prevent TUI from starting
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = WarmPoolAsync(profile.Environment.Url, cancellationToken)
-                .ContinueWith(t =>
-                {
-                    if (t.IsFaulted)
-                    {
-                        TuiDebugLog.Log($"Warm failed: {t.Exception?.InnerException?.Message}");
-                    }
-                    else
-                    {
-                        TuiDebugLog.Log("Connection pool warmed successfully");
-                        EnvironmentChanged?.Invoke(profile.Environment.Url, profile.Environment.DisplayName);
-                    }
-                }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            // Notify listeners of initial environment (but don't connect yet - lazy loading)
+            // Connection/auth will happen when user runs their first query
+            EnvironmentChanged?.Invoke(profile.Environment.Url, profile.Environment.DisplayName);
         }
         else
         {
-            TuiDebugLog.Log("No environment configured - skipping connection warming");
+            TuiDebugLog.Log("No environment configured - user will select environment manually");
         }
-    }
-
-    /// <summary>
-    /// Actually warms the connection pool by initializing all seed connections.
-    /// This triggers authentication (if needed) during TUI startup rather than first query.
-    /// </summary>
-    /// <param name="environmentUrl">The environment URL to warm.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    private async Task WarmPoolAsync(string environmentUrl, CancellationToken cancellationToken)
-    {
-        TuiDebugLog.Log($"Warming pool (triggering auth if needed) for {environmentUrl}");
-
-        var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken)
-            .ConfigureAwait(false);
-
-        var pool = provider.GetRequiredService<IDataverseConnectionPool>();
-        await pool.EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
-        TuiDebugLog.Log("Pool warmed - seeds initialized");
     }
 
     /// <summary>
