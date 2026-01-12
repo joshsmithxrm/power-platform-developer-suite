@@ -117,14 +117,9 @@ public static class GetCommand
     {
         PluginAssemblyInfo? assembly;
 
-        if (Guid.TryParse(nameOrId, out var id))
-        {
-            assembly = await registrationService.GetAssemblyByIdAsync(id, cancellationToken);
-        }
-        else
-        {
-            assembly = await registrationService.GetAssemblyByNameAsync(nameOrId, cancellationToken);
-        }
+        assembly = Guid.TryParse(nameOrId, out var id)
+            ? await registrationService.GetAssemblyByIdAsync(id, cancellationToken)
+            : await registrationService.GetAssemblyByNameAsync(nameOrId, cancellationToken);
 
         if (assembly == null)
         {
@@ -137,14 +132,15 @@ public static class GetCommand
             return ExitCodes.NotFoundError;
         }
 
-        // Get counts of related entities
+        // Get counts of related entities (parallelized to avoid N+1 queries)
         var types = await registrationService.ListTypesForAssemblyAsync(assembly.Id, cancellationToken);
-        var stepCount = 0;
-        foreach (var type in types)
+        var stepCountTasks = types.Select(async type =>
         {
             var steps = await registrationService.ListStepsForTypeAsync(type.Id, null, cancellationToken);
-            stepCount += steps.Count;
-        }
+            return steps.Count;
+        });
+        var stepCounts = await Task.WhenAll(stepCountTasks);
+        var stepCount = stepCounts.Sum();
 
         if (globalOptions.IsJsonMode)
         {
@@ -196,14 +192,9 @@ public static class GetCommand
     {
         PluginPackageInfo? package;
 
-        if (Guid.TryParse(nameOrId, out var id))
-        {
-            package = await registrationService.GetPackageByIdAsync(id, cancellationToken);
-        }
-        else
-        {
-            package = await registrationService.GetPackageByNameAsync(nameOrId, cancellationToken);
-        }
+        package = Guid.TryParse(nameOrId, out var id)
+            ? await registrationService.GetPackageByIdAsync(id, cancellationToken)
+            : await registrationService.GetPackageByNameAsync(nameOrId, cancellationToken);
 
         if (package == null)
         {
@@ -216,20 +207,17 @@ public static class GetCommand
             return ExitCodes.NotFoundError;
         }
 
-        // Get counts of related entities
+        // Get counts of related entities (parallelized to avoid N+1 queries)
         var assemblies = await registrationService.ListAssembliesForPackageAsync(package.Id, cancellationToken);
-        var typeCount = 0;
-        var stepCount = 0;
-        foreach (var assembly in assemblies)
-        {
-            var types = await registrationService.ListTypesForAssemblyAsync(assembly.Id, cancellationToken);
-            typeCount += types.Count;
-            foreach (var type in types)
-            {
-                var steps = await registrationService.ListStepsForTypeAsync(type.Id, null, cancellationToken);
-                stepCount += steps.Count;
-            }
-        }
+        var listTypesTasks = assemblies.Select(assembly => registrationService.ListTypesForAssemblyAsync(assembly.Id, cancellationToken));
+        var typesPerAssembly = await Task.WhenAll(listTypesTasks);
+        var allTypes = typesPerAssembly.SelectMany(t => t).ToList();
+
+        var listStepsTasks = allTypes.Select(type => registrationService.ListStepsForTypeAsync(type.Id, null, cancellationToken));
+        var stepsPerType = await Task.WhenAll(listStepsTasks);
+
+        var typeCount = allTypes.Count;
+        var stepCount = stepsPerType.Sum(s => s.Count);
 
         if (globalOptions.IsJsonMode)
         {
@@ -485,6 +473,8 @@ public static class GetCommand
 
     private static void WritePropertyTable(Dictionary<string, string?> properties)
     {
+        if (properties.Count == 0) return;
+
         var maxKeyLength = properties.Keys.Max(k => k.Length);
 
         foreach (var kvp in properties)

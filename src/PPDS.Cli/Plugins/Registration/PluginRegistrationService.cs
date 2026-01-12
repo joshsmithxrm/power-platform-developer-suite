@@ -487,7 +487,6 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginAssembly.Fields.Name,
                 PluginAssembly.Fields.Version,
                 PluginAssembly.Fields.PublicKeyToken,
-                PluginAssembly.Fields.Culture,
                 PluginAssembly.Fields.IsolationMode,
                 PluginAssembly.Fields.SourceType,
                 PluginAssembly.Fields.IsManaged,
