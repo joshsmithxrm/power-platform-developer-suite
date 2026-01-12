@@ -300,7 +300,8 @@ internal sealed class ProfileSelectorDialog : Dialog
         {
             X = 12,
             Y = 1,
-            Width = Dim.Fill() - 2
+            Width = Dim.Fill() - 2,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         var okButton = new Button("_OK")

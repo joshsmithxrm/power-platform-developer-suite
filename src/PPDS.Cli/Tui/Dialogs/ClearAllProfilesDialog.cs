@@ -102,7 +102,8 @@ internal sealed class ClearAllProfilesDialog : Dialog
         {
             X = 2,
             Y = 12,
-            Width = 10
+            Width = 10,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         // Buttons

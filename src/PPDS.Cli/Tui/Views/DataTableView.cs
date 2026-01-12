@@ -132,7 +132,8 @@ internal class DataTableView : FrameView
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
-                Height = 1
+                Height = 1,
+                ColorScheme = Infrastructure.TuiColorPalette.TextInput
             };
             _filterField.TextChanged += OnFilterTextChanged;
             _filterFrame.Add(_filterField);

@@ -48,7 +48,8 @@ internal sealed class QueryHistoryDialog : Dialog
         {
             X = Pos.Right(searchLabel) + 1,
             Y = 1,
-            Width = Dim.Fill() - 2
+            Width = Dim.Fill() - 2,
+            ColorScheme = TuiColorPalette.TextInput
         };
         _searchField.TextChanged += OnSearchChanged;
 

@@ -43,6 +43,19 @@ public static class TuiColorPalette
         Disabled = MakeAttr(Color.DarkGray, Color.Black)
     };
 
+    /// <summary>
+    /// Color scheme for text input fields (TextField).
+    /// High contrast focus state for clear cursor visibility.
+    /// </summary>
+    public static ColorScheme TextInput => new()
+    {
+        Normal = MakeAttr(Color.White, Color.Black),
+        Focus = MakeAttr(Color.Black, Color.BrightCyan),
+        HotNormal = MakeAttr(Color.Cyan, Color.Black),
+        HotFocus = MakeAttr(Color.Black, Color.BrightCyan),
+        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+    };
+
     #endregion
 
     #region Status Bar - Environment-Aware

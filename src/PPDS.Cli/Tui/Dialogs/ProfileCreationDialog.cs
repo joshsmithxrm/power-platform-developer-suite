@@ -81,7 +81,8 @@ internal sealed class ProfileCreationDialog : Dialog
             X = 16,
             Y = 1,
             Width = Dim.Fill() - 3,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         // Auth method dropdown
@@ -119,7 +120,8 @@ internal sealed class ProfileCreationDialog : Dialog
             X = 17,
             Y = 5,
             Width = Dim.Fill() - 24,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
         _discoverButton = new Button("Discover...")
         {
@@ -148,7 +150,8 @@ internal sealed class ProfileCreationDialog : Dialog
             X = 15,
             Y = 0,
             Width = Dim.Fill() - 2,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         var tenantLabel = new Label("Tenant ID:")
@@ -161,7 +164,8 @@ internal sealed class ProfileCreationDialog : Dialog
             X = 15,
             Y = 2,
             Width = Dim.Fill() - 2,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         _secretLabel = new Label("Client Secret:")
@@ -175,7 +179,8 @@ internal sealed class ProfileCreationDialog : Dialog
             Y = 4,
             Width = Dim.Fill() - 2,
             Secret = true,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         _certPathLabel = new Label("Cert Path:")
@@ -190,7 +195,8 @@ internal sealed class ProfileCreationDialog : Dialog
             Y = 4,
             Width = Dim.Fill() - 2,
             Text = string.Empty,
-            Visible = false
+            Visible = false,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         _certPwdLabel = new Label("Cert Password:")
@@ -206,7 +212,8 @@ internal sealed class ProfileCreationDialog : Dialog
             Width = Dim.Fill() - 2,
             Secret = true,
             Text = string.Empty,
-            Visible = false
+            Visible = false,
+            ColorScheme = TuiColorPalette.TextInput
         };
 
         _spnFrame.Add(appIdLabel, _appIdField, tenantLabel, _tenantIdField,

@@ -67,7 +67,8 @@ internal sealed class EnvironmentSelectorDialog : Dialog
         {
             X = Pos.Right(filterLabel) + 1,
             Y = 1,
-            Width = Dim.Fill() - 2
+            Width = Dim.Fill() - 2,
+            ColorScheme = TuiColorPalette.TextInput
         };
         _filterField.TextChanged += OnFilterChanged;
 
@@ -106,7 +107,8 @@ internal sealed class EnvironmentSelectorDialog : Dialog
             X = Pos.Right(urlLabel) + 1,
             Y = Pos.Bottom(listFrame) + 1,
             Width = Dim.Fill() - 3,
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = TuiColorPalette.TextInput
         };
         _urlField.TextChanged += OnUrlChanged;
 

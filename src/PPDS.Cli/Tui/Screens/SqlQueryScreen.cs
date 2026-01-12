@@ -83,7 +83,8 @@ internal sealed class SqlQueryScreen : Window
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = 1
+            Height = 1,
+            ColorScheme = TuiColorPalette.TextInput
         };
         _filterField.TextChanged += OnFilterChanged;
         _filterFrame.Add(_filterField);
