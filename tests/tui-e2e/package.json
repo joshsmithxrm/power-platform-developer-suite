@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "End-to-end visual tests for PPDS TUI using tui-test",
   "private": true,
+  "type": "module",
   "scripts": {
-    "test": "npx playwright test",
-    "test:update": "npx playwright test --update-snapshots",
-    "test:headed": "npx playwright test --headed"
+    "test": "npx @microsoft/tui-test",
+    "test:update": "npx @microsoft/tui-test --updateSnapshot",
+    "test:headed": "npx @microsoft/tui-test"
   },
   "devDependencies": {
     "@microsoft/tui-test": "^0.0.1-rc.5",

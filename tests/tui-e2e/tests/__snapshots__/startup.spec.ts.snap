@@ -1,0 +1,37 @@
+// TUI Test Snapshot v1
+
+exports[`Startup Flow › launches and displays main menu | 1`] = String.raw`
+╭────────────────────────────────────────────────────────────────────────────────╮
+│┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
+││ File  Tools  Help                                                            ││
+││┌ Main Menu ─────────────────────────────────────────────────────────────────┐││
+│││                                                                            │││
+│││  Welcome to PPDS Interactive Mode                                          │││
+│││                                                                            │││
+│││  Select an option from the menu or use keyboard shortcuts:                 │││
+│││                                                                            │││
+│││  [ SQL Query (F2) ]                                                        │││
+│││                                                                            │││
+│││  [ Data Migration (Coming Soon) ]                                          │││
+│││                                                                            │││
+│││                                                                            │││
+│││  [ Quit (Ctrl+Q) ]                                                         │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+│││                                                                            │││
+││└────────────────────────────────────────────────────────────────────────────┘││
+││[  Profile: None (josh@powerplatformdevelopersuite.onmicrosoft.com) ▼ ][  Envi││
+│└──────────────────────────────────────────────────────────────────────────────┘│
+╰────────────────────────────────────────────────────────────────────────────────╯
+`;
+
