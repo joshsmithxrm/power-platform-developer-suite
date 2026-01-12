@@ -182,4 +182,159 @@ public class CredentialProviderFactoryTests
     {
         CredentialProviderFactory.TestClientSecretEnvVar.Should().Be("PPDS_TEST_CLIENT_SECRET");
     }
+
+    #region GetSpnSecretFromEnvironment Tests
+
+    [Fact]
+    public void GetSpnSecretFromEnvironment_WhenSpnSecretSet_ReturnsSpnSecret()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, "spn-secret-value");
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+
+            var result = CredentialProviderFactory.GetSpnSecretFromEnvironment();
+
+            result.Should().Be("spn-secret-value");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+        }
+    }
+
+    [Fact]
+    public void GetSpnSecretFromEnvironment_WhenTestClientSecretSet_ReturnsTestClientSecret()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, "test-secret-value");
+
+            var result = CredentialProviderFactory.GetSpnSecretFromEnvironment();
+
+            result.Should().Be("test-secret-value");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+        }
+    }
+
+    [Fact]
+    public void GetSpnSecretFromEnvironment_WhenBothSet_PrefersSspnSecret()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, "spn-secret-value");
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, "test-secret-value");
+
+            var result = CredentialProviderFactory.GetSpnSecretFromEnvironment();
+
+            result.Should().Be("spn-secret-value", because: "PPDS_SPN_SECRET takes precedence over PPDS_TEST_CLIENT_SECRET");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+        }
+    }
+
+    [Fact]
+    public void GetSpnSecretFromEnvironment_WhenNeitherSet_ReturnsNull()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+
+            var result = CredentialProviderFactory.GetSpnSecretFromEnvironment();
+
+            result.Should().BeNull();
+        }
+        finally
+        {
+            // No cleanup needed
+        }
+    }
+
+    #endregion
+
+    #region ShouldBypassCredentialStore Tests
+
+    [Fact]
+    public void ShouldBypassCredentialStore_WhenSpnSecretSet_ReturnsTrue()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, "any-value");
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+
+            var result = CredentialProviderFactory.ShouldBypassCredentialStore();
+
+            result.Should().BeTrue();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+        }
+    }
+
+    [Fact]
+    public void ShouldBypassCredentialStore_WhenTestClientSecretSet_ReturnsTrue()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, "any-value");
+
+            var result = CredentialProviderFactory.ShouldBypassCredentialStore();
+
+            result.Should().BeTrue();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+        }
+    }
+
+    [Fact]
+    public void ShouldBypassCredentialStore_WhenNeitherSet_ReturnsFalse()
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+
+            var result = CredentialProviderFactory.ShouldBypassCredentialStore();
+
+            result.Should().BeFalse();
+        }
+        finally
+        {
+            // No cleanup needed
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ShouldBypassCredentialStore_WhenSetToEmptyOrWhitespace_ReturnsFalse(string value)
+    {
+        try
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, value);
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.TestClientSecretEnvVar, null);
+
+            var result = CredentialProviderFactory.ShouldBypassCredentialStore();
+
+            result.Should().BeFalse(because: "empty or whitespace values should not trigger bypass");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, null);
+        }
+    }
+
+    #endregion
 }
