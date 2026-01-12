@@ -18,6 +18,8 @@ internal sealed class SqlQueryScreen : Window
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession _session;
     private readonly ITuiErrorService _errorService;
+    private readonly IHotkeyRegistry _hotkeyRegistry;
+    private readonly List<IDisposable> _hotkeyRegistrations = new();
 
     private readonly TextView _queryInput;
     private readonly QueryResultsTableView _resultsTable;
@@ -37,6 +39,10 @@ internal sealed class SqlQueryScreen : Window
         _deviceCodeCallback = deviceCodeCallback;
         _session = session;
         _errorService = session.GetErrorService();
+        _hotkeyRegistry = session.GetHotkeyRegistry();
+
+        // Mark this screen as active for screen-scope hotkeys
+        _hotkeyRegistry.SetActiveScreen(this);
 
         Title = "SQL Query";
         X = 0;
@@ -211,9 +217,25 @@ internal sealed class SqlQueryScreen : Window
 
     private void SetupKeyboardShortcuts()
     {
+        // Register screen-scope hotkeys via registry
+        // These only work on this screen when no dialog is open
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.E,
+            HotkeyScope.Screen,
+            "Export results",
+            ShowExportDialog,
+            owner: this));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.H,
+            HotkeyScope.Screen,
+            "Query history",
+            ShowHistoryDialog,
+            owner: this));
+
+        // Component-specific: Ctrl+Enter in query input
         _queryInput.KeyPress += (e) =>
         {
-            // Ctrl+Enter to execute
             if (e.KeyEvent.Key == (Key.CtrlMask | Key.Enter))
             {
                 _ = ExecuteQueryAsync();
@@ -221,6 +243,7 @@ internal sealed class SqlQueryScreen : Window
             }
         };
 
+        // Context-dependent shortcuts that need local state checks
         KeyPress += (e) =>
         {
             switch (e.KeyEvent.Key)
@@ -243,16 +266,6 @@ internal sealed class SqlQueryScreen : Window
                         ShowFilter();
                         e.Handled = true;
                     }
-                    break;
-
-                case Key.CtrlMask | Key.E:
-                    ShowExportDialog();
-                    e.Handled = true;
-                    break;
-
-                case Key.CtrlMask | Key.H:
-                    ShowHistoryDialog();
-                    e.Handled = true;
                     break;
             }
         };
@@ -479,5 +492,26 @@ internal sealed class SqlQueryScreen : Window
                 _statusBar.SetStatusMessage("Query loaded from history. Press Ctrl+Enter to execute.");
             }
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // Unregister screen hotkeys
+            foreach (var registration in _hotkeyRegistrations)
+            {
+                registration.Dispose();
+            }
+            _hotkeyRegistrations.Clear();
+
+            // Clear active screen (MainWindow will set itself when it regains focus)
+            _hotkeyRegistry.SetActiveScreen(null);
+
+            // Unsubscribe from session events
+            _session.EnvironmentChanged -= OnEnvironmentChanged;
+        }
+
+        base.Dispose(disposing);
     }
 }

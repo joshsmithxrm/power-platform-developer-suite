@@ -104,7 +104,7 @@ internal sealed class ErrorDetailsDialog : Dialog
         };
         clearButton.Clicked += OnClearClicked;
 
-        var closeButton = new Button("Clos_e")
+        var closeButton = new Button("Cl_ose")
         {
             X = Pos.AnchorEnd(12),
             Y = Pos.AnchorEnd(1)

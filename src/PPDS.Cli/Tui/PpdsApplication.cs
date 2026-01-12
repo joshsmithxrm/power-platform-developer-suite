@@ -104,6 +104,13 @@ internal sealed class PpdsApplication : IDisposable
 
         Application.Init();
 
+        // Wire up global key interception via HotkeyRegistry
+        // This intercepts ALL keys before any view processes them
+        Application.RootKeyEvent += (keyEvent) =>
+        {
+            return _session?.GetHotkeyRegistry().TryHandle(keyEvent) == true;
+        };
+
         try
         {
             var mainWindow = new MainWindow(_profileName, _deviceCodeCallback, _session);

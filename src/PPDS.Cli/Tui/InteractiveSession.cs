@@ -45,6 +45,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string? _currentEnvironmentDisplayName;
     private bool _disposed;
     private ITuiErrorService? _errorService;
+    private IHotkeyRegistry? _hotkeyRegistry;
 
     /// <summary>
     /// Event raised when the environment changes (either via initialization or explicit switch).
@@ -469,6 +470,16 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public ITuiErrorService GetErrorService()
     {
         return _errorService ??= new TuiErrorService();
+    }
+
+    /// <summary>
+    /// Gets the hotkey registry for centralized keyboard shortcut management.
+    /// The registry is lazily created and shared across the session lifetime.
+    /// </summary>
+    /// <returns>The hotkey registry.</returns>
+    public IHotkeyRegistry GetHotkeyRegistry()
+    {
+        return _hotkeyRegistry ??= new HotkeyRegistry();
     }
 
     #endregion

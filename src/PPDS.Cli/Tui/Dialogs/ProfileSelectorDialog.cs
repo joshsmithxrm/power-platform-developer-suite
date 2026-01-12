@@ -13,6 +13,7 @@ internal sealed class ProfileSelectorDialog : Dialog
 {
     private readonly IProfileService _profileService;
     private readonly InteractiveSession? _session;
+    private readonly IHotkeyRegistry? _hotkeyRegistry;
     private readonly ListView _listView;
     private readonly Label _detailLabel;
     private readonly TuiSpinner _spinner;
@@ -46,6 +47,10 @@ internal sealed class ProfileSelectorDialog : Dialog
     {
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
         _session = session;
+        _hotkeyRegistry = session?.GetHotkeyRegistry();
+
+        // Mark this dialog as active so screen-level hotkeys are blocked
+        _hotkeyRegistry?.SetActiveDialog(this);
 
         Width = 60;
         Height = 19;
@@ -497,5 +502,16 @@ internal sealed class ProfileSelectorDialog : Dialog
             ProfileWasDeleted = true;
             Application.RequestStop();
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // Clear active dialog so screen-level hotkeys are re-enabled
+            _hotkeyRegistry?.SetActiveDialog(null);
+        }
+
+        base.Dispose(disposing);
     }
 }

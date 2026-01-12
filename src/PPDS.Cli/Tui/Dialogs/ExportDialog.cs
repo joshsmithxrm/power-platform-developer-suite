@@ -81,7 +81,7 @@ internal sealed class ExportDialog : Dialog
         };
 
         // Buttons
-        var exportButton = new Button("_Export")
+        var exportButton = new Button("E_xport")
         {
             X = Pos.Center() - 12,
             Y = Pos.AnchorEnd(1)

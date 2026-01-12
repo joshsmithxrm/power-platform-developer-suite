@@ -106,7 +106,7 @@ internal sealed class QueryHistoryDialog : Dialog
         };
 
         // Buttons
-        var executeButton = new Button("_Execute")
+        var executeButton = new Button("_Run")
         {
             X = Pos.Center() - 20,
             Y = Pos.AnchorEnd(1)

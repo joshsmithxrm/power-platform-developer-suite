@@ -21,6 +21,8 @@ internal sealed class MainWindow : Window
     private readonly ITuiThemeService _themeService;
     private readonly ITuiErrorService _errorService;
     private readonly TuiStatusBar _statusBar;
+    private readonly IHotkeyRegistry _hotkeyRegistry;
+    private readonly List<IDisposable> _hotkeyRegistrations = new();
     private bool _hasError;
     private DateTime _lastMenuClickTime = DateTime.MinValue;
     private const int MenuClickDebounceMs = 150;
@@ -32,6 +34,7 @@ internal sealed class MainWindow : Window
         _session = session;
         _themeService = session.GetThemeService();
         _errorService = session.GetErrorService();
+        _hotkeyRegistry = session.GetHotkeyRegistry();
 
         Title = "PPDS - Power Platform Developer Suite";
         X = 0;
@@ -53,6 +56,9 @@ internal sealed class MainWindow : Window
         SetupMenu();
         ShowMainMenu();
         Add(_statusBar);
+
+        // Register global hotkeys (work from anywhere, even inside dialogs)
+        RegisterGlobalHotkeys();
 
         // Load initial profile info
         LoadProfileInfoAsync();
@@ -78,9 +84,10 @@ internal sealed class MainWindow : Window
     private void SetupMenu()
     {
         // Disabled menu items - show "(Coming Soon)" and do nothing when clicked
+        // Note: Avoid _P and _E hotkeys - reserved for global profile/environment switching
         var dataMigrationItem = new MenuItem("_Data Migration (Coming Soon)", "", null, shortcut: Key.Null);
         var solutionsItem = new MenuItem("_Solutions (Coming Soon)", "", null);
-        var pluginTracesItem = new MenuItem("_Plugin Traces (Coming Soon)", "", null);
+        var pluginTracesItem = new MenuItem("Plu_gin Traces (Coming Soon)", "", null);
 
         // Note: Profile/Environment switching moved to interactive status bar at bottom
         var menu = new MenuBar(new MenuBarItem[]
@@ -102,7 +109,7 @@ internal sealed class MainWindow : Window
                 new("_About", "About PPDS", () => ShowAbout()),
                 new("_Keyboard Shortcuts", "Show keyboard shortcuts", () => ShowKeyboardShortcuts(), shortcut: Key.F1),
                 new("", "", () => {}, null, null, Key.Null), // Separator
-                new("_Error Log", "View recent errors and debug log", () => ShowErrorDetails(), shortcut: Key.F12),
+                new("Error _Log", "View recent errors and debug log", () => ShowErrorDetails(), shortcut: Key.F12),
             })
         });
 
@@ -166,28 +173,50 @@ internal sealed class MainWindow : Window
         container.Add(label, buttonSql, buttonData, buttonQuit);
         Add(container);
 
-        // Global keyboard shortcuts
-        KeyPress += (e) =>
-        {
-            switch (e.KeyEvent.Key)
+        // Note: Global keyboard shortcuts are now handled by HotkeyRegistry
+        // via Application.RootKeyEvent - see RegisterGlobalHotkeys()
+    }
+
+    private void RegisterGlobalHotkeys()
+    {
+        // Global hotkeys work from anywhere, even inside dialogs
+        // Alt+P and Alt+E close the current dialog before opening selector
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.AltMask | Key.P,
+            HotkeyScope.Global,
+            "Switch profile",
+            ShowProfileSelector));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.AltMask | Key.E,
+            HotkeyScope.Global,
+            "Switch environment",
+            () =>
             {
-                case Key.F1:
-                    ShowKeyboardShortcuts();
-                    e.Handled = true;
-                    break;
-                case Key.F2:
-                    NavigateToSqlQuery();
-                    e.Handled = true;
-                    break;
-                // F3 disabled - Data Migration coming soon
-                // Note: Ctrl+I (Profile Details) and Ctrl+E (Environment Details) removed
-                // - Access via status bar clicks -> dialogs -> Details button
-                case Key.F12:
+                if (_hasError)
                     ShowErrorDetails();
-                    e.Handled = true;
-                    break;
-            }
-        };
+                else
+                    ShowEnvironmentSelector();
+            }));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.F1,
+            HotkeyScope.Global,
+            "Keyboard shortcuts",
+            ShowKeyboardShortcuts));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.F2,
+            HotkeyScope.Global,
+            "SQL Query",
+            NavigateToSqlQuery));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.F12,
+            HotkeyScope.Global,
+            "Error log",
+            ShowErrorDetails));
     }
 
     private void LoadProfileInfoAsync()
@@ -440,26 +469,29 @@ internal sealed class MainWindow : Window
     private void ShowKeyboardShortcuts()
     {
         MessageBox.Query("Keyboard Shortcuts",
-            "Global Shortcuts:\n" +
+            "Global Shortcuts (work everywhere):\n" +
+            "  Alt+P    - Switch profile\n" +
+            "  Alt+E    - Switch environment\n" +
             "  F1       - This help\n" +
             "  F2       - SQL Query\n" +
             "  F12      - Error Log\n" +
             "  Ctrl+Q   - Quit\n\n" +
-            "Status Bar:\n" +
-            "  Click left side  - Switch profile\n" +
-            "  Click right side - Switch environment\n\n" +
+            "SQL Query Screen:\n" +
+            "  Ctrl+Enter - Execute query\n" +
+            "  Ctrl+E     - Export results\n" +
+            "  Ctrl+H     - Query history\n" +
+            "  /          - Filter results\n" +
+            "  Esc        - Close filter or exit\n\n" +
             "Menu Navigation:\n" +
-            "  Alt+F/T/H    - Open File/Tools/Help menu\n" +
-            "  Letter       - Select item (when menu is open)\n" +
-            "  Arrows       - Navigate menu items\n" +
-            "  Enter        - Activate selected item\n" +
-            "  Esc          - Close menu\n\n" +
+            "  Alt+F/T/H  - Open File/Tools/Help menu\n" +
+            "  Arrows     - Navigate menu items\n" +
+            "  Enter      - Activate selected item\n" +
+            "  Esc        - Close menu\n\n" +
             "Table Navigation:\n" +
-            "  Arrows   - Navigate cells\n" +
-            "  PgUp/Dn  - Page up/down\n" +
-            "  Home/End - First/last row\n" +
-            "  /        - Filter results\n" +
-            "  Ctrl+C   - Copy cell\n",
+            "  Arrows     - Navigate cells\n" +
+            "  PgUp/Dn    - Page up/down\n" +
+            "  Home/End   - First/last row\n" +
+            "  Ctrl+C     - Copy cell\n",
             "OK");
     }
 
