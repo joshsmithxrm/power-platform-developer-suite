@@ -84,6 +84,13 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    public void Create_HasUpdateSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "update");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
     public void Create_HasUnregisterSubcommand()
     {
         var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "unregister");
@@ -91,9 +98,9 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasNineSubcommands()
+    public void Create_HasTenSubcommands()
     {
-        Assert.Equal(9, _command.Subcommands.Count);
+        Assert.Equal(10, _command.Subcommands.Count);
     }
 
     #endregion

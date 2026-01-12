@@ -530,4 +530,325 @@ public class PluginRegistrationServiceTests
     }
 
     #endregion
+
+    #region GetStepByNameOrIdAsync Tests
+
+    [Fact]
+    public async Task GetStepByNameOrIdAsync_ReturnsNull_WhenStepNotFound()
+    {
+        // Arrange
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act
+        var result = await _sut.GetStepByNameOrIdAsync("NonExistentStep");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetStepByNameOrIdAsync_ReturnsStep_WhenFoundByName()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestPlugin: Create of account",
+            Stage = sdkmessageprocessingstep_stage.Preoperation,
+            Mode = sdkmessageprocessingstep_mode.Synchronous,
+            Rank = 1,
+            StateCode = sdkmessageprocessingstep_statecode.Enabled
+        };
+        step["message.name"] = new AliasedValue(SdkMessage.EntityLogicalName, SdkMessage.Fields.Name, "Create");
+        step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetStepByNameOrIdAsync("TestPlugin: Create of account");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(stepId, result.Id);
+        Assert.Equal("TestPlugin: Create of account", result.Name);
+    }
+
+    [Fact]
+    public async Task GetStepByNameOrIdAsync_ReturnsStep_WhenFoundByGuid()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestPlugin: Create of account",
+            Stage = sdkmessageprocessingstep_stage.Postoperation,
+            Mode = sdkmessageprocessingstep_mode.Asynchronous,
+            Rank = 5,
+            StateCode = sdkmessageprocessingstep_statecode.Enabled
+        };
+        step["message.name"] = new AliasedValue(SdkMessage.EntityLogicalName, SdkMessage.Fields.Name, "Create");
+        step["filter.primaryobjecttypecode"] = new AliasedValue(SdkMessageFilter.EntityLogicalName, SdkMessageFilter.Fields.PrimaryObjectTypeCode, "account");
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetStepByNameOrIdAsync(stepId.ToString());
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(stepId, result.Id);
+    }
+
+    #endregion
+
+    #region GetImageByNameOrIdAsync Tests
+
+    [Fact]
+    public async Task GetImageByNameOrIdAsync_ReturnsNull_WhenImageNotFound()
+    {
+        // Arrange
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act
+        var result = await _sut.GetImageByNameOrIdAsync("NonExistentImage");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetImageByNameOrIdAsync_ReturnsImage_WhenFoundByName()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "PreImage",
+            EntityAlias = "PreImage",
+            ImageType = sdkmessageprocessingstepimage_imagetype.PreImage,
+            Attributes1 = "name,accountnumber"
+        };
+        entities.Entities.Add(image);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        var result = await _sut.GetImageByNameOrIdAsync("PreImage");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(imageId, result.Id);
+        Assert.Equal("PreImage", result.Name);
+        Assert.Equal("name,accountnumber", result.Attributes);
+    }
+
+    #endregion
+
+    #region UpdateStepAsync Tests
+
+    [Fact]
+    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepNotFound()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
+
+        Assert.Contains("not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepIsManagedAndNotCustomizable()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "ManagedStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(false)
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = true;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
+
+        Assert.Contains("is managed", exception.Message);
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_UpdatesStep_WhenValid()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(true)
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous", Rank: 10));
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(stepId, _updatedEntity!.Id);
+        Assert.Equal((int)sdkmessageprocessingstep_mode.Asynchronous,
+            _updatedEntity.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Mode)?.Value);
+        Assert.Equal(10, _updatedEntity.GetAttributeValue<int>(SdkMessageProcessingStep.Fields.Rank));
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_DoesNotUpdate_WhenNoChangesSpecified()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestStep: Create of account"
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+        _updatedEntity = null;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest());
+
+        // Assert - UpdateAsync should not be called
+        Assert.Null(_updatedEntity);
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_AllowsUpdate_WhenManagedButCustomizable()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "ManagedStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(true) // Managed but customizable
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = true;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Stage: "PreOperation"));
+
+        // Assert - Should succeed, not throw
+        Assert.NotNull(_updatedEntity);
+    }
+
+    #endregion
+
+    #region UpdateImageAsync Tests
+
+    [Fact]
+    public async Task UpdateImageAsync_ThrowsInvalidOperationException_WhenImageNotFound()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name,accountnumber")));
+
+        Assert.Contains("not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task UpdateImageAsync_ThrowsInvalidOperationException_WhenImageIsManagedAndNotCustomizable()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "ManagedImage",
+            IsCustomizable = new BooleanManagedProperty(false)
+        };
+        image[SdkMessageProcessingStepImage.Fields.IsManaged] = true;
+        entities.Entities.Add(image);
+        _retrieveMultipleResult = entities;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name")));
+
+        Assert.Contains("is managed", exception.Message);
+    }
+
+    [Fact]
+    public async Task UpdateImageAsync_UpdatesImage_WhenValid()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "PreImage"
+        };
+        image[SdkMessageProcessingStepImage.Fields.IsManaged] = false;
+        entities.Entities.Add(image);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateImageAsync(imageId, new ImageUpdateRequest(Attributes: "name,accountnumber,statecode"));
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(imageId, _updatedEntity!.Id);
+        Assert.Equal("name,accountnumber,statecode",
+            _updatedEntity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1));
+    }
+
+    [Fact]
+    public async Task UpdateImageAsync_DoesNotUpdate_WhenNoChangesSpecified()
+    {
+        // Arrange
+        var imageId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var image = new SdkMessageProcessingStepImage
+        {
+            Id = imageId,
+            Name = "PreImage"
+        };
+        image[SdkMessageProcessingStepImage.Fields.IsManaged] = false;
+        entities.Entities.Add(image);
+        _retrieveMultipleResult = entities;
+        _updatedEntity = null;
+
+        // Act
+        await _sut.UpdateImageAsync(imageId, new ImageUpdateRequest());
+
+        // Assert - UpdateAsync should not be called
+        Assert.Null(_updatedEntity);
+    }
+
+    #endregion
 }

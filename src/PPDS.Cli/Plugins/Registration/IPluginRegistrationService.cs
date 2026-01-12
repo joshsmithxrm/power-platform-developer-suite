@@ -390,6 +390,34 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    #region Update Operations
+
+    /// <summary>
+    /// Updates a processing step with the specified changes.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="request">The update request containing properties to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the step is managed and not customizable.</exception>
+    Task UpdateStepAsync(
+        Guid stepId,
+        StepUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates a step image with the specified changes.
+    /// </summary>
+    /// <param name="imageId">The image ID.</param>
+    /// <param name="request">The update request containing properties to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the image is managed and not customizable.</exception>
+    Task UpdateImageAsync(
+        Guid imageId,
+        ImageUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>
@@ -407,3 +435,29 @@ public interface IPluginRegistrationService
 
     #endregion
 }
+
+/// <summary>
+/// Request for updating a plugin step.
+/// </summary>
+/// <param name="Mode">Execution mode: Synchronous or Asynchronous.</param>
+/// <param name="Stage">Pipeline stage: PreValidation, PreOperation, or PostOperation.</param>
+/// <param name="Rank">Execution order (1-999999).</param>
+/// <param name="FilteringAttributes">Comma-separated list of attributes that trigger the step.</param>
+/// <param name="Description">Step description.</param>
+public record StepUpdateRequest(
+    string? Mode = null,
+    string? Stage = null,
+    int? Rank = null,
+    string? FilteringAttributes = null,
+    string? Description = null
+);
+
+/// <summary>
+/// Request for updating a step image.
+/// </summary>
+/// <param name="Attributes">Comma-separated list of attributes to include in the image.</param>
+/// <param name="Name">Image name.</param>
+public record ImageUpdateRequest(
+    string? Attributes = null,
+    string? Name = null
+);

@@ -660,6 +660,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStep.Fields.ImpersonatingUserId,
                 SdkMessageProcessingStep.Fields.AsyncAutoDelete,
                 SdkMessageProcessingStep.Fields.EventHandler,
+                SdkMessageProcessingStep.Fields.IsManaged,
+                SdkMessageProcessingStep.Fields.IsCustomizable,
                 SdkMessageProcessingStep.Fields.CreatedOn,
                 SdkMessageProcessingStep.Fields.ModifiedOn),
             LinkEntities =
@@ -726,6 +728,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             AsyncAutoDelete = entity.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false,
             PluginTypeId = entity.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler)?.Id,
             PluginTypeName = entity.GetAttributeValue<AliasedValue>($"plugintype.{PluginType.Fields.TypeName}")?.Value?.ToString(),
+            IsManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false,
+            IsCustomizable = GetBooleanManagedProperty(entity, SdkMessageProcessingStep.Fields.IsCustomizable),
             CreatedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStep.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStep.Fields.ModifiedOn)
         };
@@ -749,6 +753,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStepImage.Fields.Attributes1,
                 SdkMessageProcessingStepImage.Fields.MessagePropertyName,
                 SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepId,
+                SdkMessageProcessingStepImage.Fields.IsManaged,
+                SdkMessageProcessingStepImage.Fields.IsCustomizable,
                 SdkMessageProcessingStepImage.Fields.CreatedOn,
                 SdkMessageProcessingStepImage.Fields.ModifiedOn),
             LinkEntities =
@@ -786,6 +792,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             MessagePropertyName = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.MessagePropertyName),
             StepId = entity.GetAttributeValue<EntityReference>(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepId)?.Id,
             StepName = entity.GetAttributeValue<AliasedValue>($"step.{SdkMessageProcessingStep.Fields.Name}")?.Value?.ToString(),
+            IsManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false,
+            IsCustomizable = GetBooleanManagedProperty(entity, SdkMessageProcessingStepImage.Fields.IsCustomizable),
             CreatedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStepImage.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStepImage.Fields.ModifiedOn)
         };
@@ -1283,6 +1291,186 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             return await CreateAsync(entity, client, cancellationToken);
         }
+    }
+
+    #endregion
+
+    #region Update Operations
+
+    /// <summary>
+    /// Updates a processing step with the specified changes.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="request">The update request containing properties to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the step is managed and not customizable.</exception>
+    public async Task UpdateStepAsync(
+        Guid stepId,
+        StepUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // Verify the step exists and check managed state
+        var existingStep = await GetStepByIdWithManagedStateAsync(stepId, cancellationToken);
+        if (existingStep == null)
+        {
+            throw new InvalidOperationException($"Step with ID '{stepId}' not found.");
+        }
+
+        // Check managed state
+        var isManaged = existingStep.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false;
+        var isCustomizable = GetBooleanManagedProperty(existingStep, SdkMessageProcessingStep.Fields.IsCustomizable);
+
+        if (isManaged && !isCustomizable)
+        {
+            var stepName = existingStep.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name);
+            throw new InvalidOperationException($"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
+        }
+
+        // Build update entity with only changed properties
+        var entity = new SdkMessageProcessingStep { Id = stepId };
+        var hasChanges = false;
+
+        if (request.Mode != null)
+        {
+            entity.Mode = (sdkmessageprocessingstep_mode)MapModeToValue(request.Mode);
+            hasChanges = true;
+        }
+
+        if (request.Stage != null)
+        {
+            entity.Stage = (sdkmessageprocessingstep_stage)MapStageToValue(request.Stage);
+            hasChanges = true;
+        }
+
+        if (request.Rank != null)
+        {
+            entity.Rank = request.Rank.Value;
+            hasChanges = true;
+        }
+
+        if (request.FilteringAttributes != null)
+        {
+            entity.FilteringAttributes = request.FilteringAttributes;
+            hasChanges = true;
+        }
+
+        if (request.Description != null)
+        {
+            entity.Description = request.Description;
+            hasChanges = true;
+        }
+
+        if (!hasChanges)
+        {
+            return; // Nothing to update
+        }
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await UpdateAsync(entity, client, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates a step image with the specified changes.
+    /// </summary>
+    /// <param name="imageId">The image ID.</param>
+    /// <param name="request">The update request containing properties to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the image is managed and not customizable.</exception>
+    public async Task UpdateImageAsync(
+        Guid imageId,
+        ImageUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // Verify the image exists and check managed state
+        var existingImage = await GetImageByIdWithManagedStateAsync(imageId, cancellationToken);
+        if (existingImage == null)
+        {
+            throw new InvalidOperationException($"Image with ID '{imageId}' not found.");
+        }
+
+        // Check managed state
+        var isManaged = existingImage.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
+        var isCustomizable = GetBooleanManagedProperty(existingImage, SdkMessageProcessingStepImage.Fields.IsCustomizable);
+
+        if (isManaged && !isCustomizable)
+        {
+            var imageName = existingImage.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name);
+            throw new InvalidOperationException($"Cannot update: {imageName} is managed. Managed components cannot be modified in this environment.");
+        }
+
+        // Build update entity with only changed properties
+        var entity = new SdkMessageProcessingStepImage { Id = imageId };
+        var hasChanges = false;
+
+        if (request.Attributes != null)
+        {
+            entity.Attributes1 = request.Attributes;
+            hasChanges = true;
+        }
+
+        if (request.Name != null)
+        {
+            entity.Name = request.Name;
+            hasChanges = true;
+        }
+
+        if (!hasChanges)
+        {
+            return; // Nothing to update
+        }
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await UpdateAsync(entity, client, cancellationToken);
+    }
+
+    private async Task<Entity?> GetStepByIdWithManagedStateAsync(Guid stepId, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStep.Fields.Name,
+                SdkMessageProcessingStep.Fields.IsManaged,
+                SdkMessageProcessingStep.Fields.IsCustomizable),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId, ConditionOperator.Equal, stepId)
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        return results.Entities.FirstOrDefault();
+    }
+
+    private async Task<Entity?> GetImageByIdWithManagedStateAsync(Guid imageId, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStepImage.Fields.Name,
+                SdkMessageProcessingStepImage.Fields.IsManaged,
+                SdkMessageProcessingStepImage.Fields.IsCustomizable),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId, ConditionOperator.Equal, imageId)
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        return results.Entities.FirstOrDefault();
+    }
+
+    private static bool GetBooleanManagedProperty(Entity entity, string attributeName)
+    {
+        var value = entity.GetAttributeValue<BooleanManagedProperty>(attributeName);
+        return value?.Value ?? true; // Default to true (customizable) if not set
     }
 
     #endregion
@@ -2057,6 +2245,7 @@ public sealed class PluginStepInfo
     public Guid? PluginTypeId { get; set; }
     public string? PluginTypeName { get; set; }
     public bool IsManaged { get; set; }
+    public bool IsCustomizable { get; set; } = true;
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }
 }
@@ -2075,6 +2264,7 @@ public sealed class PluginImageInfo
     public Guid? StepId { get; set; }
     public string? StepName { get; set; }
     public bool IsManaged { get; set; }
+    public bool IsCustomizable { get; set; } = true;
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }
 }
