@@ -132,16 +132,6 @@ internal sealed class ProfileCreationDialog : Dialog
             ColorScheme = TuiColorPalette.TextInput
         };
 
-        // Enter on RadioGroup advances focus to next field (user expects Enter to work)
-        _authMethodRadio.KeyPress += (args) =>
-        {
-            if (args.KeyEvent.Key == Key.Enter)
-            {
-                _environmentUrlField.SetFocus();
-                args.Handled = true;
-            }
-        };
-
         _discoverButton = new Button("Discover...")
         {
             X = Pos.Right(_environmentUrlField) + 1,
