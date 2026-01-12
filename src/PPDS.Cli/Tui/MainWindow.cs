@@ -472,31 +472,9 @@ internal sealed class MainWindow : Window
 
     private void ShowKeyboardShortcuts()
     {
-        MessageBox.Query("Keyboard Shortcuts",
-            "Global Shortcuts (work everywhere):\n" +
-            "  Alt+P    - Switch profile\n" +
-            "  Alt+E    - Switch environment\n" +
-            "  F1       - This help\n" +
-            "  F2       - SQL Query\n" +
-            "  F12      - Error Log\n" +
-            "  Ctrl+Q   - Quit\n\n" +
-            "SQL Query Screen:\n" +
-            "  Ctrl+Enter - Execute query\n" +
-            "  Ctrl+E     - Export results\n" +
-            "  Ctrl+H     - Query history\n" +
-            "  /          - Filter results\n" +
-            "  Esc        - Close filter or exit\n\n" +
-            "Menu Navigation:\n" +
-            "  Alt+F/T/H  - Open File/Tools/Help menu\n" +
-            "  Arrows     - Navigate menu items\n" +
-            "  Enter      - Activate selected item\n" +
-            "  Esc        - Close menu\n\n" +
-            "Table Navigation:\n" +
-            "  Arrows     - Navigate cells\n" +
-            "  PgUp/Dn    - Page up/down\n" +
-            "  Home/End   - First/last row\n" +
-            "  Ctrl+C     - Copy cell\n",
-            "OK");
+        // Use custom dialog instead of MessageBox to avoid Terminal.Gui rendering bugs
+        using var dialog = new KeyboardShortcutsDialog();
+        Application.Run(dialog);
     }
 
     private void OnErrorOccurred(TuiError error)
