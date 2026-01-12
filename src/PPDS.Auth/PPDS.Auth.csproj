@@ -42,7 +42,7 @@
     <PackageReference Include="Azure.Identity" Version="1.13.*" />
 
     <!-- MSAL for device code and token caching -->
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.67.*" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.81.0" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.67.*" />
 
     <!-- Dataverse ServiceClient -->
