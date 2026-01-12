@@ -1,6 +1,4 @@
 using System.CommandLine;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
@@ -14,12 +12,6 @@ namespace PPDS.Cli.Commands.Plugins;
 /// </summary>
 public static class UnregisterCommand
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     /// <summary>
     /// Valid entity types for unregistration.
     /// </summary>
@@ -145,10 +137,10 @@ public static class UnregisterCommand
 
             return ex.ErrorCode switch
             {
-                "NOT_FOUND" => ExitCodes.NotFound,
+                "NOT_FOUND" => ExitCodes.NotFoundError,
                 "MANAGED" => ExitCodes.Forbidden,
                 "HAS_CHILDREN" => ExitCodes.PreconditionFailed,
-                _ => ExitCodes.Error
+                _ => ExitCodes.Failure
             };
         }
         catch (Exception ex)
@@ -303,6 +295,8 @@ public static class UnregisterCommand
 
             case "HAS_CHILDREN":
                 var childParts = new List<string>();
+                if (ex.AssemblyCount > 0)
+                    childParts.Add($"{ex.AssemblyCount} assembly(ies)");
                 if (ex.TypeCount > 0)
                     childParts.Add($"{ex.TypeCount} plugin type(s)");
                 if (ex.StepCount > 0)

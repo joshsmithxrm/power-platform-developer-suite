@@ -1569,7 +1569,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             EntityType = "Type"
         };
 
-        // Delete steps (and their images) in parallel if force
+        // Delete steps (and their images) in sequence
         foreach (var step in steps)
         {
             var stepResult = await UnregisterStepAsync(step.Id, force: true, cancellationToken);
@@ -1680,7 +1680,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 package.Name,
                 "Package",
                 "HAS_CHILDREN",
-                typeCount: assemblies.Count);
+                assemblyCount: assemblies.Count);
         }
 
         var result = new UnregisterResult
@@ -2157,6 +2157,11 @@ public sealed class UnregisterException : Exception
     public string ErrorCode { get; }
 
     /// <summary>
+    /// Number of child assemblies that exist (for package).
+    /// </summary>
+    public int AssemblyCount { get; }
+
+    /// <summary>
     /// Number of child types that exist (for assembly/package).
     /// </summary>
     public int TypeCount { get; }
@@ -2176,6 +2181,7 @@ public sealed class UnregisterException : Exception
         string entityName,
         string entityType,
         string errorCode,
+        int assemblyCount = 0,
         int typeCount = 0,
         int stepCount = 0,
         int imageCount = 0)
@@ -2184,6 +2190,7 @@ public sealed class UnregisterException : Exception
         EntityName = entityName;
         EntityType = entityType;
         ErrorCode = errorCode;
+        AssemblyCount = assemblyCount;
         TypeCount = typeCount;
         StepCount = stepCount;
         ImageCount = imageCount;
