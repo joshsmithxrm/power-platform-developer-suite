@@ -131,7 +131,7 @@ public static class UpdateCommand
             SessionStatus.Stuck => "!",
             SessionStatus.Paused => "-",
             SessionStatus.Complete => "+",
-            _ => "-"
+            _ => "?"
         };
 
         var prNumber = SessionService.ExtractPrNumber(prUrl);
