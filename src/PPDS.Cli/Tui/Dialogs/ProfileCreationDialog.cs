@@ -1,5 +1,6 @@
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Profile;
@@ -27,7 +28,6 @@ internal sealed class ProfileCreationDialog : Dialog
     private readonly TextField _nameField;
     private readonly RadioGroup _authMethodRadio;
     private readonly TextField _environmentUrlField;
-    private readonly Button _discoverButton;
 
     // SPN fields (Client Secret / Certificate)
     private readonly FrameView _spnFrame;
@@ -138,17 +138,10 @@ internal sealed class ProfileCreationDialog : Dialog
         {
             X = 17,
             Y = 8,
-            Width = Dim.Fill() - 24,
+            Width = Dim.Fill() - 3,
             Text = string.Empty,
             ColorScheme = TuiColorPalette.TextInput
         };
-
-        _discoverButton = new Button("Discover...")
-        {
-            X = Pos.Right(_environmentUrlField) + 1,
-            Y = 8
-        };
-        _discoverButton.Clicked += OnDiscoverClicked;
 
         // SPN frame (for ClientSecret and CertificateFile)
         _spnFrame = new FrameView("Service Principal Settings")
@@ -272,7 +265,7 @@ internal sealed class ProfileCreationDialog : Dialog
         };
 
         Add(nameLabel, _nameField, methodLabel, _authMethodRadio,
-            urlLabel, _environmentUrlField, _discoverButton,
+            urlLabel, _environmentUrlField,
             _spnFrame, _statusLabel, _authenticateButton, cancelButton);
 
         // Escape closes dialog (if not authenticating)
@@ -310,47 +303,15 @@ internal sealed class ProfileCreationDialog : Dialog
         _certPwdLabel.Visible = isSpn && isCert;
         _certPasswordField.Visible = isSpn && isCert;
 
-        // Discover button only for interactive methods
-        _discoverButton.Enabled = selectedIndex < 2;
-
         // Update status text
         _statusLabel.Text = selectedIndex switch
         {
-            0 => "Device code authentication - a code will be shown to enter at microsoft.com/devicelogin",
-            1 => "Browser authentication - your default browser will open for sign-in",
-            2 => "Service principal - requires App ID, Tenant ID, Client Secret, and Environment URL",
-            3 => "Certificate auth - requires App ID, Tenant ID, Certificate, and Environment URL",
+            0 => "A code will be shown to enter at microsoft.com/devicelogin",
+            1 => "Your default browser will open for sign-in",
+            2 => "Requires App ID, Tenant ID, Client Secret, and Environment URL",
+            3 => "Requires App ID, Tenant ID, Certificate, and Environment URL",
             _ => "Select an authentication method"
         };
-    }
-
-    private void OnDiscoverClicked()
-    {
-        if (_isAuthenticating) return;
-
-        // Show environment selector dialog using provided callback or built-in dialog
-        var envDeviceCallback = _deviceCodeCallback ?? ShowDeviceCodeDialog;
-        var dialog = new EnvironmentSelectorDialog(_environmentService, envDeviceCallback);
-        Application.Run(dialog);
-
-        if (dialog.SelectedEnvironment != null)
-        {
-            _environmentUrlField.Text = dialog.SelectedEnvironment.Url;
-        }
-        else if (dialog.UseManualUrl && !string.IsNullOrWhiteSpace(dialog.ManualUrl))
-        {
-            _environmentUrlField.Text = dialog.ManualUrl;
-        }
-    }
-
-    private void ShowDeviceCodeDialog(DeviceCodeInfo info)
-    {
-        // Use the built-in device code dialog
-        Application.MainLoop?.Invoke(() =>
-        {
-            var dialog = new DeviceCodeAuthDialog(info);
-            Application.Run(dialog);
-        });
     }
 
     private void OnAuthenticateClicked()
@@ -408,7 +369,7 @@ internal sealed class ProfileCreationDialog : Dialog
         // Build request
         var request = BuildCreateRequest();
 
-        // Use provided callback if available; otherwise fall back to built-in dialog
+        // Use provided callback if available; otherwise fall back to MessageBox
         Action<DeviceCodeInfo>? deviceCallback = null;
         if (selectedIndex == 0) // Device Code
         {
@@ -416,8 +377,16 @@ internal sealed class ProfileCreationDialog : Dialog
             {
                 Application.MainLoop?.Invoke(() =>
                 {
-                    var dialog = new DeviceCodeAuthDialog(info);
-                    Application.Run(dialog);
+                    // Auto-copy code to clipboard for convenience
+                    var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
+
+                    // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
+                    MessageBox.Query(
+                        "Authentication Required",
+                        $"Visit: {info.VerificationUrl}\n\n" +
+                        $"Enter code: {info.UserCode}{copied}\n\n" +
+                        "Complete authentication in browser, then press OK.",
+                        "OK");
                 });
             });
         }

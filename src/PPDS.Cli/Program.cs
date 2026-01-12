@@ -22,8 +22,6 @@ using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Tui;
-using Spectre.Console;
 
 namespace PPDS.Cli;
 
@@ -45,7 +43,7 @@ public static class Program
         // No arguments = launch TUI directly (first-class experience)
         if (args.Length == 0)
         {
-            return LaunchTui();
+            return InteractiveCommand.LaunchTui();
         }
 
         // Write version header for diagnostic context (skip for help/version/interactive)
@@ -112,47 +110,5 @@ public static class Program
 
         var firstArg = args[0].ToLowerInvariant();
         return firstArg == "interactive";
-    }
-
-    /// <summary>
-    /// Launches the Terminal.Gui TUI application.
-    /// </summary>
-    /// <returns>Exit code (0 for success).</returns>
-    private static int LaunchTui()
-    {
-        // Check if we're in a TTY environment
-        if (!AnsiConsole.Profile.Capabilities.Interactive)
-        {
-            Console.Error.WriteLine("Error: Interactive mode requires a terminal (TTY).");
-            Console.Error.WriteLine("This may occur in CI/CD pipelines, redirected input, or non-interactive shells.");
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("Use standard CLI commands instead:");
-            Console.Error.WriteLine("  ppds auth list       - List profiles");
-            Console.Error.WriteLine("  ppds auth select     - Select a profile");
-            Console.Error.WriteLine("  ppds env list        - List environments");
-            Console.Error.WriteLine("  ppds env select      - Select an environment");
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("Or run 'ppds --help' for full command list.");
-            return ExitCodes.Failure;
-        }
-
-        try
-        {
-            using var app = new PpdsApplication(
-                profileName: null, // Uses active profile
-                deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback);
-
-            return app.Run(CancellationToken.None);
-        }
-        catch (OperationCanceledException)
-        {
-            // User cancelled - not an error
-            return ExitCodes.Success;
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.Error.WriteLine($"Interactive mode error: {ex.Message}");
-            return ExitCodes.Failure;
-        }
     }
 }
