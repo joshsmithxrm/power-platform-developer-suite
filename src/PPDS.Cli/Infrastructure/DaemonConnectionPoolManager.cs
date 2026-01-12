@@ -255,7 +255,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         {
             foreach (var profileName in profileNames)
             {
-                var profile = collection.GetByName(profileName)
+                var profile = collection.GetByNameOrIndex(profileName)
                     ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
 
                 var source = new ProfileConnectionSource(

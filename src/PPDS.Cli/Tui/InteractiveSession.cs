@@ -96,7 +96,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
             ? collection.ActiveProfile
-            : collection.GetByName(_profileName);
+            : collection.GetByNameOrIndex(_profileName);
 
         TuiDebugLog.Log($"Loaded profile: {profile?.DisplayIdentifier ?? "(none)"}, AuthMethod: {profile?.AuthMethod}");
 

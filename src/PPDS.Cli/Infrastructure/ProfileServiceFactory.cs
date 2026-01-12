@@ -80,7 +80,7 @@ public static class ProfileServiceFactory
         }
         else
         {
-            profile = collection.GetByName(profileName)
+            profile = collection.GetByNameOrIndex(profileName)
                 ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
         }
 
