@@ -44,6 +44,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string? _currentEnvironmentUrl;
     private string? _currentEnvironmentDisplayName;
     private bool _disposed;
+    private ITuiErrorService? _errorService;
 
     /// <summary>
     /// Event raised when the environment changes (either via initialization or explicit switch).
@@ -432,6 +433,16 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public ITuiThemeService GetThemeService()
     {
         return new TuiThemeService();
+    }
+
+    /// <summary>
+    /// Gets the error service for centralized error handling.
+    /// The service is lazily created and shared across the session lifetime.
+    /// </summary>
+    /// <returns>The error service.</returns>
+    public ITuiErrorService GetErrorService()
+    {
+        return _errorService ??= new TuiErrorService();
     }
 
     #endregion

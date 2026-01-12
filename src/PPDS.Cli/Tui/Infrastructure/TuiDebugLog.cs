@@ -8,7 +8,10 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// </summary>
 internal static class TuiDebugLog
 {
-    private static readonly string LogPath = Path.Combine(
+    /// <summary>
+    /// Path to the TUI debug log file.
+    /// </summary>
+    public static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".ppds", "tui-debug.log");
 

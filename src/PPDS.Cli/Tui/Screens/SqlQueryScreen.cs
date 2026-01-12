@@ -17,6 +17,7 @@ internal sealed class SqlQueryScreen : Window
     private readonly string? _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession _session;
+    private readonly ITuiErrorService _errorService;
 
     private readonly TextView _queryInput;
     private readonly QueryResultsTableView _resultsTable;
@@ -35,6 +36,7 @@ internal sealed class SqlQueryScreen : Window
         _profileName = profileName;
         _deviceCodeCallback = deviceCodeCallback;
         _session = session;
+        _errorService = session.GetErrorService();
 
         Title = "SQL Query";
         X = 0;
@@ -272,7 +274,7 @@ internal sealed class SqlQueryScreen : Window
         }
         catch (Exception ex)
         {
-            TuiDebugLog.Log($"ERROR: {ex.GetType().Name}: {ex.Message}");
+            _errorService.ReportError("Query execution failed", ex, "ExecuteQuery");
             UpdateStatus($"Error: {ex.Message}", showSpinner: false);
         }
     }
@@ -353,10 +355,12 @@ internal sealed class SqlQueryScreen : Window
         }
         catch (InvalidOperationException ex)
         {
+            _errorService.ReportError("Failed to load more results", ex, "LoadMoreResults");
             Application.MainLoop?.Invoke(() => _statusLabel.Text = $"Error loading more: {ex.Message}");
         }
         catch (HttpRequestException ex)
         {
+            _errorService.ReportError("Network error loading results", ex, "LoadMoreResults");
             Application.MainLoop?.Invoke(() => _statusLabel.Text = $"Network error: {ex.Message}");
         }
     }
@@ -417,10 +421,7 @@ internal sealed class SqlQueryScreen : Window
         {
             if (t.IsFaulted)
             {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    _statusLabel.Text = $"Error: {t.Exception?.InnerException?.Message ?? "Failed to load history"}";
-                });
+                _errorService.ReportError("Failed to load query history", t.Exception, "LoadHistory");
             }
         }, TaskScheduler.Default);
 #pragma warning restore PPDS013

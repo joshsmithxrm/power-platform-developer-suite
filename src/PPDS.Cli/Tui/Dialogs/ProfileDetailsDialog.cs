@@ -12,6 +12,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 internal sealed class ProfileDetailsDialog : Dialog
 {
     private readonly InteractiveSession _session;
+    private readonly ITuiErrorService _errorService;
     private readonly Label _profileNameLabel;
     private readonly Label _identityLabel;
     private readonly Label _authMethodLabel;
@@ -31,6 +32,7 @@ internal sealed class ProfileDetailsDialog : Dialog
     public ProfileDetailsDialog(InteractiveSession session) : base("Profile Details")
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _errorService = session.GetErrorService();
 
         Width = 68;
         Height = 20;
@@ -247,9 +249,10 @@ internal sealed class ProfileDetailsDialog : Dialog
         {
             if (t.IsFaulted && t.Exception != null)
             {
+                _errorService.ReportError("Failed to load profile details", t.Exception, "ProfileDetails");
                 Application.MainLoop?.Invoke(() =>
                 {
-                    _profileNameLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
+                    _profileNameLabel.Text = "Error loading profile (see F12 for details)";
                 });
             }
         }, TaskScheduler.Default);
@@ -390,12 +393,7 @@ internal sealed class ProfileDetailsDialog : Dialog
         {
             if (t.IsFaulted && t.Exception != null)
             {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    MessageBox.ErrorQuery("Refresh Failed",
-                        t.Exception.InnerException?.Message ?? t.Exception.Message,
-                        "OK");
-                });
+                _errorService.ReportError("Failed to refresh profile", t.Exception, "ProfileRefresh");
             }
         }, TaskScheduler.Default);
 #pragma warning restore PPDS013

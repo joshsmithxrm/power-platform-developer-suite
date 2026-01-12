@@ -18,7 +18,9 @@ internal sealed class MainWindow : Window
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession _session;
     private readonly ITuiThemeService _themeService;
+    private readonly ITuiErrorService _errorService;
     private readonly Button _statusButton;
+    private bool _hasError;
 
     public MainWindow(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
     {
@@ -26,6 +28,7 @@ internal sealed class MainWindow : Window
         _deviceCodeCallback = deviceCodeCallback;
         _session = session;
         _themeService = session.GetThemeService();
+        _errorService = session.GetErrorService();
 
         Title = "PPDS - Power Platform Developer Suite";
         X = 0;
@@ -46,7 +49,10 @@ internal sealed class MainWindow : Window
             Height = 1,
             ColorScheme = TuiColorPalette.StatusBar_Default
         };
-        _statusButton.Clicked += () => ShowEnvironmentDetails();
+        _statusButton.Clicked += OnStatusButtonClicked;
+
+        // Subscribe to error events
+        _errorService.ErrorOccurred += OnErrorOccurred;
 
         SetupMenu();
         ShowMainMenu();
@@ -91,6 +97,8 @@ internal sealed class MainWindow : Window
             {
                 new("_About", "About PPDS", () => ShowAbout()),
                 new("_Keyboard Shortcuts", "Show keyboard shortcuts", () => ShowKeyboardShortcuts(), shortcut: Key.F1),
+                new("", "", () => {}, null, null, Key.Null), // Separator
+                new("_Error Log...", "View recent errors and debug log", () => ShowErrorDetails(), shortcut: Key.F12),
             })
         });
 
@@ -162,6 +170,10 @@ internal sealed class MainWindow : Window
                     ShowEnvironmentDetails();
                     e.Handled = true;
                     break;
+                case Key.F12:
+                    ShowErrorDetails();
+                    e.Handled = true;
+                    break;
             }
         };
     }
@@ -174,10 +186,7 @@ internal sealed class MainWindow : Window
         {
             if (t.IsFaulted && t.Exception != null)
             {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    UpdateStatus("Error loading profile info");
-                });
+                _errorService.ReportError("Failed to load profile info", t.Exception, "LoadProfileInfo");
             }
         }, TaskScheduler.Default);
 #pragma warning restore PPDS013
@@ -252,10 +261,7 @@ internal sealed class MainWindow : Window
             {
                 if (t.IsFaulted)
                 {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        MessageBox.ErrorQuery("Error", t.Exception?.InnerException?.Message ?? "Failed to switch profile", "OK");
-                    });
+                    _errorService.ReportError("Failed to switch profile", t.Exception, "SwitchProfile");
                 }
             }, TaskScheduler.Default);
 #pragma warning restore PPDS013
@@ -305,10 +311,7 @@ internal sealed class MainWindow : Window
             {
                 if (t.IsFaulted)
                 {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        MessageBox.ErrorQuery("Error", t.Exception?.InnerException?.Message ?? "Failed to switch to new profile", "OK");
-                    });
+                    _errorService.ReportError("Failed to switch to new profile", t.Exception, "ProfileCreation");
                 }
             }, TaskScheduler.Default);
 #pragma warning restore PPDS013
@@ -329,12 +332,7 @@ internal sealed class MainWindow : Window
         {
             if (t.IsFaulted && t.Exception != null)
             {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    MessageBox.ErrorQuery("Error",
-                        t.Exception.InnerException?.Message ?? t.Exception.Message,
-                        "OK");
-                });
+                _errorService.ReportError("Failed to clear profiles", t.Exception, "ClearAllProfiles");
             }
         }, TaskScheduler.Default);
 #pragma warning restore PPDS013
@@ -400,10 +398,7 @@ internal sealed class MainWindow : Window
                 {
                     if (t.IsFaulted)
                     {
-                        Application.MainLoop?.Invoke(() =>
-                        {
-                            MessageBox.ErrorQuery("Error", t.Exception?.InnerException?.Message ?? "Failed to set environment", "OK");
-                        });
+                        _errorService.ReportError("Failed to set environment", t.Exception, "SetEnvironment");
                     }
                 }, TaskScheduler.Default);
 #pragma warning restore PPDS013
@@ -450,6 +445,7 @@ internal sealed class MainWindow : Window
         MessageBox.Query("Keyboard Shortcuts",
             "Global Shortcuts:\n" +
             "  F2       - SQL Query\n" +
+            "  F12      - Error Log\n" +
             "  Ctrl+I   - Profile Details\n" +
             "  Ctrl+E   - Environment Details\n" +
             "  Ctrl+Q   - Quit\n\n" +
@@ -460,5 +456,37 @@ internal sealed class MainWindow : Window
             "  /        - Filter results\n" +
             "  Ctrl+C   - Copy cell\n",
             "OK");
+    }
+
+    private void OnStatusButtonClicked()
+    {
+        if (_hasError)
+        {
+            ShowErrorDetails();
+        }
+        else
+        {
+            ShowEnvironmentDetails();
+        }
+    }
+
+    private void OnErrorOccurred(TuiError error)
+    {
+        Application.MainLoop?.Invoke(() =>
+        {
+            _hasError = true;
+            _statusButton.Text = $" Error: {error.BriefSummary} (click for details)";
+            _statusButton.ColorScheme = TuiColorPalette.Error;
+        });
+    }
+
+    private void ShowErrorDetails()
+    {
+        var dialog = new ErrorDetailsDialog(_errorService);
+        Application.Run(dialog);
+
+        // Clear error state when dialog closes (user has seen the error)
+        _hasError = false;
+        UpdateStatus();
     }
 }
