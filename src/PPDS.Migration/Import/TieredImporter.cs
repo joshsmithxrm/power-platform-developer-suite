@@ -138,64 +138,12 @@ namespace PPDS.Migration.Import
             var warnings = new WarningCollector();
             var totalImported = 0;
 
-            // Track overall progress across all entities
-            var totalEntities = data.EntityData.Count;
-            var overallTotal = data.TotalRecordCount;
-            long overallProcessed = 0;
-            var entityIndex = 0;
-
             _logger?.LogInformation("Starting tiered import: {Tiers} tiers, {Records} records",
                 plan.TierCount, data.TotalRecordCount);
 
-            // Load target environment field metadata for validity checking
-            var entityNames = data.Schema.Entities.Select(e => e.LogicalName).ToList();
-            var targetFieldMetadata = await _schemaValidator.LoadTargetFieldMetadataAsync(
-                entityNames, progress, cancellationToken).ConfigureAwait(false);
-
-            // Pre-flight check: detect columns that exist in export but not in target
-            var mismatchResult = _schemaValidator.DetectMissingColumns(data, targetFieldMetadata);
-            if (mismatchResult.HasMissingColumns)
-            {
-                if (!options.SkipMissingColumns)
-                {
-                    _logger?.LogError("Schema mismatch detected: {Count} columns missing in target",
-                        mismatchResult.TotalMissingCount);
-
-                    progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Analyzing,
-                        Message = $"Schema mismatch: {mismatchResult.TotalMissingCount} column(s) not found in target"
-                    });
-
-                    throw new SchemaMismatchException(
-                        mismatchResult.BuildDetailedMessage(),
-                        mismatchResult.MissingColumns.ToDictionary(x => x.Key, x => x.Value));
-                }
-
-                // SkipMissingColumns is true - log warnings and continue
-                _logger?.LogWarning("Skipping {Count} columns not found in target environment",
-                    mismatchResult.TotalMissingCount);
-
-                foreach (var (entity, columns) in mismatchResult.MissingColumns)
-                {
-                    _logger?.LogWarning("Entity {Entity}: skipping columns [{Columns}]",
-                        entity, string.Join(", ", columns));
-
-                    warnings.AddWarning(new ImportWarning
-                    {
-                        Code = ImportWarningCodes.ColumnSkipped,
-                        Entity = entity,
-                        Message = $"Skipping columns not found in target: {string.Join(", ", columns)}",
-                        Impact = $"{columns.Count} column(s) skipped"
-                    });
-                }
-
-                progress?.Report(new ProgressEventArgs
-                {
-                    Phase = MigrationPhase.Analyzing,
-                    Message = $"Warning: Skipping {mismatchResult.TotalMissingCount} column(s) not found in target"
-                });
-            }
+            // Load and validate schema
+            var targetFieldMetadata = await ValidateSchemaAndHandleMissingColumnsAsync(
+                data, options, progress, warnings, cancellationToken).ConfigureAwait(false);
 
             // Create shared import context for phase processors
             var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress)
@@ -204,277 +152,431 @@ namespace PPDS.Migration.Import
             };
 
             // Disable plugins on entities with disableplugins=true
-            IReadOnlyList<Guid> disabledPluginSteps = Array.Empty<Guid>();
-            if (options.RespectDisablePluginsSetting && _pluginStepManager != null)
-            {
-                var entitiesToDisablePlugins = data.Schema.Entities
-                    .Where(e => e.DisablePlugins && e.ObjectTypeCode.HasValue)
-                    .Select(e => e.ObjectTypeCode!.Value)
-                    .ToList();
-
-                if (entitiesToDisablePlugins.Count > 0)
-                {
-                    progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Analyzing,
-                        Message = $"Disabling plugins for {entitiesToDisablePlugins.Count} entities..."
-                    });
-
-                    disabledPluginSteps = await _pluginStepManager.GetActivePluginStepsAsync(
-                        entitiesToDisablePlugins, cancellationToken).ConfigureAwait(false);
-
-                    if (disabledPluginSteps.Count > 0)
-                    {
-                        await _pluginStepManager.DisablePluginStepsAsync(
-                            disabledPluginSteps, cancellationToken).ConfigureAwait(false);
-
-                        _logger?.LogInformation("Disabled {Count} plugin steps", disabledPluginSteps.Count);
-                    }
-                }
-            }
+            var disabledPluginSteps = await DisablePluginsForImportAsync(
+                data, options, progress, cancellationToken).ConfigureAwait(false);
 
             try
             {
-                // Phase 1: Process each tier sequentially
-                foreach (var tier in plan.Tiers)
-                {
-                    // Track tier-level statistics
-                    var tierStopwatch = Stopwatch.StartNew();
-                    var tierRecordsProcessed = 0L;
-                    var tierRecordsSuccess = 0L;
-                    var tierRecordsFailed = 0L;
-
-                    // Log tier start checkpoint
-                    context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
-
-                    progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Importing,
-                        TierNumber = tier.TierNumber,
-                        TotalTiers = plan.TierCount,
-                        TotalEntities = totalEntities,
-                        OverallProcessed = Interlocked.Read(ref overallProcessed),
-                        OverallTotal = overallTotal,
-                        Message = $"Processing tier {tier.TierNumber}: {string.Join(", ", tier.Entities)}"
-                    });
-
-                    // Process entities within tier in parallel
-                    await Parallel.ForEachAsync(
-                        tier.Entities,
-                        new ParallelOptions
-                        {
-                            MaxDegreeOfParallelism = options.MaxParallelEntities,
-                            CancellationToken = cancellationToken
-                        },
-                        async (entityName, ct) =>
-                        {
-                            if (!data.EntityData.TryGetValue(entityName, out var records) || records.Count == 0)
-                            {
-                                return;
-                            }
-
-                            // Get deferred fields for this entity
-                            plan.DeferredFields.TryGetValue(entityName, out var deferredFields);
-
-                            // Get field metadata for this entity
-                            var entityFieldMetadata = targetFieldMetadata.GetFieldsForEntity(entityName);
-
-                            var result = await ImportEntityAsync(
-                                entityName,
-                                records,
-                                tier.TierNumber,
-                                deferredFields,
-                                entityFieldMetadata,
-                                idMappings,
-                                options,
-                                progress,
-                                warnings,
-                                ct).ConfigureAwait(false);
-
-                            entityResults.Add(result);
-                            Interlocked.Add(ref totalImported, result.SuccessCount);
-
-                            // Update tier-level tracking
-                            Interlocked.Add(ref tierRecordsProcessed, result.RecordCount);
-                            Interlocked.Add(ref tierRecordsSuccess, result.SuccessCount);
-                            Interlocked.Add(ref tierRecordsFailed, result.FailureCount);
-
-                            // Update overall progress tracking
-                            Interlocked.Add(ref overallProcessed, result.RecordCount);
-                            Interlocked.Increment(ref entityIndex);
-
-                            // Log entity completion checkpoint
-                            if (result.Duration.TotalSeconds > 0)
-                            {
-                                var rps = result.SuccessCount / result.Duration.TotalSeconds;
-                                context.OutputManager?.LogEntityProgress(entityName, result.SuccessCount, records.Count, rps);
-                            }
-
-                            // Log entity error checkpoint if failures occurred
-                            if (result.FailureCount > 0)
-                            {
-                                var errorSummary = result.Errors.FirstOrDefault()?.Message ?? "Multiple errors";
-                                context.OutputManager?.LogEntityError(entityName, result.FailureCount, errorSummary);
-                            }
-
-                            // Add all detailed errors from this entity
-                            foreach (var error in result.Errors)
-                            {
-                                errors.Add(error);
-
-                                // Stream error immediately via callback (thread-safe)
-                                options.ErrorCallback?.Invoke(error);
-                            }
-                        }).ConfigureAwait(false);
-
-                    // Report tier completion summary
-                    tierStopwatch.Stop();
-                    var tierDuration = tierStopwatch.Elapsed;
-                    var tierRps = tierDuration.TotalSeconds > 0
-                        ? tierRecordsSuccess / tierDuration.TotalSeconds
-                        : 0;
-
-                    var tierSummaryMessage = tierRecordsFailed > 0
-                        ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
-                        : $"Tier {tier.TierNumber} completed: {tier.Entities.Count()} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
-
-                    progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Importing,
-                        TierNumber = tier.TierNumber,
-                        TotalTiers = plan.TierCount,
-                        Message = tierSummaryMessage
-                    });
-
-                    context.OutputManager?.LogProgress(tierSummaryMessage);
-
-                    _logger?.LogInformation("Tier {Tier} complete: {Entities} entities, {Records} records in {Duration}",
-                        tier.TierNumber, tier.Entities.Count(), tierRecordsSuccess, tierDuration);
-                }
-
-                // Capture Phase 1 duration (entity import)
+                // Phase 1: Process tiers
+                var tierResult = await ProcessTiersAsync(
+                    context, entityResults, errors, warnings, cancellationToken).ConfigureAwait(false);
+                totalImported = tierResult.TotalImported;
                 var phase1Duration = stopwatch.Elapsed;
 
                 // Phase 2: Process deferred fields
                 context.OutputManager?.LogProgress("Starting deferred fields phase");
                 var deferredResult = await _deferredFieldProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
-                var deferredUpdates = deferredResult.SuccessCount;
                 var phase2Duration = deferredResult.Duration;
 
                 // Phase 3: Process M2M relationships
                 context.OutputManager?.LogProgress("Starting M2M relationships phase");
                 var relationshipResult = await _relationshipProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
-                var relationshipsProcessed = relationshipResult.SuccessCount;
                 var phase3Duration = relationshipResult.Duration;
 
                 stopwatch.Stop();
 
                 _logger?.LogInformation("Import complete: {Records} imported, {Deferred} deferred, {M2M} relationships in {Duration}",
-                    totalImported, deferredUpdates, relationshipsProcessed, stopwatch.Elapsed);
+                    totalImported, deferredResult.SuccessCount, relationshipResult.SuccessCount, stopwatch.Elapsed);
 
-                var result = new ImportResult
-                {
-                    Success = errors.IsEmpty,
-                    TiersProcessed = plan.TierCount,
-                    RecordsImported = totalImported,
-                    RecordsUpdated = deferredUpdates,
-                    RelationshipsProcessed = relationshipsProcessed,
-                    Duration = stopwatch.Elapsed,
-                    Phase1Duration = phase1Duration,
-                    Phase2Duration = phase2Duration,
-                    Phase3Duration = phase3Duration,
-                    EntityResults = entityResults.ToArray(),
-                    Errors = errors.ToArray(),
-                    PoolStatistics = _connectionPool.Statistics,
-                    Warnings = warnings.GetWarnings()
-                };
-
-                // Calculate record-level failure count from entity results
-                var recordFailureCount = entityResults.Sum(r => r.FailureCount);
-
-                // Aggregate created/updated counts from entity results (only populated for upsert mode)
-                var totalCreated = entityResults.Any(r => r.CreatedCount.HasValue)
-                    ? entityResults.Sum(r => r.CreatedCount ?? 0)
-                    : (int?)null;
-                var totalUpdated = entityResults.Any(r => r.UpdatedCount.HasValue)
-                    ? entityResults.Sum(r => r.UpdatedCount ?? 0)
-                    : (int?)null;
-
-                // Include M2M relationship failures in total failure count
-                var m2mFailureCount = relationshipResult.FailureCount;
-                var totalFailureCount = recordFailureCount + m2mFailureCount;
-
-                progress?.Complete(new MigrationResult
-                {
-                    Success = result.Success,
-                    RecordsProcessed = result.RecordsImported + result.RecordsUpdated + totalFailureCount + relationshipsProcessed,
-                    SuccessCount = result.RecordsImported + result.RecordsUpdated + relationshipsProcessed,
-                    FailureCount = totalFailureCount,
-                    CreatedCount = totalCreated,
-                    UpdatedCount = totalUpdated,
-                    M2MCount = relationshipsProcessed > 0 ? relationshipsProcessed : null,
-                    Duration = result.Duration,
-                    Errors = errors.ToArray()
-                });
-
-                return result;
+                return BuildImportResult(
+                    plan, entityResults, errors, warnings,
+                    totalImported, deferredResult, relationshipResult,
+                    stopwatch.Elapsed, phase1Duration, phase2Duration, phase3Duration,
+                    options, progress);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 stopwatch.Stop();
                 _logger?.LogError(ex, "Import failed");
 
-                var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
-                progress?.Error(ex, "Import failed");
-
-                // Preserve all previously accumulated entity errors, plus add this exception error
-                var exceptionError = new MigrationError
-                {
-                    Phase = MigrationPhase.Importing,
-                    Message = safeMessage
-                };
-
-                // Stream exception error via callback
-                options?.ErrorCallback?.Invoke(exceptionError);
-
-                return new ImportResult
-                {
-                    Success = false,
-                    TiersProcessed = plan.TierCount,
-                    RecordsImported = totalImported,
-                    Duration = stopwatch.Elapsed,
-                    EntityResults = entityResults.ToArray(),
-                    Errors = errors.Append(exceptionError).ToArray(),
-                    PoolStatistics = _connectionPool.Statistics,
-                    Warnings = warnings.GetWarnings()
-                };
+                return BuildFailureResult(
+                    plan, entityResults, errors, warnings,
+                    totalImported, stopwatch.Elapsed, ex, options, progress);
             }
             finally
             {
-                // Re-enable plugins that were disabled
-                if (disabledPluginSteps.Count > 0 && _pluginStepManager != null)
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Validates schema and handles missing columns based on options.
+        /// </summary>
+        private async Task<FieldMetadataCollection> ValidateSchemaAndHandleMissingColumnsAsync(
+            MigrationData data,
+            ImportOptions options,
+            IProgressReporter? progress,
+            IWarningCollector warnings,
+            CancellationToken cancellationToken)
+        {
+            var entityNames = data.Schema.Entities.Select(e => e.LogicalName).ToList();
+            var targetFieldMetadata = await _schemaValidator.LoadTargetFieldMetadataAsync(
+                entityNames, progress, cancellationToken).ConfigureAwait(false);
+
+            var mismatchResult = _schemaValidator.DetectMissingColumns(data, targetFieldMetadata);
+            if (!mismatchResult.HasMissingColumns)
+            {
+                return targetFieldMetadata;
+            }
+
+            if (!options.SkipMissingColumns)
+            {
+                _logger?.LogError("Schema mismatch detected: {Count} columns missing in target",
+                    mismatchResult.TotalMissingCount);
+
+                progress?.Report(new ProgressEventArgs
                 {
-                    progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Complete,
-                        Message = $"Re-enabling {disabledPluginSteps.Count} plugin steps..."
-                    });
+                    Phase = MigrationPhase.Analyzing,
+                    Message = $"Schema mismatch: {mismatchResult.TotalMissingCount} column(s) not found in target"
+                });
 
-                    try
-                    {
-                        await _pluginStepManager.EnablePluginStepsAsync(
-                            disabledPluginSteps, CancellationToken.None).ConfigureAwait(false);
+                throw new SchemaMismatchException(
+                    mismatchResult.BuildDetailedMessage(),
+                    mismatchResult.MissingColumns.ToDictionary(x => x.Key, x => x.Value));
+            }
 
-                        _logger?.LogInformation("Re-enabled {Count} plugin steps", disabledPluginSteps.Count);
-                    }
-                    catch (Exception ex)
+            // SkipMissingColumns is true - log warnings and continue
+            _logger?.LogWarning("Skipping {Count} columns not found in target environment",
+                mismatchResult.TotalMissingCount);
+
+            foreach (var (entity, columns) in mismatchResult.MissingColumns)
+            {
+                _logger?.LogWarning("Entity {Entity}: skipping columns [{Columns}]",
+                    entity, string.Join(", ", columns));
+
+                warnings.AddWarning(new ImportWarning
+                {
+                    Code = ImportWarningCodes.ColumnSkipped,
+                    Entity = entity,
+                    Message = $"Skipping columns not found in target: {string.Join(", ", columns)}",
+                    Impact = $"{columns.Count} column(s) skipped"
+                });
+            }
+
+            progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Warning: Skipping {mismatchResult.TotalMissingCount} column(s) not found in target"
+            });
+
+            return targetFieldMetadata;
+        }
+
+        /// <summary>
+        /// Disables plugins on entities marked with disableplugins=true.
+        /// </summary>
+        private async Task<IReadOnlyList<Guid>> DisablePluginsForImportAsync(
+            MigrationData data,
+            ImportOptions options,
+            IProgressReporter? progress,
+            CancellationToken cancellationToken)
+        {
+            if (!options.RespectDisablePluginsSetting || _pluginStepManager == null)
+            {
+                return Array.Empty<Guid>();
+            }
+
+            var entitiesToDisablePlugins = data.Schema.Entities
+                .Where(e => e.DisablePlugins && e.ObjectTypeCode.HasValue)
+                .Select(e => e.ObjectTypeCode!.Value)
+                .ToList();
+
+            if (entitiesToDisablePlugins.Count == 0)
+            {
+                return Array.Empty<Guid>();
+            }
+
+            progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Analyzing,
+                Message = $"Disabling plugins for {entitiesToDisablePlugins.Count} entities..."
+            });
+
+            var disabledPluginSteps = await _pluginStepManager.GetActivePluginStepsAsync(
+                entitiesToDisablePlugins, cancellationToken).ConfigureAwait(false);
+
+            if (disabledPluginSteps.Count > 0)
+            {
+                await _pluginStepManager.DisablePluginStepsAsync(
+                    disabledPluginSteps, cancellationToken).ConfigureAwait(false);
+
+                _logger?.LogInformation("Disabled {Count} plugin steps", disabledPluginSteps.Count);
+            }
+
+            return disabledPluginSteps;
+        }
+
+        /// <summary>
+        /// Re-enables plugins that were disabled during import.
+        /// </summary>
+        private async Task EnablePluginsAfterImportAsync(
+            IReadOnlyList<Guid> disabledPluginSteps,
+            IProgressReporter? progress)
+        {
+            if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
+            {
+                return;
+            }
+
+            progress?.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Complete,
+                Message = $"Re-enabling {disabledPluginSteps.Count} plugin steps..."
+            });
+
+            try
+            {
+                await _pluginStepManager.EnablePluginStepsAsync(
+                    disabledPluginSteps, CancellationToken.None).ConfigureAwait(false);
+
+                _logger?.LogInformation("Re-enabled {Count} plugin steps", disabledPluginSteps.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to re-enable some plugin steps");
+            }
+        }
+
+        /// <summary>
+        /// Processes all tiers sequentially, importing entities within each tier in parallel.
+        /// </summary>
+        private async Task<TierProcessingResult> ProcessTiersAsync(
+            ImportContext context,
+            ConcurrentBag<EntityImportResult> entityResults,
+            ConcurrentBag<MigrationError> errors,
+            IWarningCollector warnings,
+            CancellationToken cancellationToken)
+        {
+            var totalEntities = context.Data.EntityData.Count;
+            var overallTotal = context.Data.TotalRecordCount;
+            long overallProcessed = 0;
+            var totalImported = 0;
+
+            foreach (var tier in context.Plan.Tiers)
+            {
+                var tierStopwatch = Stopwatch.StartNew();
+                var tierRecordsSuccess = 0L;
+                var tierRecordsFailed = 0L;
+
+                context.OutputManager?.LogTierStart(tier.TierNumber, tier.Entities.ToArray());
+
+                context.Progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Importing,
+                    TierNumber = tier.TierNumber,
+                    TotalTiers = context.Plan.TierCount,
+                    TotalEntities = totalEntities,
+                    OverallProcessed = Interlocked.Read(ref overallProcessed),
+                    OverallTotal = overallTotal,
+                    Message = $"Processing tier {tier.TierNumber}: {string.Join(", ", tier.Entities)}"
+                });
+
+                await Parallel.ForEachAsync(
+                    tier.Entities,
+                    new ParallelOptions
                     {
-                        _logger?.LogWarning(ex, "Failed to re-enable some plugin steps");
-                    }
+                        MaxDegreeOfParallelism = context.Options.MaxParallelEntities,
+                        CancellationToken = cancellationToken
+                    },
+                    async (entityName, ct) =>
+                    {
+                        if (!context.Data.EntityData.TryGetValue(entityName, out var records) || records.Count == 0)
+                        {
+                            return;
+                        }
+
+                        context.Plan.DeferredFields.TryGetValue(entityName, out var deferredFields);
+                        var entityFieldMetadata = context.TargetFieldMetadata.GetFieldsForEntity(entityName);
+
+                        var result = await ImportEntityAsync(
+                            entityName,
+                            records,
+                            tier.TierNumber,
+                            deferredFields,
+                            entityFieldMetadata,
+                            context.IdMappings,
+                            context.Options,
+                            context.Progress,
+                            warnings,
+                            ct).ConfigureAwait(false);
+
+                        entityResults.Add(result);
+                        Interlocked.Add(ref totalImported, result.SuccessCount);
+
+                        Interlocked.Add(ref tierRecordsSuccess, result.SuccessCount);
+                        Interlocked.Add(ref tierRecordsFailed, result.FailureCount);
+
+                        Interlocked.Add(ref overallProcessed, result.RecordCount);
+
+                        if (result.Duration.TotalSeconds > 0)
+                        {
+                            var rps = result.SuccessCount / result.Duration.TotalSeconds;
+                            context.OutputManager?.LogEntityProgress(entityName, result.SuccessCount, records.Count, rps);
+                        }
+
+                        if (result.FailureCount > 0)
+                        {
+                            var errorSummary = result.Errors.FirstOrDefault()?.Message ?? "Multiple errors";
+                            context.OutputManager?.LogEntityError(entityName, result.FailureCount, errorSummary);
+                        }
+
+                        foreach (var error in result.Errors)
+                        {
+                            errors.Add(error);
+                            context.Options.ErrorCallback?.Invoke(error);
+                        }
+                    }).ConfigureAwait(false);
+
+                tierStopwatch.Stop();
+                var tierDuration = tierStopwatch.Elapsed;
+                var tierRps = tierDuration.TotalSeconds > 0
+                    ? tierRecordsSuccess / tierDuration.TotalSeconds
+                    : 0;
+
+                var tierSummaryMessage = tierRecordsFailed > 0
+                    ? $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records ({tierRecordsFailed:N0} failed) in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s"
+                    : $"Tier {tier.TierNumber} completed: {tier.Entities.Count} entities, {tierRecordsSuccess:N0} records in {tierDuration:mm\\:ss} @ {tierRps:F0} rec/s";
+
+                context.Progress?.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Importing,
+                    TierNumber = tier.TierNumber,
+                    TotalTiers = context.Plan.TierCount,
+                    Message = tierSummaryMessage
+                });
+
+                context.OutputManager?.LogProgress(tierSummaryMessage);
+
+                _logger?.LogInformation("Tier {Tier} complete: {Entities} entities, {Records} records in {Duration}",
+                    tier.TierNumber, tier.Entities.Count, tierRecordsSuccess, tierDuration);
+            }
+
+            return new TierProcessingResult { TotalImported = totalImported };
+        }
+
+        /// <summary>
+        /// Builds the successful import result.
+        /// </summary>
+        private ImportResult BuildImportResult(
+            ExecutionPlan plan,
+            ConcurrentBag<EntityImportResult> entityResults,
+            ConcurrentBag<MigrationError> errors,
+            IWarningCollector warnings,
+            int totalImported,
+            PhaseResult deferredResult,
+            PhaseResult relationshipResult,
+            TimeSpan duration,
+            TimeSpan phase1Duration,
+            TimeSpan phase2Duration,
+            TimeSpan phase3Duration,
+            ImportOptions options,
+            IProgressReporter? progress)
+        {
+            var result = new ImportResult
+            {
+                Success = errors.IsEmpty,
+                TiersProcessed = plan.TierCount,
+                RecordsImported = totalImported,
+                RecordsUpdated = deferredResult.SuccessCount,
+                RelationshipsProcessed = relationshipResult.SuccessCount,
+                Duration = duration,
+                Phase1Duration = phase1Duration,
+                Phase2Duration = phase2Duration,
+                Phase3Duration = phase3Duration,
+                EntityResults = entityResults.ToArray(),
+                Errors = errors.ToArray(),
+                PoolStatistics = _connectionPool.Statistics,
+                Warnings = warnings.GetWarnings()
+            };
+
+            // Aggregate entity result stats in a single pass for efficiency
+            var recordFailureCount = 0;
+            var createdAgg = 0;
+            var updatedAgg = 0;
+            var hasCreated = false;
+            var hasUpdated = false;
+
+            foreach (var r in entityResults)
+            {
+                recordFailureCount += r.FailureCount;
+                if (r.CreatedCount.HasValue)
+                {
+                    hasCreated = true;
+                    createdAgg += r.CreatedCount.Value;
+                }
+                if (r.UpdatedCount.HasValue)
+                {
+                    hasUpdated = true;
+                    updatedAgg += r.UpdatedCount.Value;
                 }
             }
+
+            var totalCreated = hasCreated ? (int?)createdAgg : null;
+            var totalUpdated = hasUpdated ? (int?)updatedAgg : null;
+            var totalFailureCount = recordFailureCount + relationshipResult.FailureCount;
+
+            progress?.Complete(new MigrationResult
+            {
+                Success = result.Success,
+                RecordsProcessed = result.RecordsImported + result.RecordsUpdated + totalFailureCount + relationshipResult.SuccessCount,
+                SuccessCount = result.RecordsImported + result.RecordsUpdated + relationshipResult.SuccessCount,
+                FailureCount = totalFailureCount,
+                CreatedCount = totalCreated,
+                UpdatedCount = totalUpdated,
+                M2MCount = relationshipResult.SuccessCount > 0 ? relationshipResult.SuccessCount : null,
+                Duration = result.Duration,
+                Errors = errors.ToArray()
+            });
+
+            return result;
+        }
+
+        /// <summary>
+        /// Builds the failure import result when an exception occurs.
+        /// </summary>
+        private ImportResult BuildFailureResult(
+            ExecutionPlan plan,
+            ConcurrentBag<EntityImportResult> entityResults,
+            ConcurrentBag<MigrationError> errors,
+            IWarningCollector warnings,
+            int totalImported,
+            TimeSpan duration,
+            Exception ex,
+            ImportOptions options,
+            IProgressReporter? progress)
+        {
+            var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
+            progress?.Error(ex, "Import failed");
+
+            var exceptionError = new MigrationError
+            {
+                Phase = MigrationPhase.Importing,
+                Message = safeMessage
+            };
+
+            options.ErrorCallback?.Invoke(exceptionError);
+
+            return new ImportResult
+            {
+                Success = false,
+                TiersProcessed = plan.TierCount,
+                RecordsImported = totalImported,
+                Duration = duration,
+                EntityResults = entityResults.ToArray(),
+                Errors = errors.Append(exceptionError).ToArray(),
+                PoolStatistics = _connectionPool.Statistics,
+                Warnings = warnings.GetWarnings()
+            };
+        }
+
+        /// <summary>
+        /// Result of processing all tiers.
+        /// </summary>
+        private readonly struct TierProcessingResult
+        {
+            public int TotalImported { get; init; }
         }
 
         private async Task<EntityImportResult> ImportEntityAsync(
