@@ -21,7 +21,7 @@ internal sealed class AboutDialog : Dialog
     public AboutDialog() : base("About PPDS")
     {
         Width = 70;
-        Height = 20;
+        Height = 22;
         ColorScheme = TuiColorPalette.Default;
 
         var version = ErrorOutput.Version;
