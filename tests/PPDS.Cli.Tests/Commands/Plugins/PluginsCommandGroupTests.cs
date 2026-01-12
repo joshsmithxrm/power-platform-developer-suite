@@ -63,9 +63,16 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasFiveSubcommands()
+    public void Create_HasDownloadSubcommand()
     {
-        Assert.Equal(5, _command.Subcommands.Count);
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "download");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
+    public void Create_HasSixSubcommands()
+    {
+        Assert.Equal(6, _command.Subcommands.Count);
     }
 
     #endregion

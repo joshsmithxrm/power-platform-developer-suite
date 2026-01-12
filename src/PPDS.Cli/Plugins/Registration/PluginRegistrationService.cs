@@ -911,6 +911,86 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     #endregion
 
+    #region Download Operations
+
+    /// <summary>
+    /// Downloads the binary content of a plugin assembly.
+    /// </summary>
+    /// <param name="assemblyId">The assembly ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple containing the binary content and assembly name with .dll extension.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
+    public async Task<(byte[] Content, string FileName)> DownloadAssemblyAsync(
+        Guid assemblyId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        var entity = await RetrieveAsync(
+            PluginAssembly.EntityLogicalName,
+            assemblyId,
+            new ColumnSet(PluginAssembly.Fields.Name, PluginAssembly.Fields.Content),
+            client,
+            cancellationToken);
+
+        var name = entity.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? "assembly";
+        var content = entity.GetAttributeValue<string>(PluginAssembly.Fields.Content);
+
+        if (string.IsNullOrEmpty(content))
+        {
+            throw new InvalidOperationException(
+                $"Assembly '{name}' has no content. The source type may be Disk or GAC.");
+        }
+
+        var bytes = Convert.FromBase64String(content);
+        var fileName = name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            ? name
+            : $"{name}.dll";
+
+        return (bytes, fileName);
+    }
+
+    /// <summary>
+    /// Downloads the binary content of a plugin package.
+    /// </summary>
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple containing the binary content and package name with .nupkg extension.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when package has no content.</exception>
+    public async Task<(byte[] Content, string FileName)> DownloadPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        var entity = await RetrieveAsync(
+            PluginPackage.EntityLogicalName,
+            packageId,
+            new ColumnSet(PluginPackage.Fields.Name, PluginPackage.Fields.Version, PluginPackage.Fields.Content),
+            client,
+            cancellationToken);
+
+        var name = entity.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? "package";
+        var version = entity.GetAttributeValue<string>(PluginPackage.Fields.Version);
+        var content = entity.GetAttributeValue<string>(PluginPackage.Fields.Content);
+
+        if (string.IsNullOrEmpty(content))
+        {
+            throw new InvalidOperationException($"Package '{name}' has no content.");
+        }
+
+        var bytes = Convert.FromBase64String(content);
+
+        // Format: PackageName.Version.nupkg (matching NuGet convention)
+        var fileName = !string.IsNullOrEmpty(version)
+            ? $"{name}.{version}.nupkg"
+            : $"{name}.nupkg";
+
+        return (bytes, fileName);
+    }
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>
@@ -1167,6 +1247,18 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (client is IOrganizationServiceAsync2 asyncService)
             return await asyncService.ExecuteAsync(request, cancellationToken);
         return await Task.Run(() => client.Execute(request), cancellationToken);
+    }
+
+    private static async Task<Entity> RetrieveAsync(
+        string entityName,
+        Guid id,
+        ColumnSet columnSet,
+        IOrganizationService client,
+        CancellationToken cancellationToken = default)
+    {
+        if (client is IOrganizationServiceAsync2 asyncService)
+            return await asyncService.RetrieveAsync(entityName, id, columnSet, cancellationToken);
+        return await Task.Run(() => client.Retrieve(entityName, id, columnSet), cancellationToken);
     }
 
     #endregion

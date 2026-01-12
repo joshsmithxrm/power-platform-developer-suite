@@ -256,6 +256,32 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    #region Download Operations
+
+    /// <summary>
+    /// Downloads the binary content of a plugin assembly.
+    /// </summary>
+    /// <param name="assemblyId">The assembly ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple containing the binary content and assembly name with .dll extension.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
+    Task<(byte[] Content, string FileName)> DownloadAssemblyAsync(
+        Guid assemblyId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads the binary content of a plugin package.
+    /// </summary>
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple containing the binary content and package name with .nupkg extension.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when package has no content.</exception>
+    Task<(byte[] Content, string FileName)> DownloadPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken = default);
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>
