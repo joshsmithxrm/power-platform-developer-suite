@@ -198,6 +198,24 @@ public interface IPluginRegistrationService
         string assemblyName,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Gets a plugin type by its fully qualified type name.
+    /// </summary>
+    /// <param name="typeName">The fully qualified type name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginTypeInfo?> GetPluginTypeByNameAsync(
+        string typeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a processing step by its display name.
+    /// </summary>
+    /// <param name="stepName">The step display name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginStepInfo?> GetStepByNameAsync(
+        string stepName,
+        CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Create/Update Operations

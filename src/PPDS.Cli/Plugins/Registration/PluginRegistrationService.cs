@@ -953,6 +953,114 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     }
 
     /// <summary>
+    /// Gets a plugin type by its fully qualified type name.
+    /// </summary>
+    /// <param name="typeName">The fully qualified type name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<PluginTypeInfo?> GetPluginTypeByNameAsync(
+        string typeName,
+        CancellationToken cancellationToken = default)
+    {
+        var query = new QueryExpression(PluginType.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(
+                PluginType.Fields.TypeName,
+                PluginType.Fields.FriendlyName),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(PluginType.Fields.TypeName, ConditionOperator.Equal, typeName)
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entity = results.Entities.FirstOrDefault();
+
+        if (entity == null)
+            return null;
+
+        return new PluginTypeInfo
+        {
+            Id = entity.Id,
+            TypeName = entity.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
+            FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName)
+        };
+    }
+
+    /// <summary>
+    /// Gets a processing step by its display name.
+    /// </summary>
+    /// <param name="stepName">The step display name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<PluginStepInfo?> GetStepByNameAsync(
+        string stepName,
+        CancellationToken cancellationToken = default)
+    {
+        var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStep.Fields.Name,
+                SdkMessageProcessingStep.Fields.Stage,
+                SdkMessageProcessingStep.Fields.Mode,
+                SdkMessageProcessingStep.Fields.Rank,
+                SdkMessageProcessingStep.Fields.FilteringAttributes,
+                SdkMessageProcessingStep.Fields.Configuration,
+                SdkMessageProcessingStep.Fields.StateCode,
+                SdkMessageProcessingStep.Fields.Description,
+                SdkMessageProcessingStep.Fields.SupportedDeployment,
+                SdkMessageProcessingStep.Fields.AsyncAutoDelete),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessageProcessingStep.Fields.Name, ConditionOperator.Equal, stepName)
+                }
+            },
+            LinkEntities =
+            {
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SdkMessage.EntityLogicalName, SdkMessageProcessingStep.Fields.SdkMessageId, SdkMessage.Fields.SdkMessageId, JoinOperator.Inner)
+                {
+                    Columns = new ColumnSet(SdkMessage.Fields.Name),
+                    EntityAlias = "message"
+                },
+                new LinkEntity(SdkMessageProcessingStep.EntityLogicalName, SdkMessageFilter.EntityLogicalName, SdkMessageProcessingStep.Fields.SdkMessageFilterId, SdkMessageFilter.Fields.SdkMessageFilterId, JoinOperator.LeftOuter)
+                {
+                    Columns = new ColumnSet(SdkMessageFilter.Fields.PrimaryObjectTypeCode, SdkMessageFilter.Fields.SecondaryObjectTypeCode),
+                    EntityAlias = "filter"
+                }
+            }
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entity = results.Entities.FirstOrDefault();
+
+        if (entity == null)
+            return null;
+
+        return new PluginStepInfo
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name) ?? string.Empty,
+            Message = entity.GetAttributeValue<AliasedValue>($"message.{SdkMessage.Fields.Name}")?.Value?.ToString() ?? string.Empty,
+            PrimaryEntity = entity.GetAttributeValue<AliasedValue>($"filter.{SdkMessageFilter.Fields.PrimaryObjectTypeCode}")?.Value?.ToString() ?? "none",
+            SecondaryEntity = entity.GetAttributeValue<AliasedValue>($"filter.{SdkMessageFilter.Fields.SecondaryObjectTypeCode}")?.Value?.ToString(),
+            Stage = MapStageFromValue(entity.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Stage)?.Value ?? StagePostOperation),
+            Mode = MapModeFromValue(entity.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.Mode)?.Value ?? 0),
+            ExecutionOrder = entity.GetAttributeValue<int>(SdkMessageProcessingStep.Fields.Rank),
+            FilteringAttributes = entity.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.FilteringAttributes),
+            Configuration = entity.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Configuration),
+            IsEnabled = entity.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value == (int)sdkmessageprocessingstep_statecode.Enabled,
+            Description = entity.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Description),
+            Deployment = MapDeploymentFromValue(entity.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.SupportedDeployment)?.Value ?? 0),
+            AsyncAutoDelete = entity.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false
+        };
+    }
+
+    /// <summary>
     /// Creates or updates a plugin type.
     /// </summary>
     /// <param name="assemblyId">The assembly ID.</param>
