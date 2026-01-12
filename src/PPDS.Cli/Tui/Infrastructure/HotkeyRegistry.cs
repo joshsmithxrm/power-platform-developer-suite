@@ -96,6 +96,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
 {
     private readonly List<HotkeyBinding> _bindings = new();
     private readonly object _lock = new();
+    private readonly HashSet<Key> _pendingGlobalHandlers = new();
 
     private object? _activeScreen;
     private object? _activeDialog;
@@ -186,13 +187,39 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             Application.RequestStop();
         }
 
-        // CRITICAL: Always defer handler execution to next main loop iteration.
+        // CRITICAL: Always defer global handler execution to next main loop iteration.
         // Starting Application.Run() from within a key event handler corrupts
         // Terminal.Gui's internal state (Border.SetBorderBrush null reference).
         // Deferring ensures the current key event fully completes first.
         if (matchedBinding.Scope == HotkeyScope.Global)
         {
-            Application.MainLoop?.Invoke(() => matchedBinding.Handler());
+            // Prevent duplicate handlers from stacking up when keys are pressed rapidly.
+            // Each key can only have one pending handler at a time.
+            lock (_lock)
+            {
+                if (_pendingGlobalHandlers.Contains(keyEvent.Key))
+                {
+                    TuiDebugLog.Log($"Ignoring duplicate {FormatKey(keyEvent.Key)} - handler already pending");
+                    return true; // Key was handled (absorbed), just not executed again
+                }
+                _pendingGlobalHandlers.Add(keyEvent.Key);
+            }
+
+            var key = keyEvent.Key;
+            Application.MainLoop?.Invoke(() =>
+            {
+                try
+                {
+                    matchedBinding.Handler();
+                }
+                finally
+                {
+                    lock (_lock)
+                    {
+                        _pendingGlobalHandlers.Remove(key);
+                    }
+                }
+            });
         }
         else
         {
