@@ -312,7 +312,9 @@ public sealed class SessionService : ISessionService
                 CompletedAt = IsTerminalStatus(status) && existing.CompletedAt == null
                     ? DateTimeOffset.UtcNow
                     : existing.CompletedAt,
-                CompletionReason = IsTerminalStatus(status) ? reason : existing.CompletionReason
+                CompletionReason = IsTerminalStatus(status) && existing.CompletedAt == null
+                    ? (reason ?? "Completed")
+                    : existing.CompletionReason
             });
 
         await PersistSessionAsync(session, cancellationToken);
@@ -394,16 +396,22 @@ public sealed class SessionService : ISessionService
         bool keepWorktree = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_sessions.ContainsKey(sessionId))
+        if (!_sessions.TryGetValue(sessionId, out var existing))
         {
             throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found");
+        }
+
+        // Already complete - nothing to cancel
+        if (existing.Status is SessionStatus.Complete)
+        {
+            return;
         }
 
         // Atomic update to avoid race conditions
         var session = _sessions.AddOrUpdate(
             sessionId,
             _ => throw new PpdsException(ErrorCodes.Session.NotFound, $"Session '{sessionId}' not found"),
-            (_, existing) => existing with
+            (_, ex) => ex with
             {
                 Status = SessionStatus.Complete,
                 CompletedAt = DateTimeOffset.UtcNow,
@@ -435,7 +443,7 @@ public sealed class SessionService : ISessionService
 
         foreach (var session in sessions)
         {
-            if (session.Status is SessionStatus.Working or SessionStatus.Stuck or SessionStatus.Paused or SessionStatus.Planning or SessionStatus.Shipping)
+            if (session.Status is not SessionStatus.Complete)
             {
                 await CancelAsync(session.Id, keepWorktrees, cancellationToken);
                 count++;

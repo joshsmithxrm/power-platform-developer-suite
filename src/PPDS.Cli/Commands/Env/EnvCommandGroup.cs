@@ -263,7 +263,7 @@ public static class EnvCommandGroup
             Console.Error.WriteLine($"Resolving environment '{environmentIdentifier}'...");
 
             // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-            using var credentialStore = new SecureCredentialStore();
+            using var credentialStore = new NativeCredentialStore();
             using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
             var result = await resolver.ResolveAsync(environmentIdentifier, cancellationToken);
 
@@ -381,7 +381,7 @@ public static class EnvCommandGroup
                     Console.Error.WriteLine($"Resolving environment '{environmentOverride}'...");
                 }
 
-                using var credentialStore = new SecureCredentialStore();
+                using var credentialStore = new NativeCredentialStore();
                 using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(environmentOverride, cancellationToken);
 

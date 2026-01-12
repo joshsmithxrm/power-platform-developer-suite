@@ -58,6 +58,17 @@ public static class ExceptionMapper
             // Cancellation
             OperationCanceledException => ExitCodes.Failure,
 
+            // PPDS exceptions - use error code category to determine exit code
+            PpdsNotFoundException => ExitCodes.NotFoundError,
+            PpdsValidationException => ExitCodes.InvalidArguments,
+            PpdsAuthException => ExitCodes.AuthError,
+            PpdsThrottleException => ExitCodes.ConnectionError,
+            PpdsException { ErrorCode: var code } when code.StartsWith("Plugin.") => ExitCodes.Failure,
+            PpdsException { ErrorCode: var code } when code.StartsWith("Validation.") => ExitCodes.InvalidArguments,
+            PpdsException { ErrorCode: var code } when code.StartsWith("Auth.") => ExitCodes.AuthError,
+            PpdsException { ErrorCode: var code } when code.StartsWith("Connection.") => ExitCodes.ConnectionError,
+            PpdsException => ExitCodes.Failure,
+
             // Default
             _ => ExitCodes.Failure
         };
@@ -130,6 +141,9 @@ public static class ExceptionMapper
             // Ambiguous match (environment resolution)
             System.Reflection.AmbiguousMatchException =>
                 (ErrorCodes.Connection.AmbiguousEnvironment, null),
+
+            // PPDS exceptions - preserve the error code
+            PpdsException ppdsEx => (ppdsEx.ErrorCode, null),
 
             // Default fallback
             _ => (ErrorCodes.Operation.Internal, null)

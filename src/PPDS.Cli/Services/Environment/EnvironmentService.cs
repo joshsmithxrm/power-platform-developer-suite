@@ -120,7 +120,7 @@ public sealed class EnvironmentService : IEnvironmentService
 
         try
         {
-            using var credentialStore = new SecureCredentialStore();
+            using var credentialStore = new NativeCredentialStore();
             using var resolver = new EnvironmentResolutionService(
                 profile,
                 deviceCodeCallback,

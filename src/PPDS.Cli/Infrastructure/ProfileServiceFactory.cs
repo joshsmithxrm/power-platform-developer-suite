@@ -89,7 +89,7 @@ public static class ProfileServiceFactory
             profile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
         // Create credential store for secure secret lookups (registered in DI for disposal)
-        var credentialStore = new SecureCredentialStore();
+        var credentialStore = new NativeCredentialStore();
 
         // Callback to persist HomeAccountId after authentication
         // This enables token cache reuse across sessions (ADR-0027)
@@ -207,7 +207,7 @@ public static class ProfileServiceFactory
             firstProfile, environmentOverride, cancellationToken).ConfigureAwait(false);
 
         // Create credential store for secure secret lookups (registered in DI for disposal)
-        var credentialStore = new SecureCredentialStore();
+        var credentialStore = new NativeCredentialStore();
 
         // Now resolve all profiles with the resolved URL
         using var resolver = new ConnectionResolver(
