@@ -177,6 +177,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
         if (isGlobalWithDialogOpen)
         {
             TuiDebugLog.Log("Closing dialog before executing global hotkey");
+            SetActiveDialog(null);  // Clear dialog state immediately to prevent stale state
             Application.RequestStop();
             // Use MainLoop.Invoke to execute handler after dialog closes
             Application.MainLoop?.Invoke(() => matchedBinding.Handler());

@@ -94,7 +94,7 @@ internal sealed class MainWindow : Window
         {
             new("_File", new MenuItem[]
             {
-                new("_SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery(), shortcut: Key.F2),
+                new("_SQL Query", "Run SQL queries against Dataverse (F2)", () => NavigateToSqlQuery()),
                 dataMigrationItem,
                 new("", "", () => {}, null, null, Key.Null), // Separator
                 new("_Quit", "Exit the application", () => RequestStop(), shortcut: Key.CtrlMask | Key.Q)
@@ -107,9 +107,9 @@ internal sealed class MainWindow : Window
             new("_Help", new MenuItem[]
             {
                 new("_About", "About PPDS", () => ShowAbout()),
-                new("_Keyboard Shortcuts", "Show keyboard shortcuts", () => ShowKeyboardShortcuts(), shortcut: Key.F1),
+                new("_Keyboard Shortcuts", "Show keyboard shortcuts (F1)", () => ShowKeyboardShortcuts()),
                 new("", "", () => {}, null, null, Key.Null), // Separator
-                new("Error _Log", "View recent errors and debug log", () => ShowErrorDetails(), shortcut: Key.F12),
+                new("Error _Log", "View recent errors and debug log (F12)", () => ShowErrorDetails()),
             })
         });
 
@@ -267,7 +267,7 @@ internal sealed class MainWindow : Window
     private void ShowProfileSelector()
     {
         var service = _session.GetProfileService();
-        var dialog = new ProfileSelectorDialog(service, _session);
+        using var dialog = new ProfileSelectorDialog(service, _session);
 
         Application.Run(dialog);
 
@@ -374,7 +374,7 @@ internal sealed class MainWindow : Window
         var profileService = _session.GetProfileService();
         var envService = _session.GetEnvironmentService();
 
-        var dialog = new ProfileCreationDialog(profileService, envService, _deviceCodeCallback);
+        using var dialog = new ProfileCreationDialog(profileService, envService, _deviceCodeCallback);
         Application.Run(dialog);
 
         if (dialog.CreatedProfile != null)
@@ -398,7 +398,7 @@ internal sealed class MainWindow : Window
 
     private void ShowProfileDetails()
     {
-        var dialog = new ProfileDetailsDialog(_session);
+        using var dialog = new ProfileDetailsDialog(_session);
         Application.Run(dialog);
     }
 
@@ -411,7 +411,7 @@ internal sealed class MainWindow : Window
         }
 
         var service = _session.GetEnvironmentService();
-        var dialog = new EnvironmentSelectorDialog(service, _deviceCodeCallback, _session);
+        using var dialog = new EnvironmentSelectorDialog(service, _deviceCodeCallback, _session);
 
         Application.Run(dialog);
 
@@ -462,7 +462,7 @@ internal sealed class MainWindow : Window
 
     private void ShowAbout()
     {
-        var dialog = new AboutDialog();
+        using var dialog = new AboutDialog();
         Application.Run(dialog);
     }
 
@@ -506,7 +506,7 @@ internal sealed class MainWindow : Window
 
     private void ShowErrorDetails()
     {
-        var dialog = new ErrorDetailsDialog(_errorService);
+        using var dialog = new ErrorDetailsDialog(_errorService);
         Application.Run(dialog);
 
         // Clear error state when dialog closes (user has seen the error)
