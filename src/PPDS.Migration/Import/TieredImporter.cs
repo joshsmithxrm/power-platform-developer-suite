@@ -402,14 +402,19 @@ namespace PPDS.Migration.Import
                     ? entityResults.Sum(r => r.UpdatedCount ?? 0)
                     : (int?)null;
 
+                // Include M2M relationship failures in total failure count
+                var m2mFailureCount = relationshipResult.FailureCount;
+                var totalFailureCount = recordFailureCount + m2mFailureCount;
+
                 progress?.Complete(new MigrationResult
                 {
                     Success = result.Success,
-                    RecordsProcessed = result.RecordsImported + result.RecordsUpdated + recordFailureCount,
-                    SuccessCount = result.RecordsImported + result.RecordsUpdated,
-                    FailureCount = recordFailureCount,
+                    RecordsProcessed = result.RecordsImported + result.RecordsUpdated + totalFailureCount + relationshipsProcessed,
+                    SuccessCount = result.RecordsImported + result.RecordsUpdated + relationshipsProcessed,
+                    FailureCount = totalFailureCount,
                     CreatedCount = totalCreated,
                     UpdatedCount = totalUpdated,
+                    M2MCount = relationshipsProcessed > 0 ? relationshipsProcessed : null,
                     Duration = result.Duration,
                     Errors = errors.ToArray()
                 });

@@ -52,6 +52,12 @@ namespace PPDS.Migration.Progress
         public int? UpdatedCount { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of M2M (many-to-many) relationship records processed.
+        /// Only populated for import operations; null otherwise.
+        /// </summary>
+        public int? M2MCount { get; set; }
+
+        /// <summary>
         /// Gets the average records per second.
         /// </summary>
         public double RecordsPerSecond => Duration.TotalSeconds > 0
