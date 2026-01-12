@@ -104,7 +104,7 @@ namespace PPDS.Migration.Import
             if (IsBulkNotSupportedFailure(probeResult, 1))
             {
                 // Cache that this entity doesn't support bulk operations
-                _bulkNotSupportedEntities[entityName] = true;
+                _bulkNotSupportedEntities.TryAdd(entityName, true);
                 _logger?.LogWarning("Entity {Entity} does not support bulk operations, falling back to individual operations", entityName);
 
                 // Fall back to individual operations for ALL records (including the probe record)
@@ -135,7 +135,7 @@ namespace PPDS.Migration.Import
         /// </remarks>
         public void MarkBulkNotSupported(string entityName)
         {
-            _bulkNotSupportedEntities[entityName] = true;
+            _bulkNotSupportedEntities.TryAdd(entityName, true);
         }
 
         private async Task<BulkOperationResult> ExecuteBulkOperationAsync(

@@ -9,6 +9,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Security;
 using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Import
@@ -219,7 +220,7 @@ namespace PPDS.Migration.Import
                         Index = i,
                         RecordId = updates[i].Id != Guid.Empty ? updates[i].Id : null,
                         ErrorCode = -1,
-                        Message = ex.Message
+                        Message = ConnectionStringRedactor.RedactExceptionMessage(ex.Message)
                     });
 
                     if (!context.Options.ContinueOnError)
