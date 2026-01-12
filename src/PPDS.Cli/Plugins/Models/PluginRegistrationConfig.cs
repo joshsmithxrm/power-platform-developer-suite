@@ -256,10 +256,18 @@ public sealed class PluginStepConfig
 
     /// <summary>
     /// User context to run the plugin as.
-    /// Use "CallingUser" (default), "System", or a systemuser GUID.
+    /// Use "CallingUser" (default), "System", a systemuser GUID,
+    /// a domain name (e.g., "user@domain.com"), or an email address.
     /// </summary>
     [JsonPropertyName("runAsUser")]
     public string? RunAsUser { get; set; }
+
+    /// <summary>
+    /// Whether the step is enabled. Default is true.
+    /// When false, the step is registered but disabled (won't execute).
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Description of what this step does.

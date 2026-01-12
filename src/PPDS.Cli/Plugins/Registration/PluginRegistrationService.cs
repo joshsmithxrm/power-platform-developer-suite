@@ -1148,7 +1148,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         // Check if step exists by name
         var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId),
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
+                SdkMessageProcessingStep.Fields.StateCode),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -1199,9 +1201,27 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (!string.IsNullOrEmpty(stepConfig.RunAsUser) &&
             !stepConfig.RunAsUser.Equals("CallingUser", StringComparison.OrdinalIgnoreCase))
         {
-            if (Guid.TryParse(stepConfig.RunAsUser, out var userId))
+            Guid? impersonatingUserId = null;
+
+            if (Guid.TryParse(stepConfig.RunAsUser, out var parsedGuid))
             {
-                entity.ImpersonatingUserId = new EntityReference(SystemUser.EntityLogicalName, userId);
+                impersonatingUserId = parsedGuid;
+            }
+            else
+            {
+                // Resolve username to GUID (by domain name or email)
+                impersonatingUserId = await ResolveUserIdAsync(stepConfig.RunAsUser, client, cancellationToken);
+                if (impersonatingUserId == null)
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Plugin.UserNotFound,
+                        $"Could not resolve user '{stepConfig.RunAsUser}'. Specify a valid GUID, domain name, or email address.");
+                }
+            }
+
+            if (impersonatingUserId.HasValue)
+            {
+                entity.ImpersonatingUserId = new EntityReference(SystemUser.EntityLogicalName, impersonatingUserId.Value);
             }
         }
 
@@ -1211,23 +1231,41 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             entity.AsyncAutoDelete = true;
         }
 
+        Guid stepId;
         if (existing != null)
         {
-            entity.Id = existing.Id;
+            stepId = existing.Id;
+            entity.Id = stepId;
             await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
             if (!string.IsNullOrEmpty(solutionName))
             {
-                await AddToSolutionAsync(existing.Id, ComponentTypeSdkMessageProcessingStep, solutionName, cancellationToken);
+                await AddToSolutionAsync(stepId, ComponentTypeSdkMessageProcessingStep, solutionName, cancellationToken);
             }
 
-            return existing.Id;
+            // Handle state change for existing step if needed
+            var targetState = stepConfig.Enabled
+                ? sdkmessageprocessingstep_statecode.Enabled
+                : sdkmessageprocessingstep_statecode.Disabled;
+            var currentState = existing.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.StateCode)?.Value ?? 0;
+            if (currentState != (int)targetState)
+            {
+                await SetStepStateAsync(stepId, targetState, client, cancellationToken);
+            }
         }
         else
         {
-            return await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
+            stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
+
+            // New steps are created enabled by default - disable if needed
+            if (!stepConfig.Enabled)
+            {
+                await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Disabled, client, cancellationToken);
+            }
         }
+
+        return stepId;
     }
 
     /// <summary>
@@ -2168,6 +2206,60 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (client is IOrganizationServiceAsync2 asyncService)
             return await asyncService.RetrieveAsync(entityName, id, columnSet, cancellationToken);
         return await Task.Run(() => client.Retrieve(entityName, id, columnSet), cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves a username (domain name or email) to a systemuser GUID.
+    /// </summary>
+    /// <param name="username">The username, domain name, or email address.</param>
+    /// <param name="client">The Dataverse client.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The user's GUID, or null if not found.</returns>
+    private static async Task<Guid?> ResolveUserIdAsync(
+        string username,
+        IOrganizationService client,
+        CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(SystemUser.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(SystemUser.Fields.SystemUserId),
+            TopCount = 1
+        };
+
+        // Match by domain name OR internal email address
+        var filter = new FilterExpression(LogicalOperator.Or);
+        filter.AddCondition(SystemUser.Fields.DomainName, ConditionOperator.Equal, username);
+        filter.AddCondition(SystemUser.Fields.InternalEMailAddress, ConditionOperator.Equal, username);
+        query.Criteria.AddFilter(filter);
+
+        var result = await RetrieveMultipleAsync(query, client, cancellationToken);
+        return result.Entities.FirstOrDefault()?.Id;
+    }
+
+    /// <summary>
+    /// Sets the state of a plugin step (enabled or disabled).
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="state">The target state.</param>
+    /// <param name="client">The Dataverse client.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private static async Task SetStepStateAsync(
+        Guid stepId,
+        sdkmessageprocessingstep_statecode state,
+        IOrganizationService client,
+        CancellationToken cancellationToken)
+    {
+        var statusCode = state == sdkmessageprocessingstep_statecode.Enabled
+            ? sdkmessageprocessingstep_statuscode.Enabled
+            : sdkmessageprocessingstep_statuscode.Disabled;
+
+        var request = new SetStateRequest
+        {
+            EntityMoniker = new EntityReference(SdkMessageProcessingStep.EntityLogicalName, stepId),
+            State = new OptionSetValue((int)state),
+            Status = new OptionSetValue((int)statusCode)
+        };
+        await ExecuteAsync(request, client, cancellationToken);
     }
 
     #endregion
