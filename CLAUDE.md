@@ -54,6 +54,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 | Check `docs/patterns/` before implementing | Canonical patterns exist; cite them in plan |
 | Restate issue understanding in plan | "My Understanding" section catches drift before implementation |
 | Create issues after `/design` plan approval | Enables parallel workers; maintains orchestration visibility |
+| Review `needs-evaluation` Dependabot PRs before merging | Major version updates require manual evaluation |
 
 ---
 

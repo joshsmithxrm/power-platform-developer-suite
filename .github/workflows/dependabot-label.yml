@@ -1,0 +1,40 @@
+name: Label Dependabot Major Updates
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label-major-updates:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Add needs-evaluation label for major updates
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prTitle = context.payload.pull_request.title.toLowerCase();
+            const prBody = (context.payload.pull_request.body || '').toLowerCase();
+
+            // Check if this is a major version update
+            // Dependabot indicates major bumps via:
+            // - Group name in title (e.g., "Bump the major-version-updates group")
+            // - Semver metadata in body (e.g., "update-type: version-update:semver-major")
+            const isMajorUpdate =
+              prTitle.includes('major-version-updates') ||
+              prBody.includes('semver-major');
+
+            if (isMajorUpdate) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['needs-evaluation']
+              });
+              console.log('Added needs-evaluation label to major version update PR');
+            } else {
+              console.log('Not a major version update, skipping label');
+            }

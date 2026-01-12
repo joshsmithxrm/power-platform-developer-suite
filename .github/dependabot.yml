@@ -30,6 +30,11 @@ updates:
       fakexrmeasy:
         patterns:
           - "FakeXrmEasy*"
+      # Major version updates grouped separately for manual evaluation
+      major-version-updates:
+        applies-to: version-updates
+        update-types:
+          - "major"
     # Widen version constraints when needed (e.g., 1.1.* -> 1.2.*)
     versioning-strategy: increase
 
