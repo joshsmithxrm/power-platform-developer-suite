@@ -49,22 +49,26 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
         Y = Pos.AnchorEnd(1); // Bottom of screen
 
         // Profile button (left portion)
+        // CanFocus = false to exclude from Tab order - users click or use hotkeys
         _profileButton = new Button
         {
             X = 0,
             Y = 0,
             Height = 1,
-            Width = Dim.Percent(40)
+            Width = Dim.Percent(40),
+            CanFocus = false
         };
         _profileButton.Clicked += () => ProfileClicked?.Invoke();
 
         // Environment button (right portion - takes remaining space)
+        // CanFocus = false to exclude from Tab order - users click or use hotkeys
         _environmentButton = new Button
         {
             X = Pos.Right(_profileButton),
             Y = 0,
             Height = 1,
-            Width = Dim.Fill()
+            Width = Dim.Fill(),
+            CanFocus = false
         };
         _environmentButton.Clicked += () => EnvironmentClicked?.Invoke();
 

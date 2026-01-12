@@ -23,6 +23,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
     private readonly IHotkeyRegistry _hotkeyRegistry;
     private readonly List<IDisposable> _hotkeyRegistrations = new();
 
+    private readonly FrameView _queryFrame;
     private readonly TextView _queryInput;
     private readonly QueryResultsTableView _resultsTable;
     private readonly TuiStatusBar _statusBar;
@@ -59,7 +60,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
         ColorScheme = TuiColorPalette.Default;
 
         // Query input area
-        var queryFrame = new FrameView("Query (Ctrl+Enter to execute)")
+        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, F6 to toggle focus)")
         {
             X = 0,
             Y = 0,
@@ -76,13 +77,13 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
             Height = Dim.Fill(),
             Text = "SELECT TOP 100 accountid, name, createdon FROM account"
         };
-        queryFrame.Add(_queryInput);
+        _queryFrame.Add(_queryInput);
 
         // Filter field (hidden by default)
         _filterFrame = new FrameView("Filter (/)")
         {
             X = 0,
-            Y = Pos.Bottom(queryFrame),
+            Y = Pos.Bottom(_queryFrame),
             Width = Dim.Fill(),
             Height = 3,
             Visible = false,
@@ -104,7 +105,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
         _resultsTable = new QueryResultsTableView
         {
             X = 0,
-            Y = Pos.Bottom(queryFrame),
+            Y = Pos.Bottom(_queryFrame),
             Width = Dim.Fill(),
             Height = Dim.Fill() - 2
         };
@@ -119,7 +120,13 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
         _statusLine = new TuiStatusLine();
         _statusLine.SetMessage("Ready. Press Ctrl+Enter to execute query.");
 
-        Add(queryFrame, _filterFrame, _resultsTable, _statusBar, _statusLine);
+        Add(_queryFrame, _filterFrame, _resultsTable, _statusBar, _statusLine);
+
+        // Visual focus indicators - highlight active panel
+        _queryFrame.Enter += (_) => _queryFrame.ColorScheme = TuiColorPalette.Focused;
+        _queryFrame.Leave += (_) => _queryFrame.ColorScheme = TuiColorPalette.Default;
+        _resultsTable.Enter += (_) => _resultsTable.ColorScheme = TuiColorPalette.Focused;
+        _resultsTable.Leave += (_) => _resultsTable.ColorScheme = TuiColorPalette.Default;
 
         // Subscribe to environment changes from the session
         _session.EnvironmentChanged += OnEnvironmentChanged;
@@ -199,7 +206,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
                 _statusLine.SetMessage("Ready. Press Ctrl+Enter to execute query.");
 
                 // Clear stale results from previous environment
-                _resultsTable.Clear();
+                _resultsTable.ClearData();
                 _lastSql = null;
                 _lastPagingCookie = null;
                 _lastPageNumber = 1;
@@ -225,10 +232,23 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
             owner: this));
 
         _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
-            Key.CtrlMask | Key.H,
+            Key.CtrlMask | Key.ShiftMask | Key.H,
             HotkeyScope.Screen,
             "Query history",
             ShowHistoryDialog,
+            owner: this));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.F6,
+            HotkeyScope.Screen,
+            "Toggle query/results focus",
+            () =>
+            {
+                if (_queryInput.HasFocus)
+                    _resultsTable.SetFocus();
+                else
+                    _queryInput.SetFocus();
+            },
             owner: this));
 
         // Component-specific: Ctrl+Enter in query input
@@ -251,8 +271,14 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
                     {
                         HideFilter();
                     }
+                    else if (!_queryInput.HasFocus)
+                    {
+                        // Return to query from results
+                        _queryInput.SetFocus();
+                    }
                     else
                     {
+                        // Only close when already in query
                         RequestStop();
                     }
                     e.Handled = true;
@@ -420,6 +446,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
     private void ShowFilter()
     {
         _filterFrame.Visible = true;
+        _resultsTable.Y = Pos.Bottom(_filterFrame);  // Position below filter
         _filterField.Text = string.Empty;
         _filterField.SetFocus();
         _statusLine.SetMessage("Type to filter results. Press Esc to close filter.");
@@ -428,6 +455,7 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
     private void HideFilter()
     {
         _filterFrame.Visible = false;
+        _resultsTable.Y = Pos.Bottom(_queryFrame);  // Reset to below query frame
         _filterField.Text = string.Empty;
         _resultsTable.ApplyFilter(null);
         _statusLine.SetMessage("Filter cleared.");
