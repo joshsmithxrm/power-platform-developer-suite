@@ -286,6 +286,40 @@ internal sealed class MainWindow : Window
         {
             ShowProfileCreation();
         }
+        else if (dialog.ProfileWasDeleted)
+        {
+            // Refresh profile state after deletion
+            RefreshProfileState();
+        }
+    }
+
+    private void RefreshProfileState()
+    {
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
+        _ = Task.Run(async () =>
+        {
+            var profileService = _session.GetProfileService();
+            var profiles = await profileService.GetProfilesAsync();
+            var active = profiles.FirstOrDefault(p => p.IsActive);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                if (active != null)
+                {
+                    _profileName = active.DisplayIdentifier;
+                    _environmentName = active.EnvironmentName;
+                    _environmentUrl = active.EnvironmentUrl;
+                }
+                else
+                {
+                    _profileName = null;
+                    _environmentName = null;
+                    _environmentUrl = null;
+                }
+                UpdateStatus();
+            });
+        });
+#pragma warning restore PPDS013
     }
 
     private async Task SetActiveProfileAsync(ProfileSummary profile)

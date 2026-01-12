@@ -33,6 +33,11 @@ internal sealed class ProfileSelectorDialog : Dialog
     public ProfileSummary? SelectedProfile => _selectedProfile;
 
     /// <summary>
+    /// Gets whether a profile was deleted during this dialog session.
+    /// </summary>
+    public bool ProfileWasDeleted { get; private set; }
+
+    /// <summary>
     /// Creates a new profile selector dialog.
     /// </summary>
     /// <param name="profileService">The profile service for profile operations.</param>
@@ -401,18 +406,13 @@ internal sealed class ProfileSelectorDialog : Dialog
 
         var profile = _profiles[_listView.SelectedItem];
 
-        // Cannot delete active profile
-        if (profile.IsActive)
-        {
-            MessageBox.ErrorQuery("Cannot Delete",
-                "Cannot delete the active profile.\n\nSwitch to a different profile first.",
-                "OK");
-            return;
-        }
-
-        // Show confirmation dialog
+        // Show confirmation dialog with extra warning if deleting active profile
+        var activeWarning = profile.IsActive
+            ? "This is your active profile. You will be signed out.\n\n"
+            : "";
         var result = MessageBox.Query("Confirm Delete",
             $"Delete profile \"{profile.DisplayIdentifier}\"?\n\n" +
+            activeWarning +
             "This will remove the profile and its stored credentials.\n" +
             "This action cannot be undone.",
             "Delete", "Cancel");
@@ -440,6 +440,7 @@ internal sealed class ProfileSelectorDialog : Dialog
 
         if (deleted)
         {
+            ProfileWasDeleted = true;
             await LoadProfilesAsync();
         }
     }
