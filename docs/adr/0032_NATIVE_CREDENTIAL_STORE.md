@@ -52,7 +52,7 @@ if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && allowCleartextFallback)
 - **No custom crypto** - Uses proven implementations (GCM has millions of users)
 - **Cross-platform** - Single codebase for Windows, macOS, Linux
 - **CI/CD support** - `--accept-cleartext-caching` maps to GCM plaintext backend
-- **Migration handled** - Existing `ppds.credentials.dat` migrated automatically
+- **Clean break** - No migration needed (pre-release; old implementation never persisted correctly)
 
 ### Negative
 
@@ -73,15 +73,6 @@ if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && allowCleartextFallback)
 | Create | `src/PPDS.Auth/Credentials/NativeCredentialStore.cs` |
 | Delete | `src/PPDS.Auth/Credentials/SecureCredentialStore.cs` |
 | Modify | All `new SecureCredentialStore()` → `new NativeCredentialStore()` |
-
-### Migration Logic
-
-On first credential access, `NativeCredentialStore`:
-1. Checks for legacy `ppds.credentials.dat` file
-2. Reads and parses JSON credentials
-3. Stores each credential in OS credential store
-4. Securely deletes legacy file (overwrite then delete)
-5. Logs migration count to stderr
 
 ### Testing Strategy
 

@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
 using System.Threading.Tasks;
 using GitCredentialManager;
 using PPDS.Auth.Credentials;
@@ -13,26 +11,15 @@ namespace PPDS.Auth.Tests.Credentials;
 /// Unit tests for <see cref="NativeCredentialStore"/>.
 /// Uses a mock ICredentialStore to avoid OS credential store access during tests.
 /// </summary>
-public sealed class NativeCredentialStoreTests : IDisposable
+public sealed class NativeCredentialStoreTests
 {
     private readonly MockCredentialStore _mockStore;
     private readonly NativeCredentialStore _store;
-    private readonly string _testLegacyFilePath;
 
     public NativeCredentialStoreTests()
     {
         _mockStore = new MockCredentialStore();
         _store = new NativeCredentialStore(false, _mockStore);
-        _testLegacyFilePath = Path.Combine(Path.GetTempPath(), $"ppds-test-{Guid.NewGuid()}.credentials.dat");
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        if (File.Exists(_testLegacyFilePath))
-        {
-            File.Delete(_testLegacyFilePath);
-        }
     }
 
     [Fact]

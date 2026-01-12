@@ -1,14 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using GitCredentialManager;
-using PPDS.Auth.Profiles;
 
 namespace PPDS.Auth.Credentials;
 
@@ -53,10 +50,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     };
 
     private readonly ICredentialStore _store;
-    private readonly string _legacyFilePath;
     private readonly bool _allowCleartextFallback;
-    private readonly SemaphoreSlim _migrationLock = new(1, 1);
-    private bool _migrationAttempted;
 
     /// <summary>
     /// Creates a new native credential store using the default settings.
@@ -83,7 +77,6 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     internal NativeCredentialStore(bool allowCleartextFallback, ICredentialStore? store)
     {
         _allowCleartextFallback = allowCleartextFallback;
-        _legacyFilePath = Path.Combine(ProfilePaths.DataDirectory, "ppds.credentials.dat");
 
         if (store != null)
         {
@@ -113,9 +106,6 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     }
 
     /// <inheritdoc />
-    public string CacheFilePath => _legacyFilePath;
-
-    /// <inheritdoc />
     public bool IsCleartextCachingEnabled =>
         _allowCleartextFallback && RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
@@ -137,20 +127,18 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<StoredCredential?> GetAsync(string applicationId, CancellationToken cancellationToken = default)
+    public Task<StoredCredential?> GetAsync(string applicationId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(applicationId))
-            return null;
-
-        await MigrateLegacyIfNeededAsync().ConfigureAwait(false);
+            return Task.FromResult<StoredCredential?>(null);
 
         var key = applicationId.ToLowerInvariant();
         var cred = _store.Get(ServiceName, key);
 
         if (cred == null)
-            return null;
+            return Task.FromResult<StoredCredential?>(null);
 
-        return DeserializeCredential(applicationId, cred.Password);
+        return Task.FromResult<StoredCredential?>(DeserializeCredential(applicationId, cred.Password));
     }
 
     /// <inheritdoc />
@@ -186,125 +174,13 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<bool> ExistsAsync(string applicationId, CancellationToken cancellationToken = default)
+    public Task<bool> ExistsAsync(string applicationId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(applicationId))
-            return false;
-
-        await MigrateLegacyIfNeededAsync().ConfigureAwait(false);
+            return Task.FromResult(false);
 
         var key = applicationId.ToLowerInvariant();
-        return _store.Get(ServiceName, key) != null;
-    }
-
-    /// <summary>
-    /// Migrates credentials from the legacy plaintext file to the OS credential store.
-    /// </summary>
-    private async Task MigrateLegacyIfNeededAsync()
-    {
-        if (_migrationAttempted)
-            return;
-
-        await _migrationLock.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            // Double-checked locking: first check is outside lock (line 205), second is inside.
-            // Analyzer doesn't understand that other threads may have set this while we waited.
-#pragma warning disable S2583 // Conditionally executed code should be reachable
-            if (_migrationAttempted)
-                return;
-#pragma warning restore S2583
-
-            _migrationAttempted = true;
-
-            if (!File.Exists(_legacyFilePath))
-                return;
-
-            try
-            {
-                // Read the legacy file
-                var bytes = await File.ReadAllBytesAsync(_legacyFilePath).ConfigureAwait(false);
-                if (bytes.Length == 0)
-                {
-                    SecureDeleteFile(_legacyFilePath);
-                    return;
-                }
-
-                var json = Encoding.UTF8.GetString(bytes);
-                var legacyCache = JsonSerializer.Deserialize<Dictionary<string, string>>(json, JsonOptions);
-
-                if (legacyCache == null || legacyCache.Count == 0)
-                {
-                    SecureDeleteFile(_legacyFilePath);
-                    return;
-                }
-
-                // Migrate each credential to the OS store
-                var migratedCount = 0;
-                foreach (var kvp in legacyCache)
-                {
-                    var key = kvp.Key.ToLowerInvariant();
-                    _store.AddOrUpdate(ServiceName, key, kvp.Value);
-                    AddToManifest(key);
-                    migratedCount++;
-                }
-
-                // Securely delete the legacy file
-                SecureDeleteFile(_legacyFilePath);
-
-                // Log migration
-                Console.Error.WriteLine($"Migrated {migratedCount} credential(s) from legacy file to OS credential store.");
-            }
-            catch (JsonException)
-            {
-                // Corrupted legacy file - just delete it
-                SecureDeleteFile(_legacyFilePath);
-            }
-            catch (Exception ex)
-            {
-                // Log but don't fail - user can still authenticate
-                Console.Error.WriteLine($"Warning: Failed to migrate legacy credentials: {ex.Message}");
-            }
-        }
-        finally
-        {
-            _migrationLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Securely deletes a file by overwriting its contents before deletion.
-    /// </summary>
-    private static void SecureDeleteFile(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-                return;
-
-            // Overwrite with zeros before deletion
-            var fileInfo = new FileInfo(path);
-            var length = fileInfo.Length;
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
-            {
-                var zeros = new byte[Math.Min(length, 4096)];
-                var remaining = length;
-                while (remaining > 0)
-                {
-                    var toWrite = (int)Math.Min(remaining, zeros.Length);
-                    fs.Write(zeros, 0, toWrite);
-                    remaining -= toWrite;
-                }
-                fs.Flush();
-            }
-
-            File.Delete(path);
-        }
-        catch
-        {
-            // Best effort - try normal delete as fallback
-            try { File.Delete(path); } catch { /* ignore */ }
-        }
+        return Task.FromResult(_store.Get(ServiceName, key) != null);
     }
 
     /// <summary>
@@ -427,9 +303,13 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// <summary>
     /// Disposes resources used by this credential store.
     /// </summary>
+    /// <remarks>
+    /// Currently a no-op. IDisposable is implemented for compatibility with
+    /// call sites that use <c>using</c> statements.
+    /// </remarks>
     public void Dispose()
     {
-        _migrationLock.Dispose();
+        // No-op: underlying ICredentialStore doesn't require disposal
     }
 
     /// <summary>

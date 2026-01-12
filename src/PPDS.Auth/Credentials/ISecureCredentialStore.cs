@@ -55,11 +55,6 @@ public sealed class StoredCredential
 public interface ISecureCredentialStore
 {
     /// <summary>
-    /// Gets the path to the credential cache file.
-    /// </summary>
-    string CacheFilePath { get; }
-
-    /// <summary>
     /// Gets whether cleartext caching is enabled (Linux fallback).
     /// </summary>
     bool IsCleartextCachingEnabled { get; }
