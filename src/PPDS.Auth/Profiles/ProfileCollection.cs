@@ -148,14 +148,24 @@ public sealed class ProfileCollection
     /// <summary>
     /// Gets a profile by name or index string.
     /// </summary>
-    /// <param name="nameOrIndex">The profile name or index (as string).</param>
+    /// <param name="nameOrIndex">The profile name or index (as string), including bracket notation like "[1]".</param>
     /// <returns>The profile, or null if not found.</returns>
     public AuthProfile? GetByNameOrIndex(string nameOrIndex)
     {
         if (string.IsNullOrWhiteSpace(nameOrIndex))
             return null;
 
-        // Try as index first
+        // Handle bracket notation (e.g., "[1]" from DisplayIdentifier)
+        if (nameOrIndex.StartsWith('[') && nameOrIndex.EndsWith(']'))
+        {
+            var inner = nameOrIndex[1..^1];
+            if (int.TryParse(inner, out var bracketIndex))
+            {
+                return GetByIndex(bracketIndex);
+            }
+        }
+
+        // Try as plain index
         if (int.TryParse(nameOrIndex, out var index))
         {
             return GetByIndex(index);
