@@ -247,7 +247,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         CancellationToken cancellationToken)
     {
         var collection = await _loadProfilesAsync(cancellationToken).ConfigureAwait(false);
-        var credentialStore = new SecureCredentialStore();
+        var credentialStore = new NativeCredentialStore();
 
         // Create connection sources for each profile
         var sources = new List<IConnectionSource>();

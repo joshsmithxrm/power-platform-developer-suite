@@ -137,9 +137,9 @@ public static class UnregisterCommand
 
             return ex.ErrorCode switch
             {
-                "NOT_FOUND" => ExitCodes.NotFoundError,
-                "MANAGED" => ExitCodes.Forbidden,
-                "HAS_CHILDREN" => ExitCodes.PreconditionFailed,
+                ErrorCodes.Plugin.NotFound => ExitCodes.NotFoundError,
+                ErrorCodes.Plugin.ManagedComponent => ExitCodes.Forbidden,
+                ErrorCodes.Plugin.HasChildren => ExitCodes.PreconditionFailed,
                 _ => ExitCodes.Failure
             };
         }
@@ -179,7 +179,7 @@ public static class UnregisterCommand
                 $"Image not found: {nameOrId}",
                 nameOrId,
                 "Image",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         return await service.UnregisterImageAsync(image.Id, cancellationToken);
     }
@@ -195,7 +195,7 @@ public static class UnregisterCommand
                 $"Step not found: {nameOrId}",
                 nameOrId,
                 "Step",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         return await service.UnregisterStepAsync(step.Id, force, cancellationToken);
     }
@@ -211,7 +211,7 @@ public static class UnregisterCommand
                 $"Plugin type not found: {nameOrId}",
                 nameOrId,
                 "Type",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         return await service.UnregisterPluginTypeAsync(pluginType.Id, force, cancellationToken);
     }
@@ -233,7 +233,7 @@ public static class UnregisterCommand
                 $"Assembly not found: {nameOrId}",
                 nameOrId,
                 "Assembly",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         return await service.UnregisterAssemblyAsync(assembly.Id, force, cancellationToken);
     }
@@ -255,7 +255,7 @@ public static class UnregisterCommand
                 $"Package not found: {nameOrId}",
                 nameOrId,
                 "Package",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         return await service.UnregisterPackageAsync(package.Id, force, cancellationToken);
     }
@@ -285,15 +285,15 @@ public static class UnregisterCommand
 
         switch (ex.ErrorCode)
         {
-            case "NOT_FOUND":
+            case ErrorCodes.Plugin.NotFound:
                 Console.Error.WriteLine($"  {ex.EntityType} not found in the environment.");
                 break;
 
-            case "MANAGED":
+            case ErrorCodes.Plugin.ManagedComponent:
                 Console.Error.WriteLine("  Managed components cannot be deleted in this environment.");
                 break;
 
-            case "HAS_CHILDREN":
+            case ErrorCodes.Plugin.HasChildren:
                 var childParts = new List<string>();
                 if (ex.AssemblyCount > 0)
                     childParts.Add($"{ex.AssemblyCount} assembly(ies)");

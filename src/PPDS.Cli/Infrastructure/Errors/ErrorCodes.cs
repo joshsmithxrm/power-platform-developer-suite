@@ -196,4 +196,25 @@ public static class ErrorCodes
         /// <summary>The requested solution was not found.</summary>
         public const string NotFound = "Solution.NotFound";
     }
+
+    /// <summary>
+    /// Plugin-related errors.
+    /// </summary>
+    public static class Plugin
+    {
+        /// <summary>Plugin entity not found.</summary>
+        public const string NotFound = "Plugin.NotFound";
+
+        /// <summary>Assembly or package has no binary content.</summary>
+        public const string NoContent = "Plugin.NoContent";
+
+        /// <summary>Message does not support plugin images.</summary>
+        public const string ImageNotSupported = "Plugin.ImageNotSupported";
+
+        /// <summary>Cannot modify managed component.</summary>
+        public const string ManagedComponent = "Plugin.ManagedComponent";
+
+        /// <summary>Entity has child components that must be removed first.</summary>
+        public const string HasChildren = "Plugin.HasChildren";
+    }
 }
