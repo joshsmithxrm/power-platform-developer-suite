@@ -317,6 +317,50 @@ public interface IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     Task DeletePluginTypeAsync(Guid pluginTypeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Unregisters a step image by ID.
+    /// </summary>
+    /// <param name="imageId">The image ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing the name of the deleted image.</returns>
+    Task<UnregisterResult> UnregisterImageAsync(Guid imageId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters a processing step and optionally its images.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="force">If true, cascade delete all child images. If false, fails when images exist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing counts of deleted entities.</returns>
+    Task<UnregisterResult> UnregisterStepAsync(Guid stepId, bool force = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters a plugin type and optionally its steps and images.
+    /// </summary>
+    /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="force">If true, cascade delete all child steps and images. If false, fails when steps exist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing counts of deleted entities.</returns>
+    Task<UnregisterResult> UnregisterPluginTypeAsync(Guid pluginTypeId, bool force = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters an assembly and optionally all its types, steps, and images.
+    /// </summary>
+    /// <param name="assemblyId">The assembly ID.</param>
+    /// <param name="force">If true, cascade delete all child entities. If false, fails when types with steps exist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing counts of deleted entities.</returns>
+    Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters a plugin package and optionally all its assemblies, types, steps, and images.
+    /// </summary>
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="force">If true, cascade delete all child entities. If false, fails when assemblies exist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing counts of deleted entities.</returns>
+    Task<UnregisterResult> UnregisterPackageAsync(Guid packageId, bool force = false, CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Download Operations

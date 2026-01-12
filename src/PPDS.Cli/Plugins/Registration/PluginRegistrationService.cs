@@ -116,7 +116,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginAssembly.Fields.PublicKeyToken,
                 PluginAssembly.Fields.Culture,
                 PluginAssembly.Fields.IsolationMode,
-                PluginAssembly.Fields.SourceType),
+                PluginAssembly.Fields.SourceType,
+                PluginAssembly.Fields.IsManaged),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -151,7 +152,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
             Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
             PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox,
+            IsManaged = e.GetAttributeValue<bool?>(PluginAssembly.Fields.IsManaged) ?? false
         }).ToList();
     }
 
@@ -173,7 +175,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             ColumnSet = new ColumnSet(
                 PluginPackage.Fields.Name,
                 PluginPackage.Fields.UniqueName,
-                PluginPackage.Fields.Version),
+                PluginPackage.Fields.Version,
+                PluginPackage.Fields.IsManaged),
             Orders = { new OrderExpression(PluginPackage.Fields.Name, OrderType.Ascending) }
         };
 
@@ -207,7 +210,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Id = e.Id,
             Name = e.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? string.Empty,
             UniqueName = e.GetAttributeValue<string>(PluginPackage.Fields.UniqueName),
-            Version = e.GetAttributeValue<string>(PluginPackage.Fields.Version)
+            Version = e.GetAttributeValue<string>(PluginPackage.Fields.Version),
+            IsManaged = e.GetAttributeValue<bool?>(PluginPackage.Fields.IsManaged) ?? false
         }).ToList();
     }
 
@@ -228,7 +232,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginAssembly.Fields.PublicKeyToken,
                 PluginAssembly.Fields.Culture,
                 PluginAssembly.Fields.IsolationMode,
-                PluginAssembly.Fields.SourceType),
+                PluginAssembly.Fields.SourceType,
+                PluginAssembly.Fields.IsManaged),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -248,7 +253,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Name = e.GetAttributeValue<string>(PluginAssembly.Fields.Name) ?? string.Empty,
             Version = e.GetAttributeValue<string>(PluginAssembly.Fields.Version),
             PublicKeyToken = e.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
-            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox
+            IsolationMode = e.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox,
+            IsManaged = e.GetAttributeValue<bool?>(PluginAssembly.Fields.IsManaged) ?? false
         }).ToList();
     }
 
@@ -287,7 +293,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             ColumnSet = new ColumnSet(
                 PluginType.Fields.TypeName,
                 PluginType.Fields.FriendlyName,
-                PluginType.Fields.Name),
+                PluginType.Fields.Name,
+                PluginType.Fields.IsManaged),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -305,7 +312,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             Id = e.Id,
             TypeName = e.GetAttributeValue<string>(PluginType.Fields.TypeName) ?? string.Empty,
-            FriendlyName = e.GetAttributeValue<string>(PluginType.Fields.FriendlyName)
+            FriendlyName = e.GetAttributeValue<string>(PluginType.Fields.FriendlyName),
+            IsManaged = e.GetAttributeValue<bool?>(PluginType.Fields.IsManaged) ?? false
         }).ToList();
     }
 
@@ -335,7 +343,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStep.Fields.Description,
                 SdkMessageProcessingStep.Fields.SupportedDeployment,
                 SdkMessageProcessingStep.Fields.ImpersonatingUserId,
-                SdkMessageProcessingStep.Fields.AsyncAutoDelete),
+                SdkMessageProcessingStep.Fields.AsyncAutoDelete,
+                SdkMessageProcessingStep.Fields.IsManaged),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -396,7 +405,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 Deployment = MapDeploymentFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.SupportedDeployment)?.Value ?? 0),
                 ImpersonatingUserId = impersonatingUserRef?.Id,
                 ImpersonatingUserName = impersonatingUserName,
-                AsyncAutoDelete = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false
+                AsyncAutoDelete = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false,
+                IsManaged = e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false
             };
         }).ToList();
     }
@@ -416,7 +426,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStepImage.Fields.Name,
                 SdkMessageProcessingStepImage.Fields.EntityAlias,
                 SdkMessageProcessingStepImage.Fields.ImageType,
-                SdkMessageProcessingStepImage.Fields.Attributes1),
+                SdkMessageProcessingStepImage.Fields.Attributes1,
+                SdkMessageProcessingStepImage.Fields.IsManaged),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -436,7 +447,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Name = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty,
             EntityAlias = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.EntityAlias),
             ImageType = MapImageTypeFromValue(e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStepImage.Fields.ImageType)?.Value ?? 0),
-            Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1)
+            Attributes = e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Attributes1),
+            IsManaged = e.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false
         }).ToList();
     }
 
@@ -1405,6 +1417,295 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     #endregion
 
+    #region Unregister Operations
+
+    /// <summary>
+    /// Unregisters a step image by ID.
+    /// </summary>
+    public async Task<UnregisterResult> UnregisterImageAsync(Guid imageId, CancellationToken cancellationToken = default)
+    {
+        // Get image info first
+        var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(
+                SdkMessageProcessingStepImage.Fields.Name,
+                SdkMessageProcessingStepImage.Fields.IsManaged)
+        };
+        query.Criteria.AddCondition(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId, ConditionOperator.Equal, imageId);
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+        var entity = results.Entities.FirstOrDefault()
+            ?? throw new UnregisterException(
+                $"Image with ID {imageId} not found.",
+                imageId.ToString(),
+                "Image",
+                "NOT_FOUND");
+
+        var name = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty;
+        var isManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
+
+        if (isManaged)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister: {name} is managed. Managed components cannot be deleted in this environment.",
+                name,
+                "Image",
+                "MANAGED");
+        }
+
+        await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
+
+        return new UnregisterResult
+        {
+            EntityName = name,
+            EntityType = "Image",
+            ImagesDeleted = 1
+        };
+    }
+
+    /// <summary>
+    /// Unregisters a processing step and optionally its images.
+    /// </summary>
+    public async Task<UnregisterResult> UnregisterStepAsync(Guid stepId, bool force = false, CancellationToken cancellationToken = default)
+    {
+        // Get step info
+        var step = await GetStepByNameOrIdAsync(stepId.ToString(), cancellationToken)
+            ?? throw new UnregisterException(
+                $"Step with ID {stepId} not found.",
+                stepId.ToString(),
+                "Step",
+                "NOT_FOUND");
+
+        if (step.IsManaged)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister: {step.Name} is managed. Managed components cannot be deleted in this environment.",
+                step.Name,
+                "Step",
+                "MANAGED");
+        }
+
+        // Check for images
+        var images = await ListImagesForStepAsync(stepId, cancellationToken);
+
+        if (images.Count > 0 && !force)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister step: {step.Name}. Step has {images.Count} image(s). Use --force to cascade delete all images.",
+                step.Name,
+                "Step",
+                "HAS_CHILDREN",
+                imageCount: images.Count);
+        }
+
+        var result = new UnregisterResult
+        {
+            EntityName = step.Name,
+            EntityType = "Step"
+        };
+
+        // Delete images in parallel if force
+        if (images.Count > 0)
+        {
+            var parallelism = _pool.GetTotalRecommendedParallelism();
+            await Parallel.ForEachAsync(
+                images,
+                new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
+                async (image, ct) =>
+                {
+                    await using var imageClient = await _pool.GetClientAsync(cancellationToken: ct);
+                    await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, image.Id, imageClient, ct);
+                });
+            result.ImagesDeleted = images.Count;
+        }
+
+        // Delete step
+        await using var stepClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(SdkMessageProcessingStep.EntityLogicalName, stepId, stepClient, cancellationToken);
+        result.StepsDeleted = 1;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Unregisters a plugin type and optionally its steps and images.
+    /// </summary>
+    public async Task<UnregisterResult> UnregisterPluginTypeAsync(Guid pluginTypeId, bool force = false, CancellationToken cancellationToken = default)
+    {
+        // Get type info
+        var pluginType = await GetPluginTypeByNameOrIdAsync(pluginTypeId.ToString(), cancellationToken)
+            ?? throw new UnregisterException(
+                $"Plugin type with ID {pluginTypeId} not found.",
+                pluginTypeId.ToString(),
+                "Type",
+                "NOT_FOUND");
+
+        if (pluginType.IsManaged)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister: {pluginType.TypeName} is managed. Managed components cannot be deleted in this environment.",
+                pluginType.TypeName,
+                "Type",
+                "MANAGED");
+        }
+
+        // Check for steps
+        var steps = await ListStepsForTypeAsync(pluginTypeId, options: null, cancellationToken);
+
+        if (steps.Count > 0 && !force)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister plugin type: {pluginType.TypeName}. Type has {steps.Count} active step(s). Use --force to cascade delete all steps and images.",
+                pluginType.TypeName,
+                "Type",
+                "HAS_CHILDREN",
+                stepCount: steps.Count);
+        }
+
+        var result = new UnregisterResult
+        {
+            EntityName = pluginType.TypeName,
+            EntityType = "Type"
+        };
+
+        // Delete steps (and their images) in sequence
+        foreach (var step in steps)
+        {
+            var stepResult = await UnregisterStepAsync(step.Id, force: true, cancellationToken);
+            result += stepResult;
+        }
+
+        // Delete type
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(PluginType.EntityLogicalName, pluginTypeId, client, cancellationToken);
+        result.TypesDeleted = 1;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Unregisters an assembly and optionally all its types, steps, and images.
+    /// </summary>
+    public async Task<UnregisterResult> UnregisterAssemblyAsync(Guid assemblyId, bool force = false, CancellationToken cancellationToken = default)
+    {
+        // Get assembly info
+        var assembly = await GetAssemblyByIdAsync(assemblyId, cancellationToken)
+            ?? throw new UnregisterException(
+                $"Assembly with ID {assemblyId} not found.",
+                assemblyId.ToString(),
+                "Assembly",
+                "NOT_FOUND");
+
+        if (assembly.IsManaged)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister: {assembly.Name} is managed. Managed components cannot be deleted in this environment.",
+                assembly.Name,
+                "Assembly",
+                "MANAGED");
+        }
+
+        // Get types and their steps
+        var types = await ListTypesForAssemblyAsync(assemblyId, cancellationToken);
+        var totalSteps = 0;
+
+        foreach (var type in types)
+        {
+            var steps = await ListStepsForTypeAsync(type.Id, options: null, cancellationToken);
+            totalSteps += steps.Count;
+        }
+
+        if (totalSteps > 0 && !force)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister assembly: {assembly.Name}. Assembly has {types.Count} plugin type(s) with {totalSteps} active step(s). Use --force to cascade delete all children.",
+                assembly.Name,
+                "Assembly",
+                "HAS_CHILDREN",
+                typeCount: types.Count,
+                stepCount: totalSteps);
+        }
+
+        var result = new UnregisterResult
+        {
+            EntityName = assembly.Name,
+            EntityType = "Assembly"
+        };
+
+        // Delete types (and their steps/images) in sequence
+        foreach (var type in types)
+        {
+            var typeResult = await UnregisterPluginTypeAsync(type.Id, force: true, cancellationToken);
+            result += typeResult;
+        }
+
+        // Delete assembly
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(PluginAssembly.EntityLogicalName, assemblyId, client, cancellationToken);
+        result.AssembliesDeleted = 1;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Unregisters a plugin package and optionally all its assemblies, types, steps, and images.
+    /// </summary>
+    public async Task<UnregisterResult> UnregisterPackageAsync(Guid packageId, bool force = false, CancellationToken cancellationToken = default)
+    {
+        // Get package info
+        var package = await GetPackageByIdAsync(packageId, cancellationToken)
+            ?? throw new UnregisterException(
+                $"Package with ID {packageId} not found.",
+                packageId.ToString(),
+                "Package",
+                "NOT_FOUND");
+
+        if (package.IsManaged)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister: {package.Name} is managed. Managed components cannot be deleted in this environment.",
+                package.Name,
+                "Package",
+                "MANAGED");
+        }
+
+        // Get assemblies
+        var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
+
+        if (assemblies.Count > 0 && !force)
+        {
+            throw new UnregisterException(
+                $"Cannot unregister package: {package.Name}. Package has {assemblies.Count} assembly(ies). Use --force to cascade delete all children.",
+                package.Name,
+                "Package",
+                "HAS_CHILDREN",
+                assemblyCount: assemblies.Count);
+        }
+
+        var result = new UnregisterResult
+        {
+            EntityName = package.Name,
+            EntityType = "Package"
+        };
+
+        // Delete assemblies (and their types/steps/images) in sequence
+        foreach (var assembly in assemblies)
+        {
+            var assemblyResult = await UnregisterAssemblyAsync(assembly.Id, force: true, cancellationToken);
+            result += assemblyResult;
+        }
+
+        // Delete package
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        await DeleteAsync(PluginPackage.EntityLogicalName, packageId, client, cancellationToken);
+        result.PackagesDeleted = 1;
+
+        return result;
+    }
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>
@@ -1721,6 +2022,7 @@ public sealed class PluginTypeInfo
     public string? FriendlyName { get; set; }
     public Guid? AssemblyId { get; set; }
     public string? AssemblyName { get; set; }
+    public bool IsManaged { get; set; }
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }
 }
@@ -1748,6 +2050,7 @@ public sealed class PluginStepInfo
     public bool AsyncAutoDelete { get; set; }
     public Guid? PluginTypeId { get; set; }
     public string? PluginTypeName { get; set; }
+    public bool IsManaged { get; set; }
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }
 }
@@ -1765,8 +2068,133 @@ public sealed class PluginImageInfo
     public string? MessagePropertyName { get; set; }
     public Guid? StepId { get; set; }
     public string? StepName { get; set; }
+    public bool IsManaged { get; set; }
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }
+}
+
+/// <summary>
+/// Result of an unregister operation.
+/// </summary>
+public sealed class UnregisterResult
+{
+    /// <summary>
+    /// Name of the deleted entity.
+    /// </summary>
+    public string EntityName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Type of entity that was deleted (Package, Assembly, Type, Step, Image).
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Number of packages deleted (for cascade operations).
+    /// </summary>
+    public int PackagesDeleted { get; set; }
+
+    /// <summary>
+    /// Number of assemblies deleted (for cascade operations).
+    /// </summary>
+    public int AssembliesDeleted { get; set; }
+
+    /// <summary>
+    /// Number of plugin types deleted (for cascade operations).
+    /// </summary>
+    public int TypesDeleted { get; set; }
+
+    /// <summary>
+    /// Number of steps deleted (for cascade operations).
+    /// </summary>
+    public int StepsDeleted { get; set; }
+
+    /// <summary>
+    /// Number of images deleted (for cascade operations).
+    /// </summary>
+    public int ImagesDeleted { get; set; }
+
+    /// <summary>
+    /// Gets the total number of entities deleted.
+    /// </summary>
+    public int TotalDeleted => PackagesDeleted + AssembliesDeleted + TypesDeleted + StepsDeleted + ImagesDeleted;
+
+    /// <summary>
+    /// Combines two unregister results.
+    /// </summary>
+    public static UnregisterResult operator +(UnregisterResult a, UnregisterResult b)
+    {
+        return new UnregisterResult
+        {
+            EntityName = a.EntityName,
+            EntityType = a.EntityType,
+            PackagesDeleted = a.PackagesDeleted + b.PackagesDeleted,
+            AssembliesDeleted = a.AssembliesDeleted + b.AssembliesDeleted,
+            TypesDeleted = a.TypesDeleted + b.TypesDeleted,
+            StepsDeleted = a.StepsDeleted + b.StepsDeleted,
+            ImagesDeleted = a.ImagesDeleted + b.ImagesDeleted
+        };
+    }
+}
+
+/// <summary>
+/// Exception thrown when an unregister operation cannot proceed.
+/// </summary>
+public sealed class UnregisterException : Exception
+{
+    /// <summary>
+    /// The name of the entity that could not be unregistered.
+    /// </summary>
+    public string EntityName { get; }
+
+    /// <summary>
+    /// The type of entity (Assembly, Package, Type, Step).
+    /// </summary>
+    public string EntityType { get; }
+
+    /// <summary>
+    /// Error code for programmatic handling.
+    /// </summary>
+    public string ErrorCode { get; }
+
+    /// <summary>
+    /// Number of child assemblies that exist (for package).
+    /// </summary>
+    public int AssemblyCount { get; }
+
+    /// <summary>
+    /// Number of child types that exist (for assembly/package).
+    /// </summary>
+    public int TypeCount { get; }
+
+    /// <summary>
+    /// Number of child steps that exist (for type/assembly/package).
+    /// </summary>
+    public int StepCount { get; }
+
+    /// <summary>
+    /// Number of child images that exist (for step).
+    /// </summary>
+    public int ImageCount { get; }
+
+    public UnregisterException(
+        string message,
+        string entityName,
+        string entityType,
+        string errorCode,
+        int assemblyCount = 0,
+        int typeCount = 0,
+        int stepCount = 0,
+        int imageCount = 0)
+        : base(message)
+    {
+        EntityName = entityName;
+        EntityType = entityType;
+        ErrorCode = errorCode;
+        AssemblyCount = assemblyCount;
+        TypeCount = typeCount;
+        StepCount = stepCount;
+        ImageCount = imageCount;
+    }
 }
 
 #endregion

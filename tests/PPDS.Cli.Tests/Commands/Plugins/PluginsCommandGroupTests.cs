@@ -42,6 +42,13 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    public void Create_HasRegisterSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "register");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
     public void Create_HasDiffSubcommand()
     {
         var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "diff");
@@ -56,13 +63,6 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasCleanSubcommand()
-    {
-        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "clean");
-        Assert.NotNull(subcommand);
-    }
-
-    [Fact]
     public void Create_HasGetSubcommand()
     {
         var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "get");
@@ -70,9 +70,9 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasRegisterSubcommand()
+    public void Create_HasCleanSubcommand()
     {
-        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "register");
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "clean");
         Assert.NotNull(subcommand);
     }
 
@@ -84,9 +84,16 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasEightSubcommands()
+    public void Create_HasUnregisterSubcommand()
     {
-        Assert.Equal(8, _command.Subcommands.Count);
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "unregister");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
+    public void Create_HasNineSubcommands()
+    {
+        Assert.Equal(9, _command.Subcommands.Count);
     }
 
     #endregion
