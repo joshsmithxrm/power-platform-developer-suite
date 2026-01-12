@@ -59,6 +59,7 @@ namespace PPDS.Migration.DependencyInjection
 
             // Import - Phase processors
             services.AddTransient<ISchemaValidator, SchemaValidator>();
+            services.AddTransient<BulkOperationProber>();
             services.AddTransient<DeferredFieldProcessor>();
             services.AddTransient<RelationshipProcessor>();
 

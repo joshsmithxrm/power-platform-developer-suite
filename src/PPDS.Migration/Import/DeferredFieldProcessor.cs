@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -9,6 +9,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Security;
 using PPDS.Migration.Progress;
 
 namespace PPDS.Migration.Import
@@ -21,28 +22,22 @@ namespace PPDS.Migration.Import
     public class DeferredFieldProcessor : IImportPhaseProcessor
     {
         private readonly IDataverseConnectionPool _connectionPool;
-        private readonly IBulkOperationExecutor _bulkExecutor;
+        private readonly BulkOperationProber _prober;
         private readonly ILogger<DeferredFieldProcessor>? _logger;
-
-        /// <summary>
-        /// Cache of entities that don't support bulk update operations.
-        /// Per-session scope - resets each import.
-        /// </summary>
-        private readonly ConcurrentDictionary<string, bool> _bulkNotSupportedEntities = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DeferredFieldProcessor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
-        /// <param name="bulkExecutor">The bulk operation executor.</param>
+        /// <param name="prober">The bulk operation prober.</param>
         /// <param name="logger">Optional logger.</param>
         public DeferredFieldProcessor(
             IDataverseConnectionPool connectionPool,
-            IBulkOperationExecutor bulkExecutor,
+            BulkOperationProber prober,
             ILogger<DeferredFieldProcessor>? logger = null)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
-            _bulkExecutor = bulkExecutor ?? throw new ArgumentNullException(nameof(bulkExecutor));
+            _prober = prober ?? throw new ArgumentNullException(nameof(prober));
             _logger = logger;
         }
 
@@ -162,65 +157,34 @@ namespace PPDS.Migration.Import
                 BypassPowerAutomateFlows = context.Options.BypassPowerAutomateFlows
             };
 
-            // Check if we already know this entity doesn't support bulk operations
-            if (_bulkNotSupportedEntities.ContainsKey(entityName))
+            // Create progress adapter
+            var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
             {
-                _logger?.LogDebug("Using individual operations for {Entity} (bulk not supported)", entityName);
-                return await ExecuteIndividualUpdatesAsync(entityName, updates, fieldList, context, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            // Probe with first record to detect bulk operation support
-            var probeRecord = new List<Entity> { updates[0] };
-            var probeResult = await _bulkExecutor.UpdateMultipleAsync(entityName, probeRecord, bulkOptions, null, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (IsBulkNotSupportedFailure(probeResult, 1))
-            {
-                // Cache that this entity doesn't support bulk operations
-                _bulkNotSupportedEntities[entityName] = true;
-                _logger?.LogWarning("Entity {Entity} does not support bulk UpdateMultiple, falling back to individual operations", entityName);
-
-                // Fall back to individual operations for ALL records
-                return await ExecuteIndividualUpdatesAsync(entityName, updates, fieldList, context, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            // Probe succeeded - process remaining records in bulk
-            var successCount = probeResult.SuccessCount;
-            var failureCount = probeResult.FailureCount;
-
-            if (updates.Count > 1)
-            {
-                var remainingRecords = updates.GetRange(1, updates.Count - 1);
-
-                // Create progress adapter for remaining records
-                var processedCount = 1; // Already processed probe record
-                var progressAdapter = new Progress<Dataverse.Progress.ProgressSnapshot>(snapshot =>
+                context.Progress?.Report(new ProgressEventArgs
                 {
-                    context.Progress?.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.ProcessingDeferredFields,
-                        Entity = entityName,
-                        Field = fieldList,
-                        Current = processedCount + (int)snapshot.Processed,
-                        Total = updates.Count,
-                        SuccessCount = successCount + (int)snapshot.Succeeded,
-                        Message = $"Updating deferred fields: {fieldList}"
-                    });
+                    Phase = MigrationPhase.ProcessingDeferredFields,
+                    Entity = entityName,
+                    Field = fieldList,
+                    Current = (int)snapshot.Processed,
+                    Total = updates.Count,
+                    SuccessCount = (int)snapshot.Succeeded,
+                    Message = $"Updating deferred fields: {fieldList}"
                 });
+            });
 
-                var remainingResult = await _bulkExecutor.UpdateMultipleAsync(
-                    entityName, remainingRecords, bulkOptions, progressAdapter, cancellationToken).ConfigureAwait(false);
+            var result = await _prober.ExecuteWithProbeAsync(
+                entityName,
+                updates,
+                BulkOperationType.Update,
+                bulkOptions,
+                async (_, recs) => await ExecuteIndividualUpdatesAsync(entityName, recs.ToList(), fieldList, context, cancellationToken).ConfigureAwait(false),
+                progressAdapter,
+                cancellationToken).ConfigureAwait(false);
 
-                successCount += remainingResult.SuccessCount;
-                failureCount += remainingResult.FailureCount;
-            }
-
-            return (successCount, failureCount);
+            return (result.SuccessCount, result.FailureCount);
         }
 
-        private async Task<(int SuccessCount, int FailureCount)> ExecuteIndividualUpdatesAsync(
+        private async Task<BulkOperationResult> ExecuteIndividualUpdatesAsync(
             string entityName,
             List<Entity> updates,
             string fieldList,
@@ -229,6 +193,7 @@ namespace PPDS.Migration.Import
         {
             var successCount = 0;
             var failureCount = 0;
+            var errors = new List<BulkOperationError>();
 
             // Use single client for sequential individual updates
             await using var client = await _connectionPool.GetClientAsync(null, cancellationToken: cancellationToken)
@@ -250,6 +215,13 @@ namespace PPDS.Migration.Import
                     _logger?.LogDebug(ex, "Failed to update deferred fields for {Entity} record {RecordId}",
                         entityName, updates[i].Id);
                     failureCount++;
+                    errors.Add(new BulkOperationError
+                    {
+                        Index = i,
+                        RecordId = updates[i].Id != Guid.Empty ? updates[i].Id : null,
+                        ErrorCode = -1,
+                        Message = ConnectionStringRedactor.RedactExceptionMessage(ex.Message)
+                    });
 
                     if (!context.Options.ContinueOnError)
                     {
@@ -274,21 +246,12 @@ namespace PPDS.Migration.Import
                 }
             }
 
-            return (successCount, failureCount);
-        }
-
-        /// <summary>
-        /// Determines if a bulk operation failure indicates the entity doesn't support bulk operations.
-        /// </summary>
-        private static bool IsBulkNotSupportedFailure(BulkOperationResult result, int totalRecords)
-        {
-            // Only consider it a "not supported" failure if ALL records failed
-            if (result.FailureCount != totalRecords || result.Errors.Count == 0)
-                return false;
-
-            // Check if first error indicates bulk operation not supported
-            var firstError = result.Errors[0];
-            return firstError.Message?.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ?? false;
+            return new BulkOperationResult
+            {
+                SuccessCount = successCount,
+                FailureCount = failureCount,
+                Errors = errors
+            };
         }
     }
 }

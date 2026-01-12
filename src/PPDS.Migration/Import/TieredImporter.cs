@@ -34,16 +34,10 @@ namespace PPDS.Migration.Import
         private readonly ISchemaValidator _schemaValidator;
         private readonly DeferredFieldProcessor _deferredFieldProcessor;
         private readonly RelationshipProcessor _relationshipProcessor;
+        private readonly BulkOperationProber _prober;
         private readonly ImportOptions _defaultOptions;
         private readonly IPluginStepManager? _pluginStepManager;
         private readonly ILogger<TieredImporter>? _logger;
-
-        /// <summary>
-        /// Cache of entities that don't support bulk operations.
-        /// Used to avoid wasting records on probe attempts for known-unsupported entities.
-        /// Per-import-session scope - resets each import.
-        /// </summary>
-        private readonly ConcurrentDictionary<string, bool> _bulkNotSupportedEntities = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="TieredImporter"/> class.
@@ -56,7 +50,8 @@ namespace PPDS.Migration.Import
             IExecutionPlanBuilder planBuilder,
             ISchemaValidator schemaValidator,
             DeferredFieldProcessor deferredFieldProcessor,
-            RelationshipProcessor relationshipProcessor)
+            RelationshipProcessor relationshipProcessor,
+            BulkOperationProber prober)
         {
             _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
             _bulkExecutor = bulkExecutor ?? throw new ArgumentNullException(nameof(bulkExecutor));
@@ -66,6 +61,7 @@ namespace PPDS.Migration.Import
             _schemaValidator = schemaValidator ?? throw new ArgumentNullException(nameof(schemaValidator));
             _deferredFieldProcessor = deferredFieldProcessor ?? throw new ArgumentNullException(nameof(deferredFieldProcessor));
             _relationshipProcessor = relationshipProcessor ?? throw new ArgumentNullException(nameof(relationshipProcessor));
+            _prober = prober ?? throw new ArgumentNullException(nameof(prober));
             _defaultOptions = new ImportOptions();
         }
 
@@ -81,11 +77,12 @@ namespace PPDS.Migration.Import
             ISchemaValidator schemaValidator,
             DeferredFieldProcessor deferredFieldProcessor,
             RelationshipProcessor relationshipProcessor,
+            BulkOperationProber prober,
             IOptions<MigrationOptions>? migrationOptions = null,
             IPluginStepManager? pluginStepManager = null,
             ILogger<TieredImporter>? logger = null)
             : this(connectionPool, bulkExecutor, dataReader, graphBuilder, planBuilder,
-                   schemaValidator, deferredFieldProcessor, relationshipProcessor)
+                   schemaValidator, deferredFieldProcessor, relationshipProcessor, prober)
         {
             _defaultOptions = migrationOptions?.Value.Import ?? new ImportOptions();
             _pluginStepManager = pluginStepManager;
@@ -532,24 +529,30 @@ namespace PPDS.Migration.Import
             };
 
             BulkOperationResult bulkResult;
-            if (options.UseBulkApis && !_bulkNotSupportedEntities.ContainsKey(entityName))
+            if (options.UseBulkApis)
             {
-                // Probe with first record to detect bulk operation support
-                // This wastes only 1 record instead of the full batch if bulk ops aren't supported
-                var probeRecord = preparedRecords.Take(1).ToList();
-                var probeResult = options.Mode switch
+                // Track if we fell back to individual operations (for warning emission)
+                var wasKnownBulkNotSupported = _prober.IsKnownBulkNotSupported(entityName);
+
+                var operationType = options.Mode switch
                 {
-                    ImportMode.Create => await _bulkExecutor.CreateMultipleAsync(entityName, probeRecord, bulkOptions, null, cancellationToken).ConfigureAwait(false),
-                    ImportMode.Update => await _bulkExecutor.UpdateMultipleAsync(entityName, probeRecord, bulkOptions, null, cancellationToken).ConfigureAwait(false),
-                    _ => await _bulkExecutor.UpsertMultipleAsync(entityName, probeRecord, bulkOptions, null, cancellationToken).ConfigureAwait(false)
+                    ImportMode.Create => BulkOperationType.Create,
+                    ImportMode.Update => BulkOperationType.Update,
+                    _ => BulkOperationType.Upsert
                 };
 
-                if (IsBulkNotSupportedFailure(probeResult, 1))
-                {
-                    // Cache that this entity doesn't support bulk operations
-                    _bulkNotSupportedEntities[entityName] = true;
-                    _logger?.LogWarning("Entity {Entity} does not support bulk operations, falling back to individual operations", entityName);
+                bulkResult = await _prober.ExecuteWithProbeAsync(
+                    entityName,
+                    preparedRecords,
+                    operationType,
+                    bulkOptions,
+                    async (_, recs) => await ExecuteIndividualOperationsAsync(entityName, recs.ToList(), options, cancellationToken).ConfigureAwait(false),
+                    progressAdapter,
+                    cancellationToken).ConfigureAwait(false);
 
+                // Emit warning if bulk fallback occurred during this call (not previously known)
+                if (!wasKnownBulkNotSupported && _prober.IsKnownBulkNotSupported(entityName))
+                {
                     warnings.AddWarning(new ImportWarning
                     {
                         Code = ImportWarningCodes.BulkNotSupported,
@@ -558,47 +561,13 @@ namespace PPDS.Migration.Import
                         Impact = $"Reduced throughput for {preparedRecords.Count} records"
                     });
 
-                    // Fall back to individual operations for ALL records (including the probe record)
-                    bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, options, cancellationToken).ConfigureAwait(false);
-
                     _logger?.LogInformation("Successfully imported {SuccessCount}/{TotalCount} {Entity} records via individual operations",
                         bulkResult.SuccessCount, preparedRecords.Count, entityName);
                 }
-                else
-                {
-                    // Probe succeeded - process remaining records in bulk
-                    if (preparedRecords.Count > 1)
-                    {
-                        var remainingRecords = preparedRecords.Skip(1).ToList();
-                        var remainingResult = options.Mode switch
-                        {
-                            ImportMode.Create => await _bulkExecutor.CreateMultipleAsync(entityName, remainingRecords, bulkOptions, progressAdapter, cancellationToken).ConfigureAwait(false),
-                            ImportMode.Update => await _bulkExecutor.UpdateMultipleAsync(entityName, remainingRecords, bulkOptions, progressAdapter, cancellationToken).ConfigureAwait(false),
-                            _ => await _bulkExecutor.UpsertMultipleAsync(entityName, remainingRecords, bulkOptions, progressAdapter, cancellationToken).ConfigureAwait(false)
-                        };
-
-                        // Merge probe result with remaining result
-                        bulkResult = MergeBulkResults(probeResult, remainingResult);
-                    }
-                    else
-                    {
-                        // Only had 1 record, probe was the entire batch
-                        bulkResult = probeResult;
-                    }
-                }
-            }
-            else if (_bulkNotSupportedEntities.ContainsKey(entityName))
-            {
-                // Already know bulk operations aren't supported for this entity
-                _logger?.LogDebug("Using individual operations for {Entity} (bulk not supported)", entityName);
-                bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, options, cancellationToken).ConfigureAwait(false);
-
-                _logger?.LogDebug("Imported {SuccessCount}/{TotalCount} {Entity} records via individual operations",
-                    bulkResult.SuccessCount, preparedRecords.Count, entityName);
             }
             else
             {
-                // UseBulkApis is false - use individual operations
+                // UseBulkApis is false - use individual operations directly
                 bulkResult = await ExecuteIndividualOperationsAsync(entityName, preparedRecords, options, cancellationToken).ConfigureAwait(false);
             }
 
@@ -828,64 +797,6 @@ namespace PPDS.Migration.Import
         {
             return entityLogicalName.Equals("systemuser", StringComparison.OrdinalIgnoreCase) ||
                    entityLogicalName.Equals("team", StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Merges two bulk operation results into one combined result.
-        /// Used when probe record is processed separately from remaining records.
-        /// </summary>
-        private static BulkOperationResult MergeBulkResults(BulkOperationResult probeResult, BulkOperationResult remainingResult)
-        {
-            // Adjust error indices in remaining result to account for probe record
-            var adjustedErrors = remainingResult.Errors
-                .Select(e => new BulkOperationError
-                {
-                    Index = e.Index + 1, // Offset by 1 for the probe record
-                    RecordId = e.RecordId,
-                    ErrorCode = e.ErrorCode,
-                    Message = e.Message,
-                    FieldName = e.FieldName,
-                    FieldValueDescription = e.FieldValueDescription
-                })
-                .ToList();
-
-            var allErrors = probeResult.Errors.Concat(adjustedErrors).ToList();
-
-            return new BulkOperationResult
-            {
-                SuccessCount = probeResult.SuccessCount + remainingResult.SuccessCount,
-                FailureCount = probeResult.FailureCount + remainingResult.FailureCount,
-                CreatedCount = probeResult.CreatedCount + remainingResult.CreatedCount,
-                UpdatedCount = probeResult.UpdatedCount + remainingResult.UpdatedCount,
-                Errors = allErrors
-            };
-        }
-
-        /// <summary>
-        /// Determines if a bulk operation failure indicates the entity doesn't support bulk operations.
-        /// </summary>
-        /// <remarks>
-        /// Some entities (like team, queue) don't support CreateMultiple/UpdateMultiple/UpsertMultiple.
-        /// When detected, the importer should fallback to individual operations.
-        /// Error messages vary by entity:
-        /// - "is not enabled on the entity" (team)
-        /// - "does not support entities of type" (queue)
-        /// </remarks>
-        private static bool IsBulkNotSupportedFailure(BulkOperationResult result, int totalRecords)
-        {
-            // Only consider it a "not supported" failure if ALL records failed
-            if (result.FailureCount != totalRecords || result.Errors.Count == 0)
-                return false;
-
-            // Check if first error indicates bulk operation not supported
-            // Different entities return different error messages
-            var firstError = result.Errors[0];
-            var message = firstError.Message;
-            if (string.IsNullOrEmpty(message))
-                return false;
-
-            return message.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("does not support entities of type", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
