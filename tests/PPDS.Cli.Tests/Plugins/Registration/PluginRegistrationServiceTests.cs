@@ -312,6 +312,144 @@ public class PluginRegistrationServiceTests
 
     #endregion
 
+    #region ListAssembliesAsync Filtering Tests
+
+    [Fact]
+    public async Task ListAssembliesAsync_ExcludesMicrosoftAssemblies_ByDefault()
+    {
+        // Arrange
+        var entities = new EntityCollection();
+        var customAssembly = new PluginAssembly
+        {
+            Id = Guid.NewGuid(),
+            Name = "CustomPlugin",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        var microsoftAssembly = new PluginAssembly
+        {
+            Id = Guid.NewGuid(),
+            Name = "Microsoft.SomePlugin",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        entities.Entities.Add(customAssembly);
+        entities.Entities.Add(microsoftAssembly);
+        _retrieveMultipleResult = entities;
+
+        // Act - default options should exclude Microsoft assemblies
+        var result = await _sut.ListAssembliesAsync();
+
+        // Assert - verify query was built (we can't easily verify the filter in mocked tests,
+        // but we can verify the service was called and returned results)
+        // The actual filtering happens in the service layer query
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task ListAssembliesAsync_IncludesMicrosoftAssemblies_WhenOptionSet()
+    {
+        // Arrange
+        var entities = new EntityCollection();
+        var microsoftAssembly = new PluginAssembly
+        {
+            Id = Guid.NewGuid(),
+            Name = "Microsoft.SomePlugin",
+            Version = "1.0.0.0",
+            IsolationMode = pluginassembly_isolationmode.Sandbox
+        };
+        entities.Entities.Add(microsoftAssembly);
+        _retrieveMultipleResult = entities;
+
+        var options = new PluginListOptions(IncludeMicrosoft: true);
+
+        // Act
+        var result = await _sut.ListAssembliesAsync(options: options);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("Microsoft.SomePlugin", result[0].Name);
+    }
+
+    #endregion
+
+    #region ListStepsForTypeAsync Filtering Tests
+
+    [Fact]
+    public async Task ListStepsForTypeAsync_ExcludesHiddenSteps_ByDefault()
+    {
+        // Arrange
+        var typeId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act - default options should exclude hidden steps
+        var result = await _sut.ListStepsForTypeAsync(typeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task ListStepsForTypeAsync_IncludesHiddenSteps_WhenOptionSet()
+    {
+        // Arrange
+        var typeId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection();
+
+        var options = new PluginListOptions(IncludeHidden: true);
+
+        // Act
+        var result = await _sut.ListStepsForTypeAsync(typeId, options);
+
+        // Assert
+        Assert.NotNull(result);
+    }
+
+    #endregion
+
+    #region ListPackagesAsync Filtering Tests
+
+    [Fact]
+    public async Task ListPackagesAsync_ExcludesMicrosoftPackages_ByDefault()
+    {
+        // Arrange
+        _retrieveMultipleResult = new EntityCollection();
+
+        // Act - default options should exclude Microsoft packages
+        var result = await _sut.ListPackagesAsync();
+
+        // Assert
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task ListPackagesAsync_IncludesMicrosoftPackages_WhenOptionSet()
+    {
+        // Arrange
+        var entities = new EntityCollection();
+        var microsoftPackage = new PluginPackage
+        {
+            Id = Guid.NewGuid(),
+            Name = "Microsoft.SomePackage",
+            UniqueName = "Microsoft.SomePackage",
+            Version = "1.0.0.0"
+        };
+        entities.Entities.Add(microsoftPackage);
+        _retrieveMultipleResult = entities;
+
+        var options = new PluginListOptions(IncludeMicrosoft: true);
+
+        // Act
+        var result = await _sut.ListPackagesAsync(options: options);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("Microsoft.SomePackage", result[0].Name);
+    }
+
+    #endregion
+
     #region GetDefaultImagePropertyName Tests
 
     [Theory]

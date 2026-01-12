@@ -32,12 +32,30 @@ public static class ListCommand
             Description = "Filter by package name or unique name (NuGet plugin packages)"
         };
 
+        var includeHiddenOption = new Option<bool>("--include-hidden")
+        {
+            Description = "Include hidden steps (excluded by default)"
+        };
+
+        var includeMicrosoftOption = new Option<bool>("--include-microsoft")
+        {
+            Description = "Include Microsoft.* assemblies (excluded by default, except Microsoft.Crm.ServiceBus)"
+        };
+
+        var allOption = new Option<bool>("--all")
+        {
+            Description = "Show all plugins (equivalent to --include-hidden --include-microsoft)"
+        };
+
         var command = new Command("list", "List registered plugins in the environment")
         {
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption,
             assemblyOption,
-            packageOption
+            packageOption,
+            includeHiddenOption,
+            includeMicrosoftOption,
+            allOption
         };
 
         // Add global options including output format
@@ -49,9 +67,18 @@ public static class ListCommand
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var assembly = parseResult.GetValue(assemblyOption);
             var package = parseResult.GetValue(packageOption);
+            var includeHidden = parseResult.GetValue(includeHiddenOption);
+            var includeMicrosoft = parseResult.GetValue(includeMicrosoftOption);
+            var all = parseResult.GetValue(allOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(profile, environment, assembly, package, globalOptions, cancellationToken);
+            // --all is equivalent to --include-hidden --include-microsoft
+            var listOptions = new PluginListOptions(
+                IncludeHidden: all || includeHidden,
+                IncludeMicrosoft: all || includeMicrosoft
+            );
+
+            return await ExecuteAsync(profile, environment, assembly, package, listOptions, globalOptions, cancellationToken);
         });
 
         return command;
@@ -62,6 +89,7 @@ public static class ListCommand
         string? environment,
         string? assemblyFilter,
         string? packageFilter,
+        PluginListOptions listOptions,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -91,7 +119,7 @@ public static class ListCommand
             // Get assemblies (unless package filter is specified, which means we only want packages)
             if (string.IsNullOrEmpty(packageFilter))
             {
-                var assemblies = await registrationService.ListAssembliesAsync(assemblyFilter);
+                var assemblies = await registrationService.ListAssembliesAsync(assemblyFilter, listOptions);
 
                 foreach (var assembly in assemblies)
                 {
@@ -104,7 +132,7 @@ public static class ListCommand
                     };
 
                     var types = await registrationService.ListTypesForAssemblyAsync(assembly.Id);
-                    await PopulateTypesAsync(registrationService, types, assemblyOutput.Types);
+                    await PopulateTypesAsync(registrationService, types, assemblyOutput.Types, listOptions);
 
                     output.Assemblies.Add(assemblyOutput);
                 }
@@ -113,7 +141,7 @@ public static class ListCommand
             // Get packages (unless assembly filter is specified, which means we only want assemblies)
             if (string.IsNullOrEmpty(assemblyFilter))
             {
-                var packages = await registrationService.ListPackagesAsync(packageFilter);
+                var packages = await registrationService.ListPackagesAsync(packageFilter, listOptions);
 
                 foreach (var package in packages)
                 {
@@ -137,7 +165,7 @@ public static class ListCommand
                         };
 
                         var types = await registrationService.ListTypesForAssemblyAsync(assembly.Id);
-                        await PopulateTypesAsync(registrationService, types, assemblyOutput.Types);
+                        await PopulateTypesAsync(registrationService, types, assemblyOutput.Types, listOptions);
 
                         packageOutput.Assemblies.Add(assemblyOutput);
                     }
@@ -226,7 +254,8 @@ public static class ListCommand
     private static async Task PopulateTypesAsync(
         IPluginRegistrationService registrationService,
         List<PluginTypeInfo> types,
-        List<TypeOutput> typeOutputs)
+        List<TypeOutput> typeOutputs,
+        PluginListOptions listOptions)
     {
         foreach (var type in types)
         {
@@ -236,7 +265,7 @@ public static class ListCommand
                 Steps = []
             };
 
-            var steps = await registrationService.ListStepsForTypeAsync(type.Id);
+            var steps = await registrationService.ListStepsForTypeAsync(type.Id, listOptions);
 
             foreach (var step in steps)
             {

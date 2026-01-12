@@ -357,7 +357,7 @@ public class RpcMethodHandler
         // Get assemblies (unless package filter is specified)
         if (string.IsNullOrEmpty(package))
         {
-            var assemblies = await registrationService.ListAssembliesAsync(assembly, cancellationToken);
+            var assemblies = await registrationService.ListAssembliesAsync(assembly, options: null, cancellationToken);
 
             foreach (var asm in assemblies)
             {
@@ -379,7 +379,7 @@ public class RpcMethodHandler
         // Get packages (unless assembly filter is specified)
         if (string.IsNullOrEmpty(assembly))
         {
-            var packages = await registrationService.ListPackagesAsync(package, cancellationToken);
+            var packages = await registrationService.ListPackagesAsync(package, options: null, cancellationToken);
 
             foreach (var pkg in packages)
             {
@@ -425,7 +425,7 @@ public class RpcMethodHandler
             return;
 
         // Fetch all steps in parallel - each call gets its own client from the pool
-        var stepTasks = types.Select(t => registrationService.ListStepsForTypeAsync(t.Id, cancellationToken));
+        var stepTasks = types.Select(t => registrationService.ListStepsForTypeAsync(t.Id, options: null, cancellationToken));
         var stepsPerType = await Task.WhenAll(stepTasks);
 
         // Collect all steps for image fetching

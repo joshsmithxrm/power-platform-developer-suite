@@ -3,6 +3,16 @@ using PPDS.Cli.Plugins.Models;
 namespace PPDS.Cli.Plugins.Registration;
 
 /// <summary>
+/// Options for filtering plugin list results.
+/// </summary>
+/// <param name="IncludeHidden">Include hidden steps (default: false, hidden steps are excluded).</param>
+/// <param name="IncludeMicrosoft">Include Microsoft.* assemblies (default: false, Microsoft assemblies are excluded except Microsoft.Crm.ServiceBus).</param>
+public record PluginListOptions(
+    bool IncludeHidden = false,
+    bool IncludeMicrosoft = false
+);
+
+/// <summary>
 /// Service for managing plugin registrations in Dataverse.
 /// </summary>
 /// <remarks>
@@ -23,18 +33,22 @@ public interface IPluginRegistrationService
     /// Lists all plugin assemblies in the environment.
     /// </summary>
     /// <param name="assemblyNameFilter">Optional filter by assembly name.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PluginAssemblyInfo>> ListAssembliesAsync(
         string? assemblyNameFilter = null,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lists all plugin packages in the environment.
     /// </summary>
     /// <param name="packageNameFilter">Optional filter by package name or unique name.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PluginPackageInfo>> ListPackagesAsync(
         string? packageNameFilter = null,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -68,9 +82,11 @@ public interface IPluginRegistrationService
     /// Lists all processing steps for a plugin type.
     /// </summary>
     /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PluginStepInfo>> ListStepsForTypeAsync(
         Guid pluginTypeId,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

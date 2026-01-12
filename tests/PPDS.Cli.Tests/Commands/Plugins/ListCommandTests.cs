@@ -69,6 +69,30 @@ public class ListCommandTests
         Assert.False(option.Required);
     }
 
+    [Fact]
+    public void Create_HasOptionalIncludeHiddenOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--include-hidden");
+        Assert.NotNull(option);
+        Assert.False(option.Required);
+    }
+
+    [Fact]
+    public void Create_HasOptionalIncludeMicrosoftOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--include-microsoft");
+        Assert.NotNull(option);
+        Assert.False(option.Required);
+    }
+
+    [Fact]
+    public void Create_HasOptionalAllOption()
+    {
+        var option = _command.Options.FirstOrDefault(o => o.Name == "--all");
+        Assert.NotNull(option);
+        Assert.False(option.Required);
+    }
+
     #endregion
 
     #region Argument Parsing Tests
@@ -130,6 +154,42 @@ public class ListCommandTests
             "--environment https://org.crm.dynamics.com " +
             "--assembly MyPlugins " +
             "--output-format Json");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithIncludeHidden_Succeeds()
+    {
+        var result = _command.Parse("--include-hidden");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithIncludeMicrosoft_Succeeds()
+    {
+        var result = _command.Parse("--include-microsoft");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithAll_Succeeds()
+    {
+        var result = _command.Parse("--all");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithAllFilteringOptions_Succeeds()
+    {
+        var result = _command.Parse("--include-hidden --include-microsoft");
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_WithAllAndFilteringOptions_Succeeds()
+    {
+        // --all combined with individual options should still parse
+        var result = _command.Parse("--all --include-hidden --include-microsoft");
         Assert.Empty(result.Errors);
     }
 
