@@ -33,8 +33,11 @@ namespace PPDS.Migration.Import
             if (string.IsNullOrEmpty(message))
                 return false;
 
-            return message.Contains("is not enabled on the entity", StringComparison.OrdinalIgnoreCase) ||
-                   message.Contains("does not support entities of type", StringComparison.OrdinalIgnoreCase);
+            const string NotEnabledOnEntityError = "is not enabled on the entity";
+            const string DoesNotSupportEntitiesTypeError = "does not support entities of type";
+
+            return message.Contains(NotEnabledOnEntityError, StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains(DoesNotSupportEntitiesTypeError, StringComparison.OrdinalIgnoreCase);
         }
     }
 }
