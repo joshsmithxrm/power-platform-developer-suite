@@ -73,11 +73,26 @@ If tests are missing, write them (not stubs).
 
 **Base Branch Check:**
 ```bash
+# Fetch latest from origin
 git fetch origin
-git rev-list --count HEAD..origin/main
+
+# Check how many commits we're behind origin/main
+BEHIND_COUNT=$(git rev-list --count HEAD..origin/main)
+
+if [ "$BEHIND_COUNT" -gt 0 ]; then
+  echo "Branch is $BEHIND_COUNT commits behind origin/main. Rebasing..."
+  git rebase origin/main
+
+  # If rebase fails (conflicts), abort and escalate
+  if [ $? -ne 0 ]; then
+    git rebase --abort
+    echo "ERROR: Rebase failed due to conflicts. Manual resolution required."
+    exit 1
+  fi
+fi
 ```
 
-If behind, rebase onto origin/main.
+**Important:** Always check against `origin/main` (not local `main`) because worktrees may have been created from a stale local main branch.
 
 **Scaffolding Cleanup:**
 ```bash
