@@ -211,11 +211,12 @@ public static class DownloadCommand
 
             return ExitCodes.Success;
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("has no content"))
+        catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Plugin.NoContent
+                                    || ex.ErrorCode == ErrorCodes.Plugin.ImageNotSupported)
         {
             writer.WriteError(new StructuredError(
-                ErrorCodes.Validation.InvalidValue,
-                ex.Message,
+                ex.ErrorCode,
+                ex.UserMessage,
                 Target: nameOrId));
             return ExitCodes.InvalidArguments;
         }
@@ -333,11 +334,12 @@ public static class DownloadCommand
 
             return ExitCodes.Success;
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("has no content"))
+        catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Plugin.NoContent
+                                    || ex.ErrorCode == ErrorCodes.Plugin.ImageNotSupported)
         {
             writer.WriteError(new StructuredError(
-                ErrorCodes.Validation.InvalidValue,
-                ex.Message,
+                ex.ErrorCode,
+                ex.UserMessage,
                 Target: nameOrId));
             return ExitCodes.InvalidArguments;
         }

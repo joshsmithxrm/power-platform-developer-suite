@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -1228,7 +1229,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="imageConfig">The image configuration.</param>
     /// <param name="messageName">The SDK message name (e.g., "Create", "Update", "SetState").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the message does not support images.</exception>
+    /// <exception cref="PpdsException">Thrown when the message does not support images.</exception>
     public async Task<Guid> UpsertImageAsync(
         Guid stepId,
         PluginImageConfig imageConfig,
@@ -1236,7 +1237,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         var messagePropertyName = GetDefaultImagePropertyName(messageName)
-            ?? throw new InvalidOperationException($"Message '{messageName}' does not support images.");
+            ?? throw new PpdsException(
+                ErrorCodes.Plugin.ImageNotSupported,
+                $"Message '{messageName}' does not support plugin images.");
 
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
@@ -1345,7 +1348,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="assemblyId">The assembly ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple containing the binary content and assembly name with .dll extension.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
+    /// <exception cref="PpdsException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
     public async Task<(byte[] Content, string FileName)> DownloadAssemblyAsync(
         Guid assemblyId,
         CancellationToken cancellationToken = default)
@@ -1364,7 +1367,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
         if (string.IsNullOrEmpty(content))
         {
-            throw new InvalidOperationException(
+            throw new PpdsException(
+                ErrorCodes.Plugin.NoContent,
                 $"Assembly '{name}' has no content. The source type may be Disk or GAC.");
         }
 
@@ -1382,7 +1386,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="packageId">The package ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple containing the binary content and package name with .nupkg extension.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when package has no content.</exception>
+    /// <exception cref="PpdsException">Thrown when package has no content.</exception>
     public async Task<(byte[] Content, string FileName)> DownloadPackageAsync(
         Guid packageId,
         CancellationToken cancellationToken = default)
@@ -1402,7 +1406,9 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
         if (string.IsNullOrEmpty(content))
         {
-            throw new InvalidOperationException($"Package '{name}' has no content.");
+            throw new PpdsException(
+                ErrorCodes.Plugin.NoContent,
+                $"Package '{name}' has no content.");
         }
 
         var bytes = Convert.FromBase64String(content);
@@ -1440,7 +1446,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Image with ID {imageId} not found.",
                 imageId.ToString(),
                 "Image",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         var name = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) ?? string.Empty;
         var isManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false;
@@ -1451,7 +1457,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister: {name} is managed. Managed components cannot be deleted in this environment.",
                 name,
                 "Image",
-                "MANAGED");
+                ErrorCodes.Plugin.ManagedComponent);
         }
 
         await DeleteAsync(SdkMessageProcessingStepImage.EntityLogicalName, imageId, client, cancellationToken);
@@ -1475,7 +1481,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Step with ID {stepId} not found.",
                 stepId.ToString(),
                 "Step",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         if (step.IsManaged)
         {
@@ -1483,7 +1489,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister: {step.Name} is managed. Managed components cannot be deleted in this environment.",
                 step.Name,
                 "Step",
-                "MANAGED");
+                ErrorCodes.Plugin.ManagedComponent);
         }
 
         // Check for images
@@ -1495,7 +1501,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister step: {step.Name}. Step has {images.Count} image(s). Use --force to cascade delete all images.",
                 step.Name,
                 "Step",
-                "HAS_CHILDREN",
+                ErrorCodes.Plugin.HasChildren,
                 imageCount: images.Count);
         }
 
@@ -1539,7 +1545,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Plugin type with ID {pluginTypeId} not found.",
                 pluginTypeId.ToString(),
                 "Type",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         if (pluginType.IsManaged)
         {
@@ -1547,7 +1553,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister: {pluginType.TypeName} is managed. Managed components cannot be deleted in this environment.",
                 pluginType.TypeName,
                 "Type",
-                "MANAGED");
+                ErrorCodes.Plugin.ManagedComponent);
         }
 
         // Check for steps
@@ -1559,7 +1565,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister plugin type: {pluginType.TypeName}. Type has {steps.Count} active step(s). Use --force to cascade delete all steps and images.",
                 pluginType.TypeName,
                 "Type",
-                "HAS_CHILDREN",
+                ErrorCodes.Plugin.HasChildren,
                 stepCount: steps.Count);
         }
 
@@ -1595,7 +1601,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Assembly with ID {assemblyId} not found.",
                 assemblyId.ToString(),
                 "Assembly",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         if (assembly.IsManaged)
         {
@@ -1603,7 +1609,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister: {assembly.Name} is managed. Managed components cannot be deleted in this environment.",
                 assembly.Name,
                 "Assembly",
-                "MANAGED");
+                ErrorCodes.Plugin.ManagedComponent);
         }
 
         // Get types and their steps
@@ -1622,7 +1628,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister assembly: {assembly.Name}. Assembly has {types.Count} plugin type(s) with {totalSteps} active step(s). Use --force to cascade delete all children.",
                 assembly.Name,
                 "Assembly",
-                "HAS_CHILDREN",
+                ErrorCodes.Plugin.HasChildren,
                 typeCount: types.Count,
                 stepCount: totalSteps);
         }
@@ -1659,7 +1665,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Package with ID {packageId} not found.",
                 packageId.ToString(),
                 "Package",
-                "NOT_FOUND");
+                ErrorCodes.Plugin.NotFound);
 
         if (package.IsManaged)
         {
@@ -1667,7 +1673,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister: {package.Name} is managed. Managed components cannot be deleted in this environment.",
                 package.Name,
                 "Package",
-                "MANAGED");
+                ErrorCodes.Plugin.ManagedComponent);
         }
 
         // Get assemblies
@@ -1679,7 +1685,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Cannot unregister package: {package.Name}. Package has {assemblies.Count} assembly(ies). Use --force to cascade delete all children.",
                 package.Name,
                 "Package",
-                "HAS_CHILDREN",
+                ErrorCodes.Plugin.HasChildren,
                 assemblyCount: assemblies.Count);
         }
 
@@ -2139,7 +2145,7 @@ public sealed class UnregisterResult
 /// <summary>
 /// Exception thrown when an unregister operation cannot proceed.
 /// </summary>
-public sealed class UnregisterException : Exception
+public sealed class UnregisterException : PpdsException
 {
     /// <summary>
     /// The name of the entity that could not be unregistered.
@@ -2150,11 +2156,6 @@ public sealed class UnregisterException : Exception
     /// The type of entity (Assembly, Package, Type, Step).
     /// </summary>
     public string EntityType { get; }
-
-    /// <summary>
-    /// Error code for programmatic handling.
-    /// </summary>
-    public string ErrorCode { get; }
 
     /// <summary>
     /// Number of child assemblies that exist (for package).
@@ -2185,11 +2186,10 @@ public sealed class UnregisterException : Exception
         int typeCount = 0,
         int stepCount = 0,
         int imageCount = 0)
-        : base(message)
+        : base(errorCode, message)
     {
         EntityName = entityName;
         EntityType = entityType;
-        ErrorCode = errorCode;
         AssemblyCount = assemblyCount;
         TypeCount = typeCount;
         StepCount = stepCount;

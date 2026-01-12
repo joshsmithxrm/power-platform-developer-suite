@@ -4,6 +4,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Client;
@@ -510,7 +511,7 @@ public class PluginRegistrationServiceTests
     [InlineData("Retrieve")]
     [InlineData("RetrieveMultiple")]
     [InlineData("CustomAction")]
-    public async Task UpsertImageAsync_ThrowsInvalidOperationException_ForUnsupportedMessages(string messageName)
+    public async Task UpsertImageAsync_ThrowsPpdsException_ForUnsupportedMessages(string messageName)
     {
         // Arrange
         var imageConfig = new PluginImageConfig
@@ -520,11 +521,12 @@ public class PluginRegistrationServiceTests
         };
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpsertImageAsync(Guid.NewGuid(), imageConfig, messageName));
 
-        Assert.Contains(messageName, exception.Message);
-        Assert.Contains("does not support images", exception.Message);
+        Assert.Equal(ErrorCodes.Plugin.ImageNotSupported, exception.ErrorCode);
+        Assert.Contains(messageName, exception.UserMessage);
+        Assert.Contains("does not support plugin images", exception.UserMessage);
     }
 
     #endregion

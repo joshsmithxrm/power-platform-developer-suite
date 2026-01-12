@@ -1,3 +1,4 @@
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Registration;
@@ -285,7 +286,7 @@ public interface IPluginRegistrationService
     /// <param name="imageConfig">The image configuration.</param>
     /// <param name="messageName">The SDK message name (e.g., "Create", "Update", "SetState").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the message does not support images.</exception>
+    /// <exception cref="PpdsException">Thrown when the message does not support images.</exception>
     Task<Guid> UpsertImageAsync(
         Guid stepId,
         PluginImageConfig imageConfig,
@@ -371,7 +372,7 @@ public interface IPluginRegistrationService
     /// <param name="assemblyId">The assembly ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple containing the binary content and assembly name with .dll extension.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
+    /// <exception cref="PpdsException">Thrown when assembly has no content (e.g., source type is Disk or GAC).</exception>
     Task<(byte[] Content, string FileName)> DownloadAssemblyAsync(
         Guid assemblyId,
         CancellationToken cancellationToken = default);
@@ -382,7 +383,7 @@ public interface IPluginRegistrationService
     /// <param name="packageId">The package ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple containing the binary content and package name with .nupkg extension.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when package has no content.</exception>
+    /// <exception cref="PpdsException">Thrown when package has no content.</exception>
     Task<(byte[] Content, string FileName)> DownloadPackageAsync(
         Guid packageId,
         CancellationToken cancellationToken = default);
