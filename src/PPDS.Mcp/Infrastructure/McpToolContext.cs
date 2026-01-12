@@ -116,7 +116,7 @@ public sealed class McpToolContext
                 "No environment selected. Run 'ppds env select <url>' to select an environment.");
         }
 
-        var credentialStore = new SecureCredentialStore();
+        var credentialStore = new NativeCredentialStore();
         var sources = new List<IConnectionSource>();
 
         try

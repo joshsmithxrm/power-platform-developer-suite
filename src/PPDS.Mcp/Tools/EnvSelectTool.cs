@@ -48,7 +48,7 @@ public sealed class EnvSelectTool
             ?? throw new InvalidOperationException("No active profile configured. Run 'ppds auth create' first.");
 
         // Use multi-layer resolution.
-        using var credentialStore = new SecureCredentialStore();
+        using var credentialStore = new NativeCredentialStore();
         using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
         var result = await resolver.ResolveAsync(environment, cancellationToken).ConfigureAwait(false);
 

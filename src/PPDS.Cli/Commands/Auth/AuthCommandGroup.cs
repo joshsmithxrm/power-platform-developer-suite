@@ -214,7 +214,7 @@ public static class AuthCommandGroup
 
         // Store secrets in secure credential store (not in profile), unless bypassed
         // Declared outside try block so finally can dispose it
-        SecureCredentialStore? credentialStore = null;
+        NativeCredentialStore? credentialStore = null;
         string? storedCredentialKey = null;
 
         try
@@ -249,7 +249,7 @@ public static class AuthCommandGroup
 
             if (!bypassCredentialStore)
             {
-                credentialStore = new SecureCredentialStore(allowCleartextFallback: options.AcceptCleartextCaching);
+                credentialStore = new NativeCredentialStore(allowCleartextFallback: options.AcceptCleartextCaching);
 
                 // Warn if using cleartext storage on Linux
                 if (credentialStore.IsCleartextCachingEnabled)
@@ -964,7 +964,7 @@ public static class AuthCommandGroup
 
                 if (!isShared)
                 {
-                    using var credentialStore = new SecureCredentialStore();
+                    using var credentialStore = new NativeCredentialStore();
                     await credentialStore.RemoveAsync(credentialKey, cancellationToken);
                 }
             }
@@ -1072,7 +1072,7 @@ public static class AuthCommandGroup
                 Console.Error.WriteLine($"Resolving environment '{newEnvironment}'...");
 
                 // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-                using var credentialStore = new SecureCredentialStore();
+                using var credentialStore = new NativeCredentialStore();
                 using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
@@ -1226,7 +1226,7 @@ public static class AuthCommandGroup
             await TokenCacheManager.ClearAllCachesAsync();
 
             // Clear secure credential store
-            using var credentialStore = new SecureCredentialStore();
+            using var credentialStore = new NativeCredentialStore();
             await credentialStore.ClearAsync(cancellationToken);
 
             Console.Error.WriteLine("Authentication profiles, token cache, and stored credentials removed");
