@@ -533,22 +533,6 @@ public class RpcMethodHandler
                 "The 'fetchXml' parameter is required");
         }
 
-        using var store = new ProfileStore();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile;
-        if (profile == null)
-        {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-        }
-
-        if (profile.Environment == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
-        }
-
         // Inject top attribute if specified
         var query = fetchXml;
         if (top.HasValue)
@@ -556,21 +540,18 @@ public class RpcMethodHandler
             query = InjectTopAttribute(query, top.Value);
         }
 
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
-            profile.Environment.Url,
-            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
-            cancellationToken: cancellationToken);
+        return await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var result = await queryExecutor.ExecuteFetchXmlAsync(
+                query,
+                page,
+                pagingCookie,
+                count,
+                ct);
 
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-        var result = await queryExecutor.ExecuteFetchXmlAsync(
-            query,
-            page,
-            pagingCookie,
-            count,
-            cancellationToken);
-
-        return MapToResponse(result, query);
+            return MapToResponse(result, query);
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -625,37 +606,18 @@ public class RpcMethodHandler
             };
         }
 
-        using var store = new ProfileStore();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile;
-        if (profile == null)
+        return await WithActiveProfileAsync(async (sp, ct) =>
         {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-        }
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var result = await queryExecutor.ExecuteFetchXmlAsync(
+                fetchXml,
+                page,
+                pagingCookie,
+                count,
+                ct);
 
-        if (profile.Environment == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
-        }
-
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
-            profile.Environment.Url,
-            deviceCodeCallback: ProfileServiceFactory.DefaultDeviceCodeCallback,
-            cancellationToken: cancellationToken);
-
-        var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
-        var result = await queryExecutor.ExecuteFetchXmlAsync(
-            fetchXml,
-            page,
-            pagingCookie,
-            count,
-            cancellationToken);
-
-        return MapToResponse(result, fetchXml);
+            return MapToResponse(result, fetchXml);
+        }, cancellationToken);
     }
 
     private static string InjectTopAttribute(string fetchXml, int top)
@@ -736,6 +698,41 @@ public class RpcMethodHandler
         return value.Value;
     }
 
+    /// <summary>
+    /// Executes an action with an active profile's service provider.
+    /// Handles profile loading, validation, and service provider creation.
+    /// </summary>
+    /// <typeparam name="T">The return type of the action.</typeparam>
+    /// <param name="action">The action to execute with the service provider.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The result of the action.</returns>
+    /// <exception cref="RpcException">Thrown when no active profile or environment is configured.</exception>
+    private async Task<T> WithActiveProfileAsync<T>(
+        Func<IServiceProvider, CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var store = new ProfileStore();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile
+            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+
+        var environment = profile.Environment
+            ?? throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+
+        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
+            profile.Name,
+            environment.Url,
+            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+            cancellationToken: cancellationToken);
+
+        return await action(serviceProvider, cancellationToken);
+    }
+
     #endregion
 
     #region Profile Invalidation
@@ -781,47 +778,28 @@ public class RpcMethodHandler
         bool includeManaged = false,
         CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile;
-        if (profile == null)
+        return await WithActiveProfileAsync(async (sp, ct) =>
         {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-        }
+            var solutionService = sp.GetRequiredService<ISolutionService>();
+            var solutions = await solutionService.ListAsync(filter, includeManaged, ct);
 
-        if (profile.Environment == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
-        }
-
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
-            profile.Environment.Url,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            cancellationToken: cancellationToken);
-
-        var solutionService = serviceProvider.GetRequiredService<ISolutionService>();
-        var solutions = await solutionService.ListAsync(filter, includeManaged, cancellationToken);
-
-        return new SolutionsListResponse
-        {
-            Solutions = solutions.Select(s => new SolutionInfoDto
+            return new SolutionsListResponse
             {
-                Id = s.Id,
-                UniqueName = s.UniqueName,
-                FriendlyName = s.FriendlyName,
-                Version = s.Version,
-                IsManaged = s.IsManaged,
-                PublisherName = s.PublisherName,
-                Description = s.Description,
-                CreatedOn = s.CreatedOn,
-                ModifiedOn = s.ModifiedOn,
-                InstalledOn = s.InstalledOn
-            }).ToList()
-        };
+                Solutions = solutions.Select(s => new SolutionInfoDto
+                {
+                    Id = s.Id,
+                    UniqueName = s.UniqueName,
+                    FriendlyName = s.FriendlyName,
+                    Version = s.Version,
+                    IsManaged = s.IsManaged,
+                    PublisherName = s.PublisherName,
+                    Description = s.Description,
+                    CreatedOn = s.CreatedOn,
+                    ModifiedOn = s.ModifiedOn,
+                    InstalledOn = s.InstalledOn
+                }).ToList()
+            };
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -845,55 +823,36 @@ public class RpcMethodHandler
                 "The 'uniqueName' parameter is required");
         }
 
-        using var store = new ProfileStore();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile;
-        if (profile == null)
+        return await WithActiveProfileAsync(async (sp, ct) =>
         {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-        }
+            var solutionService = sp.GetRequiredService<ISolutionService>();
 
-        if (profile.Environment == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
-        }
-
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
-            profile.Environment.Url,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            cancellationToken: cancellationToken);
-
-        var solutionService = serviceProvider.GetRequiredService<ISolutionService>();
-
-        // First get the solution to find its ID
-        var solution = await solutionService.GetAsync(uniqueName, cancellationToken);
-        if (solution == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Solution.NotFound,
-                $"Solution '{uniqueName}' not found");
-        }
-
-        var components = await solutionService.GetComponentsAsync(solution.Id, componentType, cancellationToken);
-
-        return new SolutionComponentsResponse
-        {
-            SolutionId = solution.Id,
-            UniqueName = solution.UniqueName,
-            Components = components.Select(c => new SolutionComponentInfoDto
+            // First get the solution to find its ID
+            var solution = await solutionService.GetAsync(uniqueName, ct);
+            if (solution == null)
             {
-                Id = c.Id,
-                ObjectId = c.ObjectId,
-                ComponentType = c.ComponentType,
-                ComponentTypeName = c.ComponentTypeName,
-                RootComponentBehavior = c.RootComponentBehavior,
-                IsMetadata = c.IsMetadata
-            }).ToList()
-        };
+                throw new RpcException(
+                    ErrorCodes.Solution.NotFound,
+                    $"Solution '{uniqueName}' not found");
+            }
+
+            var components = await solutionService.GetComponentsAsync(solution.Id, componentType, ct);
+
+            return new SolutionComponentsResponse
+            {
+                SolutionId = solution.Id,
+                UniqueName = solution.UniqueName,
+                Components = components.Select(c => new SolutionComponentInfoDto
+                {
+                    Id = c.Id,
+                    ObjectId = c.ObjectId,
+                    ComponentType = c.ComponentType,
+                    ComponentTypeName = c.ComponentTypeName,
+                    RootComponentBehavior = c.RootComponentBehavior,
+                    IsMetadata = c.IsMetadata
+                }).ToList()
+            };
+        }, cancellationToken);
     }
 
     #endregion
