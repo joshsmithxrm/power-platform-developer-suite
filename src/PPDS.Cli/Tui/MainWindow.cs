@@ -21,6 +21,8 @@ internal sealed class MainWindow : Window
     private readonly ITuiErrorService _errorService;
     private readonly Button _statusButton;
     private bool _hasError;
+    private DateTime _lastMenuClickTime = DateTime.MinValue;
+    private const int MenuClickDebounceMs = 150;
 
     public MainWindow(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
     {
@@ -101,6 +103,20 @@ internal sealed class MainWindow : Window
                 new("_Error Log...", "View recent errors and debug log", () => ShowErrorDetails(), shortcut: Key.F12),
             })
         });
+
+        // Add debounce handler to prevent double-click flicker on menus
+        // Terminal.Gui 1.x can fire multiple events for a single click in some terminals
+        menu.MouseClick += (e) =>
+        {
+            var now = DateTime.UtcNow;
+            var timeSinceLastClick = (now - _lastMenuClickTime).TotalMilliseconds;
+            if (timeSinceLastClick < MenuClickDebounceMs)
+            {
+                e.Handled = true;
+                return;
+            }
+            _lastMenuClickTime = now;
+        };
 
         Add(menu);
     }
