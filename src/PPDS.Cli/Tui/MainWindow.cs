@@ -509,11 +509,8 @@ internal sealed class MainWindow : Window
 
     private void ShowAbout()
     {
-        var assembly = typeof(MainWindow).Assembly;
-        var version = assembly.GetName().Version?.ToString() ?? "Unknown";
-        MessageBox.Query("About PPDS",
-            $"Power Platform Developer Suite\n\nVersion: {version}\n\nA multi-interface platform for Dataverse development.\n\nhttps://github.com/joshsmithxrm/power-platform-developer-suite",
-            "OK");
+        var dialog = new AboutDialog();
+        Application.Run(dialog);
     }
 
     private void ShowKeyboardShortcuts()
