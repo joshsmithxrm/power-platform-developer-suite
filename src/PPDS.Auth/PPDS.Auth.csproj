@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
+    <InternalsVisibleTo Include="PPDS.Auth.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -56,6 +57,9 @@
 
     <!-- JWT token parsing for extracting claims -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.*" />
+
+    <!-- Native OS credential storage (Windows Credential Manager, macOS Keychain, Linux libsecret) -->
+    <PackageReference Include="Devlooped.CredentialManager" Version="2.6.1.1" />
 
     <!-- Source Link -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />

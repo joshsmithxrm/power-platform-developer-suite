@@ -135,7 +135,7 @@ public sealed class ProfileService : IProfileService
         // Update environment if specified
         if (!string.IsNullOrWhiteSpace(newEnvironment))
         {
-            using var credentialStore = new SecureCredentialStore();
+            using var credentialStore = new NativeCredentialStore();
             using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
             var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
@@ -164,7 +164,7 @@ public sealed class ProfileService : IProfileService
         await TokenCacheManager.ClearAllCachesAsync();
 
         // Clear secure credential store
-        using var credentialStore = new SecureCredentialStore();
+        using var credentialStore = new NativeCredentialStore();
         await credentialStore.ClearAsync(cancellationToken);
 
         _logger.LogInformation("Cleared all profiles and credentials");
@@ -242,7 +242,7 @@ public sealed class ProfileService : IProfileService
         var envSpnSecret = System.Environment.GetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar);
         var bypassCredentialStore = !string.IsNullOrWhiteSpace(envSpnSecret);
 
-        SecureCredentialStore? credentialStore = null;
+        NativeCredentialStore? credentialStore = null;
         string? storedCredentialKey = null;
 
         try
@@ -262,7 +262,7 @@ public sealed class ProfileService : IProfileService
             // Store credentials if not bypassing
             if (!bypassCredentialStore)
             {
-                credentialStore = new SecureCredentialStore(allowCleartextFallback: request.AcceptCleartextCaching);
+                credentialStore = new NativeCredentialStore(allowCleartextFallback: request.AcceptCleartextCaching);
 
                 if (!string.IsNullOrWhiteSpace(request.ApplicationId))
                 {
@@ -554,7 +554,7 @@ public sealed class ProfileService : IProfileService
     }
 
     private static async Task CleanupStoredCredentialAsync(
-        SecureCredentialStore? credentialStore,
+        NativeCredentialStore? credentialStore,
         string? key,
         CancellationToken cancellationToken)
     {
@@ -596,7 +596,7 @@ public sealed class ProfileService : IProfileService
 
         if (!isShared)
         {
-            using var credentialStore = new SecureCredentialStore();
+            using var credentialStore = new NativeCredentialStore();
             await credentialStore.RemoveAsync(credentialKey, cancellationToken);
         }
     }
