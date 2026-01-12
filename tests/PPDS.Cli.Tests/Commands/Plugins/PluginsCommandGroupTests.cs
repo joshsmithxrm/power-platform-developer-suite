@@ -63,6 +63,13 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    public void Create_HasGetSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "get");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
     public void Create_HasDownloadSubcommand()
     {
         var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "download");
@@ -70,9 +77,9 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasSixSubcommands()
+    public void Create_HasSevenSubcommands()
     {
-        Assert.Equal(6, _command.Subcommands.Count);
+        Assert.Equal(7, _command.Subcommands.Count);
     }
 
     #endregion

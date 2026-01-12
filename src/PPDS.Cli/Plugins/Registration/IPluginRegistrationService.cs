@@ -112,12 +112,57 @@ public interface IPluginRegistrationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets an assembly by ID.
+    /// </summary>
+    /// <param name="id">The assembly ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginAssemblyInfo?> GetAssemblyByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets a plugin package by name or unique name.
     /// </summary>
     /// <param name="name">The package name or unique name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<PluginPackageInfo?> GetPackageByNameAsync(
         string name,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a plugin package by ID.
+    /// </summary>
+    /// <param name="id">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginPackageInfo?> GetPackageByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a plugin type by name or ID.
+    /// </summary>
+    /// <param name="nameOrId">The plugin type name or ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginTypeInfo?> GetPluginTypeByNameOrIdAsync(
+        string nameOrId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a processing step by name or ID.
+    /// </summary>
+    /// <param name="nameOrId">The step name or ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginStepInfo?> GetStepByNameOrIdAsync(
+        string nameOrId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a step image by name or ID.
+    /// </summary>
+    /// <param name="nameOrId">The image name or ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PluginImageInfo?> GetImageByNameOrIdAsync(
+        string nameOrId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
