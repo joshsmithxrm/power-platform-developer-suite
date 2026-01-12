@@ -46,6 +46,13 @@ $Entities = @(
     'sdkmessageprocessingstep'
     'sdkmessageprocessingstepimage'
     'plugintracelog'  # Plugin trace logs for debugging
+    'serviceendpoint'  # WebHooks, Azure Service Bus, Event Hub
+    # Custom APIs
+    'customapi'
+    'customapirequestparameter'
+    'customapiresponseproperty'
+    # Virtual entity data providers
+    'entitydataprovider'
     # Solution/ALM
     'solution'
     'solutioncomponent'
