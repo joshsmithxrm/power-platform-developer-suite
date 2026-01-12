@@ -295,6 +295,28 @@ internal sealed class MainWindow : Window
         });
     }
 
+    private async Task SetActiveProfileWithEnvironmentAsync(ProfileSummary profile, string? environmentUrl, string? environmentName)
+    {
+        // Note: TUI profile switching is session-only (ADR-0018)
+        // Uses explicitly provided environment instead of profile's stored environment
+
+        // Update local state
+        _profileName = profile.DisplayIdentifier;
+        _environmentName = environmentName;
+        _environmentUrl = environmentUrl;
+
+        // Switch session to new profile with specified environment
+        await _session.SetActiveProfileAsync(
+            profile.DisplayIdentifier,
+            environmentUrl,
+            environmentName);
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            UpdateStatus();
+        });
+    }
+
     private void ShowProfileCreation()
     {
         var profileService = _session.GetProfileService();
@@ -305,9 +327,13 @@ internal sealed class MainWindow : Window
 
         if (dialog.CreatedProfile != null)
         {
-            // Update to use the newly created profile
+            // Use environment selected post-auth if available, otherwise fall back to profile's environment
+            var envUrl = dialog.SelectedEnvironmentUrl ?? dialog.CreatedProfile.EnvironmentUrl;
+            var envName = dialog.SelectedEnvironmentName ?? dialog.CreatedProfile.EnvironmentName;
+
+            // Update to use the newly created profile with selected environment
 #pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = SetActiveProfileAsync(dialog.CreatedProfile).ContinueWith(t =>
+            _ = SetActiveProfileWithEnvironmentAsync(dialog.CreatedProfile, envUrl, envName).ContinueWith(t =>
             {
                 if (t.IsFaulted)
                 {

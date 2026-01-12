@@ -52,6 +52,17 @@ internal sealed class ProfileCreationDialog : Dialog
     public ProfileSummary? CreatedProfile => _createdProfile;
 
     /// <summary>
+    /// Gets the environment URL selected after authentication.
+    /// This may differ from the profile's stored environment if selected post-auth.
+    /// </summary>
+    public string? SelectedEnvironmentUrl { get; private set; }
+
+    /// <summary>
+    /// Gets the environment display name selected after authentication.
+    /// </summary>
+    public string? SelectedEnvironmentName { get; private set; }
+
+    /// <summary>
     /// Creates a new profile creation dialog.
     /// </summary>
     /// <param name="profileService">The profile service for creating profiles.</param>
@@ -402,9 +413,23 @@ internal sealed class ProfileCreationDialog : Dialog
             Application.MainLoop?.Invoke(() =>
             {
                 _createdProfile = profile;
-                _statusLabel.Text = $"Profile created: {_createdProfile.DisplayIdentifier}";
-                _statusLabel.ColorScheme = TuiColorPalette.Success;
-                MessageBox.Query("Success", $"Profile '{_createdProfile.DisplayIdentifier}' created successfully!", "OK");
+
+                // Immediately show environment selector after successful auth (no success message)
+                var envDialog = new EnvironmentSelectorDialog(_environmentService, _deviceCodeCallback);
+                Application.Run(envDialog);
+
+                // Store selected environment
+                if (envDialog.SelectedEnvironment != null)
+                {
+                    SelectedEnvironmentUrl = envDialog.SelectedEnvironment.Url;
+                    SelectedEnvironmentName = envDialog.SelectedEnvironment.DisplayName;
+                }
+                else if (envDialog.UseManualUrl && !string.IsNullOrWhiteSpace(envDialog.ManualUrl))
+                {
+                    SelectedEnvironmentUrl = envDialog.ManualUrl;
+                    SelectedEnvironmentName = envDialog.ManualUrl;
+                }
+
                 Application.RequestStop();
             });
         }
