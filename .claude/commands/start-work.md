@@ -94,6 +94,26 @@ Branch: feature/import-bugs
 Status: Clean
 ```
 
+### 5b. Check Base Branch Freshness
+
+**Important:** Worktrees may be created from a stale local `main`. Check against `origin/main`:
+
+```bash
+# Fetch latest from origin
+git fetch origin
+
+# Check how many commits we're behind origin/main
+BEHIND_COUNT=$(git rev-list --count HEAD..origin/main)
+
+if [ "$BEHIND_COUNT" -gt 0 ]; then
+  echo "WARNING: Branch is $BEHIND_COUNT commits behind origin/main."
+  echo "Consider rebasing now to avoid conflicts later:"
+  echo "  git rebase origin/main"
+fi
+```
+
+This early warning helps catch stale branches before significant work is done.
+
 ### 6. Display Session Prompt
 
 Output the generated session prompt content.
