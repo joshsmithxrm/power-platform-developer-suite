@@ -99,11 +99,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// Lists all plugin assemblies in the environment.
     /// </summary>
     /// <param name="assemblyNameFilter">Optional filter by assembly name.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<List<PluginAssemblyInfo>> ListAssembliesAsync(
         string? assemblyNameFilter = null,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        options ??= new PluginListOptions();
+
         var query = new QueryExpression(PluginAssembly.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
@@ -129,6 +133,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             query.Criteria.AddCondition(PluginAssembly.Fields.Name, ConditionOperator.Equal, assemblyNameFilter);
         }
 
+        // Filter out Microsoft.* assemblies by default (except Microsoft.Crm.ServiceBus)
+        if (!options.IncludeMicrosoft)
+        {
+            var microsoftFilter = new FilterExpression(LogicalOperator.Or);
+            microsoftFilter.AddCondition(PluginAssembly.Fields.Name, ConditionOperator.NotLike, "Microsoft%");
+            microsoftFilter.AddCondition(PluginAssembly.Fields.Name, ConditionOperator.Equal, "Microsoft.Crm.ServiceBus");
+            query.Criteria.AddFilter(microsoftFilter);
+        }
+
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var results = await RetrieveMultipleAsync(query, client, cancellationToken);
 
@@ -146,11 +159,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// Lists all plugin packages in the environment.
     /// </summary>
     /// <param name="packageNameFilter">Optional filter by package name or unique name.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<List<PluginPackageInfo>> ListPackagesAsync(
         string? packageNameFilter = null,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        options ??= new PluginListOptions();
+
         var query = new QueryExpression(PluginPackage.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
@@ -171,6 +188,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                     new ConditionExpression(PluginPackage.Fields.UniqueName, ConditionOperator.Equal, packageNameFilter)
                 }
             };
+        }
+
+        // Filter out Microsoft.* packages by default (except Microsoft.Crm.ServiceBus)
+        if (!options.IncludeMicrosoft)
+        {
+            var microsoftFilter = new FilterExpression(LogicalOperator.Or);
+            microsoftFilter.AddCondition(PluginPackage.Fields.Name, ConditionOperator.NotLike, "Microsoft%");
+            microsoftFilter.AddCondition(PluginPackage.Fields.Name, ConditionOperator.Equal, "Microsoft.Crm.ServiceBus");
+            query.Criteria.AddFilter(microsoftFilter);
         }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -287,11 +313,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// Lists all processing steps for a plugin type.
     /// </summary>
     /// <param name="pluginTypeId">The plugin type ID.</param>
+    /// <param name="options">Filtering options (hidden steps, Microsoft assemblies).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<List<PluginStepInfo>> ListStepsForTypeAsync(
         Guid pluginTypeId,
+        PluginListOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        options ??= new PluginListOptions();
+
         var query = new QueryExpression(SdkMessageProcessingStep.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
@@ -333,6 +363,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             },
             Orders = { new OrderExpression(SdkMessageProcessingStep.Fields.Name, OrderType.Ascending) }
         };
+
+        // Exclude hidden steps by default
+        if (!options.IncludeHidden)
+        {
+            query.Criteria.AddCondition(SdkMessageProcessingStep.Fields.IsHidden, ConditionOperator.Equal, false);
+        }
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var results = await RetrieveMultipleAsync(query, client, cancellationToken);
@@ -417,7 +453,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string name,
         CancellationToken cancellationToken = default)
     {
-        var assemblies = await ListAssembliesAsync(name, cancellationToken);
+        // Use IncludeMicrosoft: true to search all assemblies including Microsoft.* when looking up by exact name
+        var assemblies = await ListAssembliesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
         return assemblies.FirstOrDefault();
     }
 
@@ -430,7 +467,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string name,
         CancellationToken cancellationToken = default)
     {
-        var packages = await ListPackagesAsync(name, cancellationToken);
+        // Use IncludeMicrosoft: true to search all packages including Microsoft.* when looking up by exact name
+        var packages = await ListPackagesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
         return packages.FirstOrDefault();
     }
 
