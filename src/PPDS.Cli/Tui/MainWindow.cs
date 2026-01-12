@@ -460,7 +460,7 @@ internal sealed class MainWindow : Window
         if (_hotkeyRegistry.ActiveScreen is SqlQueryScreen)
             return;
 
-        var sqlScreen = new SqlQueryScreen(_profileName, _deviceCodeCallback, _session);
+        using var sqlScreen = new SqlQueryScreen(_profileName, _deviceCodeCallback, _session);
         Application.Run(sqlScreen);
     }
 

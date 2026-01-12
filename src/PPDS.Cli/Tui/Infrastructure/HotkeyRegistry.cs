@@ -184,11 +184,20 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             TuiDebugLog.Log("Closing dialog before executing global hotkey");
             SetActiveDialog(null);  // Clear dialog state immediately to prevent stale state
             Application.RequestStop();
-            // Use MainLoop.Invoke to execute handler after dialog closes
+        }
+
+        // CRITICAL: Always defer handler execution to next main loop iteration.
+        // Starting Application.Run() from within a key event handler corrupts
+        // Terminal.Gui's internal state (Border.SetBorderBrush null reference).
+        // Deferring ensures the current key event fully completes first.
+        if (matchedBinding.Scope == HotkeyScope.Global)
+        {
             Application.MainLoop?.Invoke(() => matchedBinding.Handler());
         }
         else
         {
+            // Screen/Dialog scope hotkeys are expected to run in their context
+            // and typically don't start new Application.Run loops
             matchedBinding.Handler();
         }
 
