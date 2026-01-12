@@ -267,15 +267,12 @@ internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenSt
             },
             owner: this));
 
-        // Component-specific: Ctrl+Enter in query input
-        _queryInput.KeyPress += (e) =>
-        {
-            if (e.KeyEvent.Key == (Key.CtrlMask | Key.Enter))
-            {
-                _ = ExecuteQueryAsync();
-                e.Handled = true;
-            }
-        };
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.Enter,
+            HotkeyScope.Screen,
+            "Execute query",
+            () => _ = ExecuteQueryAsync(),
+            owner: this));
 
         // Context-dependent shortcuts that need local state checks
         KeyPress += (e) =>
