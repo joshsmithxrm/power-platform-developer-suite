@@ -19,6 +19,7 @@ public class MigrationResultTests
         result.Errors.Should().NotBeNull().And.BeEmpty();
         result.CreatedCount.Should().BeNull();
         result.UpdatedCount.Should().BeNull();
+        result.M2MCount.Should().BeNull();
     }
 
     [Fact]
@@ -36,7 +37,8 @@ public class MigrationResultTests
             Duration = duration,
             Errors = errors,
             CreatedCount = 3000,
-            UpdatedCount = 1950
+            UpdatedCount = 1950,
+            M2MCount = 500
         };
 
         result.Success.Should().BeTrue();
@@ -47,6 +49,7 @@ public class MigrationResultTests
         result.Errors.Should().HaveCount(1);
         result.CreatedCount.Should().Be(3000);
         result.UpdatedCount.Should().Be(1950);
+        result.M2MCount.Should().Be(500);
     }
 
     [Fact]
