@@ -1,0 +1,15 @@
+{
+  "name": "ppds-tui-e2e",
+  "version": "1.0.0",
+  "description": "End-to-end visual tests for PPDS TUI using tui-test",
+  "private": true,
+  "scripts": {
+    "test": "npx playwright test",
+    "test:update": "npx playwright test --update-snapshots",
+    "test:headed": "npx playwright test --headed"
+  },
+  "devDependencies": {
+    "@microsoft/tui-test": "^0.2.0",
+    "@playwright/test": "^1.40.0"
+  }
+}

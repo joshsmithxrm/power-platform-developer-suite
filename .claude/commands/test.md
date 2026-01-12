@@ -34,15 +34,31 @@ Fast, no external dependencies. Default choice.
 
 ### TUI Tests
 
+TUI testing has three layers:
+1. **TuiUnit** - State assertions (fast, no terminal needed)
+2. **tui-e2e** - Visual snapshots using @microsoft/tui-test (needs Node.js)
+3. **TuiIntegration** - Integration with FakeXrmEasy (future)
+
 ```bash
 # Build first
 dotnet build src/PPDS.Cli/PPDS.Cli.csproj --no-restore
 
-# TUI unit tests (fast)
+# TUI unit tests - state assertions (fast)
 dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj --filter "Category=TuiUnit" --no-build
+
+# TUI visual snapshots (if Node.js available)
+# Use --prefix to run npm from the repo root
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    npm test --prefix tests/tui-e2e
+}
 
 # TUI integration tests (if unit pass)
 dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj --filter "Category=TuiIntegration" --no-build
+```
+
+**Updating snapshots:** If visual changes are intentional, update snapshots:
+```bash
+npm test --prefix tests/tui-e2e -- --update-snapshots
 ```
 
 ### Integration Tests
@@ -177,3 +193,4 @@ ppds plugins --help
 
 - ADR-0028: TUI Testing Strategy
 - ADR-0029: Testing Strategy
+- `tests/tui-e2e/` - TUI visual snapshot tests using @microsoft/tui-test

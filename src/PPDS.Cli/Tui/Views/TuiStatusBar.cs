@@ -1,4 +1,6 @@
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Views;
@@ -16,7 +18,7 @@ namespace PPDS.Cli.Tui.Views;
 /// Clicking the environment section opens the environment selector dialog.
 /// </para>
 /// </remarks>
-internal sealed class TuiStatusBar : View
+internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
 {
     private readonly Button _profileButton;
     private readonly Button _environmentButton;
@@ -117,6 +119,20 @@ internal sealed class TuiStatusBar : View
         var envName = _session.CurrentEnvironmentDisplayName ?? "None";
         _environmentButton.Text = $" Environment: {envName}{labelSuffix} \u25bc";
         _environmentButton.ColorScheme = colorScheme;
+    }
+
+    /// <inheritdoc />
+    public TuiStatusBarState CaptureState()
+    {
+        var envType = _themeService.DetectEnvironmentType(_session.CurrentEnvironmentUrl);
+        return new TuiStatusBarState(
+            ProfileButtonText: _profileButton.Text?.ToString() ?? string.Empty,
+            EnvironmentButtonText: _environmentButton.Text?.ToString() ?? string.Empty,
+            EnvironmentType: envType,
+            HasProfile: _session.CurrentProfileName != null,
+            HasEnvironment: _session.CurrentEnvironmentUrl != null,
+            HelpText: null // Status bar doesn't have help text in current implementation
+        );
     }
 
     /// <inheritdoc />

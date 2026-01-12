@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Dialogs;
@@ -7,7 +9,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 /// <summary>
 /// Dialog for displaying error details and recent error history.
 /// </summary>
-internal sealed class ErrorDetailsDialog : Dialog
+internal sealed class ErrorDetailsDialog : Dialog, ITuiStateCapture<ErrorDetailsDialogState>
 {
     private readonly ITuiErrorService _errorService;
     private readonly ListView _errorListView;
@@ -239,5 +241,25 @@ internal sealed class ErrorDetailsDialog : Dialog
             _errorService.ClearErrors();
             RefreshErrorList();
         }
+    }
+
+    /// <inheritdoc />
+    public ErrorDetailsDialogState CaptureState()
+    {
+        var errors = _errorService.RecentErrors;
+        var errorItems = errors.Select(e => new ErrorListItem(
+            Message: e.Message,
+            Context: e.Context,
+            Timestamp: e.Timestamp,
+            HasException: e.ExceptionType != null
+        )).ToList();
+
+        return new ErrorDetailsDialogState(
+            Title: Title?.ToString() ?? string.Empty,
+            Errors: errorItems,
+            SelectedIndex: _errorListView.SelectedItem,
+            SelectedErrorDetails: _selectedError?.GetFullDetails(),
+            ErrorCount: errors.Count,
+            HasClearButton: true);
     }
 }

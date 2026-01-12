@@ -3,6 +3,8 @@ using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Tui.Dialogs;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Screens;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
 using Terminal.Gui;
 
@@ -11,7 +13,7 @@ namespace PPDS.Cli.Tui;
 /// <summary>
 /// Main window containing the menu and navigation for the TUI application.
 /// </summary>
-internal sealed class MainWindow : Window
+internal sealed class MainWindow : Window, ITuiStateCapture<MainWindowState>
 {
     private string? _profileName;
     private string? _environmentName;
@@ -498,5 +500,57 @@ internal sealed class MainWindow : Window
         // Clear error state when dialog closes (user has seen the error)
         _hasError = false;
         _statusLine.ClearMessage();
+    }
+
+    /// <inheritdoc />
+    public MainWindowState CaptureState()
+    {
+        // Get menu bar items
+        var menuBarItems = new List<string>();
+        foreach (var subview in Subviews)
+        {
+            if (subview is MenuBar menuBar)
+            {
+                foreach (var item in menuBar.Menus)
+                {
+                    menuBarItems.Add(item.Title?.ToString()?.Replace("_", "") ?? string.Empty);
+                }
+                break;
+            }
+        }
+
+        // Get quick action button labels
+        var quickActionButtons = new List<string>();
+        foreach (var subview in Subviews)
+        {
+            if (subview is FrameView frame && frame.Title?.ToString() == "Main Menu")
+            {
+                foreach (var child in frame.Subviews)
+                {
+                    if (child is Button btn)
+                    {
+                        quickActionButtons.Add(btn.Text?.ToString() ?? string.Empty);
+                    }
+                }
+                break;
+            }
+        }
+
+        // Determine current screen
+        string? currentScreen = null;
+        if (_hotkeyRegistry.ActiveScreen != null)
+        {
+            currentScreen = _hotkeyRegistry.ActiveScreen.GetType().Name;
+        }
+
+        return new MainWindowState(
+            Title: Title?.ToString() ?? string.Empty,
+            MenuBarItems: menuBarItems,
+            StatusBar: _statusBar.CaptureState(),
+            WelcomeMessageVisible: quickActionButtons.Count > 0, // Main menu is shown if buttons are present
+            QuickActionButtons: quickActionButtons,
+            CurrentScreen: currentScreen,
+            HasErrors: _hasError,
+            ErrorCount: _errorService.RecentErrors.Count);
     }
 }

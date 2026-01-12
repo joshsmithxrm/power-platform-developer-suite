@@ -29,7 +29,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     #region Initialization Tests
 
     [Fact]
-    public async Task InitializeAsync_WithActiveProfile_WarmsConnectionPool()
+    public async Task InitializeAsync_WithActiveProfile_SetsEnvironmentWithoutConnecting()
     {
         // Arrange
         var profile = TempProfileStore.CreateTestProfile(
@@ -43,13 +43,24 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             _tempStore.Store,
             _mockFactory);
 
+        string? eventUrl = null;
+        string? eventName = null;
+        session.EnvironmentChanged += (url, name) =>
+        {
+            eventUrl = url;
+            eventName = name;
+        };
+
         // Act
         await session.InitializeAsync();
 
-        // Assert - Factory should have been called to create a provider
-        Assert.Single(_mockFactory.CreationLog);
-        Assert.Null(_mockFactory.CreationLog[0].ProfileName); // null = use active
-        Assert.Equal("https://test.crm.dynamics.com", _mockFactory.CreationLog[0].EnvironmentUrl);
+        // Assert - Uses lazy loading: no factory call until first query
+        Assert.Empty(_mockFactory.CreationLog);
+
+        // Assert - But environment info is set and event is fired
+        Assert.Equal("https://test.crm.dynamics.com", eventUrl);
+        Assert.Equal("Test Env", eventName);
+        Assert.Equal("Test Env", session.CurrentEnvironmentDisplayName);
     }
 
     [Fact]
@@ -69,15 +80,17 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     }
 
     [Fact]
-    public async Task InitializeAsync_WithSpecificProfile_UsesSpecifiedProfile()
+    public async Task InitializeAsync_WithSpecificProfile_SetsProfileWithoutConnecting()
     {
         // Arrange
         var profile1 = TempProfileStore.CreateTestProfile(
             "Profile1",
-            environmentUrl: "https://env1.crm.dynamics.com");
+            environmentUrl: "https://env1.crm.dynamics.com",
+            environmentName: "Env 1");
         var profile2 = TempProfileStore.CreateTestProfile(
             "Profile2",
-            environmentUrl: "https://env2.crm.dynamics.com");
+            environmentUrl: "https://env2.crm.dynamics.com",
+            environmentName: "Env 2");
         await _tempStore.SeedProfilesAsync("Profile1", profile1, profile2);
 
         var session = new InteractiveSession(
@@ -85,13 +98,24 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             _tempStore.Store,
             _mockFactory);
 
+        string? eventUrl = null;
+        string? eventName = null;
+        session.EnvironmentChanged += (url, name) =>
+        {
+            eventUrl = url;
+            eventName = name;
+        };
+
         // Act
         await session.InitializeAsync();
 
-        // Assert - Should use Profile2, not active profile
-        Assert.Single(_mockFactory.CreationLog);
-        Assert.Equal("Profile2", _mockFactory.CreationLog[0].ProfileName);
-        Assert.Equal("https://env2.crm.dynamics.com", _mockFactory.CreationLog[0].EnvironmentUrl);
+        // Assert - Uses lazy loading: no factory call until first query
+        Assert.Empty(_mockFactory.CreationLog);
+
+        // Assert - Environment event fired with Profile2's environment
+        Assert.Equal("https://env2.crm.dynamics.com", eventUrl);
+        Assert.Equal("Env 2", eventName);
+        Assert.Equal("Profile2", session.CurrentProfileName);
     }
 
     #endregion

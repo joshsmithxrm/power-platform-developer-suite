@@ -42,6 +42,16 @@ internal sealed class QueryResultsTableView : FrameView
     /// </summary>
     public int CurrentPageNumber { get; private set; } = 1;
 
+    /// <summary>
+    /// Gets the number of rows per page (for display purposes).
+    /// </summary>
+    public int PageSize => _tableView.Bounds.Height - 2; // Subtract header rows
+
+    /// <summary>
+    /// Gets the number of visible rows in the current view.
+    /// </summary>
+    public int VisibleRowCount => Math.Min(PageSize, _dataTable.Rows.Count);
+
     public QueryResultsTableView() : base("Results")
     {
         X = 0;

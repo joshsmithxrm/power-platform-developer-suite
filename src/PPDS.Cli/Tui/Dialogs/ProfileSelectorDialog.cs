@@ -1,6 +1,8 @@
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
 using Terminal.Gui;
 
@@ -9,7 +11,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 /// <summary>
 /// Dialog for selecting from available authentication profiles.
 /// </summary>
-internal sealed class ProfileSelectorDialog : Dialog
+internal sealed class ProfileSelectorDialog : Dialog, ITuiStateCapture<ProfileSelectorDialogState>
 {
     private readonly IProfileService _profileService;
     private readonly InteractiveSession? _session;
@@ -22,6 +24,8 @@ internal sealed class ProfileSelectorDialog : Dialog
     private IReadOnlyList<ProfileSummary> _profiles = Array.Empty<ProfileSummary>();
     private bool _createNewSelected;
     private ProfileSummary? _selectedProfile;
+    private bool _isLoading = true;
+    private string? _errorMessage;
 
     /// <summary>
     /// Gets whether the user selected "Create New Profile".
@@ -180,8 +184,10 @@ internal sealed class ProfileSelectorDialog : Dialog
                 Application.MainLoop?.Invoke(() =>
                 {
                     _spinner.Stop();
-                    _detailLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
+                    _errorMessage = t.Exception.InnerException?.Message ?? t.Exception.Message;
+                    _detailLabel.Text = $"Error: {_errorMessage}";
                     _detailLabel.Visible = true;
+                    _isLoading = false;
                 });
             }
         }, TaskScheduler.Default);
@@ -201,6 +207,8 @@ internal sealed class ProfileSelectorDialog : Dialog
             // Stop spinner and show detail label
             _spinner.Stop();
             _detailLabel.Visible = true;
+            _isLoading = false;
+            _errorMessage = null;
 
             var items = new List<string>();
 
@@ -502,6 +510,26 @@ internal sealed class ProfileSelectorDialog : Dialog
             ProfileWasDeleted = true;
             Application.RequestStop();
         }
+    }
+
+    /// <inheritdoc />
+    public ProfileSelectorDialogState CaptureState()
+    {
+        var profileNames = _profiles.Select(p => p.DisplayIdentifier).ToList();
+        var selectedIndex = _listView.SelectedItem;
+        var selectedName = selectedIndex >= 0 && selectedIndex < _profiles.Count
+            ? _profiles[selectedIndex].DisplayIdentifier
+            : null;
+
+        return new ProfileSelectorDialogState(
+            Title: Title?.ToString() ?? string.Empty,
+            Profiles: profileNames,
+            SelectedIndex: selectedIndex,
+            SelectedProfileName: selectedName,
+            IsLoading: _isLoading,
+            HasCreateButton: true,
+            HasDetailsButton: _session != null,
+            ErrorMessage: _errorMessage);
     }
 
     protected override void Dispose(bool disposing)

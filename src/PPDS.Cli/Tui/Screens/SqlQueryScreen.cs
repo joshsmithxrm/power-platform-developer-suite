@@ -4,6 +4,8 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Dialogs;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
 using Terminal.Gui;
 
@@ -12,7 +14,7 @@ namespace PPDS.Cli.Tui.Screens;
 /// <summary>
 /// SQL Query screen for executing queries against Dataverse and viewing results.
 /// </summary>
-internal sealed class SqlQueryScreen : Window
+internal sealed class SqlQueryScreen : Window, ITuiStateCapture<SqlQueryScreenState>
 {
     private readonly string? _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
@@ -32,6 +34,9 @@ internal sealed class SqlQueryScreen : Window
     private string? _lastSql;
     private string? _lastPagingCookie;
     private int _lastPageNumber = 1;
+    private bool _isExecuting;
+    private string _statusText = "Ready";
+    private string? _lastErrorMessage;
 
     public SqlQueryScreen(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
     {
@@ -269,18 +274,23 @@ internal sealed class SqlQueryScreen : Window
         var sql = _queryInput.Text.ToString() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(sql))
         {
-            _statusLine.SetMessage("Error: Query cannot be empty.");
+            _statusText = "Error: Query cannot be empty.";
+            _statusLine.SetMessage(_statusText);
             return;
         }
 
         if (_environmentUrl == null)
         {
-            _statusLine.SetMessage("Error: No environment selected.");
+            _statusText = "Error: No environment selected.";
+            _statusLine.SetMessage(_statusText);
             return;
         }
 
         TuiDebugLog.Log($"Starting query execution for: {_environmentUrl}");
         TuiDebugLog.Log($"Session.CurrentEnvironmentUrl: {_session.CurrentEnvironmentUrl}");
+
+        _isExecuting = true;
+        _lastErrorMessage = null;
 
         try
         {
@@ -315,6 +325,7 @@ internal sealed class SqlQueryScreen : Window
 
                 var moreText = result.Result.MoreRecords ? " (more available)" : "";
                 UpdateStatus($"Returned {result.Result.Count} rows in {result.Result.ExecutionTimeMs}ms{moreText}", showSpinner: false);
+                _isExecuting = false;
             });
 
             // Save to history (fire-and-forget)
@@ -325,12 +336,15 @@ internal sealed class SqlQueryScreen : Window
         catch (Exception ex)
         {
             _errorService.ReportError("Query execution failed", ex, "ExecuteQuery");
+            _lastErrorMessage = ex.Message;
             UpdateStatus($"Error: {ex.Message}", showSpinner: false);
+            _isExecuting = false;
         }
     }
 
     private void UpdateStatus(string message, bool showSpinner = false)
     {
+        _statusText = message;
         TuiDebugLog.Log($"Status: {message}");
         Application.MainLoop?.Invoke(() =>
         {
@@ -482,6 +496,42 @@ internal sealed class SqlQueryScreen : Window
                 _statusLine.SetMessage("Query loaded from history. Press Ctrl+Enter to execute.");
             }
         });
+    }
+
+    /// <inheritdoc />
+    public SqlQueryScreenState CaptureState()
+    {
+        var dataTable = _resultsTable.GetDataTable();
+        var columnHeaders = new List<string>();
+        if (dataTable != null)
+        {
+            foreach (System.Data.DataColumn col in dataTable.Columns)
+            {
+                columnHeaders.Add(col.ColumnName);
+            }
+        }
+
+        var totalRows = dataTable?.Rows.Count ?? 0;
+        var pageSize = _resultsTable.PageSize;
+        var totalPages = pageSize > 0 && totalRows > 0
+            ? (int)Math.Ceiling((double)totalRows / pageSize)
+            : 0;
+        var currentPage = _lastPageNumber;
+
+        return new SqlQueryScreenState(
+            QueryText: _queryInput.Text?.ToString() ?? string.Empty,
+            IsExecuting: _isExecuting,
+            StatusText: _statusText,
+            ResultCount: totalRows > 0 ? totalRows : null,
+            CurrentPage: totalRows > 0 ? currentPage : null,
+            TotalPages: totalPages > 0 ? totalPages : null,
+            PageSize: pageSize,
+            ColumnHeaders: columnHeaders,
+            VisibleRowCount: _resultsTable.VisibleRowCount,
+            FilterText: _filterField.Text?.ToString() ?? string.Empty,
+            FilterVisible: _filterFrame.Visible,
+            CanExport: totalRows > 0,
+            ErrorMessage: _lastErrorMessage);
     }
 
     protected override void Dispose(bool disposing)
