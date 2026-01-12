@@ -783,8 +783,38 @@ public sealed class SessionService : ISessionService
         return (title, body);
     }
 
+    private async Task FetchOriginMainAsync(CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = "fetch origin main",
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = _repoRoot
+        };
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start git process");
+
+        // Read stderr asynchronously to avoid deadlocks
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+
+        if (process.ExitCode != 0)
+        {
+            var error = await errorTask;
+            throw new InvalidOperationException($"Failed to fetch origin main: {error}");
+        }
+    }
+
     private async Task CreateWorktreeAsync(string worktreePath, string branchName, CancellationToken cancellationToken)
     {
+        // Fetch latest from origin/main to ensure we branch from current remote state
+        await FetchOriginMainAsync(cancellationToken);
+
         // Remove existing worktree if present
         if (Directory.Exists(worktreePath))
         {
@@ -794,7 +824,7 @@ public sealed class SessionService : ISessionService
         var startInfo = new ProcessStartInfo
         {
             FileName = "git",
-            Arguments = $"worktree add \"{worktreePath}\" -b {branchName}",
+            Arguments = $"worktree add \"{worktreePath}\" -b {branchName} origin/main",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
