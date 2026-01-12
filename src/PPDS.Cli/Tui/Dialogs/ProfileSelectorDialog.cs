@@ -101,7 +101,7 @@ internal sealed class ProfileSelectorDialog : Dialog
             Width = Dim.Fill() - 2,
             Height = 1,
             Text = "F2 rename | Del delete",
-            ColorScheme = TuiColorPalette.StatusBar_Default
+            ColorScheme = TuiColorPalette.Default
         };
 
         // Buttons - Row 1 (primary actions)
@@ -201,9 +201,8 @@ internal sealed class ProfileSelectorDialog : Dialog
 
             foreach (var profile in _profiles)
             {
-                var marker = profile.IsActive ? "*" : " ";
                 var envHint = profile.EnvironmentName != null ? $" [{profile.EnvironmentName}]" : "";
-                items.Add($"{marker} {profile.DisplayIdentifier} ({profile.Identity}){envHint}");
+                items.Add($"{profile.DisplayIdentifier} ({profile.Identity}){envHint}");
             }
 
             _listView.SetSource(items);

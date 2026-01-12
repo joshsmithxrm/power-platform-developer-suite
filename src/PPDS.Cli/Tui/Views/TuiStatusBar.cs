@@ -125,9 +125,13 @@ internal sealed class TuiStatusBar : View
         var envLabel = _themeService.GetEnvironmentLabel(envType);
         var labelSuffix = !string.IsNullOrEmpty(envLabel) ? $" [{envLabel}]" : "";
 
-        // Profile section
+        // Profile section - show name and identity (e.g., "Josh (josh@contoso.com)")
         var profileName = _session.CurrentProfileName ?? "None";
-        _profileButton.Text = $" Profile: {profileName} \u25bc";
+        var profileIdentity = _session.CurrentProfileIdentity;
+        var profileDisplay = !string.IsNullOrEmpty(profileIdentity)
+            ? $"{profileName} ({profileIdentity})"
+            : profileName;
+        _profileButton.Text = $" Profile: {profileDisplay} \u25bc";
         _profileButton.ColorScheme = colorScheme;
 
         // Environment section with optional status message

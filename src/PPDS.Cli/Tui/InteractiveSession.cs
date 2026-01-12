@@ -72,6 +72,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public string? CurrentProfileName => string.IsNullOrEmpty(_profileName) ? null : _profileName;
 
     /// <summary>
+    /// Gets the identity for the current profile (username or app ID), or null if unavailable.
+    /// </summary>
+    public string? CurrentProfileIdentity { get; private set; }
+
+    /// <summary>
     /// Creates a new interactive session for the specified profile.
     /// </summary>
     /// <param name="profileName">The profile name (null for active profile).</param>
@@ -109,6 +114,9 @@ internal sealed class InteractiveSession : IAsyncDisposable
             : collection.GetByNameOrIndex(_profileName);
 
         TuiDebugLog.Log($"Loaded profile: {profile?.DisplayIdentifier ?? "(none)"}, AuthMethod: {profile?.AuthMethod}");
+
+        // Set the identity for status bar display
+        CurrentProfileIdentity = profile?.IdentityDisplay;
 
         if (profile?.Environment?.Url != null)
         {
@@ -371,6 +379,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
         // Update the profile name for future service provider creation
         _profileName = profileName;
+
+        // Load profile to get identity for status bar display
+        var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var profile = collection.GetByNameOrIndex(profileName);
+        CurrentProfileIdentity = profile?.IdentityDisplay;
 
         // Notify listeners of profile change
         ProfileChanged?.Invoke(_profileName);
