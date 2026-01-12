@@ -470,11 +470,18 @@ internal sealed class MainWindow : Window
     {
         MessageBox.Query("Keyboard Shortcuts",
             "Global Shortcuts:\n" +
+            "  F1       - This help\n" +
             "  F2       - SQL Query\n" +
             "  F12      - Error Log\n" +
             "  Ctrl+I   - Profile Details\n" +
             "  Ctrl+E   - Environment Details\n" +
             "  Ctrl+Q   - Quit\n\n" +
+            "Menu Navigation:\n" +
+            "  Alt+F/E/T/H  - Open File/Environment/Tools/Help menu\n" +
+            "  Letter       - Select item (when menu is open)\n" +
+            "  Arrows       - Navigate menu items\n" +
+            "  Enter        - Activate selected item\n" +
+            "  Esc          - Close menu\n\n" +
             "Table Navigation:\n" +
             "  Arrows   - Navigate cells\n" +
             "  PgUp/Dn  - Page up/down\n" +
