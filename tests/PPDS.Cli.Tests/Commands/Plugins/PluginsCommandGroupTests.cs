@@ -70,6 +70,13 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    public void Create_HasRegisterSubcommand()
+    {
+        var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "register");
+        Assert.NotNull(subcommand);
+    }
+
+    [Fact]
     public void Create_HasDownloadSubcommand()
     {
         var subcommand = _command.Subcommands.FirstOrDefault(c => c.Name == "download");
@@ -77,9 +84,9 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasSevenSubcommands()
+    public void Create_HasEightSubcommands()
     {
-        Assert.Equal(7, _command.Subcommands.Count);
+        Assert.Equal(8, _command.Subcommands.Count);
     }
 
     #endregion
