@@ -214,19 +214,20 @@ public sealed class ProfileStore : IDisposable
     /// <summary>
     /// Updates a specific profile using an update action.
     /// </summary>
-    /// <param name="profileName">The name of the profile to update.</param>
+    /// <param name="profileNameOrIndex">The name or index (including bracket notation like "[1]") of the profile to update.</param>
     /// <param name="updateAction">Action to apply to the profile.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if the profile was found and updated, false otherwise.</returns>
     public async Task<bool> UpdateProfileAsync(
-        string profileName,
+        string profileNameOrIndex,
         Action<AuthProfile> updateAction,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(updateAction);
 
         var collection = await LoadAsync(cancellationToken).ConfigureAwait(false);
-        var profile = collection.GetByName(profileName);
+        // Use GetByNameOrIndex to support both names and bracket notation like "[1]"
+        var profile = collection.GetByNameOrIndex(profileNameOrIndex);
 
         if (profile == null)
         {

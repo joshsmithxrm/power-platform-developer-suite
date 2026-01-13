@@ -401,6 +401,14 @@ internal sealed class InteractiveSession : IAsyncDisposable
         var profile = collection.GetByNameOrIndex(profileName);
         CurrentProfileIdentity = profile?.IdentityDisplay;
 
+        // Persist environment selection to profile if provided
+        if (!string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            var profileService = GetProfileService();
+            await profileService.SetEnvironmentAsync(profileName, environmentUrl, environmentDisplayName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // Notify listeners of profile change
         ProfileChanged?.Invoke(_profileName);
 
