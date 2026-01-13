@@ -29,6 +29,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 | Throw raw exceptions from Application Services | Wrap in `PpdsException` with ErrorCode/UserMessage (ADR-0026) |
 | Use comma-separated issues in `Closes` | GitHub only auto-closes first; use separate `Closes #N` lines |
 | Add TUI service code without tests | Use MockServiceProviderFactory for testability (ADR-0028) |
+| Re-test service logic in TUI E2E tests | CLI tests verify services; TUI tests verify presentation/navigation (ADR-0028) |
 | Use bash-specific syntax in C# process commands | `2>/dev/null`, `||`, pipes don't work on Windows; handle errors in code |
 | File issues in wrong repo | Issues belong in target repo (ppds-docs issues in ppds-docs, not ppds) |
 | Start implementation without plan citations | Cite `docs/patterns/` or ADRs in plan's "Patterns I'll Follow" section |

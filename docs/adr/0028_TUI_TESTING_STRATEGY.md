@@ -59,6 +59,46 @@ public InteractiveSession(
 - `FakeExportService` - Tracks export operations
 - `TempProfileStore` - Isolated ProfileStore with temp directory
 
+### Test Responsibility Matrix
+
+CLI and TUI share Application Services (ADR-0015). This means service logic is tested once at the CLI/service layer, not duplicated in TUI tests.
+
+| Concern | Tested By | Why |
+|---------|-----------|-----|
+| Query execution logic | CLI/Service tests | Shared `ISqlQueryService` |
+| Data transformation | CLI/Service tests | Service layer responsibility |
+| Export format validity | CLI/Service tests | Shared `IExportService` |
+| Authentication flows | CLI/Service tests | Shared auth infrastructure |
+| Screen rendering | TUI E2E snapshots | Visual verification |
+| Keyboard navigation | TUI E2E | TUI-specific behavior |
+| Session state management | TuiUnit | TUI-specific state (profile switching, caching) |
+| Error dialog display | TUI E2E | Presentation of errors |
+| Threading/UI loop | TUI E2E | TUI-specific concurrency |
+
+**Principle:** If CLI tests pass, the service works. TUI tests verify the presentation layer only.
+
+### TUI Development Workflow
+
+When implementing TUI features:
+
+1. **Implement** the feature in code
+2. **Run TuiUnit** tests for logic: `dotnet test --filter Category=TuiUnit`
+3. **Run E2E** tests: `npm test --prefix tests/tui-e2e`
+4. **Read snapshot diffs** - they show exactly what's rendering
+5. **If diff shows bug** → fix code → re-run
+6. **If diff shows intentional change** → update snapshots: `npm test --prefix tests/tui-e2e -- --update-snapshots`
+7. **Repeat** until tests pass
+
+### What TUI Tests Should NOT Verify
+
+Do not write TUI E2E tests for:
+- Query results are correct (CLI tests `ISqlQueryService`)
+- Export format is valid (CLI tests `IExportService`)
+- Authentication works (CLI tests auth flows)
+- Bulk operations succeed (CLI tests `BulkOperationExecutor`)
+
+These are already covered by CLI/service tests. Duplicating them in TUI E2E wastes effort and creates maintenance burden.
+
 ## Consequences
 
 ### Positive

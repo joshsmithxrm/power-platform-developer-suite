@@ -61,6 +61,37 @@ dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj --filter "Category=TuiInt
 npm test --prefix tests/tui-e2e -- --update-snapshots
 ```
 
+#### TUI Testing Philosophy
+
+TUI tests verify **presentation**, not business logic. CLI and TUI share Application Services (ADR-0015), so service logic is tested once at the CLI layer.
+
+**What TUI E2E tests verify:**
+- Does the screen render correctly? (snapshots)
+- Do keyboard shortcuts work? (key sequences)
+- Does navigation flow correctly? (screen transitions)
+- Do errors display properly? (error dialogs)
+
+**What TUI E2E tests do NOT verify:**
+- Query execution correctness (CLI tests `ISqlQueryService`)
+- Export format validity (CLI tests `IExportService`)
+- Authentication flows (CLI tests auth)
+
+**Trust the service layer:** If CLI tests pass, services work. Don't duplicate that coverage.
+
+#### Interpreting Snapshot Diffs
+
+When E2E tests fail with snapshot diffs:
+
+1. **Read the ASCII diff** - Shows expected vs actual terminal output
+2. **Identify what's wrong** - Layout shifted? Text missing? Wrong content?
+3. **Fix the TUI code** - The rendering issue is in the view/screen code
+4. **Re-run tests** - Verify fix with `npm test --prefix tests/tui-e2e`
+5. **If change was intentional** - Update snapshots with `--update-snapshots`
+
+Snapshots are the visual spec. They define "correct" appearance. When you see a diff:
+- If the "actual" looks wrong → fix the code
+- If the "actual" looks right (intentional change) → update the snapshot
+
 ### Integration Tests
 
 Requires `.env.local` with Dataverse credentials.
