@@ -194,7 +194,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             Height = 3
         };
 
-        var buttonSql = new Button("SQL Query (F2)")
+        var buttonSql = new Button("SQL Query")
         {
             X = 2,
             Y = 5
@@ -208,14 +208,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             Enabled = false
         };
 
-        var buttonQuit = new Button("Quit")
-        {
-            X = 2,
-            Y = 10
-        };
-        buttonQuit.Clicked += () => RequestStop();
-
-        container.Add(label, buttonSql, buttonData, buttonQuit);
+        container.Add(label, buttonSql, buttonData);
         return container;
     }
 
@@ -240,7 +233,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Remove underscores from MenuItems - they create global Alt+letter hotkeys in Terminal.Gui.
         menuItems.Add(new MenuBarItem("_File", new MenuItem[]
         {
-            new("SQL Query", "Run SQL queries against Dataverse (F2)", () => NavigateToSqlQuery()),
+            new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
             dataMigrationItem,
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Quit", "Exit the application", () => RequestStop())
@@ -312,12 +305,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             HotkeyScope.Global,
             "Keyboard shortcuts",
             ShowKeyboardShortcuts));
-
-        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
-            Key.F2,
-            HotkeyScope.Global,
-            "SQL Query",
-            NavigateToSqlQuery));
 
         _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
             Key.F12,

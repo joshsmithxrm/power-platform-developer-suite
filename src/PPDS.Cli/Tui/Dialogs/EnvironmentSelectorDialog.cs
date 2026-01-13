@@ -172,24 +172,27 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
 
         Add(filterLabel, _filterField, listFrame, urlLabel, _urlField, _spinner, _statusLabel, _selectButton, detailsButton, cancelButton);
 
-        // Start spinner and discover environments asynchronously
-        _spinner.Start("Loading environments...");
-
-        // Discover environments asynchronously (fire-and-forget with error handling)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = DiscoverEnvironmentsAsync().ContinueWith(t =>
+        // Defer loading until dialog is visible to ensure spinner renders
+        Loaded += () =>
         {
-            if (t.IsFaulted && t.Exception != null)
+            _spinner.Start("Loading environments...");
+
+            // Discover environments asynchronously (fire-and-forget with error handling)
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
+            _ = DiscoverEnvironmentsAsync().ContinueWith(t =>
             {
-                Application.MainLoop?.Invoke(() =>
+                if (t.IsFaulted && t.Exception != null)
                 {
-                    _spinner.Stop();
-                    _statusLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
-                    _statusLabel.Visible = true;
-                });
-            }
-        }, TaskScheduler.Default);
+                    Application.MainLoop?.Invoke(() =>
+                    {
+                        _spinner.Stop();
+                        _statusLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
+                        _statusLabel.Visible = true;
+                    });
+                }
+            }, TaskScheduler.Default);
 #pragma warning restore PPDS013
+        };
     }
 
     private async Task DiscoverEnvironmentsAsync()

@@ -29,6 +29,8 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
     private readonly QueryResultsTableView _resultsTable;
     private readonly TextField _filterField;
     private readonly FrameView _filterFrame;
+    private readonly TuiSpinner _statusSpinner;
+    private readonly Label _statusLabel;
 
     private string? _environmentUrl;
     private string? _lastSql;
@@ -123,17 +125,35 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         _filterField.TextChanged += OnFilterChanged;
         _filterFrame.Add(_filterField);
 
-        // Results table
+        // Results table (leave room for status line at bottom)
         _resultsTable = new QueryResultsTableView
         {
             X = 0,
             Y = Pos.Bottom(_queryFrame),
             Width = Dim.Fill(),
-            Height = Dim.Fill()
+            Height = Dim.Fill() - 1
         };
         _resultsTable.LoadMoreRequested += OnLoadMoreRequested;
 
-        _content.Add(_queryFrame, _filterFrame, _resultsTable);
+        // Status area at bottom - spinner and label share same position
+        _statusSpinner = new TuiSpinner
+        {
+            X = 0,
+            Y = Pos.AnchorEnd(1),
+            Width = Dim.Fill(),
+            Height = 1,
+            Visible = false
+        };
+
+        _statusLabel = new Label("Ready")
+        {
+            X = 0,
+            Y = Pos.AnchorEnd(1),
+            Width = Dim.Fill(),
+            Height = 1
+        };
+
+        _content.Add(_queryFrame, _filterFrame, _resultsTable, _statusSpinner, _statusLabel);
 
         // Visual focus indicators - only change title, not colors
         // The table's built-in selection highlighting is sufficient
@@ -299,12 +319,14 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         if (string.IsNullOrWhiteSpace(sql))
         {
             _statusText = "Error: Query cannot be empty.";
+            _statusLabel.Text = _statusText;
             return;
         }
 
         if (_environmentUrl == null)
         {
             _statusText = "Error: No environment selected.";
+            _statusLabel.Text = _statusText;
             return;
         }
 
@@ -312,6 +334,10 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
         _isExecuting = true;
         _lastErrorMessage = null;
+
+        // Show spinner, hide status label
+        _statusLabel.Visible = false;
+        _statusSpinner.Start("Executing query...");
 
         try
         {
@@ -339,6 +365,11 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
                 var moreText = result.Result.MoreRecords ? " (more available)" : "";
                 _statusText = $"Returned {result.Result.Count} rows in {result.Result.ExecutionTimeMs}ms{moreText}";
+
+                // Stop spinner, show status label
+                _statusSpinner.Stop();
+                _statusLabel.Text = _statusText;
+                _statusLabel.Visible = true;
                 _isExecuting = false;
             });
 
@@ -352,6 +383,11 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             _errorService.ReportError("Query execution failed", ex, "ExecuteQuery");
             _lastErrorMessage = ex.Message;
             _statusText = $"Error: {ex.Message}";
+
+            // Stop spinner, show error in status label
+            _statusSpinner.Stop();
+            _statusLabel.Text = _statusText;
+            _statusLabel.Visible = true;
             _isExecuting = false;
         }
     }

@@ -40,6 +40,7 @@ public sealed class TuiSpinner : View
     private object? _timer;
     private string _message = string.Empty;
     private bool _isRunning;
+    private string _displayText = string.Empty;
 
     /// <summary>
     /// Gets or sets the message displayed after the spinner.
@@ -50,7 +51,7 @@ public sealed class TuiSpinner : View
         set
         {
             _message = value ?? string.Empty;
-            UpdateDisplay();
+            UpdateDisplayText();
         }
     }
 
@@ -89,7 +90,7 @@ public sealed class TuiSpinner : View
         _frameIndex = 0;
         Visible = true;
 
-        UpdateDisplay();
+        UpdateDisplayText();
 
         // Start animation timer
         _timer = Application.MainLoop?.AddTimeout(
@@ -110,12 +111,9 @@ public sealed class TuiSpinner : View
             _timer = null;
         }
 
-        // Clear the display on the main thread
-        Application.MainLoop?.Invoke(() =>
-        {
-            Clear();
-            Visible = false;
-        });
+        _displayText = string.Empty;
+        Visible = false;
+        SetNeedsDisplay();
     }
 
     /// <summary>
@@ -134,8 +132,21 @@ public sealed class TuiSpinner : View
 
         // Show final message without spinner
         _message = finalMessage;
+        _displayText = finalMessage;
         Visible = true;
-        UpdateDisplay(showSpinner: false);
+        SetNeedsDisplay();
+    }
+
+    /// <inheritdoc />
+    public override void Redraw(Rect bounds)
+    {
+        Clear();
+
+        if (!string.IsNullOrEmpty(_displayText))
+        {
+            Move(0, 0);
+            Driver.AddStr(_displayText);
+        }
     }
 
     /// <inheritdoc />
@@ -156,36 +167,29 @@ public sealed class TuiSpinner : View
         }
 
         _frameIndex = (_frameIndex + 1) % Frames.Length;
-        UpdateDisplay();
+        UpdateDisplayText();
 
         return true; // Continue the timer
     }
 
-    private void UpdateDisplay(bool showSpinner = true)
+    private void UpdateDisplayText()
     {
-        Application.MainLoop?.Invoke(() =>
+        if (_isRunning)
         {
-            Clear();
+            var spinnerChar = Frames[_frameIndex];
+            _displayText = string.IsNullOrEmpty(_message)
+                ? spinnerChar
+                : $"{spinnerChar} {_message}";
+        }
+        else if (!string.IsNullOrEmpty(_message))
+        {
+            _displayText = _message;
+        }
+        else
+        {
+            _displayText = string.Empty;
+        }
 
-            if (showSpinner && _isRunning)
-            {
-                var spinnerChar = Frames[_frameIndex];
-                var displayText = string.IsNullOrEmpty(_message)
-                    ? spinnerChar
-                    : $"{spinnerChar} {_message}";
-
-                // Draw the spinner and message
-                Move(0, 0);
-                Driver?.AddStr(displayText);
-            }
-            else if (!string.IsNullOrEmpty(_message))
-            {
-                // Just show message without spinner
-                Move(0, 0);
-                Driver?.AddStr(_message);
-            }
-
-            SetNeedsDisplay();
-        });
+        SetNeedsDisplay();
     }
 }

@@ -15,7 +15,6 @@ internal sealed class KeyboardShortcutsDialog : TuiDialog, ITuiStateCapture<Keyb
         new("Alt+P", "Switch profile", "Global"),
         new("Alt+E", "Switch environment", "Global"),
         new("F1", "Keyboard shortcuts", "Global"),
-        new("F2", "SQL Query", "Global"),
         new("F12", "Error Log", "Global"),
         new("Ctrl+Q", "Quit", "Global"),
         new("Ctrl+Enter", "Execute query", "SQL Query"),
@@ -38,7 +37,6 @@ internal sealed class KeyboardShortcutsDialog : TuiDialog, ITuiStateCapture<Keyb
             "  Alt+P    - Switch profile\n" +
             "  Alt+E    - Switch environment\n" +
             "  F1       - This help\n" +
-            "  F2       - SQL Query\n" +
             "  F12      - Error Log\n" +
             "  Ctrl+Q   - Quit\n\n" +
             "SQL Query Screen:\n" +

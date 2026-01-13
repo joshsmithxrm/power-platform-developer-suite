@@ -32,9 +32,6 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     private string _profileText = string.Empty;
     private string _environmentText = string.Empty;
 
-    // Boundary between profile and environment sections (percentage of width)
-    private const int ProfileWidthPercent = 40;
-
     /// <summary>
     /// Event raised when the profile section is clicked.
     /// </summary>
@@ -85,10 +82,12 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     {
         if (mouseEvent.Flags.HasFlag(MouseFlags.Button1Clicked))
         {
-            // Calculate the boundary between profile and environment sections
-            var profileWidth = Bounds.Width * ProfileWidthPercent / 100;
+            // Profile is on left, environment on right
+            // Boundary is where environment text starts (right-aligned)
+            var envStartX = Bounds.Width - _environmentText.Length;
+            if (envStartX < 0) envStartX = Bounds.Width / 2; // Fallback if text too long
 
-            if (mouseEvent.X < profileWidth)
+            if (mouseEvent.X < envStartX)
             {
                 ProfileClicked?.Invoke();
                 return true;
@@ -122,22 +121,46 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
             Driver.AddRune(' ');
         }
 
-        // Calculate section widths
-        var profileWidth = bounds.Width * ProfileWidthPercent / 100;
+        // Calculate available space for each section
+        // Profile on left, Environment on right, with minimum gap of 2 chars
+        var totalTextLength = _profileText.Length + _environmentText.Length;
+        var availableWidth = bounds.Width;
+        var minGap = 2;
 
-        // Draw profile section
+        string profileToRender;
+        string envToRender;
+
+        if (totalTextLength + minGap <= availableWidth)
+        {
+            // Both fit - no truncation needed
+            profileToRender = _profileText;
+            envToRender = _environmentText;
+        }
+        else
+        {
+            // Need to truncate - give each section roughly half the space
+            var maxPerSection = (availableWidth - minGap) / 2;
+
+            profileToRender = _profileText.Length > maxPerSection
+                ? _profileText[..(maxPerSection - 1)] + "\u2026"
+                : _profileText;
+
+            envToRender = _environmentText.Length > maxPerSection
+                ? _environmentText[..(maxPerSection - 1)] + "\u2026"
+                : _environmentText;
+        }
+
+        // Draw profile on the left
         Move(0, 0);
-        var profileToRender = _profileText.Length > profileWidth
-            ? _profileText[..(profileWidth - 1)] + "\u2026"
-            : _profileText;
         Driver.AddStr(profileToRender);
 
-        // Draw environment section
-        Move(profileWidth, 0);
-        var envWidth = bounds.Width - profileWidth;
-        var envToRender = _environmentText.Length > envWidth
-            ? _environmentText[..(envWidth - 1)] + "\u2026"
-            : _environmentText;
+        // Draw environment on the right
+        var envStartX = bounds.Width - envToRender.Length;
+        if (envStartX < profileToRender.Length + minGap)
+        {
+            envStartX = profileToRender.Length + minGap;
+        }
+        Move(envStartX, 0);
         Driver.AddStr(envToRender);
     }
 
@@ -167,17 +190,16 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
         var labelSuffix = !string.IsNullOrEmpty(envLabel) ? $" [{envLabel}]" : "";
 
         // Profile section - show name and identity (e.g., "Josh (josh@contoso.com)")
+        // No truncation here - Redraw() will truncate based on actual terminal width
         var profileName = _session.CurrentProfileName ?? "None";
         var profileIdentity = _session.CurrentProfileIdentity;
         var profileDisplay = !string.IsNullOrEmpty(profileIdentity)
             ? $"{profileName} ({profileIdentity})"
             : profileName;
-        profileDisplay = TruncateWithEllipsis(profileDisplay, 18);
         _profileText = $" Profile: {profileDisplay} \u25bc";
 
-        // Environment section
+        // Environment section - no truncation, Redraw() handles it dynamically
         var envName = _session.CurrentEnvironmentDisplayName ?? "None";
-        envName = TruncateWithEllipsis(envName, 28);
         _environmentText = $" Environment: {envName}{labelSuffix} \u25bc";
     }
 

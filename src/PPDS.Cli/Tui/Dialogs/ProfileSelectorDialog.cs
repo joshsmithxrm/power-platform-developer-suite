@@ -154,9 +154,6 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
 
         Add(listFrame, _spinner, _detailLabel, _hintLabel, selectButton, createButton, deleteButton, detailsButton, clearAllButton, cancelButton);
 
-        // Start spinner while loading
-        _spinner.Start("Loading profiles...");
-
         // Handle keyboard shortcuts
         KeyPress += OnKeyPress;
 
@@ -170,23 +167,29 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             }
         };
 
-        // Load profiles asynchronously (fire-and-forget with error handling)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = LoadProfilesAsync().ContinueWith(t =>
+        // Defer loading until dialog is visible to ensure spinner renders
+        Loaded += () =>
         {
-            if (t.IsFaulted && t.Exception != null)
+            _spinner.Start("Loading profiles...");
+
+            // Load profiles asynchronously (fire-and-forget with error handling)
+#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
+            _ = LoadProfilesAsync().ContinueWith(t =>
             {
-                Application.MainLoop?.Invoke(() =>
+                if (t.IsFaulted && t.Exception != null)
                 {
-                    _spinner.Stop();
-                    _errorMessage = t.Exception.InnerException?.Message ?? t.Exception.Message;
-                    _detailLabel.Text = $"Error: {_errorMessage}";
-                    _detailLabel.Visible = true;
-                    _isLoading = false;
-                });
-            }
-        }, TaskScheduler.Default);
+                    Application.MainLoop?.Invoke(() =>
+                    {
+                        _spinner.Stop();
+                        _errorMessage = t.Exception.InnerException?.Message ?? t.Exception.Message;
+                        _detailLabel.Text = $"Error: {_errorMessage}";
+                        _detailLabel.Visible = true;
+                        _isLoading = false;
+                    });
+                }
+            }, TaskScheduler.Default);
 #pragma warning restore PPDS013
+        };
     }
 
     private async Task LoadProfilesAsync()

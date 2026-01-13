@@ -50,7 +50,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
         _environmentDisplayName = environmentDisplayName;
         _themeService = session.GetThemeService();
 
-        Width = 65;
+        Width = Dim.Percent(80);
         Height = 20;
 
         // Environment name header with type-specific coloring
