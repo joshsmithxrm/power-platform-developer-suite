@@ -167,6 +167,20 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     e.Handled = true;
                     break;
 
+                case Key.AltMask | Key.CursorLeft:
+                    // Word navigation backward (Alt variant) - forward to Ctrl+Left
+                    _queryInput.ProcessKey(new KeyEvent(Key.CursorLeft | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
+                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    e.Handled = true;
+                    break;
+
+                case Key.AltMask | Key.CursorRight:
+                    // Word navigation forward (Alt variant) - forward to Ctrl+Right
+                    _queryInput.ProcessKey(new KeyEvent(Key.CursorRight | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
+                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    e.Handled = true;
+                    break;
+
                 case Key.CtrlMask | Key.Z:
                     // Undo - pass through to TextView's built-in handler
                     // Terminal.Gui has this bound but something may be blocking it
