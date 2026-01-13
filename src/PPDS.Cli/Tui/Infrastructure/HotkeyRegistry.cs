@@ -180,6 +180,20 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             return true;
         }
 
+        // Intercept Alt+F/T/H to ensure they open menus even when TextView has focus
+        // TextView's emacs-style Alt+F (forward word) would otherwise intercept these
+        if (_menuBar != null && !_menuBar.IsMenuOpen)
+        {
+            var key = keyEvent.Key;
+            if (key == (Key.AltMask | Key.F) || key == (Key.AltMask | Key.T) || key == (Key.AltMask | Key.H))
+            {
+                // Give focus to MenuBar so it processes the Alt+letter
+                _menuBar.SetFocus();
+                TuiDebugLog.Log($"Redirecting {HotkeyRegistry.FormatKey(key)} to MenuBar");
+                return false; // Let MenuBar handle it
+            }
+        }
+
         // Block letter keys when menu dropdown is open to prevent first-letter navigation
         // This prevents accidental menu item selection (e.g., Q selecting Quit when File menu is open)
         // Block both plain letters and Alt+letter combinations
