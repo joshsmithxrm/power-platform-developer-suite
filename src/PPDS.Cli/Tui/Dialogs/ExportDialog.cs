@@ -3,6 +3,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.Query;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Dialogs;
@@ -14,11 +15,18 @@ internal sealed class ExportDialog : Dialog
 {
     private readonly IExportService _exportService;
     private readonly DataTable _dataTable;
+    private readonly IReadOnlyDictionary<string, QueryColumnType>? _columnTypes;
     private readonly RadioGroup _formatGroup;
     private readonly CheckBox _includeHeadersCheck;
     private readonly Label _statusLabel;
 
     private bool _exportCompleted;
+
+    // Format indices
+    private const int FormatCsv = 0;
+    private const int FormatTsv = 1;
+    private const int FormatJson = 2;
+    private const int FormatClipboard = 3;
 
     /// <summary>
     /// Gets whether export was completed successfully.
@@ -28,13 +36,20 @@ internal sealed class ExportDialog : Dialog
     /// <summary>
     /// Creates a new export dialog.
     /// </summary>
-    public ExportDialog(IExportService exportService, DataTable dataTable) : base("Export Results")
+    /// <param name="exportService">The export service.</param>
+    /// <param name="dataTable">The data to export.</param>
+    /// <param name="columnTypes">Optional column type metadata for JSON type preservation.</param>
+    public ExportDialog(
+        IExportService exportService,
+        DataTable dataTable,
+        IReadOnlyDictionary<string, QueryColumnType>? columnTypes = null) : base("Export Results")
     {
         _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
         _dataTable = dataTable ?? throw new ArgumentNullException(nameof(dataTable));
+        _columnTypes = columnTypes;
 
         Width = 50;
-        Height = 14;
+        Height = 15; // Increased to fit JSON option
         ColorScheme = TuiColorPalette.Default;
 
         // Format selection
@@ -44,7 +59,13 @@ internal sealed class ExportDialog : Dialog
             Y = 1
         };
 
-        _formatGroup = new RadioGroup(new NStack.ustring[] { "CSV (Comma-separated)", "TSV (Tab-separated)", "Clipboard" })
+        _formatGroup = new RadioGroup(new NStack.ustring[]
+        {
+            "CSV (Comma-separated)",
+            "TSV (Tab-separated)",
+            "JSON (with types)",
+            "Clipboard"
+        })
         {
             X = 1,
             Y = 2
@@ -66,7 +87,7 @@ internal sealed class ExportDialog : Dialog
         _includeHeadersCheck = new CheckBox("Include column headers")
         {
             X = 1,
-            Y = 6,
+            Y = 7, // Moved down for extra format option
             Checked = true
         };
 
@@ -74,7 +95,7 @@ internal sealed class ExportDialog : Dialog
         _statusLabel = new Label
         {
             X = 1,
-            Y = 8,
+            Y = 9, // Moved down for extra format option
             Width = Dim.Fill() - 2,
             Height = 1,
             Text = $"{_dataTable.Rows.Count} rows to export"
@@ -113,7 +134,7 @@ internal sealed class ExportDialog : Dialog
         var format = _formatGroup.SelectedItem;
         var includeHeaders = _includeHeadersCheck.Checked;
 
-        if (format == 2) // Clipboard
+        if (format == FormatClipboard)
         {
             ExportToClipboard(includeHeaders);
         }
@@ -153,14 +174,26 @@ internal sealed class ExportDialog : Dialog
 
     private void ExportToFile(int format, bool includeHeaders)
     {
-        var extension = format == 0 ? "csv" : "tsv";
-        var filter = format == 0 ? "CSV files (*.csv)" : "TSV files (*.tsv)";
+        var (extension, filter) = format switch
+        {
+            FormatCsv => ("csv", "CSV files (*.csv)"),
+            FormatTsv => ("tsv", "TSV files (*.tsv)"),
+            FormatJson => ("json", "JSON files (*.json)"),
+            _ => ("csv", "CSV files (*.csv)")
+        };
 
         string filePath;
         using (var saveDialog = new SaveDialog("Export to File", filter))
         {
             saveDialog.AllowedFileTypes = new[] { $".{extension}" };
+
+            // Apply colors immediately for views created in constructor
             ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.Default);
+
+            // Also apply in Loaded event for any lazily-created views
+            // This ensures Terminal.Gui's default blue background doesn't leak through
+            saveDialog.Loaded += () => ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.Default);
+
             Application.Run(saveDialog);
 
             if (saveDialog.Canceled || saveDialog.FilePath == null)
@@ -210,13 +243,17 @@ internal sealed class ExportDialog : Dialog
 
         await using var stream = File.Create(filePath);
 
-        if (format == 0)
+        switch (format)
         {
-            await _exportService.ExportCsvAsync(_dataTable, stream, options);
-        }
-        else
-        {
-            await _exportService.ExportTsvAsync(_dataTable, stream, options);
+            case FormatCsv:
+                await _exportService.ExportCsvAsync(_dataTable, stream, options);
+                break;
+            case FormatTsv:
+                await _exportService.ExportTsvAsync(_dataTable, stream, options);
+                break;
+            case FormatJson:
+                await _exportService.ExportJsonAsync(_dataTable, stream, _columnTypes, options);
+                break;
         }
     }
 

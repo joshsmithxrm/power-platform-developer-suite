@@ -1,5 +1,6 @@
 using System.Data;
 using PPDS.Cli.Infrastructure;
+using PPDS.Dataverse.Query;
 
 namespace PPDS.Cli.Services.Export;
 
@@ -38,6 +39,23 @@ public interface IExportService
     Task ExportTsvAsync(
         DataTable table,
         Stream stream,
+        ExportOptions? options = null,
+        IOperationProgress? progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Exports a DataTable to JSON format with proper type preservation.
+    /// </summary>
+    /// <param name="table">The data to export.</param>
+    /// <param name="stream">The output stream.</param>
+    /// <param name="columnTypes">Column type metadata for type restoration.</param>
+    /// <param name="options">Export options.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task ExportJsonAsync(
+        DataTable table,
+        Stream stream,
+        IReadOnlyDictionary<string, QueryColumnType>? columnTypes = null,
         ExportOptions? options = null,
         IOperationProgress? progress = null,
         CancellationToken cancellationToken = default);

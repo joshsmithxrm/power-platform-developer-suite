@@ -108,6 +108,12 @@ internal sealed class QueryResultsTableView : FrameView
     public DataTable? GetDataTable() => _dataTable.Rows.Count > 0 ? _dataTable : null;
 
     /// <summary>
+    /// Gets the column type metadata for export operations.
+    /// </summary>
+    public IReadOnlyDictionary<string, QueryColumnType>? GetColumnTypes() =>
+        _columnTypes.Count > 0 ? _columnTypes : null;
+
+    /// <summary>
     /// Loads query results into the table, replacing any existing data.
     /// </summary>
     public void LoadResults(QueryResult result)

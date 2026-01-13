@@ -1,6 +1,7 @@
 using System.Data;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Services.Export;
+using PPDS.Dataverse.Query;
 
 namespace PPDS.Cli.Tests.Mocks;
 
@@ -37,6 +38,19 @@ public sealed class FakeExportService : IExportService
         CancellationToken cancellationToken = default)
     {
         _exports.Add(new ExportRecord("TSV", table.Rows.Count));
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task ExportJsonAsync(
+        DataTable table,
+        Stream stream,
+        IReadOnlyDictionary<string, QueryColumnType>? columnTypes = null,
+        ExportOptions? options = null,
+        IOperationProgress? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        _exports.Add(new ExportRecord("JSON", table.Rows.Count));
         return Task.CompletedTask;
     }
 

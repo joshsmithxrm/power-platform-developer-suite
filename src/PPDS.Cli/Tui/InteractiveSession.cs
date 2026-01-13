@@ -119,6 +119,14 @@ internal sealed class InteractiveSession : IAsyncDisposable
         // Set the identity for status bar display
         CurrentProfileIdentity = profile?.IdentityDisplay;
 
+        // If using active profile (no explicit name specified), update _profileName
+        // so CurrentProfileName returns the actual profile name instead of null
+        if (string.IsNullOrEmpty(_profileName) && profile != null)
+        {
+            _profileName = profile.Name ?? collection.ActiveProfileName ?? $"[{profile.Index}]";
+            TuiDebugLog.Log($"Using active profile: {_profileName}");
+        }
+
         if (profile?.Environment?.Url != null)
         {
             _currentEnvironmentUrl = profile.Environment.Url;

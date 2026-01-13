@@ -250,6 +250,21 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                         e.Handled = true;
                     }
                     break;
+
+                case Key.CtrlMask | Key.W:
+                    // Ctrl+W always closes the screen immediately
+                    CloseRequested?.Invoke();
+                    e.Handled = true;
+                    break;
+
+                case Key k when k == (Key)'q' || k == (Key)'Q':
+                    // Q closes when not typing in query input (vim-style)
+                    if (!_queryInput.HasFocus)
+                    {
+                        CloseRequested?.Invoke();
+                        e.Handled = true;
+                    }
+                    break;
             }
         };
     }
@@ -421,8 +436,9 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             return;
         }
 
+        var columnTypes = _resultsTable.GetColumnTypes();
         var exportService = new ExportService(Microsoft.Extensions.Logging.Abstractions.NullLogger<ExportService>.Instance);
-        var dialog = new ExportDialog(exportService, dataTable);
+        var dialog = new ExportDialog(exportService, dataTable, columnTypes);
 
         Application.Run(dialog);
     }
