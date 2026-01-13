@@ -140,6 +140,20 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     _queryInput.ProcessKey(new KeyEvent(Key.Backspace, new KeyModifiers()));
                     e.Handled = true;
                     break;
+
+                case Key.AltMask | Key.Backspace:
+                case Key.CtrlMask | Key.Backspace:
+                    // Delete word before cursor
+                    DeleteWordBackward();
+                    e.Handled = true;
+                    break;
+
+                case Key.AltMask | Key.DeleteChar:
+                case Key.CtrlMask | Key.DeleteChar:
+                    // Delete word after cursor
+                    DeleteWordForward();
+                    e.Handled = true;
+                    break;
             }
         };
 
@@ -558,6 +572,92 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 _queryInput.Text = dialog.SelectedEntry.Sql;
             }
         });
+    }
+
+    private void DeleteWordBackward()
+    {
+        var text = _queryInput.Text?.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Get flat cursor position
+        var pos = _queryInput.CursorPosition;
+        var lines = text.Split('\n');
+        var flatPos = 0;
+        for (int i = 0; i < pos.Y && i < lines.Length; i++)
+        {
+            flatPos += lines[i].Length + 1; // +1 for newline
+        }
+        flatPos += Math.Min(pos.X, lines.Length > pos.Y ? lines[pos.Y].Length : 0);
+
+        if (flatPos == 0) return;
+
+        // Find word boundary going backward
+        var start = flatPos - 1;
+
+        // Skip whitespace first
+        while (start > 0 && char.IsWhiteSpace(text[start]))
+            start--;
+
+        // Then skip word characters
+        while (start > 0 && !char.IsWhiteSpace(text[start - 1]))
+            start--;
+
+        // Delete from start to flatPos
+        var newText = text.Remove(start, flatPos - start);
+        _queryInput.Text = newText;
+
+        // Reposition cursor
+        var newFlatPos = start;
+        var newRow = 0;
+        var newCol = 0;
+        var remaining = newFlatPos;
+        var newLines = newText.Split('\n');
+        foreach (var line in newLines)
+        {
+            if (remaining <= line.Length)
+            {
+                newCol = remaining;
+                break;
+            }
+            remaining -= line.Length + 1;
+            newRow++;
+        }
+        _queryInput.CursorPosition = new Point(newCol, newRow);
+    }
+
+    private void DeleteWordForward()
+    {
+        var text = _queryInput.Text?.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Get flat cursor position
+        var pos = _queryInput.CursorPosition;
+        var lines = text.Split('\n');
+        var flatPos = 0;
+        for (int i = 0; i < pos.Y && i < lines.Length; i++)
+        {
+            flatPos += lines[i].Length + 1;
+        }
+        flatPos += Math.Min(pos.X, lines.Length > pos.Y ? lines[pos.Y].Length : 0);
+
+        if (flatPos >= text.Length) return;
+
+        // Find word boundary going forward
+        var end = flatPos;
+
+        // Skip word characters first
+        while (end < text.Length && !char.IsWhiteSpace(text[end]))
+            end++;
+
+        // Then skip whitespace
+        while (end < text.Length && char.IsWhiteSpace(text[end]))
+            end++;
+
+        // Delete from flatPos to end
+        var newText = text.Remove(flatPos, end - flatPos);
+        _queryInput.Text = newText;
+
+        // Cursor stays at same position (already correct after deletion)
     }
 
     /// <inheritdoc />
