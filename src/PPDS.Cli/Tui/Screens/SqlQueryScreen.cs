@@ -166,6 +166,19 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     DeleteWordForward();
                     e.Handled = true;
                     break;
+
+                case Key.CtrlMask | Key.Z:
+                    // Undo - pass through to TextView's built-in handler
+                    // Terminal.Gui has this bound but something may be blocking it
+                    _queryInput.ProcessKey(new KeyEvent(Key.Z | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
+                    e.Handled = true;
+                    break;
+
+                case Key.CtrlMask | Key.Y:
+                    // Redo - pass through to TextView's built-in handler
+                    _queryInput.ProcessKey(new KeyEvent(Key.Y | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
+                    e.Handled = true;
+                    break;
             }
         };
 
