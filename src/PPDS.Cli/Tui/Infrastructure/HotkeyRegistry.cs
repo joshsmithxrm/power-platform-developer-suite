@@ -180,17 +180,23 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             return true;
         }
 
-        // Block single letter keys when menu dropdown is open to prevent first-letter navigation
+        // Block letter keys when menu dropdown is open to prevent first-letter navigation
         // This prevents accidental menu item selection (e.g., Q selecting Quit when File menu is open)
+        // Block both plain letters and Alt+letter combinations
         if (_menuBar != null && _menuBar.IsMenuOpen)
         {
-            var keyValue = (int)keyEvent.Key;
-            bool isUnmodifiedLetter = (keyValue >= 'a' && keyValue <= 'z') ||
-                                      (keyValue >= 'A' && keyValue <= 'Z');
+            var key = keyEvent.Key;
+            var baseKey = key & ~Key.AltMask & ~Key.CtrlMask & ~Key.ShiftMask;
+            var keyValue = (int)baseKey;
 
-            if (isUnmodifiedLetter)
+            bool isLetter = (keyValue >= 'a' && keyValue <= 'z') ||
+                            (keyValue >= 'A' && keyValue <= 'Z');
+
+            // Block plain letters and Alt+letter (but not Ctrl+letter which might be shortcuts)
+            bool hasCtrl = (key & Key.CtrlMask) != 0;
+            if (isLetter && !hasCtrl)
             {
-                TuiDebugLog.Log($"Blocking letter key '{(char)keyValue}' while menu is open");
+                TuiDebugLog.Log($"Blocking letter key '{(char)keyValue}' (Alt={(key & Key.AltMask) != 0}) while menu is open");
                 return true; // Consume the key - prevents first-letter navigation
             }
         }
