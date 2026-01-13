@@ -72,6 +72,9 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
     /// <inheritdoc />
     public event Action? CloseRequested;
 
+    /// <inheritdoc />
+    public event Action? MenuStateChanged;
+
     public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
     {
         _deviceCodeCallback = deviceCodeCallback;
@@ -466,6 +469,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             Application.MainLoop?.Invoke(() =>
             {
                 _resultsTable.LoadResults(result.Result);
+                MenuStateChanged?.Invoke(); // Notify shell to enable File > Export menu
                 _lastSql = sql;
                 _lastPagingCookie = result.Result.PagingCookie;
                 _lastPageNumber = result.Result.PageNumber;

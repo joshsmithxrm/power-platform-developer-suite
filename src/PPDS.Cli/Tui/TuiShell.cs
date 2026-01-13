@@ -100,6 +100,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         if (_currentScreen != null)
         {
             _currentScreen.CloseRequested -= OnScreenCloseRequested;
+            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
             _currentScreen.OnDeactivating();
             _contentArea.Remove(_currentScreen.Content);
             _screenStack.Push(_currentScreen);
@@ -114,6 +115,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Activate new screen
         _currentScreen = screen;
         _currentScreen.CloseRequested += OnScreenCloseRequested;
+        _currentScreen.MenuStateChanged += OnScreenMenuStateChanged;
         _hotkeyRegistry.SetActiveScreen(screen);
         _contentArea.Title = screen.Title;
         _contentArea.Add(screen.Content);
@@ -131,6 +133,11 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         NavigateBack();
     }
 
+    private void OnScreenMenuStateChanged()
+    {
+        RebuildMenuBar();
+    }
+
     /// <summary>
     /// Navigates back to the previous screen, or to the main menu if no previous screen.
     /// </summary>
@@ -140,6 +147,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         if (_currentScreen != null)
         {
             _currentScreen.CloseRequested -= OnScreenCloseRequested;
+            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
             _currentScreen.OnDeactivating();
             _contentArea.Remove(_currentScreen.Content);
             _currentScreen.Dispose();
@@ -156,6 +164,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Pop and activate previous screen
         _currentScreen = _screenStack.Pop();
         _currentScreen.CloseRequested += OnScreenCloseRequested;
+        _currentScreen.MenuStateChanged += OnScreenMenuStateChanged;
         _hotkeyRegistry.SetActiveScreen(_currentScreen);
         _contentArea.Title = _currentScreen.Title;
         _contentArea.Add(_currentScreen.Content);

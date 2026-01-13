@@ -38,6 +38,12 @@ internal interface ITuiScreen : IDisposable
     event Action? CloseRequested;
 
     /// <summary>
+    /// Raised when the screen's menu state changes (e.g., data becomes available for export).
+    /// The shell subscribes to this and rebuilds the menu bar.
+    /// </summary>
+    event Action? MenuStateChanged;
+
+    /// <summary>
     /// Called when the screen becomes active (after content is added to shell).
     /// Register screen-scope hotkeys here.
     /// </summary>
