@@ -74,11 +74,12 @@ internal static class MsalClientBuilder
         IPublicClientApplication client,
         bool warnOnFailure = true)
     {
+        var cacheFilePath = System.IO.Path.Combine(ProfilePaths.DataDirectory, ProfilePaths.TokenCacheFileName);
+
         try
         {
             ProfilePaths.EnsureDirectoryExists();
 
-            var cacheFilePath = System.IO.Path.Combine(ProfilePaths.DataDirectory, ProfilePaths.TokenCacheFileName);
             var cacheFileExists = System.IO.File.Exists(cacheFilePath);
             var cacheFileSize = cacheFileExists ? new System.IO.FileInfo(cacheFilePath).Length : 0;
 
@@ -91,14 +92,24 @@ internal static class MsalClientBuilder
                 .Build();
 
             var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties).ConfigureAwait(false);
+
+            // Verify persistence works before registering - performs write/read/clear test
+            // Throws MsalCachePersistenceException if persistence is unavailable
+            cacheHelper.VerifyPersistence();
+            AuthDebugLog.WriteLine("[MsalCache] Persistence verification PASSED");
+
             cacheHelper.RegisterCache(client.UserTokenCache);
 
-            AuthDebugLog.WriteLine("[MsalCache] Cache registered successfully");
+            cacheFileExists = System.IO.File.Exists(cacheFilePath);
+            AuthDebugLog.WriteLine($"[MsalCache] Cache registered successfully. File exists: {cacheFileExists}");
+
             return cacheHelper;
         }
         catch (MsalCachePersistenceException ex)
         {
-            AuthDebugLog.WriteLine($"[MsalCache] Cache registration FAILED: {ex.Message}");
+            AuthDebugLog.WriteLine($"[MsalCache] Persistence verification FAILED: {ex.Message}");
+            AuthDebugLog.WriteLine($"[MsalCache] Cache file path: {cacheFilePath}");
+
             if (warnOnFailure)
             {
                 AuthenticationOutput.WriteLine(
