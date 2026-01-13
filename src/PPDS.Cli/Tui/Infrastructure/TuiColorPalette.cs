@@ -69,6 +69,19 @@ public static class TuiColorPalette
         Disabled = MakeAttr(Color.DarkGray, Color.Black)
     };
 
+    /// <summary>
+    /// Color scheme for file dialogs (SaveDialog, OpenDialog).
+    /// Uses white text on cyan for Focus to ensure readability in ComboBox dropdowns.
+    /// </summary>
+    public static ColorScheme FileDialog => new()
+    {
+        Normal = MakeAttr(Color.White, Color.Black),
+        Focus = MakeAttr(Color.White, Color.Cyan),
+        HotNormal = MakeAttr(Color.Cyan, Color.Black),
+        HotFocus = MakeAttr(Color.White, Color.Cyan),
+        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+    };
+
     #endregion
 
     #region Status Bar - Environment-Aware

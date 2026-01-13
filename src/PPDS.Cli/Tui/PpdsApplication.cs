@@ -104,7 +104,9 @@ internal sealed class PpdsApplication : IDisposable
 
         // Set block cursor for better visibility in text fields (DECSCUSR)
         // \x1b[2 q = steady block cursor
-        Console.Out.Write("\x1b[2 q");
+        // \x1b]12;black\x07 = set cursor color to black (OSC 12)
+        // Note: OSC 12 is terminal-dependent; unsupported terminals ignore it
+        Console.Out.Write("\x1b[2 q\x1b]12;black\x07");
         Console.Out.Flush();
 
         Application.Init();
@@ -125,8 +127,10 @@ internal sealed class PpdsApplication : IDisposable
         }
         finally
         {
-            // Restore default cursor before Terminal.Gui cleanup
-            Console.Out.Write("\x1b[0 q");
+            // Restore default cursor and color before Terminal.Gui cleanup
+            // \x1b[0 q = restore default cursor shape
+            // \x1b]112\x07 = restore default cursor color (OSC 112)
+            Console.Out.Write("\x1b[0 q\x1b]112\x07");
             Console.Out.Flush();
 
             Application.Shutdown();

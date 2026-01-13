@@ -182,11 +182,19 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
             saveDialog.AllowedFileTypes = new[] { $".{extension}" };
 
             // Apply colors immediately for views created in constructor
-            ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.Default);
+            // Use FileDialog scheme for better readability in ComboBox dropdowns
+            ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.FileDialog);
 
             // Also apply in Loaded event for any lazily-created views
             // This ensures Terminal.Gui's default blue background doesn't leak through
-            saveDialog.Loaded += () => ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.Default);
+            saveDialog.Loaded += () =>
+            {
+                ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.FileDialog);
+
+                // Focus the filename field for immediate typing
+                var textField = FindFirstTextField(saveDialog);
+                textField?.SetFocus();
+            };
 
             Application.Run(saveDialog);
 
@@ -261,6 +269,24 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
         {
             ApplyColorSchemeRecursive(subview, scheme);
         }
+    }
+
+    /// <summary>
+    /// Finds the first TextField in a view hierarchy (for focusing the filename field).
+    /// </summary>
+    private static TextField? FindFirstTextField(View view)
+    {
+        if (view is TextField textField)
+            return textField;
+
+        foreach (var subview in view.Subviews)
+        {
+            var found = FindFirstTextField(subview);
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
     /// <inheritdoc />

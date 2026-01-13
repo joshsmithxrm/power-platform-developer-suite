@@ -415,7 +415,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
         Application.MainLoop?.Invoke(() =>
         {
             // Re-select the renamed profile to maintain context for the user
-            var renamedProfileIndex = _profiles.ToList().FindIndex(p => p.Name == newName);
+            var renamedProfileIndex = _profiles.ToList().FindIndex(p => p.DisplayIdentifier == newName);
             if (renamedProfileIndex >= 0)
             {
                 _listView.SelectedItem = renamedProfileIndex;
