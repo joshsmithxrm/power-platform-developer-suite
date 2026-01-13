@@ -64,6 +64,11 @@ internal sealed class PpdsApplication : IDisposable
             {
                 try
                 {
+                    // Force full screen redraw before showing dialog.
+                    // Without this, Terminal.Gui's ConsoleDriver state may be unstable
+                    // when Application.Run() is called from an async callback, causing
+                    // the dialog border to not render properly.
+                    Application.Refresh();
                     var dialog = new Dialogs.PreAuthenticationDialog(deviceCodeCallback);
                     Application.Run(dialog);
                     result = dialog.Result;
