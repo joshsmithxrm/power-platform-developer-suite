@@ -102,23 +102,44 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             Text = "SELECT TOP 100 accountid, name, createdon FROM account"
         };
 
-        // Handle Ctrl+A directly on TextView before Terminal.Gui's default handling
+        // Handle special keys directly on TextView before Terminal.Gui's default handling
         _queryInput.KeyPress += (e) =>
         {
-            if (e.KeyEvent.Key == (Key.CtrlMask | Key.A))
+            switch (e.KeyEvent.Key)
             {
-                var text = _queryInput.Text?.ToString() ?? string.Empty;
-                if (text.Length > 0)
-                {
-                    _queryInput.SelectionStartColumn = 0;
-                    _queryInput.SelectionStartRow = 0;
-                    var lines = text.Split('\n');
-                    var lastRow = lines.Length - 1;
-                    var lastCol = lines[lastRow].TrimEnd('\r').Length;
-                    _queryInput.CursorPosition = new Point(lastCol, lastRow);
-                    _queryInput.SetNeedsDisplay();
-                }
-                e.Handled = true;
+                case Key.CtrlMask | Key.A:
+                    // Select all text
+                    var text = _queryInput.Text?.ToString() ?? string.Empty;
+                    if (text.Length > 0)
+                    {
+                        _queryInput.SelectionStartColumn = 0;
+                        _queryInput.SelectionStartRow = 0;
+                        var lines = text.Split('\n');
+                        var lastRow = lines.Length - 1;
+                        var lastCol = lines[lastRow].TrimEnd('\r').Length;
+                        _queryInput.CursorPosition = new Point(lastCol, lastRow);
+                        _queryInput.SetNeedsDisplay();
+                    }
+                    e.Handled = true;
+                    break;
+
+                case Key.ShiftMask | Key.Space:
+                    // Shift+Space should insert space (Terminal.Gui doesn't handle this by default)
+                    _queryInput.ProcessKey(new KeyEvent(Key.Space, new KeyModifiers()));
+                    e.Handled = true;
+                    break;
+
+                case Key.ShiftMask | Key.DeleteChar:
+                    // Shift+Delete should delete (forward delete)
+                    _queryInput.ProcessKey(new KeyEvent(Key.DeleteChar, new KeyModifiers()));
+                    e.Handled = true;
+                    break;
+
+                case Key.ShiftMask | Key.Backspace:
+                    // Shift+Backspace should backspace
+                    _queryInput.ProcessKey(new KeyEvent(Key.Backspace, new KeyModifiers()));
+                    e.Handled = true;
+                    break;
             }
         };
 
