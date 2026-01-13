@@ -21,6 +21,8 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
     private readonly Label _authMethodLabel;
     private readonly Label _cloudLabel;
     private readonly Label _tenantLabel;
+    private readonly Label _objectIdLabel;
+    private readonly Label _puidLabel;
     private readonly Label _authorityLabel;
     private readonly Label _tokenStatusLabel;
     private readonly Label _createdLabel;
@@ -38,7 +40,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         _errorService = session.GetErrorService();
 
         Width = 68;
-        Height = 20;
+        Height = 22; // Increased for ObjectId and PUID fields
 
         const int labelWidth = 14;
         const int valueX = 16;
@@ -120,17 +122,45 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
             Width = Dim.Fill() - 2
         };
 
-        // Authority
-        var authorityHeaderLabel = new Label("Authority:")
+        // Object ID (Entra ID Object Id)
+        var objectIdHeaderLabel = new Label("Object Id:")
         {
             X = 1,
             Y = 7,
             Width = labelWidth
         };
-        _authorityLabel = new Label(string.Empty)
+        _objectIdLabel = new Label(string.Empty)
         {
             X = valueX,
             Y = 7,
+            Width = Dim.Fill() - 2
+        };
+
+        // PUID
+        var puidHeaderLabel = new Label("PUID:")
+        {
+            X = 1,
+            Y = 8,
+            Width = labelWidth
+        };
+        _puidLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 8,
+            Width = Dim.Fill() - 2
+        };
+
+        // Authority
+        var authorityHeaderLabel = new Label("Authority:")
+        {
+            X = 1,
+            Y = 9,
+            Width = labelWidth
+        };
+        _authorityLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 9,
             Width = Dim.Fill() - 2
         };
 
@@ -138,13 +168,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var tokenHeaderLabel = new Label("Token Status:")
         {
             X = 1,
-            Y = 9,
+            Y = 11,
             Width = labelWidth
         };
         _tokenStatusLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 9,
+            Y = 11,
             Width = Dim.Fill() - 2
         };
 
@@ -152,13 +182,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var createdHeaderLabel = new Label("Created:")
         {
             X = 1,
-            Y = 10,
+            Y = 12,
             Width = labelWidth
         };
         _createdLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 10,
+            Y = 12,
             Width = Dim.Fill() - 2
         };
 
@@ -166,13 +196,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var lastUsedHeaderLabel = new Label("Last Used:")
         {
             X = 1,
-            Y = 11,
+            Y = 13,
             Width = labelWidth
         };
         _lastUsedLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 11,
+            Y = 13,
             Width = Dim.Fill() - 2
         };
 
@@ -180,13 +210,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var envHeaderLabel = new Label("Environment:")
         {
             X = 1,
-            Y = 13,
+            Y = 15,
             Width = labelWidth
         };
         _environmentLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 13,
+            Y = 15,
             Width = Dim.Fill() - 2
         };
 
@@ -194,13 +224,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var urlHeaderLabel = new Label("URL:")
         {
             X = 1,
-            Y = 14,
+            Y = 16,
             Width = labelWidth
         };
         _environmentUrlLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 14,
+            Y = 16,
             Width = Dim.Fill() - 2
         };
 
@@ -226,6 +256,8 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
             authMethodHeaderLabel, _authMethodLabel,
             cloudHeaderLabel, _cloudLabel,
             tenantHeaderLabel, _tenantLabel,
+            objectIdHeaderLabel, _objectIdLabel,
+            puidHeaderLabel, _puidLabel,
             authorityHeaderLabel, _authorityLabel,
             tokenHeaderLabel, _tokenStatusLabel,
             createdHeaderLabel, _createdLabel,
@@ -311,6 +343,12 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
 
         // Tenant
         _tenantLabel.Text = profile.TenantId ?? "(not specified)";
+
+        // Object ID (Entra ID Object Id)
+        _objectIdLabel.Text = profile.ObjectId ?? "(not available)";
+
+        // PUID
+        _puidLabel.Text = profile.Puid ?? "(not available)";
 
         // Authority
         var authority = profile.Authority ?? CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId);

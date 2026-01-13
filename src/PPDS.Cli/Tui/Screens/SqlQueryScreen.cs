@@ -7,6 +7,7 @@ using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
+using PPDS.Dataverse.Resilience;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;
@@ -473,6 +474,53 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             _ = SaveToHistoryAsync(sql, result.Result.Count, result.Result.ExecutionTimeMs);
 #pragma warning restore PPDS013
         }
+        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
+        {
+            // Stop spinner before showing dialog
+            _statusSpinner.Stop();
+            _statusLabel.Visible = true;
+
+            TuiDebugLog.Log($"Authentication error: {authEx.Message}");
+
+            // Show re-authentication dialog
+            var dialog = new ReAuthenticationDialog(authEx.UserMessage, _session);
+            Application.Run(dialog);
+
+            if (dialog.ShouldReauthenticate)
+            {
+                TuiDebugLog.Log("User chose to re-authenticate");
+                try
+                {
+                    _statusLabel.Text = "Re-authenticating...";
+                    await _session.InvalidateAndReauthenticateAsync(CancellationToken.None);
+
+                    // Retry the query - ExecuteQueryAsync reads from _queryInput
+                    TuiDebugLog.Log("Re-authentication successful, retrying query");
+                    _statusLabel.Visible = false;
+#pragma warning disable PPDS013 // Fire-and-forget to avoid recursion in async context
+                    _ = ExecuteQueryAsync();
+#pragma warning restore PPDS013
+                    return;
+                }
+                catch (Exception reAuthEx)
+                {
+                    _errorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
+                    _lastErrorMessage = reAuthEx.Message;
+                    _statusText = $"Re-authentication failed: {reAuthEx.Message}";
+                    _statusLabel.Text = _statusText;
+                    _isExecuting = false;
+                }
+            }
+            else
+            {
+                TuiDebugLog.Log("User cancelled re-authentication");
+                _errorService.ReportError("Session expired", authEx, "ExecuteQuery");
+                _lastErrorMessage = authEx.Message;
+                _statusText = $"Error: {authEx.Message}";
+                _statusLabel.Text = _statusText;
+                _isExecuting = false;
+            }
+        }
         catch (Exception ex)
         {
             _errorService.ReportError("Query execution failed", ex, "ExecuteQuery");
@@ -527,6 +575,31 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 _lastPagingCookie = result.Result.PagingCookie;
                 _lastPageNumber = result.Result.PageNumber;
             });
+        }
+        catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
+        {
+            TuiDebugLog.Log($"Authentication error during load more: {authEx.Message}");
+
+            // Show re-authentication dialog
+            var dialog = new ReAuthenticationDialog(authEx.UserMessage, _session);
+            Application.Run(dialog);
+
+            if (dialog.ShouldReauthenticate)
+            {
+                try
+                {
+                    await _session.InvalidateAndReauthenticateAsync(CancellationToken.None);
+                    // Don't auto-retry load more - user can click the button again
+                }
+                catch (Exception reAuthEx)
+                {
+                    _errorService.ReportError("Re-authentication failed", reAuthEx, "LoadMoreResults.ReAuth");
+                }
+            }
+            else
+            {
+                _errorService.ReportError("Session expired", authEx, "LoadMoreResults");
+            }
         }
         catch (InvalidOperationException ex)
         {

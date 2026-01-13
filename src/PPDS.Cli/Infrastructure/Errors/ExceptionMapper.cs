@@ -4,6 +4,8 @@ using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Import;
 
+// DataverseAuthenticationException is in PPDS.Dataverse.Resilience
+
 namespace PPDS.Cli.Infrastructure.Errors;
 
 /// <summary>
@@ -40,6 +42,7 @@ public static class ExceptionMapper
         return ex switch
         {
             // Auth errors
+            DataverseAuthenticationException => ExitCodes.AuthError,
             AuthenticationException => ExitCodes.AuthError,
 
             // Connection errors
@@ -90,7 +93,13 @@ public static class ExceptionMapper
     {
         return ex switch
         {
-            // Auth exceptions
+            // Dataverse authentication exceptions (mid-operation token/permission failures)
+            DataverseAuthenticationException authEx when authEx.RequiresReauthentication =>
+                (ErrorCodes.Auth.Expired, authEx.ConnectionName),
+            DataverseAuthenticationException authEx =>
+                (ErrorCodes.Auth.InsufficientPermissions, authEx.ConnectionName),
+
+            // Auth exceptions from PPDS.Auth (credential issues)
             AuthenticationException authEx when authEx.ErrorCode != null =>
                 (authEx.ErrorCode, null),
             AuthenticationException =>

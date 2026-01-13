@@ -23,8 +23,6 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     private readonly Label _envNameLabel;
     private readonly Label _urlLabel;
     private readonly Label _uniqueNameLabel;
-    private readonly Label _typeLabel;
-    private readonly Label _regionLabel;
     private readonly Label _versionLabel;
     private readonly Label _orgIdLabel;
     private readonly Label _userIdLabel;
@@ -83,8 +81,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
 
         _urlLabel = CreateDetailRow("URL:", ref row, labelWidth);
         _uniqueNameLabel = CreateDetailRow("Unique Name:", ref row, labelWidth);
-        _typeLabel = CreateDetailRow("Type:", ref row, labelWidth);
-        _regionLabel = CreateDetailRow("Region:", ref row, labelWidth);
+        // Type and Region removed - type already shown in header badge
         _versionLabel = CreateDetailRow("Version:", ref row, labelWidth);
 
         // Blank line before IDs
@@ -124,7 +121,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
         closeButton.Clicked += () => { Application.RequestStop(); };
 
         Add(_envNameLabel, separator,
-            _urlLabel, _uniqueNameLabel, _typeLabel, _regionLabel, _versionLabel,
+            _urlLabel, _uniqueNameLabel, _versionLabel,
             _orgIdLabel, _userIdLabel, _businessUnitIdLabel, _connectedAsLabel,
             _statusLabel, _refreshButton, closeButton);
 
@@ -255,8 +252,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
             // Update detail values
             _urlLabel.Text = _environmentUrl;
             _uniqueNameLabel.Text = orgUniqueName ?? "(not available)";
-            _typeLabel.Text = envType ?? "(not specified)";
-            _regionLabel.Text = region ?? "(not specified)";
+            // Type and region removed - type is shown in header badge
             _versionLabel.Text = version ?? "(not available)";
 
             _orgIdLabel.Text = orgId != Guid.Empty ? orgId.ToString() : "(not available)";
@@ -264,9 +260,6 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
             _businessUnitIdLabel.Text = whoAmIResponse.BusinessUnitId.ToString();
 
             _connectedAsLabel.Text = connectedAs;
-
-            // Apply type-specific styling to type label
-            _typeLabel.ColorScheme = GetTypeColorScheme(envType);
 
             _statusLabel.Text = "Details loaded successfully";
             _statusLabel.ColorScheme = TuiColorPalette.Success;
@@ -276,23 +269,6 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
     private void OnRefreshClicked()
     {
         LoadDetailsAsync(_cancellationSource.Token);
-    }
-
-    private static ColorScheme GetTypeColorScheme(string? envType)
-    {
-        if (string.IsNullOrEmpty(envType))
-        {
-            return TuiColorPalette.Default;
-        }
-
-        return envType.ToLowerInvariant() switch
-        {
-            "production" => TuiColorPalette.StatusBar_Production,
-            "sandbox" => TuiColorPalette.StatusBar_Sandbox,
-            "developer" or "development" => TuiColorPalette.StatusBar_Development,
-            "trial" => TuiColorPalette.StatusBar_Trial,
-            _ => TuiColorPalette.Default
-        };
     }
 
     /// <inheritdoc />
@@ -306,7 +282,6 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
             Url: _environmentUrl,
             EnvironmentType: envType,
             OrganizationId: _orgIdLabel.Text?.ToString(),
-            Version: _versionLabel.Text?.ToString(),
-            Region: _regionLabel.Text?.ToString());
+            Version: _versionLabel.Text?.ToString());
     }
 }

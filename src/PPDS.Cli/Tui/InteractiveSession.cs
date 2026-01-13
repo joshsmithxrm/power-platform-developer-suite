@@ -339,6 +339,44 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
+    /// Invalidates the current session and re-authenticates, creating a fresh connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Use this method when the current authentication token has expired (401 errors).
+    /// This will:
+    /// </para>
+    /// <list type="number">
+    /// <item>Dispose the current service provider (invalidating the connection pool)</item>
+    /// <item>Create a new service provider with fresh authentication</item>
+    /// </list>
+    /// <para>
+    /// The authentication flow (browser, device code) will be triggered as needed.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">Thrown if no environment is currently configured.</exception>
+    public async Task InvalidateAndReauthenticateAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(_currentEnvironmentUrl))
+        {
+            throw new InvalidOperationException("Cannot re-authenticate: no environment is currently configured.");
+        }
+
+        var environmentUrl = _currentEnvironmentUrl;
+
+        TuiDebugLog.Log($"Re-authenticating session for {environmentUrl}...");
+
+        // Invalidate the current session
+        await InvalidateAsync().ConfigureAwait(false);
+
+        // Create a new service provider - this will trigger authentication
+        await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+
+        TuiDebugLog.Log("Re-authentication complete");
+    }
+
+    /// <summary>
     /// Switches to a different profile, invalidating the connection pool and optionally re-warming.
     /// </summary>
     /// <param name="profileName">The new profile name.</param>
