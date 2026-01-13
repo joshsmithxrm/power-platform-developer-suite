@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Identity.Client;
@@ -128,6 +129,66 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
 
         _msalClient = MsalClientBuilder.CreateClient(_cloud, _tenantId, MsalClientBuilder.RedirectUriOption.None);
         _cacheHelper = await MsalClientBuilder.CreateAndRegisterCacheAsync(_msalClient, warnOnFailure: false).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return null;
+
+        environmentUrl = environmentUrl.TrimEnd('/');
+        var scopes = new[] { $"{environmentUrl}/.default" };
+
+        AuthDebugLog.WriteLine($"[UsernamePassword] GetCachedTokenInfoAsync: url={environmentUrl}");
+
+        await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
+
+        // Check in-memory cache first
+        if (_cachedResult != null)
+        {
+            AuthDebugLog.WriteLine($"  In-memory cache has token expiring at {_cachedResult.ExpiresOn:HH:mm:ss}");
+            return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username ?? _username);
+        }
+
+        // Try to find account in persistent cache
+        var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
+        var account = accounts.FirstOrDefault(a =>
+            string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase));
+
+        if (account == null)
+        {
+            AuthDebugLog.WriteLine("  No cached account found");
+            return null;
+        }
+
+        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
+
+        try
+        {
+            var result = await _msalClient!
+                .AcquireTokenSilent(scopes, account)
+                .WithForceRefresh(false)
+                .ExecuteAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            _cachedResult = result;
+
+            AuthDebugLog.WriteLine($"  Silent acquisition returned token expiring at {result.ExpiresOn:HH:mm:ss}");
+            return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username ?? _username);
+        }
+        catch (MsalUiRequiredException ex)
+        {
+            AuthDebugLog.WriteLine($"  Token requires re-authentication: {ex.Message}");
+            return null;
+        }
+        catch (MsalServiceException ex)
+        {
+            AuthDebugLog.WriteLine($"  Service error checking token: {ex.Message}");
+            return null;
+        }
     }
 
     /// <inheritdoc />

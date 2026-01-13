@@ -315,7 +315,6 @@ public sealed class ProfileService : IProfileService
                 // Populate profile from auth result
                 profile.Username = provider.Identity;
                 profile.ObjectId = provider.ObjectId;
-                profile.TokenExpiresOn = provider.TokenExpiresAt;
                 profile.HomeAccountId = provider.HomeAccountId;
 
                 if (string.IsNullOrEmpty(profile.TenantId) && !string.IsNullOrEmpty(provider.TenantId))

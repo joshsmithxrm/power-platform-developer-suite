@@ -360,7 +360,6 @@ public static class AuthCommandGroup
                 var client = await provider.CreateServiceClientAsync(targetUrl, cancellationToken, forceInteractive: true);
                 profile.Username = provider.Identity;
                 profile.ObjectId = provider.ObjectId;
-                profile.TokenExpiresOn = provider.TokenExpiresAt;
                 profile.HomeAccountId = provider.HomeAccountId;
 
                 // Store tenant ID from auth result if not already set
@@ -1291,15 +1290,29 @@ public static class AuthCommandGroup
             // Get token cache type
             var cacheType = TokenCacheDetector.GetCacheType();
 
+            // Query MSAL for current token state (if environment is bound)
+            CachedTokenInfo? tokenInfo = null;
+            if (profile.HasEnvironment && !string.IsNullOrEmpty(profile.Environment!.Url))
+            {
+                try
+                {
+                    using var provider = CredentialProviderFactory.Create(profile);
+                    tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
+                }
+                catch
+                {
+                    // Ignore errors - token info will be null
+                }
+            }
+
+            // Determine token status from MSAL query result
+            string? tokenStatus = tokenInfo != null
+                ? (tokenInfo.IsExpired ? "expired" : "valid")
+                : null;
+            DateTimeOffset? tokenExpires = tokenInfo?.ExpiresOn;
+
             if (outputFormat == OutputFormat.Json)
             {
-                // Determine token status
-                string? tokenStatus = null;
-                if (profile.TokenExpiresOn.HasValue)
-                {
-                    tokenStatus = profile.TokenExpiresOn.Value < DateTimeOffset.UtcNow ? "expired" : "valid";
-                }
-
                 var output = new
                 {
                     active = new
@@ -1314,7 +1327,7 @@ public static class AuthCommandGroup
                         objectId = profile.ObjectId,
                         puid = profile.Puid,
                         applicationId = profile.ApplicationId,
-                        tokenExpires = profile.TokenExpiresOn,
+                        tokenExpires,
                         tokenStatus,
                         authority = profile.Authority ?? CloudEndpoints.GetAuthorityUrl(profile.Cloud, profile.TenantId),
                         environment = profile.Environment != null ? new
@@ -1380,19 +1393,22 @@ public static class AuthCommandGroup
                     Console.WriteLine($"Application Id:              {profile.ApplicationId}");
                 }
 
-                if (profile.TokenExpiresOn.HasValue)
+                if (tokenInfo != null)
                 {
-                    var isExpired = profile.TokenExpiresOn.Value < DateTimeOffset.UtcNow;
-                    if (isExpired)
+                    if (tokenInfo.IsExpired)
                     {
                         Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine($"Token Expires:               {profile.TokenExpiresOn.Value:yyyy-MM-dd HH:mm:ss zzz} (EXPIRED)");
+                        Console.WriteLine($"Token Expires:               {tokenInfo.ExpiresOn:yyyy-MM-dd HH:mm:ss zzz} (EXPIRED)");
                         Console.ResetColor();
                     }
                     else
                     {
-                        Console.WriteLine($"Token Expires:               {profile.TokenExpiresOn.Value:yyyy-MM-dd HH:mm:ss zzz}");
+                        Console.WriteLine($"Token Expires:               {tokenInfo.ExpiresOn:yyyy-MM-dd HH:mm:ss zzz}");
                     }
+                }
+                else if (!profile.HasEnvironment)
+                {
+                    Console.WriteLine($"Token Expires:               (no environment bound)");
                 }
 
                 // Show authority based on cloud

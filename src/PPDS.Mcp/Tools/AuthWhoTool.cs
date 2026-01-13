@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using PPDS.Auth.Credentials;
 using PPDS.Mcp.Infrastructure;
 
 namespace PPDS.Mcp.Tools;
@@ -33,6 +34,21 @@ public sealed class AuthWhoTool
     {
         var profile = await _context.GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
+        // Query MSAL for current token state (if environment is bound)
+        CachedTokenInfo? tokenInfo = null;
+        if (profile.Environment != null && !string.IsNullOrEmpty(profile.Environment.Url))
+        {
+            try
+            {
+                using var provider = CredentialProviderFactory.Create(profile);
+                tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
+            }
+            catch
+            {
+                // Ignore errors - token info will be null
+            }
+        }
+
         return new AuthWhoResult
         {
             Index = profile.Index,
@@ -43,9 +59,9 @@ public sealed class AuthWhoTool
             Username = profile.Username,
             ObjectId = profile.ObjectId,
             ApplicationId = profile.ApplicationId,
-            TokenExpiresOn = profile.TokenExpiresOn,
-            TokenStatus = profile.TokenExpiresOn.HasValue
-                ? (profile.TokenExpiresOn.Value < DateTimeOffset.UtcNow ? "expired" : "valid")
+            TokenExpiresOn = tokenInfo?.ExpiresOn,
+            TokenStatus = tokenInfo != null
+                ? (tokenInfo.IsExpired ? "expired" : "valid")
                 : null,
             Environment = profile.Environment != null ? new EnvironmentDetails
             {

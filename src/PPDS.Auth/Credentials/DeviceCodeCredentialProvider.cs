@@ -254,6 +254,64 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
     }
 
     /// <inheritdoc />
+    public async Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return null;
+
+        environmentUrl = environmentUrl.TrimEnd('/');
+        var scopes = new[] { $"{environmentUrl}/.default" };
+
+        AuthDebugLog.WriteLine($"[DeviceCode] GetCachedTokenInfoAsync: url={environmentUrl}");
+
+        // Initialize MSAL client to load persistent cache
+        await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
+
+        // Check in-memory cache first
+        if (_cachedResult != null)
+        {
+            AuthDebugLog.WriteLine($"  In-memory cache has token expiring at {_cachedResult.ExpiresOn:HH:mm:ss}");
+            return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username);
+        }
+
+        // Try to find account in persistent cache
+        var account = await FindAccountAsync().ConfigureAwait(false);
+        if (account == null)
+        {
+            AuthDebugLog.WriteLine("  No cached account found");
+            return null;
+        }
+
+        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
+
+        try
+        {
+            var result = await _msalClient!
+                .AcquireTokenSilent(scopes, account)
+                .WithForceRefresh(false)
+                .ExecuteAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            _cachedResult = result;
+
+            AuthDebugLog.WriteLine($"  Silent acquisition returned token expiring at {result.ExpiresOn:HH:mm:ss}");
+            return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username);
+        }
+        catch (MsalUiRequiredException ex)
+        {
+            AuthDebugLog.WriteLine($"  Token requires re-authentication: {ex.Message}");
+            return null;
+        }
+        catch (MsalServiceException ex)
+        {
+            AuthDebugLog.WriteLine($"  Service error checking token: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed)

@@ -1,4 +1,5 @@
 using PPDS.Auth.Cloud;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
@@ -265,6 +266,21 @@ internal sealed class ProfileDetailsDialog : Dialog
         var collection = await store.LoadAsync(CancellationToken.None);
         var profile = collection.ActiveProfile;
 
+        // Query MSAL for current token state (if environment is bound)
+        CachedTokenInfo? tokenInfo = null;
+        if (profile?.Environment != null && !string.IsNullOrEmpty(profile.Environment.Url))
+        {
+            try
+            {
+                using var provider = CredentialProviderFactory.Create(profile);
+                tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, CancellationToken.None);
+            }
+            catch
+            {
+                // Ignore errors - token info will be null
+            }
+        }
+
         Application.MainLoop?.Invoke(() =>
         {
             if (profile == null)
@@ -284,11 +300,11 @@ internal sealed class ProfileDetailsDialog : Dialog
                 return;
             }
 
-            UpdateDisplay(profile);
+            UpdateDisplay(profile, tokenInfo);
         });
     }
 
-    private void UpdateDisplay(AuthProfile profile)
+    private void UpdateDisplay(AuthProfile profile, CachedTokenInfo? tokenInfo)
     {
         // Profile name
         _profileNameLabel.Text = profile.DisplayIdentifier;
@@ -310,7 +326,7 @@ internal sealed class ProfileDetailsDialog : Dialog
         _authorityLabel.Text = TruncateUrl(authority, 48);
 
         // Token status with color
-        UpdateTokenStatus(profile);
+        UpdateTokenStatus(profile, tokenInfo);
 
         // Created
         _createdLabel.Text = profile.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
@@ -331,19 +347,16 @@ internal sealed class ProfileDetailsDialog : Dialog
         }
     }
 
-    private void UpdateTokenStatus(AuthProfile profile)
+    private void UpdateTokenStatus(AuthProfile profile, CachedTokenInfo? tokenInfo)
     {
-        if (!profile.TokenExpiresOn.HasValue)
+        if (tokenInfo == null)
         {
-            _tokenStatusLabel.Text = "Unknown";
+            _tokenStatusLabel.Text = profile.HasEnvironment ? "Unknown" : "(no environment bound)";
             _tokenStatusLabel.ColorScheme = TuiColorPalette.Default;
             return;
         }
 
-        var expiresOn = profile.TokenExpiresOn.Value;
-        var now = DateTimeOffset.UtcNow;
-
-        if (expiresOn < now)
+        if (tokenInfo.IsExpired)
         {
             // Expired
             _tokenStatusLabel.Text = "Expired";
@@ -351,7 +364,7 @@ internal sealed class ProfileDetailsDialog : Dialog
         }
         else
         {
-            var remaining = expiresOn - now;
+            var remaining = tokenInfo.ExpiresOn - DateTimeOffset.UtcNow;
             string timeRemaining;
 
             if (remaining.TotalDays >= 1)

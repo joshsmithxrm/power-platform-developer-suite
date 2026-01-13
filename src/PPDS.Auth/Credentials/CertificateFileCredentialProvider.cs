@@ -266,6 +266,22 @@ public sealed class CertificateFileCredentialProvider : ICredentialProvider
     }
 
     /// <inheritdoc />
+    public Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        // Certificate auth uses connection string internally - we don't have access to MSAL cache.
+        // Return estimated expiry if we've authenticated, otherwise null.
+        if (_tokenExpiresAt.HasValue)
+        {
+            return Task.FromResult<CachedTokenInfo?>(
+                CachedTokenInfo.Create(_tokenExpiresAt.Value, _applicationId));
+        }
+
+        return Task.FromResult<CachedTokenInfo?>(null);
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed)
