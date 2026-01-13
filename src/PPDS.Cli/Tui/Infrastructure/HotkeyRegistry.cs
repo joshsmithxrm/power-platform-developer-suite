@@ -93,6 +93,11 @@ public interface IHotkeyRegistry
     /// Call this after handling Alt+key combinations to prevent menu focus on Alt release.
     /// </summary>
     void SuppressNextAltMenuFocus();
+
+    /// <summary>
+    /// Sets the menu bar reference for Alt key suppression.
+    /// </summary>
+    void SetMenuBar(MenuBar? menuBar);
 }
 
 /// <summary>
@@ -104,6 +109,8 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
     private readonly object _lock = new();
     private bool _globalHandlerExecuting;
     private bool _suppressAltMenuFocus;
+    private MenuBar? _menuBar;
+    private System.Reflection.FieldInfo? _openedByAltKeyField;
 
     private object? _activeScreen;
     private object? _activeDialog;
@@ -140,9 +147,28 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
         }
     }
 
+    public void SetMenuBar(MenuBar? menuBar)
+    {
+        _menuBar = menuBar;
+        if (menuBar != null)
+        {
+            // Cache the reflection field for performance
+            _openedByAltKeyField = typeof(MenuBar).GetField(
+                "openedByAltKey",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        }
+    }
+
     public void SuppressNextAltMenuFocus()
     {
         _suppressAltMenuFocus = true;
+
+        // Reset the MenuBar's internal state using reflection
+        // This prevents OnKeyUp from opening the menu when Alt is released
+        if (_menuBar != null && _openedByAltKeyField != null)
+        {
+            _openedByAltKeyField.SetValue(_menuBar, false);
+        }
     }
 
     public bool TryHandle(KeyEvent keyEvent)

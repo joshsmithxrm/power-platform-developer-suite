@@ -264,6 +264,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _menuBar = new MenuBar(menuItems.ToArray());
         _menuBar.ColorScheme = TuiColorPalette.MenuBar;
 
+        // Register MenuBar with HotkeyRegistry for Alt key suppression
+        _hotkeyRegistry.SetMenuBar(_menuBar);
+
         // Add debounce handler to prevent double-click flicker
         _menuBar.MouseClick += (e) =>
         {
