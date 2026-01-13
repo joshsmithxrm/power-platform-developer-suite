@@ -25,6 +25,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
 
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
+    private string? _capturedHomeAccountId;
     private bool _disposed;
 
     /// <summary>
@@ -98,6 +99,16 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
     {
         return authMethod is AuthMethod.InteractiveBrowser or AuthMethod.DeviceCode;
     }
+
+    /// <summary>
+    /// Gets the HomeAccountId captured during interactive authentication.
+    /// </summary>
+    /// <remarks>
+    /// This value is only populated after <see cref="DiscoverEnvironmentsAsync"/> completes
+    /// and only if interactive authentication was required (not silent).
+    /// Callers should persist this value to the profile to enable silent auth on subsequent calls.
+    /// </remarks>
+    public string? CapturedHomeAccountId => _capturedHomeAccountId;
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<DiscoveredEnvironment>> DiscoverEnvironmentsAsync(
@@ -266,6 +277,10 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                 AuthenticationOutput.WriteLine($"Authenticated as: {result.Account.Username}");
                 AuthenticationOutput.WriteLine();
             }
+
+            // Capture HomeAccountId for persistence by caller
+            // This enables silent auth on subsequent discovery calls
+            _capturedHomeAccountId = result.Account.HomeAccountId?.Identifier;
 
             return result.AccessToken;
         };

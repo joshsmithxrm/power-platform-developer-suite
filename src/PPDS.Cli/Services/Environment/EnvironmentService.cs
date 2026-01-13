@@ -54,6 +54,16 @@ public sealed class EnvironmentService : IEnvironmentService
             using var gds = GlobalDiscoveryService.FromProfile(profile, deviceCodeCallback);
             var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
 
+            // Persist HomeAccountId if captured during authentication.
+            // This enables silent auth on subsequent discovery calls (fixes repeated login prompts).
+            if (!string.IsNullOrEmpty(gds.CapturedHomeAccountId) &&
+                !string.Equals(profile.HomeAccountId, gds.CapturedHomeAccountId, StringComparison.Ordinal))
+            {
+                profile.HomeAccountId = gds.CapturedHomeAccountId;
+                await _store.SaveAsync(collection, cancellationToken);
+                _logger.LogDebug("Updated profile HomeAccountId after environment discovery authentication");
+            }
+
             _logger.LogInformation("Discovered {Count} environments", environments.Count);
 
             return environments
