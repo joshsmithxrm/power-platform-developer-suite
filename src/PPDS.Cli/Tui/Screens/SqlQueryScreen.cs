@@ -1,4 +1,5 @@
 using System.Net.Http;
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
@@ -58,6 +59,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         new MenuBarItem("_Query", new MenuItem[]
         {
             new("Execute", "Ctrl+Enter", () => _ = ExecuteQueryAsync()),
+            new("Show FetchXML", "Ctrl+Shift+F", ShowFetchXmlDialog),
             new("History", "Ctrl+Shift+H", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
@@ -324,6 +326,13 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             HotkeyScope.Screen,
             "Execute query",
             () => _ = ExecuteQueryAsync(),
+            owner: this));
+
+        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
+            Key.CtrlMask | Key.ShiftMask | Key.F,
+            HotkeyScope.Screen,
+            "Show FetchXML",
+            ShowFetchXmlDialog,
             owner: this));
     }
 
@@ -685,6 +694,51 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             {
                 _queryInput.Text = dialog.SelectedEntry.Sql;
             }
+        });
+    }
+
+    private void ShowFetchXmlDialog()
+    {
+        var sql = _queryInput.Text?.ToString()?.Trim();
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            MessageBox.ErrorQuery("Show FetchXML", "Enter a SQL query first.", "OK");
+            return;
+        }
+
+        if (_environmentUrl == null)
+        {
+            MessageBox.ErrorQuery("Show FetchXML", "No environment selected.", "OK");
+            return;
+        }
+
+#pragma warning disable PPDS013 // Fire-and-forget with proper error handling
+        _ = ShowFetchXmlDialogAsync(sql).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    MessageBox.ErrorQuery("FetchXML Error",
+                        t.Exception?.InnerException?.Message ?? "Failed to transpile SQL",
+                        "OK");
+                });
+            }
+        }, TaskScheduler.Default);
+#pragma warning restore PPDS013
+    }
+
+    private async Task ShowFetchXmlDialogAsync(string sql)
+    {
+        var provider = await _session.GetServiceProviderAsync(_deviceCodeCallback, CancellationToken.None);
+        var sqlQueryService = provider.GetRequiredService<ISqlQueryService>();
+
+        var fetchXml = sqlQueryService.TranspileSql(sql);
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            var dialog = new FetchXmlPreviewDialog(fetchXml, _session);
+            Application.Run(dialog);
         });
     }
 

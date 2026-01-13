@@ -19,6 +19,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
     private readonly Label _profileNameLabel;
     private readonly Label _identityLabel;
     private readonly Label _authMethodLabel;
+    private readonly Label _cacheTypeLabel;
     private readonly Label _cloudLabel;
     private readonly Label _tenantLabel;
     private readonly Label _objectIdLabel;
@@ -40,7 +41,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         _errorService = session.GetErrorService();
 
         Width = 68;
-        Height = 22; // Increased for ObjectId and PUID fields
+        Height = 23; // Increased for ObjectId, PUID, and Cache Type fields
 
         const int labelWidth = 14;
         const int valueX = 16;
@@ -94,17 +95,31 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
             Width = Dim.Fill() - 2
         };
 
-        // Cloud
-        var cloudHeaderLabel = new Label("Cloud:")
+        // Cache Type (token storage type)
+        var cacheTypeHeaderLabel = new Label("Cache Type:")
         {
             X = 1,
             Y = 5,
             Width = labelWidth
         };
-        _cloudLabel = new Label(string.Empty)
+        _cacheTypeLabel = new Label(string.Empty)
         {
             X = valueX,
             Y = 5,
+            Width = Dim.Fill() - 2
+        };
+
+        // Cloud
+        var cloudHeaderLabel = new Label("Cloud:")
+        {
+            X = 1,
+            Y = 6,
+            Width = labelWidth
+        };
+        _cloudLabel = new Label(string.Empty)
+        {
+            X = valueX,
+            Y = 6,
             Width = Dim.Fill() - 2
         };
 
@@ -112,13 +127,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var tenantHeaderLabel = new Label("Tenant:")
         {
             X = 1,
-            Y = 6,
+            Y = 7,
             Width = labelWidth
         };
         _tenantLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 6,
+            Y = 7,
             Width = Dim.Fill() - 2
         };
 
@@ -126,13 +141,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var objectIdHeaderLabel = new Label("Object Id:")
         {
             X = 1,
-            Y = 7,
+            Y = 8,
             Width = labelWidth
         };
         _objectIdLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 7,
+            Y = 8,
             Width = Dim.Fill() - 2
         };
 
@@ -140,13 +155,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var puidHeaderLabel = new Label("PUID:")
         {
             X = 1,
-            Y = 8,
+            Y = 9,
             Width = labelWidth
         };
         _puidLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 8,
+            Y = 9,
             Width = Dim.Fill() - 2
         };
 
@@ -154,13 +169,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var authorityHeaderLabel = new Label("Authority:")
         {
             X = 1,
-            Y = 9,
+            Y = 10,
             Width = labelWidth
         };
         _authorityLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 9,
+            Y = 10,
             Width = Dim.Fill() - 2
         };
 
@@ -168,13 +183,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var tokenHeaderLabel = new Label("Token Status:")
         {
             X = 1,
-            Y = 11,
+            Y = 12,
             Width = labelWidth
         };
         _tokenStatusLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 11,
+            Y = 12,
             Width = Dim.Fill() - 2
         };
 
@@ -182,13 +197,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var createdHeaderLabel = new Label("Created:")
         {
             X = 1,
-            Y = 12,
+            Y = 13,
             Width = labelWidth
         };
         _createdLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 12,
+            Y = 13,
             Width = Dim.Fill() - 2
         };
 
@@ -196,13 +211,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var lastUsedHeaderLabel = new Label("Last Used:")
         {
             X = 1,
-            Y = 13,
+            Y = 14,
             Width = labelWidth
         };
         _lastUsedLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 13,
+            Y = 14,
             Width = Dim.Fill() - 2
         };
 
@@ -210,13 +225,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var envHeaderLabel = new Label("Environment:")
         {
             X = 1,
-            Y = 15,
+            Y = 16,
             Width = labelWidth
         };
         _environmentLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 15,
+            Y = 16,
             Width = Dim.Fill() - 2
         };
 
@@ -224,13 +239,13 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
         var urlHeaderLabel = new Label("URL:")
         {
             X = 1,
-            Y = 16,
+            Y = 17,
             Width = labelWidth
         };
         _environmentUrlLabel = new Label(string.Empty)
         {
             X = valueX,
-            Y = 16,
+            Y = 17,
             Width = Dim.Fill() - 2
         };
 
@@ -254,6 +269,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
             separator,
             identityHeaderLabel, _identityLabel,
             authMethodHeaderLabel, _authMethodLabel,
+            cacheTypeHeaderLabel, _cacheTypeLabel,
             cloudHeaderLabel, _cloudLabel,
             tenantHeaderLabel, _tenantLabel,
             objectIdHeaderLabel, _objectIdLabel,
@@ -311,6 +327,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
                 _profileNameLabel.Text = "(No active profile)";
                 _identityLabel.Text = "-";
                 _authMethodLabel.Text = "-";
+                _cacheTypeLabel.Text = "-";
                 _cloudLabel.Text = "-";
                 _tenantLabel.Text = "-";
                 _authorityLabel.Text = "-";
@@ -337,6 +354,9 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
 
         // Auth method
         _authMethodLabel.Text = profile.AuthMethod.ToString();
+
+        // Cache type (token storage)
+        _cacheTypeLabel.Text = TokenCacheDetector.GetCacheType().ToString();
 
         // Cloud
         _cloudLabel.Text = profile.Cloud.ToString();
