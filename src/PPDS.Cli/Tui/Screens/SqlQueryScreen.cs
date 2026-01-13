@@ -273,6 +273,15 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     }
                     break;
 
+                case Key.CtrlMask | Key.A:
+                    // Ctrl+A selects all text in query input
+                    if (_queryInput.HasFocus)
+                    {
+                        _queryInput.SelectAll();
+                        e.Handled = true;
+                    }
+                    break;
+
                 case Key.CtrlMask | Key.W:
                     // Ctrl+W always closes the screen immediately
                     CloseRequested?.Invoke();
