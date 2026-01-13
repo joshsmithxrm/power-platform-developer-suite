@@ -181,12 +181,14 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
         {
             saveDialog.AllowedFileTypes = new[] { $".{extension}" };
 
-            // Apply colors immediately for views created in constructor
-            // Use FileDialog scheme for better readability in ComboBox dropdowns
+            // Apply colors to dialog views
             ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.FileDialog);
 
-            // Also apply in Loaded event for any lazily-created views
-            // This ensures Terminal.Gui's default blue background doesn't leak through
+            // ComboBox dropdowns are separate popup windows that use Colors.Menu globally.
+            // Save and restore to avoid affecting other parts of the app.
+            var originalMenu = Colors.Menu;
+            Colors.Menu = TuiColorPalette.FileDialog;
+
             saveDialog.Loaded += () =>
             {
                 ApplyColorSchemeRecursive(saveDialog, TuiColorPalette.FileDialog);
@@ -196,7 +198,14 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
                 textField?.SetFocus();
             };
 
-            Application.Run(saveDialog);
+            try
+            {
+                Application.Run(saveDialog);
+            }
+            finally
+            {
+                Colors.Menu = originalMenu;
+            }
 
             if (saveDialog.Canceled || saveDialog.FilePath == null)
             {
