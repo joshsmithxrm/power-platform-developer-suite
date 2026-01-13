@@ -161,6 +161,21 @@ public sealed class ManagedIdentityCredentialProvider : ICredentialProvider
     }
 
     /// <inheritdoc />
+    public Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        // Return cached token info if we have one
+        if (_cachedToken.HasValue)
+        {
+            return Task.FromResult<CachedTokenInfo?>(
+                CachedTokenInfo.Create(_cachedToken.Value.ExpiresOn, Identity));
+        }
+
+        return Task.FromResult<CachedTokenInfo?>(null);
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed)

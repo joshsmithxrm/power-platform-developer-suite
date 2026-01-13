@@ -110,6 +110,21 @@ public class RpcMethodHandler
             throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
         }
 
+        // Query MSAL for current token state (if environment is bound)
+        CachedTokenInfo? tokenInfo = null;
+        if (profile.Environment != null && !string.IsNullOrEmpty(profile.Environment.Url))
+        {
+            try
+            {
+                using var provider = CredentialProviderFactory.Create(profile);
+                tokenInfo = await provider.GetCachedTokenInfoAsync(profile.Environment.Url, cancellationToken);
+            }
+            catch
+            {
+                // Ignore errors - token info will be null
+            }
+        }
+
         return new AuthWhoResponse
         {
             Index = profile.Index,
@@ -120,9 +135,9 @@ public class RpcMethodHandler
             Username = profile.Username,
             ObjectId = profile.ObjectId,
             ApplicationId = profile.ApplicationId,
-            TokenExpiresOn = profile.TokenExpiresOn,
-            TokenStatus = profile.TokenExpiresOn.HasValue
-                ? (profile.TokenExpiresOn.Value < DateTimeOffset.UtcNow ? "expired" : "valid")
+            TokenExpiresOn = tokenInfo?.ExpiresOn,
+            TokenStatus = tokenInfo != null
+                ? (tokenInfo.IsExpired ? "expired" : "valid")
                 : null,
             Environment = profile.Environment != null ? new EnvironmentDetails
             {

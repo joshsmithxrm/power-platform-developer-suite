@@ -375,7 +375,6 @@ public class AuthProfileTests
             Environment = EnvironmentInfo.Create("https://test.crm.dynamics.com", "Test"),
             CreatedAt = DateTimeOffset.Parse("2024-01-01T00:00:00Z"),
             LastUsedAt = DateTimeOffset.Parse("2024-01-02T00:00:00Z"),
-            TokenExpiresOn = DateTimeOffset.Parse("2024-01-03T00:00:00Z"),
             Puid = "puid",
             HomeAccountId = "home-id"
         };
@@ -396,7 +395,6 @@ public class AuthProfileTests
         clone.Environment!.Url.Should().Be("https://test.crm.dynamics.com");
         clone.CreatedAt.Should().Be(profile.CreatedAt);
         clone.LastUsedAt.Should().Be(profile.LastUsedAt);
-        clone.TokenExpiresOn.Should().Be(profile.TokenExpiresOn);
         clone.Puid.Should().Be("puid");
         clone.HomeAccountId.Should().Be("home-id");
     }
