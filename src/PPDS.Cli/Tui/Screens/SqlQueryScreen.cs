@@ -142,15 +142,27 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     break;
 
                 case Key.AltMask | Key.Backspace:
+                    // Delete word before cursor (Alt variant)
+                    DeleteWordBackward();
+                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    e.Handled = true;
+                    break;
+
                 case Key.CtrlMask | Key.Backspace:
-                    // Delete word before cursor
+                    // Delete word before cursor (Ctrl variant)
                     DeleteWordBackward();
                     e.Handled = true;
                     break;
 
                 case Key.AltMask | Key.DeleteChar:
+                    // Delete word after cursor (Alt variant)
+                    DeleteWordForward();
+                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    e.Handled = true;
+                    break;
+
                 case Key.CtrlMask | Key.DeleteChar:
-                    // Delete word after cursor
+                    // Delete word after cursor (Ctrl variant)
                     DeleteWordForward();
                     e.Handled = true;
                     break;

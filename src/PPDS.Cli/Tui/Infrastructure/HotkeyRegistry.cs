@@ -87,6 +87,12 @@ public interface IHotkeyRegistry
     /// Sets the current open dialog for dialog-scope filtering.
     /// </summary>
     void SetActiveDialog(object? dialog);
+
+    /// <summary>
+    /// Suppresses the next bare Alt key from focusing the menu bar.
+    /// Call this after handling Alt+key combinations to prevent menu focus on Alt release.
+    /// </summary>
+    void SuppressNextAltMenuFocus();
 }
 
 /// <summary>
@@ -97,6 +103,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
     private readonly List<HotkeyBinding> _bindings = new();
     private readonly object _lock = new();
     private bool _globalHandlerExecuting;
+    private bool _suppressAltMenuFocus;
 
     private object? _activeScreen;
     private object? _activeDialog;
@@ -133,8 +140,20 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
         }
     }
 
+    public void SuppressNextAltMenuFocus()
+    {
+        _suppressAltMenuFocus = true;
+    }
+
     public bool TryHandle(KeyEvent keyEvent)
     {
+        // Suppress bare Alt key to prevent menu focus after Alt+modifier combinations
+        if (keyEvent.Key == Key.AltMask && _suppressAltMenuFocus)
+        {
+            _suppressAltMenuFocus = false;
+            return true;
+        }
+
         HotkeyBinding? matchedBinding = null;
         bool isGlobalWithDialogOpen = false;
 
