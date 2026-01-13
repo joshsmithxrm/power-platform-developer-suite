@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Identity.Client;
@@ -128,6 +129,54 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
 
         _msalClient = MsalClientBuilder.CreateClient(_cloud, _tenantId, MsalClientBuilder.RedirectUriOption.None);
         _cacheHelper = await MsalClientBuilder.CreateAndRegisterCacheAsync(_msalClient, warnOnFailure: false).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return null;
+
+        environmentUrl = environmentUrl.TrimEnd('/');
+        var scopes = new[] { $"{environmentUrl}/.default" };
+
+        await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
+
+        // Check in-memory cache first
+        if (_cachedResult != null)
+        {
+            return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username ?? _username);
+        }
+
+        // Try to find account in persistent cache
+        var accounts = await _msalClient!.GetAccountsAsync().ConfigureAwait(false);
+        var account = accounts.FirstOrDefault(a =>
+            string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase));
+
+        if (account == null)
+            return null;
+
+        try
+        {
+            var result = await _msalClient!
+                .AcquireTokenSilent(scopes, account)
+                .WithForceRefresh(false)
+                .ExecuteAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            _cachedResult = result;
+            return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username ?? _username);
+        }
+        catch (MsalUiRequiredException)
+        {
+            return null;
+        }
+        catch (MsalServiceException)
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc />

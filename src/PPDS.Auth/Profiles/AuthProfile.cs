@@ -132,13 +132,6 @@ public sealed class AuthProfile
     #region Token Claims
 
     /// <summary>
-    /// Gets or sets when the access token expires.
-    /// Populated after successful authentication.
-    /// </summary>
-    [JsonPropertyName("tokenExpiresOn")]
-    public DateTimeOffset? TokenExpiresOn { get; set; }
-
-    /// <summary>
     /// Gets or sets the user's PUID from the JWT 'puid' claim.
     /// </summary>
     [JsonPropertyName("puid")]
@@ -284,7 +277,6 @@ public sealed class AuthProfile
             Environment = Environment?.Clone(),
             CreatedAt = CreatedAt,
             LastUsedAt = LastUsedAt,
-            TokenExpiresOn = TokenExpiresOn,
             Puid = Puid,
             HomeAccountId = HomeAccountId,
             Authority = Authority

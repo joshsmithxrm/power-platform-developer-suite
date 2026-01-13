@@ -71,6 +71,39 @@ public interface ICredentialProvider : IDisposable
     /// The ID token typically contains user claims like country that aren't in the access token.
     /// </summary>
     System.Security.Claims.ClaimsPrincipal? IdTokenClaims { get; }
+
+    /// <summary>
+    /// Gets cached token information without triggering interactive authentication.
+    /// Queries the MSAL token cache to determine current token state.
+    /// </summary>
+    /// <param name="environmentUrl">The Dataverse environment URL to check token for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Token information if a valid cached token exists, null if token is expired or not cached.</returns>
+    Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Information about a cached token, retrieved without triggering authentication.
+/// </summary>
+/// <param name="ExpiresOn">When the cached token expires.</param>
+/// <param name="Username">The username/identity associated with the token.</param>
+/// <param name="IsExpired">Whether the token is expired or will expire within 5 minutes.</param>
+public sealed record CachedTokenInfo(
+    DateTimeOffset ExpiresOn,
+    string? Username,
+    bool IsExpired
+)
+{
+    /// <summary>
+    /// Creates token info, automatically calculating IsExpired based on a 5-minute buffer.
+    /// </summary>
+    public static CachedTokenInfo Create(DateTimeOffset expiresOn, string? username)
+    {
+        var isExpired = expiresOn <= DateTimeOffset.UtcNow.AddMinutes(5);
+        return new CachedTokenInfo(expiresOn, username, isExpired);
+    }
 }
 
 /// <summary>
