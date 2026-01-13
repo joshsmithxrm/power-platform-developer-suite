@@ -224,18 +224,20 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         var menuItems = new List<MenuBarItem>();
 
-        // Disabled menu items (no underscore hotkeys - they work globally in Terminal.Gui)
-        var dataMigrationItem = new MenuItem("Data Migration (Coming Soon)", "", null, shortcut: Key.Null);
-        var solutionsItem = new MenuItem("Solutions (Coming Soon)", "", null);
-        var pluginTracesItem = new MenuItem("Plugin Traces (Coming Soon)", "", null);
+        // Export menu item - enabled only when current screen supports export
+        var exportAction = _currentScreen?.ExportAction;
+        var exportItem = new MenuItem(
+            "Export",
+            "Export data (Ctrl+E)",
+            exportAction != null ? () => exportAction() : (Action?)null,
+            shortcut: Key.Null);
 
         // File menu (always present)
         // Note: Keep underscore on MenuBarItem (_File) for Alt+F to open menu.
         // Remove underscores from MenuItems - they create global Alt+letter hotkeys in Terminal.Gui.
         menuItems.Add(new MenuBarItem("_File", new MenuItem[]
         {
-            new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
-            dataMigrationItem,
+            exportItem,
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Exit", "Exit the application", () =>
             {
@@ -245,15 +247,23 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             })
         }));
 
-        // Screen-specific menus (inserted between File and Help)
+        // Screen-specific menus (inserted between File and Tools)
         if (_currentScreen?.ScreenMenuItems != null)
         {
             menuItems.AddRange(_currentScreen.ScreenMenuItems);
         }
 
-        // Tools menu (always present)
+        // Disabled menu items (no underscore hotkeys - they work globally in Terminal.Gui)
+        var dataMigrationItem = new MenuItem("Data Migration (Coming Soon)", "", null, shortcut: Key.Null);
+        var solutionsItem = new MenuItem("Solutions (Coming Soon)", "", null);
+        var pluginTracesItem = new MenuItem("Plugin Traces (Coming Soon)", "", null);
+
+        // Tools menu (always present) - contains all workspaces/tools
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
+            new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
+            dataMigrationItem,
+            new("", "", () => {}, null, null, Key.Null), // Separator
             solutionsItem,
             pluginTracesItem,
         }));

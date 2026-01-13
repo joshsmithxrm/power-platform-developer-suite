@@ -58,12 +58,14 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         new MenuBarItem("_Query", new MenuItem[]
         {
             new("Execute", "Ctrl+Enter", () => _ = ExecuteQueryAsync()),
-            new("Export Results", "Ctrl+E", ShowExportDialog),
             new("History", "Ctrl+Shift+H", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
         })
     };
+
+    /// <inheritdoc />
+    public Action? ExportAction => _resultsTable.GetDataTable() != null ? ShowExportDialog : null;
 
     /// <inheritdoc />
     public event Action? CloseRequested;

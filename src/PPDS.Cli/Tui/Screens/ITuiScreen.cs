@@ -26,6 +26,12 @@ internal interface ITuiScreen : IDisposable
     MenuBarItem[]? ScreenMenuItems { get; }
 
     /// <summary>
+    /// Optional export action for File > Export menu.
+    /// Return null if the screen doesn't support export or has nothing to export.
+    /// </summary>
+    Action? ExportAction => null;
+
+    /// <summary>
     /// Raised when the screen wants to close (e.g., user pressed Escape).
     /// The shell subscribes to this and calls NavigateBack().
     /// </summary>
