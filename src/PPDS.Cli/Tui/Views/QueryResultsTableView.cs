@@ -261,6 +261,11 @@ internal sealed class QueryResultsTableView : FrameView
     {
         _tableView.KeyPress += (e) =>
         {
+            // Only handle shortcuts when table has focus
+            // Prevents Ctrl+C/X from triggering when query input has focus
+            if (!_tableView.HasFocus)
+                return;
+
             switch (e.KeyEvent.Key)
             {
                 case Key.CtrlMask | Key.C:

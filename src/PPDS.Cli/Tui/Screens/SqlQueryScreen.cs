@@ -277,7 +277,10 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     // Ctrl+A selects all text in query input
                     if (_queryInput.HasFocus)
                     {
-                        _queryInput.SelectAll();
+                        // Terminal.Gui v1.x SelectAll() doesn't visually select text
+                        // Use ProcessKey to simulate Ctrl+Home then Ctrl+Shift+End
+                        _queryInput.ProcessKey(new KeyEvent(Key.Home | Key.CtrlMask, new KeyModifiers()));
+                        _queryInput.ProcessKey(new KeyEvent(Key.End | Key.ShiftMask | Key.CtrlMask, new KeyModifiers()));
                         e.Handled = true;
                     }
                     break;
