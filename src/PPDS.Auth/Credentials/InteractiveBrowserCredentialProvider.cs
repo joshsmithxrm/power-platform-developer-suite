@@ -368,7 +368,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         environmentUrl = environmentUrl.TrimEnd('/');
         var scopes = new[] { $"{environmentUrl}/.default" };
 
-        AuthDebugLog.WriteLine($"GetCachedTokenInfoAsync: url={environmentUrl}");
+        AuthDebugLog.WriteLine($"[InteractiveBrowser] GetCachedTokenInfoAsync: url={environmentUrl}");
 
         // Initialize MSAL client to load persistent cache
         await EnsureMsalClientInitializedAsync().ConfigureAwait(false);

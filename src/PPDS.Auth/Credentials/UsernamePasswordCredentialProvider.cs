@@ -142,11 +142,14 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
         environmentUrl = environmentUrl.TrimEnd('/');
         var scopes = new[] { $"{environmentUrl}/.default" };
 
+        AuthDebugLog.WriteLine($"[UsernamePassword] GetCachedTokenInfoAsync: url={environmentUrl}");
+
         await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
 
         // Check in-memory cache first
         if (_cachedResult != null)
         {
+            AuthDebugLog.WriteLine($"  In-memory cache has token expiring at {_cachedResult.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username ?? _username);
         }
 
@@ -156,7 +159,12 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
             string.Equals(a.Username, _username, StringComparison.OrdinalIgnoreCase));
 
         if (account == null)
+        {
+            AuthDebugLog.WriteLine("  No cached account found");
             return null;
+        }
+
+        AuthDebugLog.WriteLine($"  Found cached account: {account.Username}");
 
         try
         {
@@ -167,14 +175,18 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
                 .ConfigureAwait(false);
 
             _cachedResult = result;
+
+            AuthDebugLog.WriteLine($"  Silent acquisition returned token expiring at {result.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username ?? _username);
         }
-        catch (MsalUiRequiredException)
+        catch (MsalUiRequiredException ex)
         {
+            AuthDebugLog.WriteLine($"  Token requires re-authentication: {ex.Message}");
             return null;
         }
-        catch (MsalServiceException)
+        catch (MsalServiceException ex)
         {
+            AuthDebugLog.WriteLine($"  Service error checking token: {ex.Message}");
             return null;
         }
     }
