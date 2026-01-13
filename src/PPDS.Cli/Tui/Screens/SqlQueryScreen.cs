@@ -672,33 +672,16 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             return;
         }
 
-#pragma warning disable PPDS013 // Fire-and-forget with proper error handling
-        _ = ShowHistoryDialogAsync().ContinueWith(t =>
+        // QueryHistoryService is local file-based, no Dataverse connection needed
+        var historyService = _session.GetQueryHistoryService();
+        var dialog = new QueryHistoryDialog(historyService, _environmentUrl, _session);
+
+        Application.Run(dialog);
+
+        if (dialog.SelectedEntry != null)
         {
-            if (t.IsFaulted)
-            {
-                _errorService.ReportError("Failed to load query history", t.Exception, "LoadHistory");
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
-    }
-
-    private async Task ShowHistoryDialogAsync()
-    {
-        if (_environmentUrl == null) return;
-
-        var historyService = await _session.GetQueryHistoryServiceAsync(_environmentUrl, CancellationToken.None);
-        var dialog = new QueryHistoryDialog(historyService, _environmentUrl);
-
-        Application.MainLoop?.Invoke(() =>
-        {
-            Application.Run(dialog);
-
-            if (dialog.SelectedEntry != null)
-            {
-                _queryInput.Text = dialog.SelectedEntry.Sql;
-            }
-        });
+            _queryInput.Text = dialog.SelectedEntry.Sql;
+        }
     }
 
     private void ShowFetchXmlDialog()

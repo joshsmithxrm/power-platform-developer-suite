@@ -511,6 +511,16 @@ internal sealed class InteractiveSession : IAsyncDisposable
         return _hotkeyRegistry ??= new HotkeyRegistry();
     }
 
+    /// <summary>
+    /// Gets the query history service for local history operations.
+    /// This service uses local file storage and does not require a Dataverse connection.
+    /// </summary>
+    /// <returns>The query history service.</returns>
+    public IQueryHistoryService GetQueryHistoryService()
+    {
+        return new QueryHistoryService(NullLogger<QueryHistoryService>.Instance);
+    }
+
     #endregion
 
     /// <inheritdoc />
