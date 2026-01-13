@@ -160,6 +160,7 @@ internal sealed class ExportDialog : Dialog
         using (var saveDialog = new SaveDialog("Export to File", filter))
         {
             saveDialog.AllowedFileTypes = new[] { $".{extension}" };
+            saveDialog.ColorScheme = TuiColorPalette.Default;
             Application.Run(saveDialog);
 
             if (saveDialog.Canceled || saveDialog.FilePath == null)

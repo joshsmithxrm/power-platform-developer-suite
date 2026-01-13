@@ -208,7 +208,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             Enabled = false
         };
 
-        var buttonQuit = new Button("Quit (Ctrl+Q)")
+        var buttonQuit = new Button("Quit")
         {
             X = 2,
             Y = 10
@@ -241,7 +241,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("_SQL Query", "Run SQL queries against Dataverse (F2)", () => NavigateToSqlQuery()),
             dataMigrationItem,
             new("", "", () => {}, null, null, Key.Null), // Separator
-            new("_Quit", "Exit the application", () => RequestStop(), shortcut: Key.CtrlMask | Key.Q)
+            new("_Quit", "Exit the application", () => RequestStop())
         }));
 
         // Screen-specific menus (inserted between File and Help)
@@ -267,6 +267,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         }));
 
         _menuBar = new MenuBar(menuItems.ToArray());
+        _menuBar.ColorScheme = TuiColorPalette.MenuBar;
 
         // Add debounce handler to prevent double-click flicker
         _menuBar.MouseClick += (e) =>

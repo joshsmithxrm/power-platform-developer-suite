@@ -140,6 +140,23 @@ public static class TuiColorPalette
 
     #endregion
 
+    #region Menu Bar
+
+    /// <summary>
+    /// Color scheme for the menu bar.
+    /// Dark background with cyan accents for a modern look.
+    /// </summary>
+    public static ColorScheme MenuBar => new()
+    {
+        Normal = MakeAttr(Color.Cyan, Color.Black),
+        Focus = MakeAttr(Color.Black, Color.Cyan),
+        HotNormal = MakeAttr(Color.BrightCyan, Color.Black),
+        HotFocus = MakeAttr(Color.Black, Color.BrightCyan),
+        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+    };
+
+    #endregion
+
     #region Accent Colors
 
     /// <summary>

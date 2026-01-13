@@ -411,72 +411,71 @@ internal sealed class QueryResultsTableView : FrameView
     }
 
     /// <summary>
-    /// Applies type-aware column sizing based on the column data types.
+    /// Applies content-aware column sizing with padding.
+    /// Columns are sized based on actual data with breathing room.
     /// </summary>
     private void ApplyColumnSizing()
     {
         _tableView.Style.ColumnStyles.Clear();
 
+        const int padding = 2; // Extra space on each side
+        const int minWidth = 6;
+        const int maxWidth = 60;
+
         foreach (DataColumn column in _dataTable.Columns)
         {
-            if (!_columnTypes.TryGetValue(column.ColumnName, out var dataType))
+            _columnTypes.TryGetValue(column.ColumnName, out var dataType);
+
+            // Calculate optimal width based on content
+            var headerWidth = column.ColumnName.Length;
+            var maxContentWidth = 0;
+
+            // Sample first 100 rows for performance
+            var rowsToSample = Math.Min(_dataTable.Rows.Count, 100);
+            for (int i = 0; i < rowsToSample; i++)
             {
-                continue;
+                var value = _dataTable.Rows[i][column]?.ToString() ?? string.Empty;
+                maxContentWidth = Math.Max(maxContentWidth, value.Length);
             }
 
-            var style = GetColumnStyle(dataType);
-            if (style != null)
-            {
-                // Apply hidden state for GUID columns if toggled
-                if (_guidColumnsHidden && dataType == QueryColumnType.Guid)
-                {
-                    style.Visible = false;
-                }
+            // Use the larger of header or content, plus padding
+            var optimalWidth = Math.Max(headerWidth, maxContentWidth) + padding;
 
-                _tableView.Style.ColumnStyles[column] = style;
+            // Apply type-specific constraints
+            var (typeMin, typeMax) = GetTypeWidthConstraints(dataType);
+            var finalWidth = Math.Clamp(optimalWidth, Math.Max(minWidth, typeMin), Math.Min(maxWidth, typeMax));
+
+            var style = new TableView.ColumnStyle
+            {
+                MinWidth = finalWidth,
+                MaxWidth = finalWidth + 10 // Allow some expansion
+            };
+
+            // Apply hidden state for GUID columns if toggled
+            if (_guidColumnsHidden && dataType == QueryColumnType.Guid)
+            {
+                style.Visible = false;
             }
+
+            _tableView.Style.ColumnStyles[column] = style;
         }
 
         _tableView.SetNeedsDisplay();
     }
 
     /// <summary>
-    /// Gets the appropriate column style for a given data type.
+    /// Gets min/max width constraints for a data type.
     /// </summary>
-    private static TableView.ColumnStyle? GetColumnStyle(QueryColumnType dataType)
+    private static (int min, int max) GetTypeWidthConstraints(QueryColumnType dataType)
     {
         return dataType switch
         {
-            // GUID columns: fixed width of 38 (36 chars + 2 for padding)
-            QueryColumnType.Guid => new TableView.ColumnStyle { MinWidth = 38, MaxWidth = 38 },
-
-            // DateTime columns: fixed width of 20 (yyyy-MM-dd HH:mm:ss + padding)
-            QueryColumnType.DateTime => new TableView.ColumnStyle { MinWidth = 20, MaxWidth = 20 },
-
-            // Boolean columns: fixed width of 5 (Yes/No)
-            QueryColumnType.Boolean => new TableView.ColumnStyle { MinWidth = 5, MaxWidth = 5 },
-
-            // Integer columns: constrained width
-            QueryColumnType.Integer or QueryColumnType.BigInt =>
-                new TableView.ColumnStyle { MinWidth = 8, MaxWidth = 20 },
-
-            // Decimal/currency columns: constrained width
-            QueryColumnType.Decimal or QueryColumnType.Double or QueryColumnType.Money =>
-                new TableView.ColumnStyle { MinWidth = 10, MaxWidth = 20 },
-
-            // Lookup columns: moderate flexibility
-            QueryColumnType.Lookup => new TableView.ColumnStyle { MinWidth = 15, MaxWidth = 50 },
-
-            // OptionSet columns: constrained width
-            QueryColumnType.OptionSet or QueryColumnType.MultiSelectOptionSet =>
-                new TableView.ColumnStyle { MinWidth = 10, MaxWidth = 30 },
-
-            // String/Memo columns: flexible, minimum width only
-            QueryColumnType.String or QueryColumnType.Memo =>
-                new TableView.ColumnStyle { MinWidth = 10 },
-
-            // Unknown or other types: no specific styling
-            _ => null
+            QueryColumnType.Guid => (36, 38),
+            QueryColumnType.DateTime => (19, 22),
+            QueryColumnType.Boolean => (5, 8),
+            QueryColumnType.Integer or QueryColumnType.BigInt => (6, 20),
+            QueryColumnType.Decimal or QueryColumnType.Double or QueryColumnType.Money => (8, 20),
+            _ => (6, 100)
         };
     }
 

@@ -69,7 +69,8 @@ internal sealed class QueryHistoryDialog : Dialog
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             AllowsMarking = false,
-            AllowsMultipleSelection = false
+            AllowsMultipleSelection = false,
+            ColorScheme = TuiColorPalette.Default
         };
         _listView.SelectedItemChanged += OnSelectedItemChanged;
         _listView.OpenSelectedItem += OnItemActivated;
@@ -91,7 +92,8 @@ internal sealed class QueryHistoryDialog : Dialog
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             ReadOnly = true,
-            WordWrap = true
+            WordWrap = true,
+            ColorScheme = TuiColorPalette.ReadOnlyText
         };
         previewFrame.Add(_previewText);
 

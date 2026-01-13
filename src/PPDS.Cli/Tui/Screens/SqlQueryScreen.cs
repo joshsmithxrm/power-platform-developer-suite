@@ -133,25 +133,22 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
         _content.Add(_queryFrame, _filterFrame, _resultsTable);
 
-        // Visual focus indicators
+        // Visual focus indicators - only change title, not colors
+        // The table's built-in selection highlighting is sufficient
         _queryFrame.Enter += (_) =>
         {
-            _queryFrame.ColorScheme = TuiColorPalette.Focused;
             _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, F6 to toggle focus)";
         };
         _queryFrame.Leave += (_) =>
         {
-            _queryFrame.ColorScheme = TuiColorPalette.Default;
             _queryFrame.Title = "Query (Ctrl+Enter to execute, F6 to toggle focus)";
         };
         _resultsTable.Enter += (_) =>
         {
-            _resultsTable.ColorScheme = TuiColorPalette.Focused;
             _resultsTable.Title = "\u25b6 Results";
         };
         _resultsTable.Leave += (_) =>
         {
-            _resultsTable.ColorScheme = TuiColorPalette.Default;
             _resultsTable.Title = "Results";
         };
 
