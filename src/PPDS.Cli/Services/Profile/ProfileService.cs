@@ -160,8 +160,13 @@ public sealed class ProfileService : IProfileService
     {
         _store.Delete();
 
-        // Clear all MSAL token caches
-        await TokenCacheManager.ClearAllCachesAsync();
+        // Clear MSAL token cache in the same directory as the profile store
+        // This ensures tests using isolated directories don't nuke the global cache
+        var storeDirectory = Path.GetDirectoryName(_store.FilePath);
+        var tokenCachePath = storeDirectory != null
+            ? Path.Combine(storeDirectory, ProfilePaths.TokenCacheFileName)
+            : null; // null = use global default
+        await TokenCacheManager.ClearAllCachesAsync(tokenCachePath);
 
         // Clear secure credential store
         using var credentialStore = new NativeCredentialStore();

@@ -368,24 +368,34 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         if (_currentScreen is SqlQueryScreen)
             return;
 
-        // Show spinner in status line - immediately visible
-        _statusLine.ShowSpinner("Loading SQL Query...");
+        // Clear current content
+        if (_mainMenuContent != null)
+        {
+            _contentArea.Remove(_mainMenuContent);
+            _mainMenuContent = null;
+        }
 
-        // Update content area title for visual consistency
-        _contentArea.Title = "Loading...";
+        // Show centered loading message in content area
+        var loadingLabel = new Label("Loading SQL Query...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
 
-        // Force UI to refresh so spinner is visible before blocking work
+        // Force UI to show loading state before blocking work
         Application.Refresh();
 
         // Use AddIdle to allow the UI refresh to complete, then create screen
         Application.MainLoop?.AddIdle(() =>
         {
+            // Remove loading label
+            _contentArea.Remove(loadingLabel);
+
             // Create and navigate to SQL screen (this is the slow part)
             var sqlScreen = new SqlQueryScreen(_deviceCodeCallback, _session);
             NavigateTo(sqlScreen);
-
-            // Stop spinner and clear message after navigation completes
-            _statusLine.ClearMessage();
 
             return false; // Don't repeat idle callback
         });
