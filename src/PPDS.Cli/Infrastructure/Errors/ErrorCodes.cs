@@ -216,5 +216,8 @@ public static class ErrorCodes
 
         /// <summary>Entity has child components that must be removed first.</summary>
         public const string HasChildren = "Plugin.HasChildren";
+
+        /// <summary>Specified user for impersonation was not found.</summary>
+        public const string UserNotFound = "Plugin.UserNotFound";
     }
 }
