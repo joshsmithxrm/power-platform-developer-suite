@@ -66,6 +66,7 @@ public static class TuiColorPalette
     /// <summary>
     /// Color scheme for read-only text display (TextViews showing non-editable content).
     /// Maintains black background even when focused for readability.
+    /// Uses White for Disabled because Terminal.Gui treats ReadOnly as Disabled.
     /// </summary>
     public static ColorScheme ReadOnlyText => new()
     {
@@ -73,7 +74,7 @@ public static class TuiColorPalette
         Focus = MakeAttr(Color.White, Color.Black),
         HotNormal = MakeAttr(Color.Cyan, Color.Black),
         HotFocus = MakeAttr(Color.White, Color.Black),
-        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+        Disabled = MakeAttr(Color.White, Color.Black)
     };
 
     /// <summary>
