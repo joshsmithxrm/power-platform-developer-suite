@@ -4,13 +4,11 @@ using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Registration;
-using PPDS.Cli.Services.Backlog;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
-using PPDS.Cli.Services.Session;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Pooling;
 
@@ -55,13 +53,6 @@ public static class ServiceRegistration
 
         // TUI theming
         services.AddSingleton<ITuiThemeService, TuiThemeService>();
-
-        // Session orchestration services
-        services.AddSingleton<IWorkerSpawner, WindowsTerminalWorkerSpawner>();
-        services.AddSingleton<ISessionService, SessionService>();
-
-        // Backlog service - depends on session service for worker correlation
-        services.AddTransient<IBacklogService, BacklogService>();
 
         // Connection service - requires profile-based token provider and environment ID
         // Registered as factory because it needs runtime values from ResolvedConnectionInfo

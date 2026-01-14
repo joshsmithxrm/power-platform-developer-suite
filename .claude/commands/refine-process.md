@@ -33,9 +33,6 @@ Review recent work to identify friction:
 # Recent PRs and their review cycles
 gh pr list --state merged --limit 10 --json number,title,reviews
 
-# Recent stuck sessions
-ppds session list --status stuck --json
-
 # Recent issues that had scope problems
 gh issue list --label blocked --state closed --limit 5
 ```

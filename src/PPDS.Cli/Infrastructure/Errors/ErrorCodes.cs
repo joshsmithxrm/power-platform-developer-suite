@@ -153,27 +153,6 @@ public static class ErrorCodes
     }
 
     /// <summary>
-    /// Session orchestration errors.
-    /// </summary>
-    public static class Session
-    {
-        /// <summary>The requested session was not found.</summary>
-        public const string NotFound = "Session.NotFound";
-
-        /// <summary>A session for this issue already exists.</summary>
-        public const string AlreadyExists = "Session.AlreadyExists";
-
-        /// <summary>Failed to create worktree for session.</summary>
-        public const string WorktreeCreationFailed = "Session.WorktreeCreationFailed";
-
-        /// <summary>Failed to spawn worker terminal.</summary>
-        public const string SpawnFailed = "Session.SpawnFailed";
-
-        /// <summary>Invalid session status transition.</summary>
-        public const string InvalidTransition = "Session.InvalidTransition";
-    }
-
-    /// <summary>
     /// External service errors.
     /// </summary>
     public static class External

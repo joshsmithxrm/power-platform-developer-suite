@@ -1,6 +1,5 @@
 using System.CommandLine;
 using PPDS.Cli.Commands.Auth;
-using PPDS.Cli.Commands.Backlog;
 using PPDS.Cli.Commands.Connections;
 using PPDS.Cli.Commands.ConnectionReferences;
 using PPDS.Cli.Commands.Data;
@@ -16,7 +15,6 @@ using PPDS.Cli.Commands.PluginTraces;
 using PPDS.Cli.Commands.Query;
 using PPDS.Cli.Commands.Roles;
 using PPDS.Cli.Commands.Serve;
-using PPDS.Cli.Commands.Session;
 using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
@@ -59,7 +57,6 @@ public static class Program
 
         // Add command groups
         rootCommand.Subcommands.Add(AuthCommandGroup.Create());
-        rootCommand.Subcommands.Add(BacklogCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.Create());
         rootCommand.Subcommands.Add(EnvCommandGroup.CreateOrgAlias()); // 'org' alias for 'env'
         rootCommand.Subcommands.Add(DataCommandGroup.Create());
@@ -84,7 +81,6 @@ public static class Program
         if (Environment.GetEnvironmentVariable("PPDS_INTERNAL") == "1")
         {
             rootCommand.Subcommands.Add(InternalCommandGroup.Create());
-            rootCommand.Subcommands.Add(SessionCommandGroup.Create());
         }
 
         // Prepend [Required] to required option descriptions for scannability
