@@ -16,7 +16,6 @@ using PPDS.Cli.Commands.PluginTraces;
 using PPDS.Cli.Commands.Query;
 using PPDS.Cli.Commands.Roles;
 using PPDS.Cli.Commands.Serve;
-using PPDS.Cli.Commands.Session;
 using PPDS.Cli.Commands.Solutions;
 using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
@@ -84,7 +83,6 @@ public static class Program
         if (Environment.GetEnvironmentVariable("PPDS_INTERNAL") == "1")
         {
             rootCommand.Subcommands.Add(InternalCommandGroup.Create());
-            rootCommand.Subcommands.Add(SessionCommandGroup.Create());
         }
 
         // Prepend [Required] to required option descriptions for scannability

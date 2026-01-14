@@ -55,7 +55,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 | Wait for required CI checks only in /ship | `Integration Tests` requires live Dataverse (ADR-0029) |
 | Check `docs/patterns/` before implementing | Canonical patterns exist; cite them in plan |
 | Restate issue understanding in plan | "My Understanding" section catches drift before implementation |
-| Create issues after `/design` plan approval | Enables parallel workers; maintains orchestration visibility |
+| Create issues after `/design` plan approval | Enables parallel workers |
 | Review `needs-evaluation` Dependabot PRs before merging | Major version updates require manual evaluation |
 
 ---
@@ -190,7 +190,6 @@ MinVer tags: `{Package}-v{version}` (e.g., `Cli-v1.0.0-beta.11`)
 | `/backlog` | View bugs, ready work, and start planning sessions |
 | `/design` | Design conversation for new feature |
 | `/design-ui` | Reference-driven UI design with wireframes |
-| `/orchestrate` | Orchestrate parallel work sessions |
 | `/start-work` | Begin work session from issues |
 | `/commit` | Phase-aware intermediate commit |
 | `/test` | Run tests with auto-detection |

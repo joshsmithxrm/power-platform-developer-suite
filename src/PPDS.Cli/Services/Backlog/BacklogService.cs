@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Services.Session;
 
 namespace PPDS.Cli.Services.Backlog;
 
@@ -38,7 +37,6 @@ public sealed class BacklogService : IBacklogService
     /// </summary>
     private const string DefaultRepo = "power-platform-developer-suite";
 
-    private readonly ISessionService? _sessionService;
     private readonly ILogger<BacklogService> _logger;
     private readonly string _cacheDir;
     private readonly string _repoRoot;
@@ -46,9 +44,8 @@ public sealed class BacklogService : IBacklogService
     /// <summary>
     /// Initializes a new instance of the <see cref="BacklogService"/> class.
     /// </summary>
-    public BacklogService(ISessionService? sessionService, ILogger<BacklogService> logger)
+    public BacklogService(ILogger<BacklogService> logger)
     {
-        _sessionService = sessionService;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var userProfile = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
@@ -192,9 +189,6 @@ public sealed class BacklogService : IBacklogService
 
         _logger.LogDebug("Fetched {Count} project items", allItems.Count);
 
-        // Get active sessions for correlation
-        var sessionsByIssue = await GetActiveSessionsAsync(cancellationToken);
-
         // Convert to BacklogItems and categorize
         var now = DateTimeOffset.UtcNow;
         var bugs = new List<BacklogItem>();
@@ -211,7 +205,7 @@ public sealed class BacklogService : IBacklogService
                 continue;
             }
 
-            var backlogItem = ToBacklogItem(item, sessionsByIssue);
+            var backlogItem = ToBacklogItem(item);
 
             // Categorize based on type, status, and fields
             if (IsBug(backlogItem))
@@ -491,31 +485,8 @@ public sealed class BacklogService : IBacklogService
         return prs;
     }
 
-    private async Task<Dictionary<int, SessionState>> GetActiveSessionsAsync(CancellationToken cancellationToken)
+    private static BacklogItem ToBacklogItem(ProjectItem item)
     {
-        if (_sessionService == null)
-        {
-            return [];
-        }
-
-        try
-        {
-            var sessions = await _sessionService.ListAsync(cancellationToken);
-            return sessions
-                .Where(s => s.Status is not SessionStatus.Complete)
-                .ToDictionary(s => s.IssueNumber);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get active sessions");
-            return [];
-        }
-    }
-
-    private BacklogItem ToBacklogItem(ProjectItem item, Dictionary<int, SessionState> sessions)
-    {
-        sessions.TryGetValue(item.Number, out var session);
-
         return new BacklogItem
         {
             Number = item.Number,
@@ -529,9 +500,7 @@ public sealed class BacklogService : IBacklogService
             Assignee = item.Assignee,
             Milestone = item.Milestone,
             Labels = item.Labels,
-            CreatedAt = item.CreatedAt,
-            ActiveSessionId = session?.Id,
-            ActiveSessionStatus = session?.Status.ToString()
+            CreatedAt = item.CreatedAt
         };
     }
 

@@ -148,12 +148,11 @@ Design sessions produce **plans and issues**, not code. After the user approves 
 
 1. **Create GitHub issues** for each implementation phase using `/create-issue`
 2. **Add wave labels** (`wave:1`, `wave:2`) for parallel execution
-3. **Offer to dispatch workers** via `/orchestrate`
-4. **End the design session** - implementation happens in worker sessions
+3. **End the design session** - implementation happens separately
 
 ```
 Design Session Flow:
-  Explore → Analyze → Plan → [GATE] → Create Issues → Dispatch Workers
+  Explore → Analyze → Plan → [GATE] → Create Issues
                                ↑
                         You are here after plan approval
 ```
@@ -168,9 +167,8 @@ Before proposing new work, design sessions MUST complete this checklist:
 - [ ] **Search for duplicates** - Run `gh issue list --search "<feature-keywords>" --limit 20`
 - [ ] **Scope alignment** - Explicitly confirm if TUI/Extension/CLI should have feature parity
 - [ ] **Platform-specific vs shared** - Identify features unique to one UI layer (e.g., notebooks are VS Code-only)
-- [ ] **Design for orchestration** - Plan wave labels and include query patterns for worker dispatch
+- [ ] **Wave planning** - Plan wave labels for parallel execution
 - [ ] **Integrate existing backlog** - Consider labeling existing open issues into wave structure
-- [ ] **Session boundary clarity** - Be explicit: what happens THIS session vs FUTURE worker sessions
 
 ## When to Use
 

@@ -282,18 +282,6 @@ public sealed record BacklogItem
     /// </summary>
     [JsonPropertyName("ageInDays")]
     public int AgeInDays => (int)(DateTimeOffset.UtcNow - CreatedAt).TotalDays;
-
-    /// <summary>
-    /// Active worker session ID for this issue (null if no active session).
-    /// </summary>
-    [JsonPropertyName("activeSessionId")]
-    public string? ActiveSessionId { get; init; }
-
-    /// <summary>
-    /// Active worker session status (null if no active session).
-    /// </summary>
-    [JsonPropertyName("activeSessionStatus")]
-    public string? ActiveSessionStatus { get; init; }
 }
 
 /// <summary>

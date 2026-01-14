@@ -5,7 +5,6 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Services.Backlog;
-using PPDS.Cli.Services.Session;
 using Spectre.Console;
 
 namespace PPDS.Cli.Commands.Backlog;
@@ -97,21 +96,8 @@ public static class BacklogCommandGroup
 
         try
         {
-            // Create service with optional session integration
-            ISessionService? sessionService = null;
-            try
-            {
-                var spawner = new WindowsTerminalWorkerSpawner();
-                var sessionLogger = NullLogger<SessionService>.Instance;
-                sessionService = new SessionService(spawner, sessionLogger);
-            }
-            catch
-            {
-                // Session service not available, continue without it
-            }
-
             var logger = NullLogger<BacklogService>.Instance;
-            var service = new BacklogService(sessionService, logger);
+            var service = new BacklogService(logger);
 
             // Parse repo option if provided
             string? owner = null;
@@ -190,8 +176,7 @@ public static class BacklogCommandGroup
         if (!readyOnly)
         {
             RenderCategory("BUGS", backlog.Bugs, full, item =>
-                $"[red]#{item.Number}[/] [[{EscapeMarkup(item.Priority ?? "?")}]] {EscapeMarkup(item.Title)} [dim]({item.AgeInDays}d)[/]" +
-                (item.ActiveSessionId != null ? $" [yellow][[{item.ActiveSessionStatus}]][/]" : ""));
+                $"[red]#{item.Number}[/] [[{EscapeMarkup(item.Priority ?? "?")}]] {EscapeMarkup(item.Title)} [dim]({item.AgeInDays}d)[/]");
         }
 
         // In Progress
@@ -200,8 +185,7 @@ public static class BacklogCommandGroup
             RenderCategory("IN PROGRESS", backlog.InProgress, full, item =>
             {
                 var assignee = item.Assignee != null ? $"@{item.Assignee}" : "unassigned";
-                return $"[yellow]#{item.Number}[/] [[{EscapeMarkup(item.Size ?? "?")}]] {EscapeMarkup(item.Title)} [dim]{assignee} ({item.AgeInDays}d)[/]" +
-                       (item.ActiveSessionId != null ? $" [green][[{item.ActiveSessionStatus}]][/]" : "");
+                return $"[yellow]#{item.Number}[/] [[{EscapeMarkup(item.Size ?? "?")}]] {EscapeMarkup(item.Title)} [dim]{assignee} ({item.AgeInDays}d)[/]";
             });
         }
 
@@ -216,8 +200,7 @@ public static class BacklogCommandGroup
         if (!bugsOnly)
         {
             RenderCategory("READY FOR WORK", backlog.Ready, full, item =>
-                $"[green]#{item.Number}[/] [[{EscapeMarkup(item.Priority ?? "?")}, {EscapeMarkup(item.Size ?? "?")}]] {EscapeMarkup(item.Title)}" +
-                (item.ActiveSessionId != null ? $" [yellow][[{item.ActiveSessionStatus}]][/]" : ""));
+                $"[green]#{item.Number}[/] [[{EscapeMarkup(item.Priority ?? "?")}, {EscapeMarkup(item.Size ?? "?")}]] {EscapeMarkup(item.Title)}");
         }
 
         // Untriaged

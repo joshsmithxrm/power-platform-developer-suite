@@ -40,7 +40,6 @@ The CLI handles:
 - GitHub API calls (GraphQL for project fields, REST for PRs)
 - Caching (5-minute TTL in ~/.ppds/cache/backlog.json)
 - Cross-repo aggregation (single project tracks all repos)
-- Session integration (shows active worker sessions)
 
 Display the CLI output to the user.
 
@@ -91,4 +90,3 @@ Based on their response, chain to the appropriate next command:
 | `/triage` | Process untriaged issues |
 | `/plan-work` | Create worktrees for issues |
 | `/design` | Start design conversation |
-| `/orchestrate` | Dispatch parallel workers |
