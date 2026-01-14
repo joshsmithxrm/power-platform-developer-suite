@@ -680,14 +680,21 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             // Dispose stacked screens
             while (_screenStack.Count > 0)
             {
-                var screen = _screenStack.Pop();
                 try
                 {
-                    screen.Dispose();
+                    var screen = _screenStack.Pop();
+                    try
+                    {
+                        screen.Dispose();
+                    }
+                    catch
+                    {
+                        // Continue disposing remaining screens even if one fails
+                    }
                 }
                 catch
                 {
-                    // Continue disposing remaining screens even if one fails
+                    // Continue attempting to dispose remaining screens even if Pop fails
                 }
             }
 
