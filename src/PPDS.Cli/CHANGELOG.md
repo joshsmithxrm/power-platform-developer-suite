@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.12] - 2026-01-14
+
+### Added
+
+- **Plugin lifecycle commands** - Full plugin registration and management:
+  - `ppds plugins register` - Imperative plugin registration ([#470](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/470))
+  - `ppds plugins unregister` - Plugin cleanup ([#471](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/471))
+  - `ppds plugins get` - Get plugin entity details ([#469](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/469))
+  - `ppds plugins download` - Download assembly and package binaries ([#468](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/468))
+  - `ppds plugins update` - Update existing plugin ([#489](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/489))
+  - `ppds plugins list --filter` - Filtering options for plugin list ([#464](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/464))
+- **Plugin step configuration** - Enable/disable plugin steps and username impersonation support ([#490](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/490))
+
+### Changed
+
+- **TUI polish sprint** - Improved cursor handling, hotkeys, auth flow, and menus ([#407](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/407))
+- **Authentication uses native OS credential storage** - Replaced custom SecureCredentialStore with OS-native credential storage for better security and reliability ([#485](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/485))
+
+### Fixed
+
+- **Auth token state query** - Query MSAL for token state instead of stale profile metadata ([#491](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/491))
+- **Credential store bypass** - Check PPDS_TEST_CLIENT_SECRET for credential store bypass in test scenarios ([#488](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/488))
+
+### Removed
+
+- **Session orchestration commands** - Removed `ppds session` and `ppds backlog` command groups. Orchestration functionality has moved to ppds-orchestration repository ([#492](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/492))
+
 ## [1.0.0-beta.11] - 2026-01-06
 
 ### Added
@@ -304,7 +331,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged as .NET global tool (`ppds`)
 - Targets: `net8.0`, `net9.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.11...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.12...HEAD
+[1.0.0-beta.12]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.11...Cli-v1.0.0-beta.12
 [1.0.0-beta.11]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.10...Cli-v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.9...Cli-v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.8...Cli-v1.0.0-beta.9

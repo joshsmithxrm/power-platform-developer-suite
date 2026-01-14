@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-01-14
+
 ### Added
 
 - **Warnings array in summary.json** - Import warnings (column skipped, bulk not supported, schema mismatch, etc.) are now captured in `ImportResult.Warnings` and serialized to the `warnings` array in summary.json. Enables programmatic consumers to detect non-fatal issues. ([#271](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/271))
 - **Pool statistics in summary.json** - `ImportResult.PoolStatistics` captures throttle/retry metrics (`requestsServed`, `throttleEvents`, `totalBackoffTime`, `retriesAttempted`, `retriesSucceeded`) and serializes to the `poolStatistics` object in summary.json. ([#273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/273))
 - **IWarningCollector interface** - Thread-safe warning collection during parallel import operations. Used by `TieredImporter` to aggregate warnings from concurrent entity imports. ([#271](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/271))
 - **ImportWarning and ImportWarningCodes** - Structured warning type with standard codes: `BULK_NOT_SUPPORTED`, `COLUMN_SKIPPED`, `SCHEMA_MISMATCH`, `USER_MAPPING_FALLBACK`, `PLUGIN_REENABLE_FAILED`. ([#271](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/271))
+
+
+### Fixed
+
+- **M2M import throughput calculation** - M2M association records are now included in import throughput calculation. Previously showed incorrect import rates when M2M relationships were present. ([#400](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/400))
+- **Bypass plugins for M2M and fallback operations** - `--bypass-plugins` option now correctly applies to M2M association operations and single-record fallback operations (when bulk API is not supported). Previously only applied to primary bulk upsert operations. ([#241](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/241))
 
 ## [1.0.0-beta.5] - 2026-01-06
 
@@ -84,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DI integration via `AddDataverseMigration()` extension method
 - Targets: `net8.0`, `net9.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.5...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.6...HEAD
+[1.0.0-beta.6]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.5...Migration-v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.4...Migration-v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.3...Migration-v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.2...Migration-v1.0.0-beta.3

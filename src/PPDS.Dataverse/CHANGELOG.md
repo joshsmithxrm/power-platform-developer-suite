@@ -7,8 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-01-14
+
 ### Added
 
+- **IPluginTraceService** - Service for plugin trace log operations ([#152](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/152), [#153](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/153), [#154](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/154), [#155](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/155), [#156](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/156), [#157](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/157), [#158](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/158)):
+  - `ListAsync` - Query traces with 15+ filter options
+  - `GetAsync` - Get detailed trace information
+  - `GetRelatedAsync` - Get correlated traces by correlation ID
+  - `GetTimelineAsync` - Build execution hierarchy tree
+  - `GetSettingsAsync`/`SetSettingsAsync` - View/set trace logging level
+  - `DeleteAsync`/`DeleteByFilterAsync`/`DeleteByAgeAsync` - Delete traces
+  - `CountAsync` - Efficient aggregate count queries
+- **TimelineHierarchyBuilder** - Utility for building plugin trace execution hierarchy trees for timeline visualization
+- **Early-bound entities for plugin registration and custom APIs** - Generated entity classes ([#440](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/440)):
+  - `PluginTracelog` - Plugin trace log entries
+  - `ServiceEndpoint` - WebHooks, Azure Service Bus, Event Hub
+  - `CustomAPI` - Custom API definitions
+  - `CustomAPIRequestParameter` - Input parameters for Custom APIs
+  - `CustomAPIResponseProperty` - Output properties for Custom APIs
+  - `EntityDataProvider` - Virtual entity data providers
+  - `customapifieldtype` option set
 - **Eager pool initialization** - `IDataverseConnectionPool.EnsureInitializedAsync()` allows triggering authentication during startup, avoiding surprise browser popups on first query. Idempotent - subsequent calls are no-ops. ([#292](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/292))
 - **Seed initialization result tracking** - `IDataverseConnectionPool.InitializationResults` exposes per-source seed initialization status with failure reason classification (auth, network, service, connection not ready). Enables accurate pool health reporting. ([#287](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/287))
 - **Throttle backoff time tracking** - `IThrottleTracker.TotalBackoffTime` accumulates total backoff duration across all throttle events for observability. ([#273](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/273))
@@ -129,7 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed rate control presets (`Conservative`, `Balanced`, `Aggressive`) in favor of DOP-based parallelism
 - Removed adaptive rate control in favor of server-recommended limits
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.5...HEAD
+[1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.4...Dataverse-v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.3...Dataverse-v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.2...Dataverse-v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.1...Dataverse-v1.0.0-beta.2
