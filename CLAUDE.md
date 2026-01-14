@@ -39,9 +39,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 |---------|---------|
 | `ppds --help` | Full CLI reference |
 | `ppds serve` | RPC server for IDE integration |
-| `/design` | Design conversation for new feature |
 | `/ship` | Validate, commit, PR, handle CI |
-| `/test` | Run tests with auto-detection |
+| `/debug` | Interactive feedback loop for CLI/TUI/MCP |
 
 ## Testing
 
