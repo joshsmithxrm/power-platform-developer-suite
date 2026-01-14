@@ -28,8 +28,20 @@ public sealed class SqlToFetchXmlTranspiler
     /// </summary>
     public string Transpile(SqlSelectStatement statement)
     {
+        return TranspileWithVirtualColumns(statement).FetchXml;
+    }
+
+    /// <summary>
+    /// Transpiles a SQL AST to FetchXML, also returning virtual column metadata.
+    /// Virtual columns are *name columns (e.g., owneridname) that map to base columns.
+    /// </summary>
+    public TranspileResult TranspileWithVirtualColumns(SqlSelectStatement statement)
+    {
         _aliasCounter = 0;
         _currentEntityName = NormalizeEntityName(statement.From.TableName);
+
+        // Detect virtual columns first
+        var virtualColumns = DetectVirtualColumns(statement.Columns);
 
         var lines = new List<string>();
 
@@ -64,7 +76,8 @@ public sealed class SqlToFetchXmlTranspiler
         lines.Add($"  <entity name=\"{_currentEntityName}\">");
 
         // Attributes (columns) - handles both regular and aggregate columns
-        TranspileColumns(statement.Columns, statement.From, statement.GroupBy, lines);
+        // Pass virtual columns so we can emit base columns instead
+        TranspileColumnsWithVirtual(statement.Columns, statement.From, statement.GroupBy, virtualColumns, lines);
 
         // Link entities (JOINs)
         foreach (var join in statement.Joins)
@@ -87,7 +100,91 @@ public sealed class SqlToFetchXmlTranspiler
         lines.Add("  </entity>");
         lines.Add("</fetch>");
 
-        return string.Join("\n", lines);
+        return new TranspileResult
+        {
+            FetchXml = string.Join("\n", lines),
+            VirtualColumns = virtualColumns
+        };
+    }
+
+    /// <summary>
+    /// Detects virtual *name columns and determines their base columns.
+    /// </summary>
+    private Dictionary<string, VirtualColumnInfo> DetectVirtualColumns(IReadOnlyList<ISqlSelectColumn> columns)
+    {
+        var virtualColumns = new Dictionary<string, VirtualColumnInfo>(StringComparer.OrdinalIgnoreCase);
+
+        // Build a set of all column names for checking if base column is explicitly queried
+        var allColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in columns)
+        {
+            if (col is SqlColumnRef cr && !cr.IsWildcard)
+            {
+                allColumnNames.Add(NormalizeAttributeName(cr.ColumnName));
+            }
+        }
+
+        foreach (var col in columns)
+        {
+            if (col is not SqlColumnRef columnRef || columnRef.IsWildcard)
+            {
+                continue;
+            }
+
+            var columnName = NormalizeAttributeName(columnRef.ColumnName);
+
+            // Check if this looks like a virtual *name column
+            if (IsVirtualNameColumn(columnName, out var baseColumnName))
+            {
+                virtualColumns[columnName] = new VirtualColumnInfo
+                {
+                    BaseColumnName = baseColumnName,
+                    BaseColumnExplicitlyQueried = allColumnNames.Contains(baseColumnName),
+                    Alias = columnRef.Alias
+                };
+            }
+        }
+
+        return virtualColumns;
+    }
+
+    /// <summary>
+    /// Checks if a column name is a virtual *name column and extracts the base column name.
+    /// </summary>
+    private static bool IsVirtualNameColumn(string columnName, out string baseColumnName)
+    {
+        baseColumnName = "";
+
+        // Must end with "name" and have at least one character before it
+        if (columnName.Length <= 4 || !columnName.EndsWith("name", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Extract potential base column name
+        var potentialBase = columnName[..^4]; // Remove "name" suffix
+
+        // Check if base column looks like a lookup (ends with "id") or optionset/state/status pattern
+        if (potentialBase.EndsWith("id", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.Equals("statecode", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.Equals("statuscode", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.EndsWith("code", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.EndsWith("type", StringComparison.OrdinalIgnoreCase))
+        {
+            baseColumnName = potentialBase;
+            return true;
+        }
+
+        // Also check for boolean patterns (ismanaged, isdisabled, etc.)
+        if (potentialBase.StartsWith("is", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.StartsWith("do", StringComparison.OrdinalIgnoreCase) ||
+            potentialBase.StartsWith("has", StringComparison.OrdinalIgnoreCase))
+        {
+            baseColumnName = potentialBase;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -101,6 +198,56 @@ public sealed class SqlToFetchXmlTranspiler
     }
 
     #region Column Transpilation
+
+    /// <summary>
+    /// Transpiles SELECT columns to FetchXML attributes, handling virtual *name columns.
+    /// </summary>
+    private void TranspileColumnsWithVirtual(
+        IReadOnlyList<ISqlSelectColumn> columns,
+        SqlTableRef mainEntity,
+        IReadOnlyList<SqlColumnRef> groupBy,
+        Dictionary<string, VirtualColumnInfo> virtualColumns,
+        List<string> lines)
+    {
+        var groupByColumns = new HashSet<string>(
+            groupBy.Select(col => NormalizeAttributeName(col.ColumnName)),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Track which base columns have been emitted to avoid duplicates
+        var emittedBaseColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var column in columns)
+        {
+            switch (column)
+            {
+                case SqlAggregateColumn aggregate:
+                    TranspileAggregateColumn(aggregate, lines);
+                    break;
+                case SqlColumnRef columnRef:
+                    TranspileRegularColumnWithVirtual(
+                        columnRef, mainEntity, groupByColumns, virtualColumns, emittedBaseColumns, lines);
+                    break;
+            }
+        }
+
+        // Emit GROUP BY columns that aren't already in SELECT
+        foreach (var groupByCol in groupBy)
+        {
+            var attrName = NormalizeAttributeName(groupByCol.ColumnName);
+            var isInSelect = columns.Any(col =>
+                col is SqlColumnRef cr && NormalizeAttributeName(cr.ColumnName) == attrName);
+
+            if (!isInSelect)
+            {
+                lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" />");
+                OutputTrailingComment(groupByCol.TrailingComment, lines, "    ");
+            }
+            else
+            {
+                OutputTrailingComment(groupByCol.TrailingComment, lines, "    ");
+            }
+        }
+    }
 
     /// <summary>
     /// Transpiles SELECT columns to FetchXML attributes.
@@ -145,6 +292,86 @@ public sealed class SqlToFetchXmlTranspiler
                 OutputTrailingComment(groupByCol.TrailingComment, lines, "    ");
             }
         }
+    }
+
+    /// <summary>
+    /// Transpiles a regular column reference to FetchXML attribute, handling virtual columns.
+    /// </summary>
+    private void TranspileRegularColumnWithVirtual(
+        SqlColumnRef column,
+        SqlTableRef mainEntity,
+        HashSet<string> groupByColumns,
+        Dictionary<string, VirtualColumnInfo> virtualColumns,
+        HashSet<string> emittedBaseColumns,
+        List<string> lines)
+    {
+        if (column.IsWildcard && column.TableName == null)
+        {
+            // SELECT *
+            lines.Add("    <all-attributes />");
+            OutputTrailingComment(column.TrailingComment, lines, "    ");
+            return;
+        }
+
+        if (column.IsWildcard && IsMainEntityColumn(column.TableName, mainEntity))
+        {
+            // SELECT c.* where c is main entity alias
+            lines.Add("    <all-attributes />");
+            OutputTrailingComment(column.TrailingComment, lines, "    ");
+            return;
+        }
+
+        if (column.IsWildcard)
+        {
+            return;
+        }
+
+        if (!IsMainEntityColumn(column.TableName, mainEntity))
+        {
+            return;
+        }
+
+        var attrName = NormalizeAttributeName(column.ColumnName);
+
+        // Check if this is a virtual column
+        if (virtualColumns.TryGetValue(attrName, out var virtualInfo))
+        {
+            // For virtual columns, emit the base column instead (if not already emitted)
+            if (!emittedBaseColumns.Contains(virtualInfo.BaseColumnName))
+            {
+                var isGroupBy = groupByColumns.Contains(virtualInfo.BaseColumnName);
+                var attrs = new List<string> { $"name=\"{virtualInfo.BaseColumnName}\"" };
+
+                if (isGroupBy)
+                {
+                    attrs.Add("groupby=\"true\"");
+                }
+
+                lines.Add($"    <attribute {string.Join(" ", attrs)} />");
+                emittedBaseColumns.Add(virtualInfo.BaseColumnName);
+            }
+            OutputTrailingComment(column.TrailingComment, lines, "    ");
+            return;
+        }
+
+        // Regular column - emit normally
+        var isGroupByCol = groupByColumns.Contains(attrName);
+        var attrsList = new List<string> { $"name=\"{attrName}\"" };
+
+        if (column.Alias != null)
+        {
+            attrsList.Add($"alias=\"{column.Alias}\"");
+        }
+        if (isGroupByCol)
+        {
+            attrsList.Add("groupby=\"true\"");
+        }
+
+        // Track that we've emitted this column
+        emittedBaseColumns.Add(attrName);
+
+        lines.Add($"    <attribute {string.Join(" ", attrsList)} />");
+        OutputTrailingComment(column.TrailingComment, lines, "    ");
     }
 
     /// <summary>

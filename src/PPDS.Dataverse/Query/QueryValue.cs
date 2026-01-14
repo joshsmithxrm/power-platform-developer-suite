@@ -68,4 +68,29 @@ public sealed class QueryValue
     /// Creates a null value.
     /// </summary>
     public static QueryValue Null => new() { Value = null };
+
+    /// <summary>
+    /// Returns true if this value represents a lookup (EntityReference).
+    /// </summary>
+    [JsonIgnore]
+    public bool IsLookup => LookupEntityId.HasValue;
+
+    /// <summary>
+    /// Returns true if this value represents an optionset (integer with formatted label).
+    /// </summary>
+    [JsonIgnore]
+    public bool IsOptionSet => Value is int && FormattedValue != null;
+
+    /// <summary>
+    /// Returns true if this value represents a boolean with formatted value.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsBoolean => Value is bool;
+
+    /// <summary>
+    /// Returns true if this value has a formatted representation that differs from the raw value.
+    /// Used to determine if a *name column should be expanded.
+    /// </summary>
+    [JsonIgnore]
+    public bool HasFormattedValue => !string.IsNullOrEmpty(FormattedValue);
 }

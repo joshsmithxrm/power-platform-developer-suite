@@ -501,4 +501,134 @@ public class SqlToFetchXmlTranspilerTests
     }
 
     #endregion
+
+    #region Virtual Column Support
+
+    private TranspileResult TranspileWithVirtualColumns(string sql)
+    {
+        var parser = new SqlParser(sql);
+        var ast = parser.Parse();
+        return _transpiler.TranspileWithVirtualColumns(ast);
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_VirtualLookupNameColumn_TranspilesBaseColumn()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT owneridname FROM account");
+
+        // Assert - FetchXML should have ownerid, not owneridname
+        var doc = ParseFetchXml(result.FetchXml);
+        var entity = doc.Root!.Element("entity");
+        var attributes = entity!.Elements("attribute").ToList();
+        attributes.Should().HaveCount(1);
+        attributes[0].Attribute("name")!.Value.Should().Be("ownerid");
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_VirtualLookupNameColumn_DetectsVirtualColumn()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT owneridname FROM account");
+
+        // Assert
+        result.VirtualColumns.Should().HaveCount(1);
+        result.VirtualColumns.Should().ContainKey("owneridname");
+        result.VirtualColumns["owneridname"].BaseColumnName.Should().Be("ownerid");
+        result.VirtualColumns["owneridname"].BaseColumnExplicitlyQueried.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_BothBaseAndVirtualColumn_DetectsBothQueried()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT ownerid, owneridname FROM account");
+
+        // Assert
+        result.VirtualColumns.Should().HaveCount(1);
+        result.VirtualColumns["owneridname"].BaseColumnExplicitlyQueried.Should().BeTrue();
+
+        // FetchXML should have only one ownerid attribute (no duplicate)
+        var doc = ParseFetchXml(result.FetchXml);
+        var entity = doc.Root!.Element("entity");
+        var attributes = entity!.Elements("attribute").ToList();
+        attributes.Should().HaveCount(1);
+        attributes[0].Attribute("name")!.Value.Should().Be("ownerid");
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_VirtualStatusCodeName_TranspilesBaseColumn()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT statuscodename FROM account");
+
+        // Assert
+        var doc = ParseFetchXml(result.FetchXml);
+        var entity = doc.Root!.Element("entity");
+        var attr = entity!.Element("attribute");
+        attr!.Attribute("name")!.Value.Should().Be("statuscode");
+
+        result.VirtualColumns.Should().ContainKey("statuscodename");
+        result.VirtualColumns["statuscodename"].BaseColumnName.Should().Be("statuscode");
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_VirtualStateCodeName_TranspilesBaseColumn()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT statecodename FROM account");
+
+        // Assert
+        result.VirtualColumns.Should().ContainKey("statecodename");
+        result.VirtualColumns["statecodename"].BaseColumnName.Should().Be("statecode");
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_VirtualBooleanName_TranspilesBaseColumn()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT ismanagedname FROM solution");
+
+        // Assert
+        var doc = ParseFetchXml(result.FetchXml);
+        var entity = doc.Root!.Element("entity");
+        var attr = entity!.Element("attribute");
+        attr!.Attribute("name")!.Value.Should().Be("ismanaged");
+
+        result.VirtualColumns.Should().ContainKey("ismanagedname");
+        result.VirtualColumns["ismanagedname"].BaseColumnName.Should().Be("ismanaged");
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_RegularNameColumn_NotDetectedAsVirtual()
+    {
+        // "name" is a real column, not a virtual column
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT name FROM account");
+
+        // Assert
+        result.VirtualColumns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TranspileWithVirtualColumns_MixedColumns_HandlesCorrectly()
+    {
+        // Arrange & Act
+        var result = TranspileWithVirtualColumns("SELECT name, owneridname, statuscode FROM account");
+
+        // Assert
+        result.VirtualColumns.Should().HaveCount(1);
+        result.VirtualColumns.Should().ContainKey("owneridname");
+
+        // FetchXML should have: name, ownerid (from owneridname), statuscode
+        var doc = ParseFetchXml(result.FetchXml);
+        var entity = doc.Root!.Element("entity");
+        var attributes = entity!.Elements("attribute").Select(a => a.Attribute("name")!.Value).ToList();
+        attributes.Should().Contain("name");
+        attributes.Should().Contain("ownerid");
+        attributes.Should().Contain("statuscode");
+        attributes.Should().NotContain("owneridname");
+    }
+
+    #endregion
 }

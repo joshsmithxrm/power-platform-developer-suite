@@ -46,20 +46,36 @@ public sealed class SqlQueryService : ISqlQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
-        var fetchXml = TranspileSql(request.Sql, request.TopOverride);
+        // Parse and transpile with virtual column detection
+        var parser = new SqlParser(request.Sql);
+        var ast = parser.Parse();
+
+        if (request.TopOverride.HasValue)
+        {
+            ast = ast.WithTop(request.TopOverride.Value);
+        }
+
+        var transpiler = new SqlToFetchXmlTranspiler();
+        var transpileResult = transpiler.TranspileWithVirtualColumns(ast);
 
         var result = await _queryExecutor.ExecuteFetchXmlAsync(
-            fetchXml,
+            transpileResult.FetchXml,
             request.PageNumber,
             request.PagingCookie,
             request.IncludeCount,
             cancellationToken);
 
+        // Expand lookup, optionset, and boolean columns to include *name variants
+        // Pass virtual column info so we can handle explicitly queried *name columns
+        var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
+            result,
+            transpileResult.VirtualColumns);
+
         return new SqlQueryResult
         {
             OriginalSql = request.Sql,
-            TranspiledFetchXml = fetchXml,
-            Result = result
+            TranspiledFetchXml = transpileResult.FetchXml,
+            Result = expandedResult
         };
     }
 }
