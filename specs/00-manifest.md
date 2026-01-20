@@ -37,7 +37,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 
 | # | Subsystem | Status | Spec File |
 |---|-----------|--------|-----------|
-| 3.1 | Dependency Analysis (Tarjan) | pending | - |
+| 3.1 | Dependency Analysis (Tarjan) | complete | [01-dependency-analysis.md](03-migration/01-dependency-analysis.md) |
 | 3.2 | Export Pipeline | pending | - |
 | 3.3 | Import Pipeline | pending | - |
 | 3.4 | Circular References | pending | - |
@@ -89,10 +89,10 @@ Progress tracking for specification generation. Claude reads this file each iter
 |-----------|-------|----------|---------|
 | PPDS.Dataverse | 6 | 6 | 0 |
 | PPDS.Auth | 5 | 5 | 0 |
-| PPDS.Migration | 6 | 0 | 6 |
+| PPDS.Migration | 6 | 1 | 5 |
 | PPDS.Cli Services | 3 | 0 | 3 |
 | PPDS.TUI | 3 | 0 | 3 |
 | PPDS.Mcp | 2 | 0 | 2 |
 | VS Code Extension | 2 | 0 | 2 |
 | PPDS.Plugins | 2 | 0 | 2 |
-| **Total** | **29** | **11** | **18** |
+| **Total** | **29** | **12** | **17** |
