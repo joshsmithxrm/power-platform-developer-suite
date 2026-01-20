@@ -48,7 +48,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 
 | # | Subsystem | Status | Spec File |
 |---|-----------|--------|-----------|
-| 4.1 | Application Services | pending | - |
+| 4.1 | Application Services | complete | [01-application-services.md](04-cli-services/01-application-services.md) |
 | 4.2 | Connection Service | pending | - |
 | 4.3 | Export Service | pending | - |
 
@@ -90,9 +90,9 @@ Progress tracking for specification generation. Claude reads this file each iter
 | PPDS.Dataverse | 6 | 6 | 0 |
 | PPDS.Auth | 5 | 5 | 0 |
 | PPDS.Migration | 6 | 6 | 0 |
-| PPDS.Cli Services | 3 | 0 | 3 |
+| PPDS.Cli Services | 3 | 1 | 2 |
 | PPDS.TUI | 3 | 0 | 3 |
 | PPDS.Mcp | 2 | 0 | 2 |
 | VS Code Extension | 2 | 0 | 2 |
 | PPDS.Plugins | 2 | 0 | 2 |
-| **Total** | **29** | **17** | **12** |
+| **Total** | **29** | **18** | **11** |
