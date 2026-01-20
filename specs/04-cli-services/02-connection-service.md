@@ -156,3 +156,4 @@ Both commands support JSON output via `--json` flag for programmatic consumption
 | `src/PPDS.Auth/Cloud/CloudEnvironment.cs` | Cloud environment enumeration |
 | `src/PPDS.Auth/Credentials/IPowerPlatformTokenProvider.cs` | Token provider interface |
 | `tests/PPDS.Cli.Tests/Services/ConnectionServiceTests.cs` | Unit tests |
+| `tests/PPDS.Cli.Tests/Commands/Connections/ConnectionsCommandGroupTests.cs` | Command structure tests |

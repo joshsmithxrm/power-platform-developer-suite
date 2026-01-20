@@ -49,7 +49,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 | # | Subsystem | Status | Review Status | Spec File |
 |---|-----------|--------|---------------|-----------|
 | 4.1 | Application Services | complete | reviewed | [01-application-services.md](04-cli-services/01-application-services.md) |
-| 4.2 | Connection Service | complete | | [02-connection-service.md](04-cli-services/02-connection-service.md) |
+| 4.2 | Connection Service | complete | reviewed | [02-connection-service.md](04-cli-services/02-connection-service.md) |
 | 4.3 | Export Service | complete | | [03-export-service.md](04-cli-services/03-export-service.md) |
 
 ### 5. PPDS.TUI
