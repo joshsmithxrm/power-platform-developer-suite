@@ -26,7 +26,7 @@ The Circular References subsystem detects and resolves circular dependencies bet
 | Type | Purpose |
 |------|---------|
 | `DependencyGraph` | Graph structure with nodes, edges, and circular references |
-| `DependencyNode` | Entity in the graph with tier assignment |
+| `EntityNode` | Entity in the graph with tier assignment |
 | `DependencyEdge` | Lookup relationship between entities |
 | `CircularReference` | Group of entities forming a cycle |
 | `ExecutionPlan` | Tiered execution order with deferred fields |
@@ -173,7 +173,7 @@ The circular reference subsystem has no direct configuration. Behavior is contro
 - **`ExecutionPlanBuilder`**: Stateless, thread-safe for concurrent calls
 - **`DependencyGraph`**: Immutable after construction
 - **`ExecutionPlan`**: Immutable after construction
-- **`CircularReference`**: Immutable record
+- **`CircularReference`**: Immutable after construction
 
 All graph building operations are single-threaded during the analysis phase. Thread safety matters during import where `DeferredFieldProcessor` uses concurrent operations.
 
