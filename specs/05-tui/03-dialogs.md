@@ -105,7 +105,7 @@ internal abstract class TuiDialog : Dialog
 |--------|----------|
 | `AboutDialog` | Product name, version, docs URL, GitHub URL, copyright |
 | `KeyboardShortcutsDialog` | Global and screen-specific shortcuts table |
-| `ErrorDetailsDialog` | Recent errors list, debug log content |
+| `ErrorDetailsDialog` | Recent errors list, copy error, open log file |
 
 ### Async Patterns
 

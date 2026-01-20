@@ -58,7 +58,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 |---|-----------|--------|---------------|-----------|
 | 5.1 | Architecture | complete | reviewed | [01-architecture.md](05-tui/01-architecture.md) |
 | 5.2 | Testing Harness | complete | reviewed | [02-testing-harness.md](05-tui/02-testing-harness.md) |
-| 5.3 | Dialogs | complete | | [03-dialogs.md](05-tui/03-dialogs.md) |
+| 5.3 | Dialogs | complete | reviewed | [03-dialogs.md](05-tui/03-dialogs.md) |
 
 ### 6. PPDS.Mcp
 
