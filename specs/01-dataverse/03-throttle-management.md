@@ -17,10 +17,15 @@ The Throttle Management subsystem tracks, detects, and handles Dataverse service
 | Class | Purpose |
 |-------|---------|
 | `ThrottleTracker` | Thread-safe throttle state tracking implementation |
-| `ThrottleDetector` | Wraps operations to detect throttle and auth errors |
 | `AuthenticationErrorDetector` | Static utilities for detecting auth failures |
 | `ServiceProtectionException` | Exception for service protection limit errors |
 | `DataverseAuthenticationException` | Exception for auth/permission failures |
+
+### Internal Classes
+
+| Class | Purpose |
+|-------|---------|
+| `ThrottleDetector` | Wraps operations to detect throttle and auth errors |
 
 ### DTOs/Models
 
@@ -30,6 +35,20 @@ The Throttle Management subsystem tracks, detects, and handles Dataverse service
 | `ResilienceOptions` | Configuration for retry and throttle behavior |
 
 ## Behaviors
+
+### IThrottleTracker Interface
+
+| Member | Type | Purpose |
+|--------|------|---------|
+| `RecordThrottle(connectionName, retryAfter)` | Method | Records a throttle event |
+| `IsThrottled(connectionName)` | Method | Checks if connection is currently throttled |
+| `GetThrottleExpiry(connectionName)` | Method | Returns expiry time or null |
+| `ClearThrottle(connectionName)` | Method | Manually clears throttle state |
+| `GetShortestExpiry()` | Method | Shortest time until any throttle expires |
+| `TotalThrottleEvents` | Property | Count of all throttle events recorded |
+| `TotalBackoffTime` | Property | Sum of all RetryAfter durations |
+| `ThrottledConnectionCount` | Property | Number of currently throttled connections |
+| `ThrottledConnections` | Property | Names of all throttled connections |
 
 ### Throttle State Tracking
 
@@ -90,8 +109,9 @@ The `AuthenticationErrorDetector` distinguishes between:
 | No Retry-After header | Uses fallback (30 seconds) | Logged as warning |
 | Multiple throttles same connection | Latest state overwrites | Extends throttle period |
 | Query expired throttle | Returns false, cleans up | Lazy expiration cleanup |
-| Empty connection name | `IsThrottled` returns false | Defensive null handling |
+| Empty connection name in query | `IsThrottled` returns false | Defensive null handling |
 | Concurrent throttle updates | Thread-safe via `ConcurrentDictionary` | No lock contention |
+| RecordThrottle with null/empty name | Throws `ArgumentNullException` | Fail-fast validation |
 
 ## Error Handling
 

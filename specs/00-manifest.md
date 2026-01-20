@@ -18,7 +18,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 |---|-----------|--------|---------------|-----------|
 | 1.1 | Connection Pooling | complete | reviewed | [01-connection-pooling.md](01-dataverse/01-connection-pooling.md) |
 | 1.2 | Bulk Operations | complete | reviewed | [02-bulk-operations.md](01-dataverse/02-bulk-operations.md) |
-| 1.3 | Throttle Management | complete | | [03-throttle-management.md](01-dataverse/03-throttle-management.md) |
+| 1.3 | Throttle Management | complete | reviewed | [03-throttle-management.md](01-dataverse/03-throttle-management.md) |
 | 1.4 | SQL Transpiler | complete | | [04-sql-transpiler.md](01-dataverse/04-sql-transpiler.md) |
 | 1.5 | Metadata Service | complete | | [05-metadata-service.md](01-dataverse/05-metadata-service.md) |
 | 1.6 | Query Executor | complete | | [06-query-executor.md](01-dataverse/06-query-executor.md) |
