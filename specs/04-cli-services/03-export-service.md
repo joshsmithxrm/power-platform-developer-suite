@@ -10,7 +10,7 @@ The Export Service provides data export capabilities for query results, supporti
 
 | Interface | Purpose |
 |-----------|---------|
-| `IExportService` | Export data to various formats (CSV, TSV, JSON, clipboard) |
+| `IExportService` | Export data to various formats (CSV, TSV, JSON, clipboard) and format cells |
 | `IOperationProgress` | UI-agnostic progress reporting callback |
 
 ### Classes
@@ -44,6 +44,7 @@ The Export Service provides data export capabilities for query results, supporti
 | TSV | `ExportTsvAsync` | Tab (`\t`) | RFC 4180 style quoting |
 | JSON | `ExportJsonAsync` | N/A | Standard JSON serialization |
 | Clipboard | `FormatForClipboard` | Tab (`\t`) | Tabs/newlines replaced with spaces |
+| Single Cell | `FormatCellForClipboard` | N/A | Tabs/newlines replaced with spaces |
 
 ### CSV Escaping Rules (RFC 4180)
 
