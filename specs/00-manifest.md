@@ -29,7 +29,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 |---|-----------|--------|---------------|-----------|
 | 2.1 | Profile Storage | complete | reviewed | [01-profile-storage.md](02-auth/01-profile-storage.md) |
 | 2.2 | Credential Providers | complete | reviewed | [02-credential-providers.md](02-auth/02-credential-providers.md) |
-| 2.3 | Token Management | complete | | [03-token-management.md](02-auth/03-token-management.md) |
+| 2.3 | Token Management | complete | reviewed | [03-token-management.md](02-auth/03-token-management.md) |
 | 2.4 | Environment Discovery | complete | | [04-environment-discovery.md](02-auth/04-environment-discovery.md) |
 | 2.5 | Cloud Support | complete | | [05-cloud-support.md](02-auth/05-cloud-support.md) |
 

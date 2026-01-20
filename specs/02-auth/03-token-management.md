@@ -11,10 +11,10 @@ The Token Management subsystem handles MSAL token caching, Power Platform API to
 | Class | Purpose |
 |-------|---------|
 | `TokenCacheManager` | Manages token cache clearing operations |
-| `MsalClientBuilder` | Creates and configures MSAL public client applications |
+| `MsalClientBuilder` | Creates and configures MSAL public client applications with persistent cache |
 | `PowerPlatformTokenProvider` | Acquires tokens for Power Platform APIs |
 | `MsalAccountHelper` | Finds cached accounts for silent authentication |
-| `JwtClaimsParser` | Parses claims from JWT access tokens |
+| `JwtClaimsParser` | Parses PUID claim from JWT tokens |
 
 ### Interfaces
 
@@ -27,18 +27,19 @@ The Token Management subsystem handles MSAL token caching, Power Platform API to
 | Type | Purpose |
 |------|---------|
 | `PowerPlatformToken` | Access token with expiration and identity info |
-| `CachedTokenInfo` | Token cache status without triggering auth |
+| `ParsedJwtClaims` | PUID extracted from JWT token |
+| `MsalClientBuilder.RedirectUriOption` | Enum for redirect URI configuration (None, Default, Localhost) |
 
 ## Behaviors
 
 ### Token Cache Operations
 
-| Operation | Description |
-|-----------|-------------|
-| `CreateAndRegisterCacheAsync` | Creates file-based MSAL cache with persistence verification |
-| `UnregisterCache` | Cleans up cache registration |
-| `ClearAllCachesAsync` | Deletes MSAL token cache file |
-| `VerifyPersistence` | Tests cache write/read/clear operations |
+| Class | Method | Description |
+|-------|--------|-------------|
+| `TokenCacheManager` | `ClearAllCachesAsync` | Deletes MSAL token cache file |
+| `MsalClientBuilder` | `CreateAndRegisterCacheAsync` | Creates file-based MSAL cache with persistence verification |
+| `MsalClientBuilder` | `UnregisterCache` | Cleans up cache registration |
+| `MsalClientBuilder` | `CreateClient` | Creates MSAL public client with authority and redirect URI |
 
 ### Power Platform Token Acquisition
 
@@ -131,22 +132,21 @@ For full functionality, use interactive or device code authentication.
 
 The `MsalAccountHelper.FindAccountAsync` method searches cached accounts by priority:
 
-1. **HomeAccountId**: Exact match on `{objectId}.{tenantId}` (most reliable)
-2. **TenantId + Username**: Match on tenant and username
-3. **Username only**: Match on username across all tenants (fallback)
+1. **HomeAccountId**: Exact match via `GetAccountAsync(homeAccountId)` (most reliable)
+2. **TenantId**: First account matching `HomeAccountId.TenantId`
+3. **Username**: First account matching username (fallback)
+
+Returns `null` if no match found, forcing re-authentication. Never silently uses a random cached account.
 
 ## JWT Claims Parsing
 
-The `JwtClaimsParser` extracts claims from access tokens:
+The `JwtClaimsParser` extracts the `puid` claim from ID tokens or access tokens. Returns a `ParsedJwtClaims` record containing:
 
-| Claim | Description |
-|-------|-------------|
-| `oid` | Object ID (user or SPN) |
-| `tid` | Tenant ID |
-| `upn` | User Principal Name |
-| `preferred_username` | Display username |
-| `puid` | User PUID |
-| `exp` | Token expiration |
+| Property | Source Claim | Description |
+|----------|--------------|-------------|
+| `Puid` | `puid` | User PUID for migration mapping |
+
+Attempts ClaimsPrincipal (ID token) first, falls back to parsing the access token JWT.
 
 ## Dependencies
 
