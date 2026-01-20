@@ -18,7 +18,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 |---|-----------|--------|-----------|
 | 1.1 | Connection Pooling | complete | [01-connection-pooling.md](01-dataverse/01-connection-pooling.md) |
 | 1.2 | Bulk Operations | complete | [02-bulk-operations.md](01-dataverse/02-bulk-operations.md) |
-| 1.3 | Throttle Management | pending | - |
+| 1.3 | Throttle Management | complete | [03-throttle-management.md](01-dataverse/03-throttle-management.md) |
 | 1.4 | SQL Transpiler | pending | - |
 | 1.5 | Metadata Service | pending | - |
 | 1.6 | Query Executor | pending | - |
@@ -87,7 +87,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 
 | Component | Total | Complete | Pending |
 |-----------|-------|----------|---------|
-| PPDS.Dataverse | 6 | 2 | 4 |
+| PPDS.Dataverse | 6 | 3 | 3 |
 | PPDS.Auth | 5 | 0 | 5 |
 | PPDS.Migration | 6 | 0 | 6 |
 | PPDS.Cli Services | 3 | 0 | 3 |
@@ -95,4 +95,4 @@ Progress tracking for specification generation. Claude reads this file each iter
 | PPDS.Mcp | 2 | 0 | 2 |
 | VS Code Extension | 2 | 0 | 2 |
 | PPDS.Plugins | 2 | 0 | 2 |
-| **Total** | **29** | **2** | **27** |
+| **Total** | **29** | **3** | **26** |
