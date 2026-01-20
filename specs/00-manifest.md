@@ -58,7 +58,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 |---|-----------|--------|-----------|
 | 5.1 | Architecture | complete | [01-architecture.md](05-tui/01-architecture.md) |
 | 5.2 | Testing Harness | complete | [02-testing-harness.md](05-tui/02-testing-harness.md) |
-| 5.3 | Dialogs | pending | - |
+| 5.3 | Dialogs | complete | [03-dialogs.md](05-tui/03-dialogs.md) |
 
 ### 6. PPDS.Mcp
 
@@ -91,8 +91,8 @@ Progress tracking for specification generation. Claude reads this file each iter
 | PPDS.Auth | 5 | 5 | 0 |
 | PPDS.Migration | 6 | 6 | 0 |
 | PPDS.Cli Services | 3 | 3 | 0 |
-| PPDS.TUI | 3 | 2 | 1 |
+| PPDS.TUI | 3 | 3 | 0 |
 | PPDS.Mcp | 2 | 0 | 2 |
 | VS Code Extension | 2 | 0 | 2 |
 | PPDS.Plugins | 2 | 0 | 2 |
-| **Total** | **29** | **22** | **7** |
+| **Total** | **29** | **23** | **6** |
