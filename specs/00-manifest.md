@@ -31,7 +31,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 | 2.2 | Credential Providers | complete | [02-credential-providers.md](02-auth/02-credential-providers.md) |
 | 2.3 | Token Management | complete | [03-token-management.md](02-auth/03-token-management.md) |
 | 2.4 | Environment Discovery | complete | [04-environment-discovery.md](02-auth/04-environment-discovery.md) |
-| 2.5 | Cloud Support | pending | - |
+| 2.5 | Cloud Support | complete | [05-cloud-support.md](02-auth/05-cloud-support.md) |
 
 ### 3. PPDS.Migration
 
@@ -88,11 +88,11 @@ Progress tracking for specification generation. Claude reads this file each iter
 | Component | Total | Complete | Pending |
 |-----------|-------|----------|---------|
 | PPDS.Dataverse | 6 | 6 | 0 |
-| PPDS.Auth | 5 | 4 | 1 |
+| PPDS.Auth | 5 | 5 | 0 |
 | PPDS.Migration | 6 | 0 | 6 |
 | PPDS.Cli Services | 3 | 0 | 3 |
 | PPDS.TUI | 3 | 0 | 3 |
 | PPDS.Mcp | 2 | 0 | 2 |
 | VS Code Extension | 2 | 0 | 2 |
 | PPDS.Plugins | 2 | 0 | 2 |
-| **Total** | **29** | **10** | **19** |
+| **Total** | **29** | **11** | **18** |
