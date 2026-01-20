@@ -72,7 +72,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 | # | Subsystem | Status | Review Status | Spec File |
 |---|-----------|--------|---------------|-----------|
 | 7.1 | Architecture | complete | reviewed | [01-architecture.md](07-vscode/01-architecture.md) |
-| 7.2 | Features | complete | | [02-features.md](07-vscode/02-features.md) |
+| 7.2 | Features | complete | reviewed | [02-features.md](07-vscode/02-features.md) |
 
 ### 8. PPDS.Plugins
 

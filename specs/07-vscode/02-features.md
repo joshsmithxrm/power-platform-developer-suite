@@ -106,6 +106,8 @@ Gets detailed information about the active profile.
 | `tokenExpiresOn` | DateTimeOffset? | Token expiration |
 | `tokenStatus` | string? | "valid" or "expired" |
 | `environment` | EnvironmentDetails? | Bound environment details |
+| `createdAt` | DateTimeOffset? | Profile creation time |
+| `lastUsedAt` | DateTimeOffset? | Last usage time |
 
 **Errors:**
 
@@ -331,6 +333,10 @@ Lists registered plugins in the environment.
 | `executionOrder` | int | Order of execution |
 | `filteringAttributes` | string? | Comma-separated attributes |
 | `isEnabled` | bool | Whether step is active |
+| `description` | string? | Step description |
+| `deployment` | string | ServerOnly or Both |
+| `runAsUser` | string? | Impersonating user name |
+| `asyncAutoDelete` | bool | Auto-delete async jobs |
 | `images` | PluginImageInfo[] | Pre/Post images |
 
 **Errors:**
@@ -547,23 +553,30 @@ Currently the only implemented extension command.
 **Flow:**
 
 ```typescript
-async function listProfiles(): Promise<void> {
+const listProfilesCmd = vscode.commands.registerCommand('ppds.listProfiles', async () => {
     const result = await daemonClient.listProfiles();
 
-    const items: vscode.QuickPickItem[] = result.profiles.map(p => ({
+    if (result.profiles.length === 0) {
+        vscode.window.showInformationMessage('No authentication profiles found. Use "ppds auth create" to create one.');
+        return;
+    }
+
+    const items = result.profiles.map(p => ({
         label: p.name ?? `Profile ${p.index}`,
         description: p.identity,
-        detail: p.environment?.displayName ?? 'No environment'
+        detail: p.environment ? `${p.environment.displayName} (${p.authMethod})` : p.authMethod,
+        picked: p.isActive
     }));
 
     const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a profile'
+        title: 'Authentication Profiles',
+        placeHolder: result.activeProfile ? `Active: ${result.activeProfile}` : 'No active profile'
     });
 
     if (selected) {
-        vscode.window.showInformationMessage(`Selected: ${selected.label}`);
+        vscode.window.showInformationMessage(`Selected profile: ${selected.label}`);
     }
-}
+});
 ```
 
 ## Future UI Features
@@ -603,8 +616,8 @@ The following VS Code UI elements can be built using the available RPC methods:
 
 | File | Purpose |
 |------|---------|
-| `extension/src/extension.ts` | Command registration |
-| `extension/src/daemonClient.ts` | RPC client implementation |
-| `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` | RPC method implementations |
-| `src/PPDS.Cli/Commands/Serve/Handlers/RpcException.cs` | Error handling |
-| `src/PPDS.Cli/Infrastructure/Errors/ErrorCodes.cs` | Error code definitions |
+| [extension/src/extension.ts](../../extension/src/extension.ts) | Command registration |
+| [extension/src/daemonClient.ts](../../extension/src/daemonClient.ts) | RPC client implementation |
+| [src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs](../../src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs) | RPC method implementations |
+| [src/PPDS.Cli/Commands/Serve/Handlers/RpcException.cs](../../src/PPDS.Cli/Commands/Serve/Handlers/RpcException.cs) | Error handling |
+| [src/PPDS.Cli/Infrastructure/Errors/ErrorCodes.cs](../../src/PPDS.Cli/Infrastructure/Errors/ErrorCodes.cs) | Error code definitions |
