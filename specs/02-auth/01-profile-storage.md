@@ -21,7 +21,7 @@ The Profile Storage subsystem provides persistent storage for authentication pro
 | Enum | Purpose |
 |------|---------|
 | `AuthMethod` | Authentication methods (interactive, service principal, federated, etc.) |
-| `CloudEnvironment` | Cloud regions (Public, GCC, GCCHigh, DoD, China, etc.) |
+| `CloudEnvironment` | Cloud regions (Public, UsGov, UsGovHigh, UsGovDod, China) |
 
 ## Behaviors
 
@@ -46,6 +46,8 @@ The Profile Storage subsystem provides persistent storage for authentication pro
 | `RemoveByIndex` / `RemoveByName` | Remove profile |
 | `SetActiveByIndex` / `SetActiveByName` | Set active profile |
 | `IsNameInUse` | Check for name conflicts |
+| `Clear` | Remove all profiles |
+| `Clone` | Deep copy of collection |
 
 ### Schema Versioning
 
@@ -112,7 +114,12 @@ Override via `PPDS_CONFIG_DIR` environment variable.
       "objectId": "...",
       "environment": {
         "url": "https://org.crm.dynamics.com/",
-        "displayName": "Dev Org"
+        "displayName": "Dev Org",
+        "uniqueName": "unq3a504f4385d7f01195c7000d3a5cc",
+        "organizationId": "...",
+        "environmentId": "...",
+        "type": "Sandbox",
+        "region": "NA"
       },
       "createdAt": "2024-01-01T00:00:00Z",
       "lastUsedAt": "2024-01-02T00:00:00Z",
@@ -173,12 +180,28 @@ Override via `PPDS_CONFIG_DIR` environment variable.
 |----------|-------------|
 | `Environment` | Bound Dataverse environment (null = universal) |
 
+### Computed Properties (JsonIgnore)
+
+| Property | Description |
+|----------|-------------|
+| `HasEnvironment` | True if environment is bound |
+| `HasName` | True if profile has a name |
+| `DisplayIdentifier` | Display format: `[N] Name` or `[N]` |
+| `IdentityDisplay` | Username or ApplicationId for display |
+
 ### Metadata
 
 | Property | Description |
 |----------|-------------|
 | `CreatedAt` | Profile creation timestamp |
 | `LastUsedAt` | Last use timestamp |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `Validate()` | Validates required fields for the auth method; throws `InvalidOperationException` if invalid |
+| `Clone()` | Creates a deep copy of the profile |
 
 ## AuthMethod Values
 
@@ -195,6 +218,18 @@ Override via `PPDS_CONFIG_DIR` environment variable.
 | `UsernamePassword` | ROPC flow | Username |
 
 **Note**: Secrets (passwords, client secrets) are stored in secure credential store, not in profile.
+
+## EnvironmentInfo Properties
+
+| Property | Description |
+|----------|-------------|
+| `Url` | Environment URL (required) |
+| `DisplayName` | Friendly name (required) |
+| `UniqueName` | Unique name identifier |
+| `OrganizationId` | Organization GUID |
+| `EnvironmentId` | Power Platform environment ID |
+| `Type` | Environment type (Sandbox, Production) |
+| `Region` | Geographic region (NA, EMEA, APAC) |
 
 ## Related
 
