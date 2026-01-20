@@ -42,7 +42,7 @@ Progress tracking for specification generation. Claude reads this file each iter
 | 3.3 | Import Pipeline | complete | reviewed | [03-import-pipeline.md](03-migration/03-import-pipeline.md) |
 | 3.4 | Circular References | complete | reviewed | [04-circular-references.md](03-migration/04-circular-references.md) |
 | 3.5 | CMT Compatibility | complete | reviewed | [05-cmt-compatibility.md](03-migration/05-cmt-compatibility.md) |
-| 3.6 | User Mapping | complete | | [06-user-mapping.md](03-migration/06-user-mapping.md) |
+| 3.6 | User Mapping | complete | reviewed | [06-user-mapping.md](03-migration/06-user-mapping.md) |
 
 ### 4. PPDS.Cli Services
 

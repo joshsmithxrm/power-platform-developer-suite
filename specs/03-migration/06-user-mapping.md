@@ -28,7 +28,10 @@ The User Mapping subsystem handles the remapping of user, team, and owner refere
 |------|---------|
 | `UserMappingCollection` | Collection with DefaultUserId and UseCurrentUserAsDefault |
 | `UserMapping` | Source/target user IDs and names |
-| `UserMatchingStatistics` | Generation results (matched, unmatched counts) |
+| `UserMappingResult` | Generation results (matched, unmatched counts) |
+| `UserMappingMatch` | A matched source→target user pair with match method |
+| `UserMappingOptions` | Options for generation (e.g., include disabled users) |
+| `UserInfo` | User details from Dataverse query |
 
 ## Behaviors
 
@@ -86,7 +89,8 @@ The `UserMappingGenerator` matches users between environments:
 - DomainName
 - InternalEMailAddress
 - AzureActiveDirectoryObjectId
-- IsDisabled (excludes disabled users)
+- IsDisabled (excludes disabled users by default)
+- AccessMode
 
 ### Lifecycle
 
@@ -184,11 +188,11 @@ Invalid individual mappings are skipped with logging rather than failing the ent
 
 ## Thread Safety
 
-- **`UserMappingCollection`**: Thread-safe (uses ConcurrentDictionary internally)
+- **`UserMappingCollection`**: Not thread-safe (uses standard Dictionary internally). Safe for concurrent reads after initialization.
 - **`UserMappingReader`**: Stateless, thread-safe
 - **`UserMappingGenerator`**: Stateless, thread-safe
 
-Mappings are read once and shared across parallel entity imports.
+Mappings are read once before import and then shared (read-only) across parallel entity imports.
 
 ## CLI Integration
 
@@ -229,18 +233,16 @@ ppds data import --data <data.zip> \
 
 ## Related
 
-- [Spec: Import Pipeline](../specs/03-migration/03-import-pipeline.md)
-- [Spec: CMT Compatibility](../specs/03-migration/05-cmt-compatibility.md)
+- [Spec: Import Pipeline](03-import-pipeline.md)
+- [Spec: CMT Compatibility](05-cmt-compatibility.md)
 
 ## Source Files
 
 | File | Purpose |
 |------|---------|
 | `src/PPDS.Migration/Models/UserMapping.cs` | UserMapping and UserMappingCollection models |
-| `src/PPDS.Migration/Formats/IUserMappingReader.cs` | Reader interface |
-| `src/PPDS.Migration/Formats/UserMappingReader.cs` | XML parser implementation |
-| `src/PPDS.Migration/UserMapping/IUserMappingGenerator.cs` | Generator interface |
-| `src/PPDS.Migration/UserMapping/UserMappingGenerator.cs` | Cross-environment matching |
+| `src/PPDS.Migration/Formats/UserMappingReader.cs` | IUserMappingReader interface and XML parser |
+| `src/PPDS.Migration/UserMapping/UserMappingGenerator.cs` | IUserMappingGenerator interface and cross-environment matching, plus UserMappingResult, UserMappingMatch, UserMappingOptions, UserInfo types |
 | `src/PPDS.Migration/Import/ImportOptions.cs` | UserMappings and StripOwnerFields options |
 | `src/PPDS.Migration/Import/TieredImporter.cs` | RemapEntityReference and IsUserReference methods |
 | `src/PPDS.Cli/Commands/Data/UsersCommand.cs` | CLI user mapping generation |
