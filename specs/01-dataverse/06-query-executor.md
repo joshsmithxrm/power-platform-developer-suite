@@ -136,8 +136,8 @@ No configuration required. Default behaviors:
 | Property | Type | Description |
 |----------|------|-------------|
 | `EntityLogicalName` | string | Primary entity name |
-| `Columns` | List&lt;QueryColumn&gt; | Column metadata |
-| `Records` | List&lt;Dict&lt;string, QueryValue&gt;&gt; | Record data |
+| `Columns` | IReadOnlyList&lt;QueryColumn&gt; | Column metadata |
+| `Records` | IReadOnlyList&lt;IReadOnlyDict&lt;string, QueryValue&gt;&gt; | Record data |
 | `Count` | int | Records in this page |
 | `TotalCount` | int? | Total matching records (if requested) |
 | `MoreRecords` | bool | More pages available |
@@ -146,6 +146,25 @@ No configuration required. Default behaviors:
 | `ExecutionTimeMs` | long | Query execution time |
 | `ExecutedFetchXml` | string? | Actual FetchXML executed |
 | `IsAggregate` | bool | Whether query uses aggregation |
+
+### Static Factory
+
+- `QueryResult.Empty(entityLogicalName)` - Creates empty result with no records
+
+## QueryColumn Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `LogicalName` | string | Attribute logical name |
+| `Alias` | string? | Column alias in query |
+| `DisplayName` | string? | Display name from metadata (if enriched) |
+| `DataType` | QueryColumnType | Column data type |
+| `LinkedEntityAlias` | string? | Alias of linked entity |
+| `LinkedEntityName` | string? | Logical name of linked entity |
+| `IsAggregate` | bool | Whether column uses aggregate |
+| `AggregateFunction` | string? | Aggregate function (count, sum, etc.) |
+| `EffectiveName` | string | Alias if set, else LogicalName (computed) |
+| `QualifiedName` | string | LinkedEntityAlias.LogicalName or LogicalName (computed) |
 
 ## QueryValue Properties
 
