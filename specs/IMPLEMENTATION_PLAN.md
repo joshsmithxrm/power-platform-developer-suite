@@ -16,7 +16,7 @@ PPDS already has a comprehensive `specs/IMPLEMENTATION_PLAN.md` with 11 systems 
 | 2 | connection-pool.md | src/PPDS.Dataverse/Pooling/ | P1 | Complete |
 | 3 | authentication.md | src/PPDS.Auth/ | P1 | Complete |
 | 4 | cli.md | src/PPDS.Cli/Commands/ | P2 | Complete |
-| 5 | application-services.md | src/PPDS.Cli/Services/ | P2 | Pending |
+| 5 | application-services.md | src/PPDS.Cli/Services/ | P2 | Complete |
 | 6 | migration.md | src/PPDS.Migration/ | P3 | Pending |
 | 7 | tui.md | src/PPDS.Cli/Tui/ | P3 | Pending |
 | 8 | error-handling.md | src/PPDS.Cli/Infrastructure/ | P4 | Pending |
