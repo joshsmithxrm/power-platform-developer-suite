@@ -20,7 +20,7 @@ PPDS already has a comprehensive `specs/IMPLEMENTATION_PLAN.md` with 11 systems 
 | 6 | migration.md | src/PPDS.Migration/ | P3 | Complete |
 | 7 | tui.md | src/PPDS.Cli/Tui/ | P3 | Complete |
 | 8 | error-handling.md | src/PPDS.Cli/Infrastructure/ | P4 | Complete |
-| 9 | mcp.md | src/PPDS.Mcp/ | P4 | Pending |
+| 9 | mcp.md | src/PPDS.Mcp/ | P4 | Complete |
 | 10 | testing.md | tests/ | P5 | Pending |
 | 11 | plugins.md | src/PPDS.Plugins/ | P5 | Pending |
 
