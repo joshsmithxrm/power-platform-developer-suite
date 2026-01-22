@@ -432,6 +432,87 @@ services.AddTransient<IMyService, MyService>();
 
 ## Extension Points
 
+### Service Implementation Pattern
+
+Full service implementation with progress reporting and structured exceptions:
+
+```csharp
+public interface IDataExportService
+{
+    Task<ExportResult> ExportAsync(
+        ExportOptions options,
+        IProgressReporter? progress = null,
+        CancellationToken cancellationToken = default);
+}
+
+public class DataExportService : IDataExportService
+{
+    private readonly IDataverseConnectionPool _connectionPool;
+    private readonly ILogger<DataExportService> _logger;
+
+    public DataExportService(IDataverseConnectionPool connectionPool, ILogger<DataExportService> logger)
+    {
+        _connectionPool = connectionPool;
+        _logger = logger;
+    }
+
+    public async Task<ExportResult> ExportAsync(
+        ExportOptions options, IProgressReporter? progress = null, CancellationToken cancellationToken = default)
+    {
+        // Validate inputs, throw structured exceptions
+        if (string.IsNullOrWhiteSpace(options.EntityName))
+        {
+            throw new PpdsValidationException(
+                ErrorCodes.Validation.MissingRequired,
+                "Entity name is required",
+                new[] { new ValidationError("entityName", "Entity name cannot be empty") });
+        }
+
+        try
+        {
+            progress?.Report(new ProgressUpdate("Connecting to Dataverse..."));
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken);
+
+            progress?.Report(new ProgressUpdate("Fetching records..."));
+            var records = await FetchRecordsAsync(client, options, cancellationToken);
+
+            var totalRecords = records.Count;
+            var exported = 0;
+
+            foreach (var batch in records.Chunk(1000))
+            {
+                await WriteBatchAsync(batch, options.OutputPath, cancellationToken);
+                exported += batch.Length;
+                progress?.Report(new ProgressUpdate(
+                    $"Exported {exported}/{totalRecords} records",
+                    percentage: (double)exported / totalRecords * 100));
+            }
+
+            return new ExportResult { Success = true, RecordCount = totalRecords, OutputPath = options.OutputPath };
+        }
+        catch (FaultException<OrganizationServiceFault> ex) when (IsNotFoundError(ex))
+        {
+            throw new PpdsNotFoundException("Entity", options.EntityName,
+                $"Entity '{options.EntityName}' not found in environment");
+        }
+        catch (FaultException<OrganizationServiceFault> ex) when (IsAuthError(ex))
+        {
+            throw new PpdsAuthException(ErrorCodes.Auth.TokenExpired,
+                "Authentication expired during export. Please re-authenticate.", ex)
+            {
+                RequiresReauthentication = true
+            };
+        }
+    }
+}
+```
+
+**Anti-patterns to avoid:**
+- Business logic in UI (`ExportCommand.Execute()` calling Dataverse directly)
+- Raw exceptions without ErrorCode (`throw new Exception("Export failed")`)
+- Console.WriteLine in services (use `IProgressReporter`)
+- Catching exceptions silently (`catch (Exception) { return null; }`)
+
 ### Adding a New Application Service
 
 1. **Define interface** in `src/PPDS.Cli/Services/{Domain}/`:

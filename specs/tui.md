@@ -397,6 +397,130 @@ var session = new InteractiveSession(profile, store, mockFactory);
 
 ## Extension Points
 
+### Loading Spinner Pattern
+
+Use `TuiSpinner` for animated feedback during async operations expected to take more than ~500ms:
+
+```csharp
+var spinner = new TuiSpinner
+{
+    X = 1,
+    Y = Pos.Bottom(listFrame),
+    Width = Dim.Fill() - 2,
+    Height = 1
+};
+Add(spinner);
+
+// Start with a message
+spinner.Start("Loading environments...");
+
+// ... async operation ...
+
+// Stop and hide when done
+spinner.Stop();
+
+// Or stop with a final message
+spinner.StopWithMessage("Found 5 environments");
+```
+
+**Animation frames:** `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏` (100ms intervals)
+
+**Integration with IOperationProgress:**
+```csharp
+var progress = new TuiOperationProgress(progressBar: null, statusLabel: null, spinner: spinner);
+progress.ReportStatus("Processing...");  // Animates the spinner
+progress.ReportComplete("Done!");        // Stops spinner and shows final message
+```
+
+**Best practices:**
+- Always stop the spinner (use try/finally)
+- Use action verbs: "Loading...", "Connecting...", "Executing..."
+- Handle errors by stopping spinner and showing error state
+- Avoid nested spinners (one per visible area)
+
+### TUI Panel Pattern
+
+Full-screen panel with layout, keyboard navigation, and async updates:
+
+```csharp
+public class DataExplorerPanel : View
+{
+    private readonly InteractiveSession _session;
+    private readonly IDataExportService _exportService;
+
+    public DataExplorerPanel(InteractiveSession session)
+    {
+        _session = session;
+        _exportService = session.Services.GetRequiredService<IDataExportService>();
+
+        // Fill entire container
+        Width = Dim.Fill();
+        Height = Dim.Fill();
+        ColorScheme = TuiColorPalette.Default;
+
+        // Fixed-height input area
+        _queryFrame = new FrameView("Query (Ctrl+Enter to execute)")
+        {
+            X = 0, Y = 0, Width = Dim.Fill(), Height = 6
+        };
+
+        // Results fill remaining space
+        _resultsTable = new TableView
+        {
+            X = 0, Y = Pos.Bottom(_queryFrame),
+            Width = Dim.Fill(), Height = Dim.Fill() - 2
+        };
+
+        // Status bar anchored to bottom
+        _statusLabel = new Label("Ready...")
+        {
+            X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1,
+            ColorScheme = TuiColorPalette.StatusBar_Default
+        };
+
+        Add(_queryFrame, _resultsTable, _statusLabel);
+    }
+
+    private async Task ExecuteQueryAsync()
+    {
+        // Update status immediately
+        Application.MainLoop?.Invoke(() =>
+        {
+            _statusLabel.Text = "Executing query...";
+            _statusLabel.ColorScheme = TuiColorPalette.StatusBar_Working;
+        });
+
+        try
+        {
+            // Logic in service, not in TUI
+            var result = await _exportService.QueryAsync(query, CancellationToken.None);
+
+            // Update UI on main thread
+            Application.MainLoop?.Invoke(() =>
+            {
+                _resultsTable.Table = ConvertToDataTable(result.Records);
+                _statusLabel.Text = $"{result.Records.Count} records returned";
+                _statusLabel.ColorScheme = TuiColorPalette.StatusBar_Success;
+            });
+        }
+        catch (PpdsException ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Error: {ex.UserMessage}";
+                _statusLabel.ColorScheme = TuiColorPalette.StatusBar_Error;
+            });
+        }
+    }
+}
+```
+
+**Anti-patterns to avoid:**
+- Absolute positioning (`_resultsTable.X = 10`) - doesn't adapt to resize
+- Updating UI from background thread (must use `MainLoop.Invoke`)
+- Business logic in TUI (use services)
+- Hardcoded colors (use `TuiColorPalette`)
+
 ### Adding a New Screen
 
 1. **Create screen class**: Implement `ITuiScreen` in `src/PPDS.Cli/Tui/Screens/`

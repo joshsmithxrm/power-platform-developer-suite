@@ -365,6 +365,155 @@ Pattern: `ppds-{os}-{arch}[.exe]`
 - Positive: Binaries always attached before visible, predictable extension downloads
 - Negative: CLI release differs from library packages, draft visible in UI
 
+### Why Published Content Default?
+
+**Context:** Several Dataverse entities support dual-state content (published vs unpublished/draft): web resources, forms, views, sitemap, ribbons. When querying these entities, the CLI must decide which version to return by default.
+
+**Decision:** Default to published content with `--unpublished` flag to access draft/pending changes.
+
+```bash
+# Default: published content
+ppds webresources get myfile.js
+
+# Explicit: unpublished/draft content
+ppds webresources get myfile.js --unpublished
+```
+
+**Rationale:**
+- Principle of least surprise ("show me what's live")
+- Scripting safety (automation operates on stable, published content)
+- Explicit intent (developers add flag when working on drafts)
+- Consistency with data queries (published schema)
+
+**Alternatives considered:**
+- Default to unpublished: Rejected—unsafe for scripting, violates least surprise
+- Force explicit choice (no default): Rejected—adds friction for common case
+
+**Consequences:**
+- Positive: Safe default for automation, clear semantic meaning, matches user expectations
+- Negative: Must remember `--unpublished` when working on drafts
+
+### Why PAC-Compatible Deployment Settings?
+
+**Context:** CLI generates deployment settings files for solution deployment. Two formats exist in the Power Platform ecosystem: Power Platform Build Tools format (simple JSON with EnvironmentVariables/ConnectionReferences arrays) and ALM Accelerator format (complex multi-environment UserSettings).
+
+**Decision:** Use PAC-compatible format (EnvironmentVariables + ConnectionReferences arrays).
+
+```json
+{
+  "EnvironmentVariables": [
+    { "SchemaName": "prefix_VariableName", "Value": "value" }
+  ],
+  "ConnectionReferences": [
+    {
+      "LogicalName": "prefix_connectionref",
+      "ConnectionId": "connection-guid",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_connector"
+    }
+  ]
+}
+```
+
+**Sync behavior:**
+- Deterministic sorting by `SchemaName`/`LogicalName` (StringComparison.Ordinal)
+- **Value preservation**: Never overwrite existing file values with environment values
+- Return counts: `{ added: N, removed: N, preserved: N }`
+
+**CLI commands:**
+```bash
+ppds deployment-settings sync --solution MyApp --file config/prod.deploymentsettings.json
+ppds deployment-settings generate --solution MyApp --output config/template.deploymentsettings.json
+ppds deployment-settings validate --file config/prod.deploymentsettings.json --solution MyApp
+```
+
+**Alternatives considered:**
+- ALM Accelerator format: Rejected—requires full pipeline template adoption
+- Custom PPDS format: Rejected—no ecosystem compatibility
+
+**Consequences:**
+- Positive: Direct `pac solution import --settings-file` compatibility, git-friendly diffs
+- Negative: Not compatible with ALM Accelerator pipelines, separate files per environment
+
+### Why Hybrid Filter Approach?
+
+**Context:** `ppds plugintraces list` needs to filter across 25 fields with 11 operators. Full flag expansion (25+ flags with operator suffixes) would be unwieldy. Conversely, requiring a filter file for every query creates friction for simple cases.
+
+**Decision:** Three-tier filtering approach:
+
+1. **Inline flags** for 10 common filters:
+   | Flag | Field | Operator |
+   |------|-------|----------|
+   | `--plugin` | typename | contains |
+   | `--entity` | primaryentity | eq |
+   | `--message` | messagename | eq |
+   | `--mode` | mode | eq |
+   | `--since` | createdon | ge |
+   | `--until` | createdon | le |
+   | `--min-duration` | performanceexecutionduration | gt |
+   | `--correlation` | correlationid | eq |
+   | `--depth` | depth | eq |
+   | `--has-exception` | exceptiondetails | notnull |
+
+2. **Quick filter shortcuts** for 8 common scenarios:
+   `--exceptions`, `--success`, `--last-hour`, `--last-24h`, `--today`, `--async-only`, `--sync-only`, `--recursive`
+
+3. **Filter file** for complex multi-condition queries with full operator support
+
+**Combining behavior:** All filter sources combine with AND logic. Filter file takes precedence.
+
+```bash
+ppds plugintraces list --plugin MyPlugin --exceptions --filter-file extra.json
+# => typename contains 'MyPlugin' AND exceptiondetails IS NOT NULL AND <file conditions>
+```
+
+**Alternatives considered:**
+- All flags for all fields: Rejected—25+ flags unusable
+- Filter file only: Rejected—friction for simple cases
+- Query string syntax: Rejected—shell escaping issues
+
+**Consequences:**
+- Positive: Simple queries stay simple, complex queries possible, consistent with extension UX
+- Negative: Two learning curves (flags + file format)
+
+### Why Elevated Truncate Confirmation?
+
+**Context:** Users need to delete all records from entities for dev/test scenarios (resetting environments, cleaning test data). This is more dangerous than regular delete operations.
+
+**Decision:** `ppds data truncate` with elevated safeguards that exceed standard `delete` command:
+
+```bash
+ppds data truncate --entity <logical_name> [options]
+```
+
+**Elevated confirmation:**
+```
+Connected as: admin@contoso.onmicrosoft.com
+Environment: Andromeda Dev (https://andromeda.crm.dynamics.com)
+
+Entity: account
+Records to delete: 43,710
+
+WARNING: This will permanently delete ALL 43,710 records from 'account'.
+         This operation cannot be undone.
+
+Type 'TRUNCATE account 43710' to confirm, or Ctrl+C to cancel:
+```
+
+**Key safeguards:**
+- ALL CAPS "TRUNCATE"—visual distinction, harder to type accidentally
+- Entity name + count included—confirms WHAT and HOW MUCH
+- Environment context always displayed—prevents wrong-environment accidents
+- `--force` required for non-interactive mode
+- Denied in Claude Code settings to prevent AI-initiated truncations
+
+**Alternatives considered:**
+- Hidden command (require env var): Rejected—security through obscurity doesn't work
+- Same confirmation as delete: Rejected—truncate is more dangerous, needs stronger signal
+
+**Consequences:**
+- Positive: Conscious choice before mass deletion, visible command, environment awareness
+- Negative: Users can still ignore warnings (acceptable for admins)
+
 ---
 
 ## Extension Points
@@ -402,6 +551,100 @@ Pattern: `ppds-{os}-{arch}[.exe]`
    rootCommand.Subcommands.Add(MyCommandGroup.Create());
    ```
 
+### Command Pattern Example
+
+Full command implementation with output routing, exception mapping, and exit codes:
+
+```csharp
+public static class ExportCommand
+{
+    public static Command Create()
+    {
+        var entityOption = new Option<string>("--entity", "Entity logical name") { IsRequired = true };
+        var outputOption = new Option<string>("--output", "Output file path") { IsRequired = true };
+        var formatOption = new Option<ExportFormat>("--format", () => ExportFormat.Json);
+
+        var command = new Command("export", "Export entity data to file")
+        {
+            entityOption, outputOption, formatOption
+        };
+
+        GlobalOptions.AddToCommand(command);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var entity = parseResult.GetValue(entityOption)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var format = parseResult.GetValue(formatOption);
+            var globalOptions = GlobalOptions.GetValues(parseResult);
+
+            return await ExecuteAsync(entity, output, format, globalOptions, cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static async Task<int> ExecuteAsync(
+        string entity, string outputPath, ExportFormat format,
+        GlobalOptions options, CancellationToken cancellationToken)
+    {
+        var writer = ServiceFactory.CreateOutputWriter(options);
+
+        try
+        {
+            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                options.Profile, options.Environment, options.Verbose, options.Debug,
+                ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+
+            // Status messages to stderr (not stdout)
+            if (!options.IsJsonMode)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+            }
+
+            var exportService = serviceProvider.GetRequiredService<IDataExportService>();
+            var progress = options.IsJsonMode ? null : new ConsoleProgressReporter();
+
+            var result = await exportService.ExportAsync(
+                new ExportOptions { EntityName = entity, OutputPath = outputPath, Format = format },
+                progress, cancellationToken);
+
+            // Output based on mode
+            if (options.IsJsonMode)
+                writer.WriteSuccess(new { result.RecordCount, result.OutputPath });
+            else
+                Console.WriteLine($"Exported {result.RecordCount:N0} records to {result.OutputPath}");
+
+            return ExitCodes.Success;
+        }
+        catch (PpdsValidationException ex)
+        {
+            writer.WriteError(new StructuredError(ex.ErrorCode, ex.UserMessage));
+            return ExitCodes.ValidationError;
+        }
+        catch (PpdsAuthException ex)
+        {
+            writer.WriteError(new StructuredError(ex.ErrorCode, ex.UserMessage));
+            if (!options.IsJsonMode)
+                Console.Error.WriteLine("Run 'ppds auth create' to re-authenticate.");
+            return ExitCodes.AuthError;
+        }
+        catch (Exception ex)
+        {
+            var error = ExceptionMapper.Map(ex, context: $"exporting {entity}", debug: options.Debug);
+            writer.WriteError(error);
+            return ExceptionMapper.ToExitCode(ex);
+        }
+    }
+}
+```
+
+**Anti-patterns to avoid:**
+- Data to stderr (`Console.Error.WriteLine($"Found {count} records")`) - breaks piping
+- Status to stdout (`Console.WriteLine("Connecting...")`) - pollutes data stream
+- No exit codes (`catch (Exception) { return 0; }`) - caller can't detect failure
+
 ---
 
 ## Configuration
@@ -431,6 +674,52 @@ Pattern: `ppds-{os}-{arch}[.exe]`
   "timestamp": "2026-01-21T12:00:00Z"
 }
 ```
+
+### Console Output Standards
+
+**Section Headers:** Use `[brackets]` for section headers in normal output:
+```
+[Environments]
+
+  PPDS Demo - Dev *
+      Type: Developer
+      URL: https://orgcabef92d.crm.dynamics.com
+```
+
+Do NOT use `======` (dated), `******` (decorative), or box-drawing characters. For error messages, use plain headers without brackets.
+
+**Card vs Table Format:**
+
+| Use Cards When | Use Tables When |
+|----------------|-----------------|
+| Items have 4+ fields | Fixed columns across items |
+| Variable/optional fields | Scanning/comparing matters |
+| Readability > density | Grep-parseability important |
+
+**Elapsed Timestamp Format:** `[+hh:mm:ss.fff]` prefix for progress messages:
+```
+[+00:00:02.456] [Export] account: 1,234/5,000 (25%) @ 523.4 rec/s
+```
+
+**Progress Format:**
+```
+[+elapsed] [Phase] entity(tier): current/total (pct%) @ throughput rec/s [success/failure]
+```
+
+**Completion Format:**
+```
+Export succeeded.
+    42,366 record(s) in 00:00:08 (4,774.5 rec/s)
+    0 Error(s)
+```
+
+**Color Usage:**
+| Color | Usage |
+|-------|-------|
+| Green | Success messages |
+| Yellow | Warning, partial success |
+| Red | Error messages, error counts |
+| Cyan | Suggestions, hints |
 
 ---
 

@@ -2,6 +2,8 @@
 
 This directory contains Architecture Decision Records for PPDS.
 
+> **Note:** Most historical ADRs have been absorbed into specification documents in `specs/`. Each spec includes a "Design Decisions" section explaining the rationale behind key choices. Only standalone workflow decisions (like branching strategy) remain as ADRs.
+
 ## What is an ADR?
 
 An ADR captures a significant architectural decision along with its context and consequences. ADRs help future maintainers understand *why* decisions were made, not just *what* was decided.

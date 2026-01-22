@@ -360,6 +360,45 @@ var response = await _pool.ExecuteAsync(new RetrieveRequest { ... });
 - Positive: Automatic fairness; simple implementation; .NET-native efficiency
 - Negative: Coarse-grained (can't prioritize specific consumers)
 
+### Why Throttle-Aware Selection Strategy?
+
+**Context:** When Dataverse returns a 429 (Too Many Requests) with a `Retry-After` header, the SDK's built-in retry logic waits and retries on the same connection. This wastes time when other connections have available quota.
+
+**Decision:** `ThrottleAware` as default selection strategy. When a connection receives a throttle response:
+1. Record throttle state with expiry time via `IThrottleTracker`
+2. Route subsequent requests to non-throttled connections
+3. Auto-clear throttle state when cooldown expires
+
+**Available strategies:**
+
+| Strategy | Behavior | Use Case |
+|----------|----------|----------|
+| `RoundRobin` | Simple rotation | Even distribution, no throttle awareness |
+| `LeastConnections` | Fewest active clients | Balance concurrent load |
+| `ThrottleAware` | Avoid throttled + round-robin fallback | **Default**. High-throughput with multiple connections |
+
+**Flow diagram:**
+```
+Request 1 → AppUser1 (available) ✓
+Request 2 → AppUser2 (available) ✓
+Request 3 → AppUser3 (available) ✓
+Request 4 → AppUser1 → 429 Throttled (5 min cooldown)
+            ThrottleTracker.Record("AppUser1", 5 min)
+Request 5 → AppUser2 (available, skip AppUser1) ✓
+Request 6 → AppUser3 (available, skip AppUser1) ✓
+...
+[5 minutes later]
+Request N → AppUser1 (cooldown expired, available again) ✓
+```
+
+**Alternatives considered:**
+- Always use SDK retry: Rejected—wastes time on throttled connections when others available
+- Complex token bucket rate limiting: Rejected—more complex, DOP-based approach simpler
+
+**Consequences:**
+- Positive: Maximizes throughput by avoiding throttled connections; automatic recovery; transparent to application code
+- Negative: Requires tracking state per connection (minimal memory overhead)
+
 ---
 
 ## Configuration
@@ -380,6 +419,63 @@ var response = await _pool.ExecuteAsync(new RetrieveRequest { ... });
 | `MaxConnectionRetries` | int | 2 | Auth/connection failure retries |
 
 Configuration defined in [`ConnectionPoolOptions.cs:8-140`](../src/PPDS.Dataverse/Pooling/ConnectionPoolOptions.cs#L8-L140).
+
+---
+
+## Extension Points
+
+### Connection Pool Usage Pattern
+
+Proper pool usage with client acquisition inside parallel loops:
+
+```csharp
+public async Task<List<Entity>> FetchEntitiesParallelAsync(
+    IDataverseConnectionPool pool,
+    IReadOnlyList<string> entityLogicalNames,
+    CancellationToken cancellationToken)
+{
+    var results = new ConcurrentBag<Entity>();
+
+    // Get parallelism from pool DOP
+    var parallelism = pool.GetTotalRecommendedParallelism();
+
+    await Parallel.ForEachAsync(
+        entityLogicalNames,
+        new ParallelOptions
+        {
+            MaxDegreeOfParallelism = parallelism,
+            CancellationToken = cancellationToken
+        },
+        async (entityName, ct) =>
+        {
+            // CRITICAL: Acquire client INSIDE the parallel loop
+            await using var client = await pool.GetClientAsync(ct);
+
+            var query = new QueryExpression(entityName) { ColumnSet = new ColumnSet(true) };
+            var entities = await client.RetrieveMultipleAsync(query, ct);
+
+            foreach (var entity in entities.Entities)
+                results.Add(entity);
+        });
+
+    return results.ToList();
+}
+```
+
+**When to use Pool vs Clone:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Write operations (Create, Update, Delete) | Use Pool |
+| Bulk operations (CreateMultiple, UpdateMultiple) | Use Pool |
+| Mixed read/write workloads | Use Pool |
+| Many small parallel reads | Use Clone |
+
+**Anti-patterns to avoid:**
+- Hardcoded parallelism (`var parallelism = 4` or `Environment.ProcessorCount`)
+- Client outside loop (holds slot entire time, serializes requests)
+- Never releasing clients (pool slot never returned)
+- Ignoring cancellation token
 
 ---
 

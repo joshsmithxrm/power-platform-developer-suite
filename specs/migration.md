@@ -401,6 +401,65 @@ The error report ([`ErrorReport.cs:10-243`](../src/PPDS.Migration/Progress/Error
 
 ## Extension Points
 
+### Bulk Operations Pattern
+
+Parallel bulk operations with pool-managed concurrency:
+
+```csharp
+public async Task<BulkOperationResult> CreateRecordsAsync(
+    string entityLogicalName,
+    IReadOnlyList<Entity> entities,
+    IProgressReporter? progress = null,
+    CancellationToken cancellationToken = default)
+{
+    // Get parallelism from pool, not hardcoded
+    var parallelism = _connectionPool.GetTotalRecommendedParallelism();
+    var batches = entities.Chunk(1000).ToList();
+
+    var successCount = 0;
+    var failedRecords = new ConcurrentBag<FailedRecord>();
+
+    await Parallel.ForEachAsync(
+        batches,
+        new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
+        async (batch, ct) =>
+        {
+            // Get client INSIDE the parallel loop
+            await using var client = await _connectionPool.GetClientAsync(ct);
+
+            var request = new CreateMultipleRequest
+            {
+                Targets = new EntityCollection(batch.ToList())
+            };
+
+            var response = (CreateMultipleResponse)await client.ExecuteAsync(request, ct);
+
+            // Handle partial failures - CreateMultiple can succeed partially
+            if (response.Responses != null)
+            {
+                foreach (var item in response.Responses)
+                {
+                    if (item.Fault != null)
+                        failedRecords.Add(new FailedRecord(batch[item.RequestIndex], item.Fault));
+                    else
+                        Interlocked.Increment(ref successCount);
+                }
+            }
+            else
+            {
+                Interlocked.Add(ref successCount, batch.Count());
+            }
+        });
+
+    return new BulkOperationResult { SuccessCount = successCount, FailedRecords = failedRecords.ToList() };
+}
+```
+
+**Error handling strategies:**
+- Throttle (429): Wait and retry (pool handles automatically)
+- Auth error: Limited retries, may need re-authentication
+- Deadlock: Retry with backoff
+
 ### Adding a New Import Phase Processor
 
 1. **Implement IImportPhaseProcessor** ([`IImportPhaseProcessor.cs`](../src/PPDS.Migration/Import/IImportPhaseProcessor.cs)):

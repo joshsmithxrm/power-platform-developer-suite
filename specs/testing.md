@@ -395,6 +395,42 @@ public async Task Auth_WithClientSecret_Succeeds()
 
 ---
 
+## Coverage Targets
+
+### Package Coverage
+
+| Package | Unit Target | Current | Status |
+|---------|-------------|---------|--------|
+| **PPDS.Plugins** | 95% | ~95% | ✅ Met |
+| **PPDS.Dataverse** | 60% | ~65% | ✅ Met |
+| **PPDS.Cli** | 60% | ~45% | ⏳ Gap |
+| **PPDS.Auth** | 70% | ~65% | ✅ Near |
+| **PPDS.Migration** | 50% | ~55% | ✅ Met |
+| **Overall** | 60% | ~58% | ⏳ Near |
+
+### Test Count Summary
+
+| Test Project | Test Count | Scope |
+|--------------|------------|-------|
+| PPDS.Plugins.Tests | 77 | Attributes, enums |
+| PPDS.Dataverse.Tests | 351 | Client, pooling, bulk operations |
+| PPDS.Dataverse.IntegrationTests | ~50 | FakeXrmEasy mocked operations |
+| PPDS.Cli.Tests | 210 | Command structure, parsing |
+| PPDS.Auth.Tests | 282 | Profiles, credentials, discovery |
+| PPDS.Migration.Tests | 200 | Models, formats, analysis |
+| PPDS.LiveTests | ~40 + 27 CLI | Live Dataverse + CLI E2E |
+
+### Measurement
+
+Coverage collected using `coverlet.collector` via `dotnet test --collect:"XPlat Code Coverage"` and reported to Codecov. Merged from net8.0, net9.0, net10.0 test runs.
+
+### Future Gates
+
+- Patch coverage enforcement (80% for new code)
+- Project-level coverage gates after baseline improvement
+
+---
+
 ## Extension Points
 
 ### Adding a New Test Category
