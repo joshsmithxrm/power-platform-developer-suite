@@ -52,7 +52,7 @@
     - Priority: P2
     - Key interfaces: IQueryExecutor, ISqlQueryService, IQueryHistoryService
 
-- [ ] **7. Generate spec: dataverse-services.md** <!-- id: spec-dv-svc -->
+- [x] **7. Generate spec: dataverse-services.md** <!-- id: spec-dv-svc -->
     - Source: src/PPDS.Dataverse/Services/, Metadata/
     - Priority: P2
     - Key interfaces: ISolutionService, IPluginTraceService, IFlowService, IRoleService, IUserService, +4 more
