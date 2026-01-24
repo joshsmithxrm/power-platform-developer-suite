@@ -27,7 +27,7 @@
     - Priority: P0 (Blocking - all others depend on this)
     - Key interfaces: IOperationProgress, IOutputWriter, PpdsException, ErrorCodes
 
-- [ ] **2. Generate spec: connection-pooling.md** <!-- id: spec-pool -->
+- [x] **2. Generate spec: connection-pooling.md** <!-- id: spec-pool -->
     - Source: src/PPDS.Dataverse/Pooling/, Resilience/
     - Priority: P0 (Core infrastructure)
     - Key interfaces: IDataverseConnectionPool, IPooledClient, IConnectionSource, IThrottleTracker
