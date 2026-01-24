@@ -67,7 +67,7 @@
     - Priority: P2
     - Key interfaces: ITuiScreen, ITuiThemeService, ITuiErrorService, ITuiStateCapture
 
-- [ ] **10. Generate spec: mcp.md** <!-- id: spec-mcp -->
+- [x] **10. Generate spec: mcp.md** <!-- id: spec-mcp -->
     - Source: src/PPDS.Mcp/
     - Priority: P2
     - Key interfaces: IMcpConnectionPoolManager, tool registration patterns
