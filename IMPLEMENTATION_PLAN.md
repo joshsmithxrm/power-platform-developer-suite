@@ -47,7 +47,7 @@
     - Priority: P1
     - Key interfaces: IImporter, IExporter, IDependencyGraphBuilder, IExecutionPlanBuilder, CMT format interfaces
 
-- [ ] **6. Generate spec: query.md** <!-- id: spec-query -->
+- [x] **6. Generate spec: query.md** <!-- id: spec-query -->
     - Source: src/PPDS.Dataverse/Sql/, Query/; src/PPDS.Cli/Services/Query/, History/
     - Priority: P2
     - Key interfaces: IQueryExecutor, ISqlQueryService, IQueryHistoryService
