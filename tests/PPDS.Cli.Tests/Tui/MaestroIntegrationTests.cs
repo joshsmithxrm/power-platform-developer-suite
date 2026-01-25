@@ -9,6 +9,7 @@ namespace PPDS.Cli.Tests.Tui;
 public class MaestroIntegrationTests
 {
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task VerifyMaestroInjection()
     {
         // Setup
