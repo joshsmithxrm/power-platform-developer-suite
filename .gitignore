@@ -76,3 +76,5 @@ states.json
 
 # Gemini AI config (personal)
 .gemini/
+
+*.log
