@@ -1,0 +1,24 @@
+Test run for C:\VS\ppdsw\ppds\tests\PPDS.Cli.Tests\bin\Debug\net9.0\PPDS.Cli.Tests.dll (.NETCoreApp,Version=v9.0)
+VSTest version 18.0.1 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+  Failed PPDS.Cli.Tests.Tui.MaestroIntegrationTests.VerifyMaestroInjection [8 ms]
+  Error Message:
+   System.InvalidOperationException : Unable to initialize the console. This can happen if the console is already in use by another process or in unit tests.
+---- System.InvalidOperationException : The Windows Console output window is not available.
+-------- System.ComponentModel.Win32Exception : The handle is invalid.
+  Stack Trace:
+     at Terminal.Gui.Application.InternalInit(Func`1 topLevelFactory, ConsoleDriver driver, IMainLoopDriver mainLoopDriver, Boolean calledViaRunT)
+   at Terminal.Gui.Application.Init(ConsoleDriver driver, IMainLoopDriver mainLoopDriver)
+   at Maestro.TerminalGui.MaestroApplication.Init() in C:\VS\maestro\src\Maestro.TerminalGui.V1\MaestroApplication.cs:line 50
+   at PPDS.Cli.Tests.Tui.MaestroIntegrationTests.VerifyMaestroInjection() in C:\VS\ppdsw\ppds\tests\PPDS.Cli.Tests\Tui\MaestroIntegrationTests.cs:line 16
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Terminal.Gui.WindowsDriver.Init(Action terminalResized)
+   at Terminal.Gui.Application.InternalInit(Func`1 topLevelFactory, ConsoleDriver driver, IMainLoopDriver mainLoopDriver, Boolean calledViaRunT)
+----- Inner Stack Trace -----
+   at Terminal.Gui.WindowsConsole.GetConsoleOutputWindow(Point& position)
+   at Terminal.Gui.WindowsDriver.Init(Action terminalResized)
+
+Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 17 ms - PPDS.Cli.Tests.dll (net9.0)

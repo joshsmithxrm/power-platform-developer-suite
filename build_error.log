@@ -1,0 +1,20 @@
+  Determining projects to restore...
+  Skipping project "C:\VS\ppdsw\maestro\src\Maestro.TerminalGui.V1\Maestro.TerminalGui.V1.csproj" because it was not found.
+  Skipping project "C:\VS\ppdsw\maestro\src\Maestro.TerminalGui.V1\Maestro.TerminalGui.V1.csproj" because it was not found.
+  All projects are up-to-date for restore.
+  PPDS.Dataverse -> C:\VS\ppdsw\ppds\src\PPDS.Dataverse\bin\Debug\net8.0\PPDS.Dataverse.dll
+  PPDS.Auth -> C:\VS\ppdsw\ppds\src\PPDS.Auth\bin\Debug\net8.0\PPDS.Auth.dll
+  PPDS.Migration -> C:\VS\ppdsw\ppds\src\PPDS.Migration\bin\Debug\net8.0\PPDS.Migration.dll
+  PPDS.Plugins -> C:\VS\ppdsw\ppds\src\PPDS.Plugins\bin\Debug\net462\PPDS.Plugins.dll
+  PPDS.Analyzers -> C:\VS\ppdsw\ppds\src\PPDS.Analyzers\bin\Debug\netstandard2.0\PPDS.Analyzers.dll
+C:\Program Files\dotnet\sdk\10.0.102\Microsoft.Common.CurrentVersion.targets(2189,5): warning MSB9008: The referenced project ..\..\..\maestro\src\Maestro.TerminalGui.V1\Maestro.TerminalGui.V1.csproj does not exist. [C:\VS\ppdsw\ppds\src\PPDS.Cli\PPDS.Cli.csproj::TargetFramework=net8.0]
+C:\VS\ppdsw\ppds\src\PPDS.Cli\Tui\PpdsApplication.cs(5,7): error CS0246: The type or namespace name 'Maestro' could not be found (are you missing a using directive or an assembly reference?) [C:\VS\ppdsw\ppds\src\PPDS.Cli\PPDS.Cli.csproj::TargetFramework=net8.0]
+
+Build FAILED.
+
+C:\Program Files\dotnet\sdk\10.0.102\Microsoft.Common.CurrentVersion.targets(2189,5): warning MSB9008: The referenced project ..\..\..\maestro\src\Maestro.TerminalGui.V1\Maestro.TerminalGui.V1.csproj does not exist. [C:\VS\ppdsw\ppds\src\PPDS.Cli\PPDS.Cli.csproj::TargetFramework=net8.0]
+C:\VS\ppdsw\ppds\src\PPDS.Cli\Tui\PpdsApplication.cs(5,7): error CS0246: The type or namespace name 'Maestro' could not be found (are you missing a using directive or an assembly reference?) [C:\VS\ppdsw\ppds\src\PPDS.Cli\PPDS.Cli.csproj::TargetFramework=net8.0]
+    1 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:03.69
