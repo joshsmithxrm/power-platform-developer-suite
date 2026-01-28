@@ -29,33 +29,28 @@ The spec-gen loop itself caused the drift — LLMs summarize by default, capturi
 
 ---
 
-## Phase 2: Verify/Finish Backend Spec Gaps — TODO
+## Phase 2: Verify/Finish Backend Spec Gaps — COMPLETE
 
-Four areas need completion before UI specs can reference them accurately.
+Four areas verified. Three specs updated, one noted as future work.
 
-### 2a. Plugins
-- Verify `IPluginRegistrationService` interface in spec matches code
-- Verify CLI commands section matches actual `ppds plugins` subcommands
-- Check if extract/deploy/diff flows are fully documented
-- Source: `src/PPDS.Cli/Plugins/`, `src/PPDS.Cli/Commands/Plugins/`
+### 2a. Plugins — COMPLETE
+- `plugins.md` expanded from ~15% to 100% coverage of `IPluginRegistrationService` (37 methods)
+- Added 9 Info/Result types, 5 missing CLI commands (register, get, download, update, clean)
+- Expanded config model properties (Deployment, RunAsUser, Enabled, AllTypeNames, ExtensionData)
 
-### 2b. Data Migration
-- Verify export/import service interfaces match code
-- Check if all import modes documented (upsert, create-only, etc.)
-- Verify progress reporting, owner mapping, plugin bypass are covered
-- Source: `src/PPDS.Migration/`
+### 2b. Data Migration — COMPLETE
+- `migration.md` updated with 4 minor gaps: IProgressReporter.Reset(), IPluginStepManager interface, PageSize naming fix, 3 ImportOptions properties
 
-### 2c. Plugin Traces
-- Verify trace filtering, timeline, settings are in spec
-- Check if `IPluginTraceService` interface matches
-- Source: `src/PPDS.Dataverse/Services/` (trace-related), `src/PPDS.Cli/Commands/PluginTraces/`
+### 2c. Plugin Traces — COMPLETE
+- Created new `specs/plugin-traces.md` from scratch (595 lines)
+- IPluginTraceService (12 methods), 9 data types, 6 CLI commands, TimelineHierarchyBuilder
+- Design decisions: depth-based hierarchy, IProgress<int>, FetchXml counts, parallel deletion
 
-### 2d. Web Resources
-- Check if `src/PPDS.Cli/Commands/` has a WebResources directory
-- If code exists: write `specs/web-resources.md` (Status: Draft)
-- If no code: note for future Draft spec
+### 2d. Web Resources — NO ACTION
+- No code exists (only component type 61 references in solution service)
+- Deferred to future work
 
-**Verification discipline:** After updating each spec, count members in spec code blocks vs actual source files. Don't commit until counts match.
+**Verification discipline applied:** All member counts verified against source files before each commit.
 
 ---
 
@@ -79,7 +74,7 @@ This is creative/architectural work — decide which screens to build, what work
 
 | File | Purpose |
 |------|---------|
-| `ppds/specs/*.md` | 12 specs (all accuracy-fixed in Phase 1) |
+| `ppds/specs/*.md` | 13 specs (12 accuracy-fixed in Phase 1, 1 new in Phase 2) |
 | `ppds/specs/SPEC-TEMPLATE.md` | Template for new specs |
 | `ppds/docs/SPEC-LOOP-READY-PLAN.md` | This plan |
 | `vault/Methodology/Specs/ADDENDUM-SPEC-VERIFICATION.md` | Methodology fix for spec-gen accuracy |
@@ -90,6 +85,5 @@ This is creative/architectural work — decide which screens to build, what work
 ## Git State
 
 - Branch: `feat/spec-system-v2`
-- Staged (ppds): 8 modified spec files
-- Staged (vault): 1 new addendum file
-- Neither committed yet
+- Phase 1 committed: 8 spec drift fixes (`5ec0297`)
+- Phase 2 committed: migration.md update (`c77e02b`), plugin-traces.md created (`1390ff4`), plugins.md expanded (`e5e36d2`)
