@@ -194,10 +194,14 @@ public sealed class QueryResult
     public string EntityLogicalName { get; }
     public IReadOnlyList<QueryColumn> Columns { get; }
     public IReadOnlyList<IReadOnlyDictionary<string, QueryValue>> Records { get; }
+    public int Count { get; }
     public bool MoreRecords { get; }
     public string? PagingCookie { get; }
+    public int PageNumber { get; }
     public int? TotalCount { get; }
     public long ExecutionTimeMs { get; }
+    public string? ExecutedFetchXml { get; }  // Transpiled FetchXML for SQL queries
+    public bool IsAggregate { get; }
 }
 ```
 
@@ -274,6 +278,15 @@ public interface IQueryHistoryService
 
     Task<IReadOnlyList<QueryHistoryEntry>> SearchHistoryAsync(
         string environmentUrl, string pattern, int count = 50, CancellationToken ct = default);
+
+    Task<QueryHistoryEntry?> GetEntryByIdAsync(
+        string environmentUrl, string entryId, CancellationToken ct = default);
+
+    Task<bool> DeleteEntryAsync(
+        string environmentUrl, string entryId, CancellationToken ct = default);
+
+    Task ClearHistoryAsync(
+        string environmentUrl, CancellationToken ct = default);
 }
 ```
 

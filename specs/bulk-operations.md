@@ -175,6 +175,9 @@ public class BulkOperationOptions
     public CustomLogicBypass BypassCustomLogic { get; set; } = CustomLogicBypass.None;
     public bool BypassPowerAutomateFlows { get; set; } = false;
     public int? MaxParallelBatches { get; set; } = null;  // Uses pool DOP if null
+    public bool ContinueOnError { get; set; } = true;
+    public bool SuppressDuplicateDetection { get; set; } = false;
+    public string? Tag { get; set; }  // Passed to plugin execution context via SharedVariables
 }
 ```
 

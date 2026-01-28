@@ -155,17 +155,41 @@ Central interface for connection management ([`IDataverseConnectionPool.cs`](../
 ```csharp
 public interface IDataverseConnectionPool : IAsyncDisposable, IDisposable
 {
+    // Client acquisition
     Task<IPooledClient> GetClientAsync(DataverseClientOptions? options = null,
         string? excludeConnectionName = null, CancellationToken ct = default);
+    IPooledClient GetClient(DataverseClientOptions? options = null);
+    Task<IPooledClient?> TryGetClientWithCapacityAsync(CancellationToken ct = default);
+
+    // Execution
     Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken ct);
+
+    // Pool state
+    PoolStatistics Statistics { get; }
+    IReadOnlyList<SeedInitializationResult> InitializationResults { get; }
+    bool IsEnabled { get; }
+    int SourceCount { get; }
+    BatchParallelismCoordinator BatchCoordinator { get; }
+
+    // Capacity
     int GetTotalRecommendedParallelism();
+    int GetLiveSourceDop(string sourceName);
+    int GetActiveConnectionCount(string sourceName);
+
+    // Lifecycle
+    Task EnsureInitializedAsync(CancellationToken ct = default);
+    void InvalidateSeed(string connectionName);
+    void RecordAuthFailure();
+    void RecordConnectionFailure();
 }
 ```
 
 **Key methods:**
 - `GetClientAsync`: Primary acquisition path with throttle-aware routing
-- `ExecuteAsync`: Fire-and-forget execution with automatic throttle retry (never throws service protection errors)
+- `ExecuteAsync`: Automatic throttle retry (never throws service protection errors)
+- `TryGetClientWithCapacityAsync`: Returns null if all sources at capacity
 - `InvalidateSeed`: Force re-authentication when token expires
+- `BatchCoordinator`: Coordinates concurrent bulk operations across pool capacity
 
 ### IPooledClient
 
@@ -174,8 +198,14 @@ Wrapped client that returns to pool on dispose ([`IPooledClient.cs`](../src/PPDS
 ```csharp
 public interface IPooledClient : IDataverseClient, IAsyncDisposable, IDisposable
 {
-    string ConnectionName { get; }  // For throttle tracking
-    void MarkInvalid(string reason); // Dispose instead of return to pool
+    Guid ConnectionId { get; }
+    string ConnectionName { get; }    // Stable key for throttle tracking
+    string DisplayName { get; }       // "{ConnectionName}@{OrgFriendlyName}"
+    DateTime CreatedAt { get; }
+    DateTime LastUsedAt { get; }
+    bool IsInvalid { get; }
+    string? InvalidReason { get; }
+    void MarkInvalid(string reason);  // Dispose instead of return to pool
 }
 ```
 
@@ -187,6 +217,7 @@ Provides seed ServiceClient for cloning ([`IConnectionSource.cs`](../src/PPDS.Da
 public interface IConnectionSource : IDisposable
 {
     string Name { get; }
+    int MaxPoolSize { get; }
     ServiceClient GetSeedClient();
     void InvalidateSeed();
 }
@@ -205,7 +236,15 @@ public interface IThrottleTracker
 {
     void RecordThrottle(string connectionName, TimeSpan retryAfter);
     bool IsThrottled(string connectionName);
+    DateTime? GetThrottleExpiry(string connectionName);
+    void ClearThrottle(string connectionName);
     TimeSpan GetShortestExpiry();
+
+    // Statistics
+    long TotalThrottleEvents { get; }
+    TimeSpan TotalBackoffTime { get; }
+    int ThrottledConnectionCount { get; }
+    IReadOnlyCollection<string> ThrottledConnections { get; }
 }
 ```
 

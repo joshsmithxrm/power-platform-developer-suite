@@ -162,13 +162,25 @@ public interface ICredentialProvider : IDisposable
     string? Identity { get; }
     string? TenantId { get; }
     DateTimeOffset? TokenExpiresAt { get; }
+    string? ObjectId { get; }
+    string? HomeAccountId { get; }
+    string? AccessToken { get; }
+    ClaimsPrincipal? IdTokenClaims { get; }
 
     Task<ServiceClient> CreateServiceClientAsync(
         string environmentUrl,
         CancellationToken cancellationToken = default,
         bool forceInteractive = false);
+
+    Task<CachedTokenInfo?> GetCachedTokenInfoAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default);
 }
 ```
+
+Supporting types:
+- `CachedTokenInfo(DateTimeOffset ExpiresOn, string? Username, bool IsExpired)` — cached token state without triggering auth
+- `CredentialResult` — factory class with `Succeeded()` and `Failed()` static methods
 
 The implementation ([`InteractiveBrowserCredentialProvider.cs:89-156`](../src/PPDS.Auth/Credentials/InteractiveBrowserCredentialProvider.cs#L89-L156)) manages MSAL token acquisition with silent-first strategy.
 
@@ -183,6 +195,8 @@ public interface ISecureCredentialStore
     Task StoreAsync(StoredCredential credential, CancellationToken ct = default);
     Task<StoredCredential?> GetAsync(string applicationId, CancellationToken ct = default);
     Task<bool> RemoveAsync(string applicationId, CancellationToken ct = default);
+    Task ClearAsync(CancellationToken ct = default);
+    Task<bool> ExistsAsync(string applicationId, CancellationToken ct = default);
 }
 ```
 
@@ -195,7 +209,6 @@ Environment discovery for interactive users ([`Discovery/IGlobalDiscoveryService
 ```csharp
 public interface IGlobalDiscoveryService
 {
-    string? CapturedHomeAccountId { get; }
     Task<IReadOnlyList<DiscoveredEnvironment>> DiscoverEnvironmentsAsync(
         CancellationToken cancellationToken = default);
 }
@@ -208,13 +221,45 @@ Profile model with auth configuration ([`Profiles/AuthProfile.cs`](../src/PPDS.A
 ```csharp
 public sealed class AuthProfile
 {
+    // Identity
     public int Index { get; set; }              // 1-based identifier
     public string? Name { get; set; }           // Optional display name
     public AuthMethod AuthMethod { get; set; }  // One of 9 methods
     public CloudEnvironment Cloud { get; set; } // Public, GCC, etc.
     public string? TenantId { get; set; }
+    public string? Username { get; set; }       // For device code / password auth
+    public string? ObjectId { get; set; }       // Entra ID Object ID
+
+    // Application auth
     public string? ApplicationId { get; set; }
+
+    // Certificate auth
+    public string? CertificatePath { get; set; }
+    public string? CertificateThumbprint { get; set; }
+    public string? CertificateStoreName { get; set; }
+    public string? CertificateStoreLocation { get; set; }
+
+    // Environment
     public EnvironmentInfo? Environment { get; set; }
+
+    // Metadata
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    // Token claims
+    public string? Puid { get; set; }
+    public string? HomeAccountId { get; set; }
+    public string? Authority { get; set; }
+
+    // Computed
+    public bool HasEnvironment { get; }
+    public bool HasName { get; }
+    public string DisplayIdentifier { get; }
+    public string IdentityDisplay { get; }
+
+    // Methods
+    public void Validate();
+    public AuthProfile Clone();
 }
 ```
 

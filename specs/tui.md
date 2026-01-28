@@ -178,11 +178,19 @@ Context-aware keyboard shortcut management ([`HotkeyRegistry.cs:46-101`](../src/
 ```csharp
 public interface IHotkeyRegistry
 {
-    IDisposable Register(Key key, HotkeyScope scope, string description, Action handler);
+    IDisposable Register(Key key, HotkeyScope scope, string description, Action handler, object? owner = null);
     bool TryHandle(KeyEvent keyEvent);
     IReadOnlyList<HotkeyBinding> GetAllBindings();
+    IReadOnlyList<HotkeyBinding> GetContextBindings();
+    void SetActiveScreen(object? screen);
+    void SetActiveDialog(object? dialog);
+    void SetMenuBar(MenuBar? menuBar);
+    void SuppressNextAltMenuFocus();
+    object? ActiveScreen { get; }
 }
 ```
+
+`HotkeyBinding` record: `Key`, `Scope`, `Description`, `Handler`, `Owner`.
 
 Three scope layers control hotkey priority:
 - `Global` - Works everywhere; closes dialogs first
@@ -219,7 +227,9 @@ public interface ITuiErrorService
     void ReportError(string message, Exception? ex = null, string? context = null);
     IReadOnlyList<TuiError> RecentErrors { get; }
     TuiError? LatestError { get; }
+    void ClearErrors();
     event Action<TuiError>? ErrorOccurred;
+    string GetLogFilePath();
 }
 ```
 

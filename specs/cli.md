@@ -194,6 +194,8 @@ public interface IOutputWriter
     void WriteSuccess<T>(T data);
     void WriteError(StructuredError error);
     void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results);
+    void WriteMessage(string message);
+    void WriteWarning(string message);
 }
 ```
 

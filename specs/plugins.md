@@ -139,10 +139,14 @@ The implementation ([`PluginStepAttribute.cs:1-122`](../src/PPDS.Plugins/Attribu
 |----------|------|---------|-------------|
 | `Message` | string | Required | SDK message (Create, Update, Delete, etc.) |
 | `EntityLogicalName` | string | Required | Entity logical name ("none" for entity-agnostic) |
+| `SecondaryEntityLogicalName` | string | null | Secondary entity for relationship-based messages (Associate, Disassociate) |
 | `Stage` | PluginStage | Required | Pipeline stage (PreValidation, PreOperation, PostOperation) |
 | `Mode` | PluginMode | Synchronous | Execution mode |
 | `FilteringAttributes` | string | null | Comma-separated attributes that trigger plugin |
 | `ExecutionOrder` | int | 1 | Execution priority (lower = first) |
+| `Name` | string | null | Display name for step (auto-generated if not set: "{Type}: {Message} of {Entity}") |
+| `UnsecureConfiguration` | string | null | Plain-text configuration string passed to plugin constructor |
+| `Description` | string | null | Description of what the step does (stored as Dataverse metadata) |
 | `StepId` | string | null | ID for associating images with specific steps |
 | `AsyncAutoDelete` | bool | false | Auto-delete async job on success |
 

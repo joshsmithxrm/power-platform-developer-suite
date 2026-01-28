@@ -1,6 +1,6 @@
 # Roslyn Analyzers
 
-**Status:** Implemented
+**Status:** Partial (3 of 13 rules implemented)
 **Version:** 1.0
 **Last Updated:** 2026-01-27
 **Code:** [src/PPDS.Analyzers/](../src/PPDS.Analyzers/)
@@ -42,7 +42,8 @@ PPDS.Analyzers is a Roslyn-based static code analysis package that enforces arch
           ▼
 ┌─────────────────────┐
 │  PPDS.Analyzers     │  ← DiagnosticAnalyzer implementations
-│   (13 rules)        │
+│   (3 implemented,   │
+│    10 planned)      │
 └─────────┬───────────┘
           │
           ▼
