@@ -40,7 +40,7 @@
 
   <ItemGroup>
     <!-- Azure Identity for OIDC and DefaultAzureCredential -->
-    <PackageReference Include="Azure.Identity" Version="1.13.*" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
 
     <!-- MSAL for device code and token caching -->
     <PackageReference Include="Microsoft.Identity.Client" Version="4.81.0" />
