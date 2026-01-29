@@ -87,11 +87,33 @@ Four areas verified. Three specs updated, one noted as future work.
 
 ---
 
-## Phase 4: Run the Loop — FUTURE
+## Phase 4: Run the Loop — COMPLETE
 
-1. Generate `IMPLEMENTATION_PLAN.md` from Draft specs using planning prompts
-2. Configure muse.toml for ppds (or ralph-win for quick start)
-3. Run the loop — human gates at design (spec review) and review (PR merge)
+### 4a. Verify Phase 3 Specs — COMPLETE
+All 5 TUI specs verified against SPEC-TEMPLATE.md:
+- Template format: All sections present ✅
+- Backend dependencies: Correctly referenced ✅
+- State capture records: ITuiStateCapture pattern implemented ✅
+
+| Spec | State Records |
+|------|--------------|
+| tui-plugin-traces.md | 4 (screen + 3 dialogs) |
+| tui-plugin-registration.md | 2 (screen + shared dialog) |
+| tui-solutions.md | 1 (screen only) |
+| tui-environment-dashboard.md | 3 (screen + 2 dialogs) |
+| tui-migration.md | 2 (screen + preview dialog) |
+
+### 4b. Generate Implementation Plan — COMPLETE
+Created `docs/UI-IMPLEMENTATION-PLAN.md` with:
+- 31 new files to create
+- 12 state capture records
+- 7 dialog classes (1 shared across screens)
+- Implementation order: ConfirmDestructiveActionDialog → Traces → Registration → Solutions → Dashboard → Migration
+- Service dependencies, hotkeys, menu integration, and tests for each screen
+
+### Next Steps
+1. Configure muse.toml for ppds (or ralph-win for quick start)
+2. Run the loop — human gates at design (spec review) and review (PR merge)
 
 ---
 
@@ -103,10 +125,7 @@ Four areas verified. Three specs updated, one noted as future work.
 | `ppds/specs/tui-*.md` | 5 UI specs (Phase 3) |
 | `ppds/specs/SPEC-TEMPLATE.md` | Template for new specs |
 | `ppds/docs/SPEC-LOOP-READY-PLAN.md` | This plan |
-| `vault/Methodology/Specs/ADDENDUM-SPEC-VERIFICATION.md` | Methodology fix for spec-gen accuracy |
-| `vault/Methodology/Specs/PROMPT-SPEC-BUILD.md` | Existing spec-gen prompt |
-| `vault/Methodology/Specs/PROMPT-PLAN-*.md` | Planning prompts |
-| `vault/Methodology/Specs/PROMPT-BUILD-BUILD.md` | Build loop prompt |
+| `ppds/docs/UI-IMPLEMENTATION-PLAN.md` | Phase 4 implementation plan for ralph/muse |
 
 ## Git State
 
@@ -114,3 +133,4 @@ Four areas verified. Three specs updated, one noted as future work.
 - Phase 1 committed: 8 spec drift fixes (`5ec0297`)
 - Phase 2 committed: migration.md update (`c77e02b`), plugin-traces.md created (`1390ff4`), plugins.md expanded (`e5e36d2`)
 - Phase 3 committed: 5 UI specs (`6012086`..`54eb6ab`)
+- Phase 4: UI-IMPLEMENTATION-PLAN.md created, ready to commit
