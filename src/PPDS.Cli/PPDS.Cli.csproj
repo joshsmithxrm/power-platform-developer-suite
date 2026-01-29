@@ -62,10 +62,10 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
     <PackageReference Include="CsvHelper" Version="33.1.0" />
-    <PackageReference Include="Spectre.Console" Version="0.54.*" />
-    <PackageReference Include="Terminal.Gui" Version="1.19.*" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+    <PackageReference Include="Spectre.Console" Version="0.54.0" />
+    <PackageReference Include="Terminal.Gui" Version="1.19.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
     <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
     <PackageReference Include="StreamJsonRpc" Version="2.22.23" />
     <PackageReference Include="System.CommandLine" Version="2.0.1" />

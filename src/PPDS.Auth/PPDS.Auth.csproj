@@ -40,23 +40,23 @@
 
   <ItemGroup>
     <!-- Azure Identity for OIDC and DefaultAzureCredential -->
-    <PackageReference Include="Azure.Identity" Version="1.13.*" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
 
     <!-- MSAL for device code and token caching -->
     <PackageReference Include="Microsoft.Identity.Client" Version="4.81.0" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.81.0" />
 
     <!-- Dataverse ServiceClient -->
-    <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.*" />
+    <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
 
     <!-- Logging -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.2" />
 
     <!-- JSON serialization -->
-    <PackageReference Include="System.Text.Json" Version="9.0.*" />
+    <PackageReference Include="System.Text.Json" Version="9.0.12" />
 
     <!-- JWT token parsing for extracting claims -->
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.*" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.1" />
 
     <!-- Native OS credential storage (Windows Credential Manager, macOS Keychain, Linux libsecret) -->
     <PackageReference Include="Devlooped.CredentialManager" Version="2.6.1.1" />
