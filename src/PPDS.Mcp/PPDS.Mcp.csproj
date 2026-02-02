@@ -39,7 +39,7 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="0.2.0-preview.3" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
     <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
     <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
