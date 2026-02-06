@@ -30,6 +30,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
     private AuthenticationResult? _cachedResult;
+    private string? _cachedResultUrl;
     private bool _disposed;
 
     /// <inheritdoc />
@@ -212,8 +213,10 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         // For profile creation, skip silent auth and go straight to interactive
         if (!forceInteractive)
         {
-            // Try to get token silently from cache first
-            if (_cachedResult != null && _cachedResult.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+            // Try to get token silently from cache first (must match target URL to avoid scope mismatch)
+            if (_cachedResult != null
+                && _cachedResult.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5)
+                && string.Equals(_cachedResultUrl, environmentUrl, StringComparison.OrdinalIgnoreCase))
             {
                 AuthDebugLog.WriteLine("  Using in-memory cached token (expires " + _cachedResult.ExpiresOn.ToString("HH:mm:ss") + ")");
                 return _cachedResult.AccessToken;
@@ -233,6 +236,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
                         .AcquireTokenSilent(scopes, account)
                         .ExecuteAsync(cancellationToken)
                         .ConfigureAwait(false);
+                    _cachedResultUrl = environmentUrl;
                     AuthDebugLog.WriteLine("  Silent acquisition SUCCEEDED");
                     return _cachedResult.AccessToken;
                 }
@@ -284,6 +288,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
                 .WithPrompt(Microsoft.Identity.Client.Prompt.SelectAccount) // Always show account picker
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
+            _cachedResultUrl = environmentUrl;
         }
         catch (MsalClientException ex) when (ex.ErrorCode == "authentication_canceled")
         {
@@ -331,6 +336,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             })
             .ExecuteAsync(cancellationToken)
             .ConfigureAwait(false);
+        _cachedResultUrl = environmentUrl;
 
         AuthDebugLog.WriteLine($"  Device code authentication succeeded: {_cachedResult.Account.Username}");
         AuthenticationOutput.WriteLine($"Authenticated as: {_cachedResult.Account.Username}");
@@ -373,8 +379,9 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
         // Initialize MSAL client to load persistent cache
         await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
 
-        // Check in-memory cache first
-        if (_cachedResult != null)
+        // Check in-memory cache first (must match target URL)
+        if (_cachedResult != null
+            && string.Equals(_cachedResultUrl, environmentUrl, StringComparison.OrdinalIgnoreCase))
         {
             AuthDebugLog.WriteLine($"  In-memory cache has token expiring at {_cachedResult.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username);
@@ -402,6 +409,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
             // Update in-memory cache
             _cachedResult = result;
+            _cachedResultUrl = environmentUrl;
 
             AuthDebugLog.WriteLine($"  Silent acquisition returned token expiring at {result.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username);
