@@ -78,3 +78,6 @@ states.json
 .gemini/
 
 *.log
+
+# Git worktrees
+.worktrees/
