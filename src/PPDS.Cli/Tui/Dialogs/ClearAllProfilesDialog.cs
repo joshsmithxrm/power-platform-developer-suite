@@ -21,6 +21,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 internal sealed class ClearAllProfilesDialog : TuiDialog, ITuiStateCapture<ClearAllProfilesDialogState>
 {
     private readonly IProfileService _profileService;
+    private readonly ITuiErrorService? _errorService;
     private readonly TextField _confirmationField;
     private readonly Button _clearButton;
     private readonly int _profileCount;
@@ -40,6 +41,7 @@ internal sealed class ClearAllProfilesDialog : TuiDialog, ITuiStateCapture<Clear
         : base("Clear All Profiles", session)
     {
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
+        _errorService = session?.GetErrorService();
         _profileCount = profileCount;
 
         Width = 65;
@@ -171,20 +173,7 @@ internal sealed class ClearAllProfilesDialog : TuiDialog, ITuiStateCapture<Clear
         }
 
         // Perform the clear operation
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = PerformClearAsync().ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    MessageBox.ErrorQuery("Clear Failed",
-                        t.Exception.InnerException?.Message ?? t.Exception.Message,
-                        "OK");
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(PerformClearAsync(), "ClearAllProfiles");
     }
 
     private async Task PerformClearAsync()

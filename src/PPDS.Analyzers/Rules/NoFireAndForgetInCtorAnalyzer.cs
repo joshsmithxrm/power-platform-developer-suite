@@ -67,6 +67,10 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
             if (HasContinueWithErrorHandling(invocation))
                 continue;
 
+            // Skip if passed as argument to FireAndForget (centralized error handler)
+            if (IsArgumentToFireAndForget(invocation))
+                continue;
+
             var methodName = GetMethodName(invocation);
 
             var diagnostic = Diagnostic.Create(
@@ -166,6 +170,47 @@ public sealed class NoFireAndForgetInCtorAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    private static bool IsArgumentToFireAndForget(InvocationExpressionSyntax invocation)
+    {
+        // Check if this invocation is an argument to a FireAndForget call
+        // Pattern 1: _errorService.FireAndForget(SomeAsync(), "context")
+        // Pattern 2: _errorService?.FireAndForget(SomeAsync(), "context")
+        if (invocation.Parent is ArgumentSyntax argument &&
+            argument.Parent is ArgumentListSyntax argumentList)
+        {
+            // Direct call: errorService.FireAndForget(task, ...)
+            if (argumentList.Parent is InvocationExpressionSyntax outerInvocation)
+            {
+                var outerName = GetInvocationName(outerInvocation);
+                if (outerName == "FireAndForget")
+                    return true;
+            }
+
+            // Null-conditional call: errorService?.FireAndForget(task, ...)
+            // Syntax tree: ConditionalAccessExpression > InvocationExpression > ArgumentList
+            if (argumentList.Parent is InvocationExpressionSyntax conditionalInvocation &&
+                conditionalInvocation.Parent is ConditionalAccessExpressionSyntax)
+            {
+                var name = GetInvocationName(conditionalInvocation);
+                if (name == "FireAndForget")
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? GetInvocationName(InvocationExpressionSyntax invocation)
+    {
+        return invocation.Expression switch
+        {
+            MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier.Text,
+            MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier.Text,
+            IdentifierNameSyntax identifier => identifier.Identifier.Text,
+            _ => null
+        };
     }
 
     private static string GetMethodName(InvocationExpressionSyntax invocation)

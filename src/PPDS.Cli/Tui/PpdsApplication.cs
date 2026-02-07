@@ -88,9 +88,7 @@ internal sealed class PpdsApplication : IDisposable
 
         // Start warming the connection pool in the background
         // This runs while Terminal.Gui initializes, so connection is ready faster
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling in InitializeAsync
-        _ = _session.InitializeAsync(cancellationToken);
-#pragma warning restore PPDS013
+        _session.GetErrorService().FireAndForget(_session.InitializeAsync(cancellationToken), "SessionInit");
 
         // Register cancellation to request stop
         using var registration = cancellationToken.Register(() => Application.RequestStop());

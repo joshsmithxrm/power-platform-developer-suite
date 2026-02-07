@@ -15,17 +15,12 @@ namespace PPDS.Cli.Tui.Screens;
 
 /// <summary>
 /// SQL Query screen for executing queries against Dataverse and viewing results.
-/// Implements ITuiScreen for hosting in the TuiShell.
+/// Inherits TuiScreenBase for lifecycle, hotkey, and dispose management.
 /// </summary>
-internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScreenState>
+internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryScreenState>
 {
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
-    private readonly InteractiveSession _session;
-    private readonly ITuiErrorService _errorService;
-    private readonly List<IDisposable> _hotkeyRegistrations = new();
-    private IHotkeyRegistry? _hotkeyRegistry;
 
-    private readonly View _content;
     private readonly FrameView _queryFrame;
     private readonly TextView _queryInput;
     private readonly QueryResultsTableView _resultsTable;
@@ -34,27 +29,22 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
     private readonly TuiSpinner _statusSpinner;
     private readonly Label _statusLabel;
 
-    private string? _environmentUrl;
     private string? _lastSql;
     private string? _lastPagingCookie;
     private int _lastPageNumber = 1;
     private bool _isExecuting;
     private string _statusText = "Ready";
     private string? _lastErrorMessage;
-    private bool _disposed;
 
     /// <inheritdoc />
-    public View Content => _content;
-
-    /// <inheritdoc />
-    public string Title => _environmentUrl != null
-        ? $"SQL Query - {_session.CurrentEnvironmentDisplayName ?? _environmentUrl}"
+    public override string Title => EnvironmentUrl != null
+        ? $"SQL Query - {Session.CurrentEnvironmentDisplayName ?? EnvironmentUrl}"
         : "SQL Query";
 
     // Note: Keep underscore on MenuBarItem (_Query) for Alt+Q to open menu.
     // Remove underscores from MenuItems - they create global Alt+letter hotkeys in Terminal.Gui.
     /// <inheritdoc />
-    public MenuBarItem[]? ScreenMenuItems => new[]
+    public override MenuBarItem[]? ScreenMenuItems => new[]
     {
         new MenuBarItem("_Query", new MenuItem[]
         {
@@ -67,29 +57,12 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
     };
 
     /// <inheritdoc />
-    public Action? ExportAction => _resultsTable.GetDataTable() != null ? ShowExportDialog : null;
-
-    /// <inheritdoc />
-    public event Action? CloseRequested;
-
-    /// <inheritdoc />
-    public event Action? MenuStateChanged;
+    public override Action? ExportAction => _resultsTable.GetDataTable() != null ? ShowExportDialog : null;
 
     public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
+        : base(session)
     {
         _deviceCodeCallback = deviceCodeCallback;
-        _session = session;
-        _errorService = session.GetErrorService();
-
-        // Create the container view for the content
-        _content = new View
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill()
-        };
-        _content.ColorScheme = TuiColorPalette.Default;
 
         // Query input area
         _queryFrame = new FrameView("Query (Ctrl+Enter to execute, F6 to toggle focus)")
@@ -152,7 +125,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 case Key.AltMask | Key.Backspace:
                     // Delete word before cursor (Alt variant)
                     DeleteWordBackward();
-                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -165,7 +138,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 case Key.AltMask | Key.DeleteChar:
                     // Delete word after cursor (Alt variant)
                     DeleteWordForward();
-                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -178,14 +151,14 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 case Key.AltMask | Key.CursorLeft:
                     // Word navigation backward (Alt variant) - forward to Ctrl+Left
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorLeft | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
                 case Key.AltMask | Key.CursorRight:
                     // Word navigation forward (Alt variant) - forward to Ctrl+Right
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorRight | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    _session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
+                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -256,7 +229,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             Height = 1
         };
 
-        _content.Add(_queryFrame, _filterFrame, _resultsTable, _statusSpinner, _statusLabel);
+        Content.Add(_queryFrame, _filterFrame, _resultsTable, _statusSpinner, _statusLabel);
 
         // Visual focus indicators - only change title, not colors
         // The table's built-in selection highlighting is sufficient
@@ -277,14 +250,10 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             _resultsTable.Title = "Results";
         };
 
-        // Subscribe to environment changes from the session
-        _session.EnvironmentChanged += OnEnvironmentChanged;
-
-        // Initialize from session's current environment
-        if (_session.CurrentEnvironmentUrl != null)
+        // Initialize results table with environment URL (already set by base constructor)
+        if (EnvironmentUrl != null)
         {
-            _environmentUrl = _session.CurrentEnvironmentUrl;
-            _resultsTable.SetEnvironmentUrl(_environmentUrl);
+            _resultsTable.SetEnvironmentUrl(EnvironmentUrl);
         }
 
         // Set up keyboard handling for context-dependent shortcuts
@@ -292,68 +261,25 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
     }
 
     /// <inheritdoc />
-    public void OnActivated(IHotkeyRegistry hotkeyRegistry)
+    protected override void RegisterHotkeys(IHotkeyRegistry registry)
     {
-        _hotkeyRegistry = hotkeyRegistry;
-
-        // Register screen-scope hotkeys
-        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
-            Key.CtrlMask | Key.E,
-            HotkeyScope.Screen,
-            "Export results",
-            ShowExportDialog,
-            owner: this));
-
-        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
-            Key.CtrlMask | Key.ShiftMask | Key.H,
-            HotkeyScope.Screen,
-            "Query history",
-            ShowHistoryDialog,
-            owner: this));
-
-        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
-            Key.F6,
-            HotkeyScope.Screen,
-            "Toggle query/results focus",
-            () =>
-            {
-                if (_queryInput.HasFocus)
-                    _resultsTable.SetFocus();
-                else
-                    _queryInput.SetFocus();
-            },
-            owner: this));
-
-        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
-            Key.CtrlMask | Key.Enter,
-            HotkeyScope.Screen,
-            "Execute query",
-            () => _ = ExecuteQueryAsync(),
-            owner: this));
-
-        _hotkeyRegistrations.Add(hotkeyRegistry.Register(
-            Key.CtrlMask | Key.ShiftMask | Key.F,
-            HotkeyScope.Screen,
-            "Show FetchXML",
-            ShowFetchXmlDialog,
-            owner: this));
-    }
-
-    /// <inheritdoc />
-    public void OnDeactivating()
-    {
-        foreach (var registration in _hotkeyRegistrations)
+        RegisterHotkey(registry, Key.CtrlMask | Key.E, "Export results", ShowExportDialog);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.H, "Query history", ShowHistoryDialog);
+        RegisterHotkey(registry, Key.F6, "Toggle query/results focus", () =>
         {
-            registration.Dispose();
-        }
-        _hotkeyRegistrations.Clear();
-        _hotkeyRegistry = null;
+            if (_queryInput.HasFocus)
+                _resultsTable.SetFocus();
+            else
+                _queryInput.SetFocus();
+        });
+        RegisterHotkey(registry, Key.CtrlMask | Key.Enter, "Execute query", () => _ = ExecuteQueryAsync());
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
     }
 
     private void SetupKeyboardHandling()
     {
         // Context-dependent shortcuts that need local state checks
-        _content.KeyPress += (e) =>
+        Content.KeyPress += (e) =>
         {
             switch (e.KeyEvent.Key)
             {
@@ -370,7 +296,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     else
                     {
                         // Request close when already in query
-                        CloseRequested?.Invoke();
+                        RequestClose();
                     }
                     e.Handled = true;
                     break;
@@ -383,44 +309,16 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                     }
                     break;
 
-                case Key.CtrlMask | Key.W:
-                    // Ctrl+W always closes the screen immediately
-                    CloseRequested?.Invoke();
-                    e.Handled = true;
-                    break;
-
                 case Key k when k == (Key)'q' || k == (Key)'Q':
                     // Q closes when not typing in query input (vim-style)
                     if (!_queryInput.HasFocus)
                     {
-                        CloseRequested?.Invoke();
+                        RequestClose();
                         e.Handled = true;
                     }
                     break;
             }
         };
-    }
-
-    private void OnEnvironmentChanged(string? url, string? displayName)
-    {
-        Application.MainLoop?.Invoke(() =>
-        {
-            if (url != null)
-            {
-                _environmentUrl = url;
-                _resultsTable.SetEnvironmentUrl(_environmentUrl);
-
-                // Clear stale results from previous environment
-                _resultsTable.ClearData();
-                _lastSql = null;
-                _lastPagingCookie = null;
-                _lastPageNumber = 1;
-            }
-            else
-            {
-                _environmentUrl = null;
-            }
-        });
     }
 
     private async Task ExecuteQueryAsync()
@@ -433,14 +331,14 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             return;
         }
 
-        if (_environmentUrl == null)
+        if (EnvironmentUrl == null)
         {
             _statusText = "Error: No environment selected.";
             _statusLabel.Text = _statusText;
             return;
         }
 
-        TuiDebugLog.Log($"Starting query execution for: {_environmentUrl}");
+        TuiDebugLog.Log($"Starting query execution for: {EnvironmentUrl}");
 
         _isExecuting = true;
         _lastErrorMessage = null;
@@ -451,9 +349,9 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
         try
         {
-            TuiDebugLog.Log($"Getting SQL query service for URL: {_environmentUrl}");
+            TuiDebugLog.Log($"Getting SQL query service for URL: {EnvironmentUrl}");
 
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, CancellationToken.None);
+            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
             TuiDebugLog.Log("Got service, executing query...");
 
             var request = new SqlQueryRequest
@@ -463,7 +361,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 PagingCookie = null
             };
 
-            var result = await service.ExecuteAsync(request, CancellationToken.None);
+            var result = await service.ExecuteAsync(request, ScreenCancellation);
             TuiDebugLog.Log($"Query complete: {result.Result.Count} rows in {result.Result.ExecutionTimeMs}ms");
 
             Application.MainLoop?.Invoke(() =>
@@ -471,7 +369,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 try
                 {
                     _resultsTable.LoadResults(result.Result);
-                    MenuStateChanged?.Invoke(); // Notify shell to enable File > Export menu
+                    NotifyMenuChanged(); // Notify shell to enable File > Export menu
                     _lastSql = sql;
                     _lastPagingCookie = result.Result.PagingCookie;
                     _lastPageNumber = result.Result.PageNumber;
@@ -481,7 +379,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 }
                 catch (Exception ex)
                 {
-                    _errorService.ReportError("Failed to display query results", ex, "ExecuteQuery.LoadResults");
+                    ErrorService.ReportError("Failed to display query results", ex, "ExecuteQuery.LoadResults");
                     _lastErrorMessage = ex.Message;
                     _statusText = $"Error displaying results: {ex.Message}";
                     TuiDebugLog.Log($"Error in ExecuteQuery callback: {ex}");
@@ -497,9 +395,9 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             });
 
             // Save to history (fire-and-forget)
-#pragma warning disable PPDS013 // Fire-and-forget - history save shouldn't block UI
-            _ = SaveToHistoryAsync(sql, result.Result.Count, result.Result.ExecutionTimeMs);
-#pragma warning restore PPDS013
+            ErrorService.FireAndForget(
+                SaveToHistoryAsync(sql, result.Result.Count, result.Result.ExecutionTimeMs),
+                "SaveHistory");
         }
         catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
         {
@@ -510,7 +408,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             TuiDebugLog.Log($"Authentication error: {authEx.Message}");
 
             // Show re-authentication dialog
-            var dialog = new ReAuthenticationDialog(authEx.UserMessage, _session);
+            var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
             Application.Run(dialog);
 
             if (dialog.ShouldReauthenticate)
@@ -519,19 +417,17 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 try
                 {
                     _statusLabel.Text = "Re-authenticating...";
-                    await _session.InvalidateAndReauthenticateAsync(CancellationToken.None);
+                    await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
 
                     // Retry the query - ExecuteQueryAsync reads from _queryInput
                     TuiDebugLog.Log("Re-authentication successful, retrying query");
                     _statusLabel.Visible = false;
-#pragma warning disable PPDS013 // Fire-and-forget to avoid recursion in async context
-                    _ = ExecuteQueryAsync();
-#pragma warning restore PPDS013
+                    ErrorService.FireAndForget(ExecuteQueryAsync(), "RetryQuery");
                     return;
                 }
                 catch (Exception reAuthEx)
                 {
-                    _errorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
+                    ErrorService.ReportError("Re-authentication failed", reAuthEx, "ExecuteQuery.ReAuth");
                     _lastErrorMessage = reAuthEx.Message;
                     _statusText = $"Re-authentication failed: {reAuthEx.Message}";
                     _statusLabel.Text = _statusText;
@@ -541,7 +437,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             else
             {
                 TuiDebugLog.Log("User cancelled re-authentication");
-                _errorService.ReportError("Session expired", authEx, "ExecuteQuery");
+                ErrorService.ReportError("Session expired", authEx, "ExecuteQuery");
                 _lastErrorMessage = authEx.Message;
                 _statusText = $"Error: {authEx.Message}";
                 _statusLabel.Text = _statusText;
@@ -550,7 +446,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         }
         catch (Exception ex)
         {
-            _errorService.ReportError("Query execution failed", ex, "ExecuteQuery");
+            ErrorService.ReportError("Query execution failed", ex, "ExecuteQuery");
             _lastErrorMessage = ex.Message;
             _statusText = $"Error: {ex.Message}";
 
@@ -564,12 +460,12 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
     private async Task SaveToHistoryAsync(string sql, int rowCount, long executionTimeMs)
     {
-        if (_environmentUrl == null) return;
+        if (EnvironmentUrl == null) return;
 
         try
         {
-            var historyService = await _session.GetQueryHistoryServiceAsync(_environmentUrl, CancellationToken.None);
-            await historyService.AddQueryAsync(_environmentUrl, sql, rowCount, executionTimeMs);
+            var historyService = await Session.GetQueryHistoryServiceAsync(EnvironmentUrl, ScreenCancellation);
+            await historyService.AddQueryAsync(EnvironmentUrl, sql, rowCount, executionTimeMs);
         }
         catch (Exception ex)
         {
@@ -580,12 +476,12 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
     private async Task OnLoadMoreRequested()
     {
-        if (_lastSql == null || _environmentUrl == null)
+        if (_lastSql == null || EnvironmentUrl == null)
             return;
 
         try
         {
-            var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, CancellationToken.None);
+            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
 
             var request = new SqlQueryRequest
             {
@@ -594,7 +490,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 PagingCookie = _lastPagingCookie
             };
 
-            var result = await service.ExecuteAsync(request, CancellationToken.None);
+            var result = await service.ExecuteAsync(request, ScreenCancellation);
 
             Application.MainLoop?.Invoke(() =>
             {
@@ -606,7 +502,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
                 }
                 catch (Exception ex)
                 {
-                    _errorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
+                    ErrorService.ReportError("Failed to load additional results", ex, "LoadMore.AddPage");
                     TuiDebugLog.Log($"Error in LoadMore callback: {ex}");
                 }
             });
@@ -616,33 +512,33 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             TuiDebugLog.Log($"Authentication error during load more: {authEx.Message}");
 
             // Show re-authentication dialog
-            var dialog = new ReAuthenticationDialog(authEx.UserMessage, _session);
+            var dialog = new ReAuthenticationDialog(authEx.UserMessage, Session);
             Application.Run(dialog);
 
             if (dialog.ShouldReauthenticate)
             {
                 try
                 {
-                    await _session.InvalidateAndReauthenticateAsync(CancellationToken.None);
+                    await Session.InvalidateAndReauthenticateAsync(ScreenCancellation);
                     // Don't auto-retry load more - user can click the button again
                 }
                 catch (Exception reAuthEx)
                 {
-                    _errorService.ReportError("Re-authentication failed", reAuthEx, "LoadMoreResults.ReAuth");
+                    ErrorService.ReportError("Re-authentication failed", reAuthEx, "LoadMoreResults.ReAuth");
                 }
             }
             else
             {
-                _errorService.ReportError("Session expired", authEx, "LoadMoreResults");
+                ErrorService.ReportError("Session expired", authEx, "LoadMoreResults");
             }
         }
         catch (InvalidOperationException ex)
         {
-            _errorService.ReportError("Failed to load more results", ex, "LoadMoreResults");
+            ErrorService.ReportError("Failed to load more results", ex, "LoadMoreResults");
         }
         catch (HttpRequestException ex)
         {
-            _errorService.ReportError("Network error loading results", ex, "LoadMoreResults");
+            ErrorService.ReportError("Network error loading results", ex, "LoadMoreResults");
         }
     }
 
@@ -678,7 +574,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
         }
 
         var columnTypes = _resultsTable.GetColumnTypes();
-        var exportService = new ExportService(Microsoft.Extensions.Logging.Abstractions.NullLogger<ExportService>.Instance);
+        var exportService = Session.GetExportService();
         var dialog = new ExportDialog(exportService, dataTable, columnTypes);
 
         Application.Run(dialog);
@@ -686,15 +582,15 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
 
     private void ShowHistoryDialog()
     {
-        if (_environmentUrl == null)
+        if (EnvironmentUrl == null)
         {
             MessageBox.ErrorQuery("History", "No environment selected. Query history is per-environment.", "OK");
             return;
         }
 
         // QueryHistoryService is local file-based, no Dataverse connection needed
-        var historyService = _session.GetQueryHistoryService();
-        var dialog = new QueryHistoryDialog(historyService, _environmentUrl, _session);
+        var historyService = Session.GetQueryHistoryService();
+        var dialog = new QueryHistoryDialog(historyService, EnvironmentUrl, Session);
 
         Application.Run(dialog);
 
@@ -713,39 +609,26 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             return;
         }
 
-        if (_environmentUrl == null)
+        if (EnvironmentUrl == null)
         {
             MessageBox.ErrorQuery("Show FetchXML", "No environment selected.", "OK");
             return;
         }
 
-#pragma warning disable PPDS013 // Fire-and-forget with proper error handling
-        _ = ShowFetchXmlDialogAsync(sql).ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    MessageBox.ErrorQuery("FetchXML Error",
-                        t.Exception?.InnerException?.Message ?? "Failed to transpile SQL",
-                        "OK");
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        ErrorService.FireAndForget(ShowFetchXmlDialogAsync(sql), "ShowFetchXml");
     }
 
     private async Task ShowFetchXmlDialogAsync(string sql)
     {
-        // Caller guarantees _environmentUrl is non-null before calling this method
-        var provider = await _session.GetServiceProviderAsync(_environmentUrl!, CancellationToken.None);
+        // Caller guarantees EnvironmentUrl is non-null before calling this method
+        var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
         var sqlQueryService = provider.GetRequiredService<ISqlQueryService>();
 
         var fetchXml = sqlQueryService.TranspileSql(sql);
 
         Application.MainLoop?.Invoke(() =>
         {
-            var dialog = new FetchXmlPreviewDialog(fetchXml, _session);
+            var dialog = new FetchXmlPreviewDialog(fetchXml, Session);
             Application.Run(dialog);
         });
     }
@@ -872,17 +755,7 @@ internal sealed class SqlQueryScreen : ITuiScreen, ITuiStateCapture<SqlQueryScre
             ErrorMessage: _lastErrorMessage);
     }
 
-    public void Dispose()
+    protected override void OnDispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        // Ensure hotkeys are unregistered
-        OnDeactivating();
-
-        // Unsubscribe from session events
-        _session.EnvironmentChanged -= OnEnvironmentChanged;
-
-        _content.Dispose();
     }
 }

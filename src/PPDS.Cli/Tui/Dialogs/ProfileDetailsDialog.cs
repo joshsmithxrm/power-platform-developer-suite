@@ -283,20 +283,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
             refreshButton, closeButton
         );
 
-        // Load profile data asynchronously
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = LoadProfileAsync().ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                _errorService.ReportError("Failed to load profile details", t.Exception, "ProfileDetails");
-                Application.MainLoop?.Invoke(() =>
-                {
-                    _profileNameLabel.Text = "Error loading profile (see F12 for details)";
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService.FireAndForget(LoadProfileAsync(), "LoadProfile");
     }
 
     private async Task LoadProfileAsync()
@@ -450,15 +437,7 @@ internal sealed class ProfileDetailsDialog : TuiDialog, ITuiStateCapture<Profile
 
     private void OnRefreshClicked()
     {
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = LoadProfileAsync().ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                _errorService.ReportError("Failed to refresh profile", t.Exception, "ProfileRefresh");
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService.FireAndForget(LoadProfileAsync(), "RefreshProfile");
     }
 
     /// <inheritdoc />

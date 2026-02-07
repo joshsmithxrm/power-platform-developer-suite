@@ -84,13 +84,13 @@ public class InteractiveSessionTests : IAsyncLifetime
     }
 
     [Fact]
-    public void GetProfileService_MultipleCallsReturnNewInstances()
+    public void GetProfileService_MultipleCallsReturnSameInstance()
     {
         var service1 = _session.GetProfileService();
         var service2 = _session.GetProfileService();
 
-        // Each call creates a new instance (transient)
-        Assert.NotSame(service1, service2);
+        // Lazy<T> ensures thread-safe singleton per session
+        Assert.Same(service1, service2);
     }
 
     [Fact]
@@ -103,13 +103,13 @@ public class InteractiveSessionTests : IAsyncLifetime
     }
 
     [Fact]
-    public void GetEnvironmentService_MultipleCallsReturnNewInstances()
+    public void GetEnvironmentService_MultipleCallsReturnSameInstance()
     {
         var service1 = _session.GetEnvironmentService();
         var service2 = _session.GetEnvironmentService();
 
-        // Each call creates a new instance (transient)
-        Assert.NotSame(service1, service2);
+        // Lazy<T> ensures thread-safe singleton per session
+        Assert.Same(service1, service2);
     }
 
     [Fact]

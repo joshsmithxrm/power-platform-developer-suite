@@ -24,7 +24,6 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 |------------|---------|---------|
 | .NET | 4.6.2, 8.0, 9.0, 10.0 | Plugins: 4.6.2; libraries/CLI: 8.0+ |
 | Terminal.Gui | 1.19+ | TUI framework |
-| Spectre.Console | 0.54+ | CLI output |
 
 ## Key Files
 

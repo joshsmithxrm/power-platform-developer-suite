@@ -17,6 +17,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
     private readonly IEnvironmentService _environmentService;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession? _session;
+    private readonly ITuiErrorService? _errorService;
     private readonly TextField _filterField;
     private readonly ListView _listView;
     private readonly Label _statusLabel;
@@ -59,6 +60,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
         _deviceCodeCallback = deviceCodeCallback;
         _session = session;
+        _errorService = session?.GetErrorService();
 
         Width = 70;
         Height = 22;
@@ -177,21 +179,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         {
             _spinner.Start("Loading environments...");
 
-            // Discover environments asynchronously (fire-and-forget with error handling)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-            _ = DiscoverEnvironmentsAsync().ContinueWith(t =>
-            {
-                if (t.IsFaulted && t.Exception != null)
-                {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        _spinner.Stop();
-                        _statusLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
-                        _statusLabel.Visible = true;
-                    });
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            _errorService?.FireAndForget(DiscoverEnvironmentsAsync(), "DiscoverEnvironments");
         };
     }
 

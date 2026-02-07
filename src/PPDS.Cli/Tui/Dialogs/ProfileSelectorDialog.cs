@@ -15,6 +15,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
 {
     private readonly IProfileService _profileService;
     private readonly InteractiveSession? _session;
+    private readonly ITuiErrorService? _errorService;
     private readonly ListView _listView;
     private readonly Label _detailLabel;
     private readonly TuiSpinner _spinner;
@@ -51,6 +52,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
     {
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
         _session = session;
+        _errorService = session?.GetErrorService();
 
         Width = 60;
         Height = 19;
@@ -172,23 +174,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
         {
             _spinner.Start("Loading profiles...");
 
-            // Load profiles asynchronously (fire-and-forget with error handling)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-            _ = LoadProfilesAsync().ContinueWith(t =>
-            {
-                if (t.IsFaulted && t.Exception != null)
-                {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        _spinner.Stop();
-                        _errorMessage = t.Exception.InnerException?.Message ?? t.Exception.Message;
-                        _detailLabel.Text = $"Error: {_errorMessage}";
-                        _detailLabel.Visible = true;
-                        _isLoading = false;
-                    });
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            _errorService?.FireAndForget(LoadProfilesAsync(), "LoadProfiles");
         };
     }
 
@@ -391,20 +377,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
 
     private void PerformRename(ProfileSummary profile, string newName)
     {
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling via ContinueWith
-        _ = PerformRenameAsync(profile, newName).ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                var ex = t.Exception.InnerException;
-                var message = ex is PpdsException ppdsEx ? ppdsEx.UserMessage : ex?.Message ?? "Unknown error";
-                Application.MainLoop?.Invoke(() =>
-                {
-                    MessageBox.ErrorQuery("Rename Failed", message, "OK");
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(PerformRenameAsync(profile, newName), "RenameProfile");
     }
 
     private async Task PerformRenameAsync(ProfileSummary profile, string newName)
@@ -446,18 +419,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
 
         if (result == 0) // "Delete" selected
         {
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = DeleteProfileAsync(profile).ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        _detailLabel.Text = $"Error: {t.Exception?.InnerException?.Message ?? "Delete failed"}";
-                    });
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            _errorService?.FireAndForget(DeleteProfileAsync(profile), "DeleteProfile");
         }
     }
 

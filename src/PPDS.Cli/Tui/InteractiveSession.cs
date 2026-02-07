@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -40,12 +41,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private readonly IServiceProviderFactory _serviceProviderFactory;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    private ServiceProvider? _serviceProvider;
-    private string? _currentEnvironmentUrl;
-    private string? _currentEnvironmentDisplayName;
+    private readonly ConcurrentDictionary<string, ServiceProvider> _providers = new(StringComparer.OrdinalIgnoreCase);
+    private string? _activeEnvironmentUrl;
+    private string? _activeEnvironmentDisplayName;
     private bool _disposed;
-    private ITuiErrorService? _errorService;
-    private IHotkeyRegistry? _hotkeyRegistry;
+    private readonly Lazy<ITuiErrorService> _errorService;
+    private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
+    private readonly Lazy<IProfileService> _profileService;
+    private readonly Lazy<IEnvironmentService> _environmentService;
+    private readonly Lazy<ITuiThemeService> _themeService;
+    private readonly Lazy<IQueryHistoryService> _queryHistoryService;
+    private readonly Lazy<IExportService> _exportService;
 
     /// <summary>
     /// Event raised when the environment changes (either via initialization or explicit switch).
@@ -60,12 +66,12 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <summary>
     /// Gets the current environment URL, or null if no connection has been established.
     /// </summary>
-    public string? CurrentEnvironmentUrl => _currentEnvironmentUrl;
+    public string? CurrentEnvironmentUrl => _activeEnvironmentUrl;
 
     /// <summary>
     /// Gets the current environment display name, or null if not set.
     /// </summary>
-    public string? CurrentEnvironmentDisplayName => _currentEnvironmentDisplayName;
+    public string? CurrentEnvironmentDisplayName => _activeEnvironmentDisplayName;
 
     /// <summary>
     /// Gets the current profile name, or null if using the active profile.
@@ -98,6 +104,15 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
         _beforeInteractiveAuth = beforeInteractiveAuth;
+
+        // Initialize lazy service instances (thread-safe by default)
+        _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance));
+        _environmentService = new Lazy<IEnvironmentService>(() => new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance));
+        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService());
+        _errorService = new Lazy<ITuiErrorService>(() => new TuiErrorService());
+        _hotkeyRegistry = new Lazy<IHotkeyRegistry>(() => new HotkeyRegistry());
+        _queryHistoryService = new Lazy<IQueryHistoryService>(() => new QueryHistoryService(NullLogger<QueryHistoryService>.Instance));
+        _exportService = new Lazy<IExportService>(() => new ExportService(NullLogger<ExportService>.Instance));
     }
 
     /// <summary>
@@ -129,8 +144,8 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
         if (profile?.Environment?.Url != null)
         {
-            _currentEnvironmentUrl = profile.Environment.Url;
-            _currentEnvironmentDisplayName = profile.Environment.DisplayName;
+            _activeEnvironmentUrl = profile.Environment.Url;
+            _activeEnvironmentDisplayName = profile.Environment.DisplayName;
             TuiDebugLog.Log($"Environment configured: {profile.Environment.DisplayName} ({profile.Environment.Url}) - will connect on first query");
 
             // Notify listeners of initial environment (but don't connect yet - lazy loading)
@@ -156,38 +171,23 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
 
-        TuiDebugLog.Log($"Switching environment to {displayName ?? environmentUrl}");
+        TuiDebugLog.Log($"Switching active environment to {displayName ?? environmentUrl}");
 
-        // Update profile to persist the environment selection
         var profileService = GetProfileService();
         var profileName = string.IsNullOrEmpty(_profileName) ? null : _profileName;
         await profileService.SetEnvironmentAsync(profileName, environmentUrl, displayName, cancellationToken)
             .ConfigureAwait(false);
 
-        // Invalidate old connection
-        await InvalidateAsync().ConfigureAwait(false);
+        // Update active environment (for status bar display)
+        // Do NOT invalidate — other tabs may still be using old environment's provider
+        _activeEnvironmentUrl = environmentUrl;
+        _activeEnvironmentDisplayName = displayName;
 
-        // Update local state
-        _currentEnvironmentUrl = environmentUrl;
-        _currentEnvironmentDisplayName = displayName;
+        // Pre-warm the new environment's provider
+        GetErrorService().FireAndForget(
+            GetServiceProviderAsync(environmentUrl, cancellationToken),
+            "WarmNewEnvironment");
 
-        // Warm new connection (fire-and-forget)
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = GetServiceProviderAsync(environmentUrl, cancellationToken)
-            .ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    TuiDebugLog.Log($"Warm failed after switch: {t.Exception?.InnerException?.Message}");
-                }
-                else
-                {
-                    TuiDebugLog.Log("New connection pool warmed successfully");
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore PPDS013
-
-        // Notify listeners
         EnvironmentChanged?.Invoke(environmentUrl, displayName);
     }
 
@@ -204,45 +204,35 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // Fast path: already cached
+        if (_providers.TryGetValue(environmentUrl, out var existing))
+        {
+            TuiDebugLog.Log($"Reusing existing provider for {environmentUrl}");
+            return existing;
+        }
+
+        // Slow path: create new provider (serialized to prevent duplicate creation)
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Check if we need to create or recreate the provider
-            if (_serviceProvider != null && _currentEnvironmentUrl == environmentUrl)
+            // Double-check after lock
+            if (_providers.TryGetValue(environmentUrl, out existing))
             {
-                TuiDebugLog.Log($"Reusing existing provider for {environmentUrl}");
-                return _serviceProvider;
+                return existing;
             }
 
-            // Log why we're creating a new provider
-            if (_serviceProvider == null)
-            {
-                TuiDebugLog.Log($"Creating new provider (no existing provider) for {environmentUrl}, profile={_profileName}");
-            }
-            else
-            {
-                TuiDebugLog.Log($"Creating new provider (URL mismatch: '{_currentEnvironmentUrl}' != '{environmentUrl}'), profile={_profileName}");
-            }
+            TuiDebugLog.Log($"Creating new provider for {environmentUrl}, profile={_profileName}");
 
-            // Dispose existing provider if environment changed
-            if (_serviceProvider != null)
-            {
-                await _serviceProvider.DisposeAsync().ConfigureAwait(false);
-                _serviceProvider = null;
-                _currentEnvironmentUrl = null;
-            }
-
-            // Create new provider using injected factory
-            _serviceProvider = await _serviceProviderFactory.CreateAsync(
+            var provider = await _serviceProviderFactory.CreateAsync(
                 string.IsNullOrEmpty(_profileName) ? null : _profileName,
                 environmentUrl,
                 _deviceCodeCallback,
                 _beforeInteractiveAuth,
                 cancellationToken).ConfigureAwait(false);
 
-            _currentEnvironmentUrl = environmentUrl;
+            _providers[environmentUrl] = provider;
             TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");
-            return _serviceProvider;
+            return provider;
         }
         finally
         {
@@ -308,13 +298,15 @@ internal sealed class InteractiveSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Invalidates the current session, disposing the connection pool.
-    /// The next call to Get*Async will create a fresh provider.
+    /// Invalidates cached providers. If <paramref name="environmentUrl"/> is specified,
+    /// only that provider is disposed. Otherwise all providers are disposed.
     /// </summary>
+    /// <param name="environmentUrl">Optional URL to invalidate a specific provider.</param>
     /// <param name="caller">Automatically populated with caller method name.</param>
     /// <param name="filePath">Automatically populated with caller file path.</param>
     /// <param name="lineNumber">Automatically populated with caller line number.</param>
     public async Task InvalidateAsync(
+        string? environmentUrl = null,
         [CallerMemberName] string? caller = null,
         [CallerFilePath] string? filePath = null,
         [CallerLineNumber] int lineNumber = 0)
@@ -322,14 +314,35 @@ internal sealed class InteractiveSession : IAsyncDisposable
         await _lock.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_serviceProvider != null)
+            var fileName = filePath != null ? Path.GetFileName(filePath) : "unknown";
+
+            if (environmentUrl != null)
             {
-                var fileName = filePath != null ? Path.GetFileName(filePath) : "unknown";
-                TuiDebugLog.Log($"Invalidating connection pool (from {caller} at {fileName}:{lineNumber})...");
-                await _serviceProvider.DisposeAsync().ConfigureAwait(false);
-                _serviceProvider = null;
-                _currentEnvironmentUrl = null;
-                TuiDebugLog.Log("Connection pool invalidated");
+                // Invalidate specific environment
+                if (_providers.TryRemove(environmentUrl, out var provider))
+                {
+                    TuiDebugLog.Log($"Invalidating provider for {environmentUrl} (from {caller} at {fileName}:{lineNumber})");
+                    await provider.DisposeAsync().ConfigureAwait(false);
+                    TuiDebugLog.Log($"Provider for {environmentUrl} invalidated");
+                }
+            }
+            else
+            {
+                // Invalidate all
+                TuiDebugLog.Log($"Invalidating all {_providers.Count} providers (from {caller} at {fileName}:{lineNumber})");
+                foreach (var kvp in _providers)
+                {
+                    try
+                    {
+                        await kvp.Value.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        TuiDebugLog.Log($"Error disposing provider for {kvp.Key}: {ex.Message}");
+                    }
+                }
+                _providers.Clear();
+                TuiDebugLog.Log("All providers invalidated");
             }
         }
         finally
@@ -358,17 +371,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Thrown if no environment is currently configured.</exception>
     public async Task InvalidateAndReauthenticateAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_currentEnvironmentUrl))
+        if (string.IsNullOrEmpty(_activeEnvironmentUrl))
         {
             throw new InvalidOperationException("Cannot re-authenticate: no environment is currently configured.");
         }
 
-        var environmentUrl = _currentEnvironmentUrl;
+        var environmentUrl = _activeEnvironmentUrl;
 
         TuiDebugLog.Log($"Re-authenticating session for {environmentUrl}...");
 
-        // Invalidate the current session
-        await InvalidateAsync().ConfigureAwait(false);
+        // Invalidate the specific environment's provider
+        await InvalidateAsync(environmentUrl).ConfigureAwait(false);
 
         // Create a new service provider - this will trigger authentication
         await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
@@ -412,20 +425,20 @@ internal sealed class InteractiveSession : IAsyncDisposable
         // Notify listeners of profile change
         ProfileChanged?.Invoke(_profileName);
 
-        // Invalidate old connection (uses old profile's credentials)
+        // Profile change invalidates ALL cached providers since credentials differ
         await InvalidateAsync().ConfigureAwait(false);
 
         // Update display name if provided
         if (environmentDisplayName != null)
         {
-            _currentEnvironmentDisplayName = environmentDisplayName;
+            _activeEnvironmentDisplayName = environmentDisplayName;
         }
 
         // Re-warm with new profile credentials if environment is known
         if (!string.IsNullOrWhiteSpace(environmentUrl))
         {
             // Set URL immediately so it's available to consumers
-            _currentEnvironmentUrl = environmentUrl;
+            _activeEnvironmentUrl = environmentUrl;
 
             TuiDebugLog.Log($"Re-warming connection for {environmentDisplayName ?? environmentUrl}");
 
@@ -433,20 +446,9 @@ internal sealed class InteractiveSession : IAsyncDisposable
             EnvironmentChanged?.Invoke(environmentUrl, environmentDisplayName);
 
             // Then warm pool asynchronously
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = GetServiceProviderAsync(environmentUrl, cancellationToken)
-                .ContinueWith(t =>
-                {
-                    if (t.IsFaulted)
-                    {
-                        TuiDebugLog.Log($"Re-warm failed: {t.Exception?.InnerException?.Message}");
-                    }
-                    else
-                    {
-                        TuiDebugLog.Log("New profile connection warmed successfully");
-                    }
-                }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            GetErrorService().FireAndForget(
+                GetServiceProviderAsync(environmentUrl, cancellationToken),
+                "WarmAfterProfileSwitch");
         }
     }
 
@@ -459,7 +461,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The profile service.</returns>
     public IProfileService GetProfileService()
     {
-        return new ProfileService(_profileStore, NullLogger<ProfileService>.Instance);
+        return _profileService.Value;
     }
 
     /// <summary>
@@ -469,7 +471,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The environment service.</returns>
     public IEnvironmentService GetEnvironmentService()
     {
-        return new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance);
+        return _environmentService.Value;
     }
 
     /// <summary>
@@ -488,7 +490,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The theme service.</returns>
     public ITuiThemeService GetThemeService()
     {
-        return new TuiThemeService();
+        return _themeService.Value;
     }
 
     /// <summary>
@@ -498,7 +500,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The error service.</returns>
     public ITuiErrorService GetErrorService()
     {
-        return _errorService ??= new TuiErrorService();
+        return _errorService.Value;
     }
 
     /// <summary>
@@ -508,7 +510,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The hotkey registry.</returns>
     public IHotkeyRegistry GetHotkeyRegistry()
     {
-        return _hotkeyRegistry ??= new HotkeyRegistry();
+        return _hotkeyRegistry.Value;
     }
 
     /// <summary>
@@ -518,7 +520,17 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The query history service.</returns>
     public IQueryHistoryService GetQueryHistoryService()
     {
-        return new QueryHistoryService(NullLogger<QueryHistoryService>.Instance);
+        return _queryHistoryService.Value;
+    }
+
+    /// <summary>
+    /// Gets the export service for local export operations.
+    /// This service uses local file storage and does not require a Dataverse connection.
+    /// </summary>
+    /// <returns>The export service.</returns>
+    public IExportService GetExportService()
+    {
+        return _exportService.Value;
     }
 
     #endregion
@@ -526,51 +538,43 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
-        {
-            return;
-        }
+        if (_disposed) return;
 
         TuiDebugLog.Log("Disposing InteractiveSession...");
         _disposed = true;
 
-        if (_serviceProvider != null)
+        if (_providers.Count > 0)
         {
-            TuiDebugLog.Log("Disposing ServiceProvider (connection pool)...");
-
-            // Use timeout to prevent blocking on ServiceClient.Dispose()
-            // Microsoft's ServiceClient can hang during disposal if there are pending HTTP requests
-            try
+            TuiDebugLog.Log($"Disposing {_providers.Count} ServiceProviders...");
+            foreach (var kvp in _providers)
             {
-                using var cts = new CancellationTokenSource(DisposeTimeout);
-                var disposeTask = _serviceProvider.DisposeAsync().AsTask();
-
-                // Wait with timeout - if it doesn't complete, force-abandon
-                var completedTask = await Task.WhenAny(disposeTask, Task.Delay(Timeout.Infinite, cts.Token))
-                    .ConfigureAwait(false);
-
-                if (completedTask == disposeTask)
+                try
                 {
-                    await disposeTask.ConfigureAwait(false); // Propagate any exception
-                    TuiDebugLog.Log("ServiceProvider disposed");
+                    using var cts = new CancellationTokenSource(DisposeTimeout);
+                    var disposeTask = kvp.Value.DisposeAsync().AsTask();
+                    var completed = await Task.WhenAny(disposeTask, Task.Delay(Timeout.Infinite, cts.Token))
+                        .ConfigureAwait(false);
+
+                    if (completed == disposeTask)
+                    {
+                        await disposeTask.ConfigureAwait(false);
+                        TuiDebugLog.Log($"Provider for {kvp.Key} disposed");
+                    }
+                    else
+                    {
+                        TuiDebugLog.Log($"Provider for {kvp.Key} disposal timed out - abandoning");
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    TuiDebugLog.Log("ServiceProvider disposal timed out - abandoning");
+                    TuiDebugLog.Log($"Provider for {kvp.Key} disposal timed out - abandoning");
+                }
+                catch (Exception ex)
+                {
+                    TuiDebugLog.Log($"Provider for {kvp.Key} disposal error: {ex.Message}");
                 }
             }
-            catch (OperationCanceledException)
-            {
-                TuiDebugLog.Log("ServiceProvider disposal timed out - abandoning");
-            }
-            catch (Exception ex)
-            {
-                TuiDebugLog.Log($"ServiceProvider disposal error: {ex.Message}");
-            }
-            finally
-            {
-                _serviceProvider = null;
-            }
+            _providers.Clear();
         }
 
         _lock.Dispose();

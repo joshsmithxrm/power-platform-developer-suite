@@ -17,6 +17,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
 {
     private static readonly IReadOnlyList<string> FormatNames = new[] { "CSV", "TSV", "JSON", "Clipboard" };
     private readonly IExportService _exportService;
+    private readonly ITuiErrorService? _errorService;
     private readonly DataTable _dataTable;
     private readonly IReadOnlyDictionary<string, QueryColumnType>? _columnTypes;
     private readonly RadioGroup _formatGroup;
@@ -50,6 +51,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
         InteractiveSession? session = null) : base("Export Results", session)
     {
         _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
+        _errorService = session?.GetErrorService();
         _dataTable = dataTable ?? throw new ArgumentNullException(nameof(dataTable));
         _columnTypes = columnTypes;
 
@@ -228,24 +230,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
         _statusLabel.Text = "Exporting...";
         Application.Refresh();
 
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = ExportToFileAsync(filePath, format, includeHeaders).ContinueWith(t =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                if (t.IsFaulted)
-                {
-                    _statusLabel.Text = $"Error: {t.Exception?.InnerException?.Message ?? "Export failed"}";
-                }
-                else
-                {
-                    _exportCompleted = true;
-                    MessageBox.Query("Export", $"Exported to:\n{filePath}", "OK");
-                    Application.RequestStop();
-                }
-            });
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(ExportToFileAsync(filePath, format, includeHeaders), "ExportToFile");
     }
 
     private async Task ExportToFileAsync(string filePath, int format, bool includeHeaders)

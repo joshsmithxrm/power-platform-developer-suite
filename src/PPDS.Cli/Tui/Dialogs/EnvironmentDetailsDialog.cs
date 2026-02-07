@@ -15,6 +15,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<EnvironmentDetailsDialogState>
 {
     private readonly InteractiveSession _session;
+    private readonly ITuiErrorService _errorService;
     private readonly string _environmentUrl;
     private readonly string? _environmentDisplayName;
     private readonly ITuiThemeService _themeService;
@@ -44,6 +45,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
         string? environmentDisplayName = null) : base("Environment Details", session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _errorService = session.GetErrorService();
         _environmentUrl = environmentUrl ?? throw new ArgumentNullException(nameof(environmentUrl));
         _environmentDisplayName = environmentDisplayName;
         _themeService = session.GetThemeService();
@@ -170,28 +172,7 @@ internal sealed class EnvironmentDetailsDialog : TuiDialog, ITuiStateCapture<Env
         _refreshButton.Enabled = false;
         _statusLabel.Text = "Loading environment details...";
 
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = LoadDetailsInternalAsync(cancellationToken).ContinueWith(t =>
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                // Check _disposed before accessing token (CTS may be disposed)
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _refreshButton.Enabled = true;
-
-                if (t.IsFaulted && t.Exception != null)
-                {
-                    var message = t.Exception.InnerException?.Message ?? t.Exception.Message;
-                    _statusLabel.Text = $"Error: {message}";
-                    _statusLabel.ColorScheme = TuiColorPalette.Error;
-                }
-            });
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService.FireAndForget(LoadDetailsInternalAsync(cancellationToken), "LoadEnvironmentDetails");
     }
 
     private async Task LoadDetailsInternalAsync(CancellationToken cancellationToken)

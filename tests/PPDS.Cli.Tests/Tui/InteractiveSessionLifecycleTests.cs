@@ -284,7 +284,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     }
 
     [Fact]
-    public async Task SetEnvironmentAsync_InvalidatesOldProvider()
+    public async Task SetEnvironmentAsync_PreWarmsNewEnvironment()
     {
         // Arrange - Need an active profile for SetEnvironmentAsync to work
         var profile = TempProfileStore.CreateTestProfile(
@@ -293,7 +293,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
         var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
-        await session.GetServiceProviderAsync("https://old.crm.dynamics.com");
+        var oldProvider = await session.GetServiceProviderAsync("https://old.crm.dynamics.com");
         _mockFactory.Reset();
 
         // Act
@@ -301,12 +301,16 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             "https://new.crm.dynamics.com",
             "New Environment");
 
-        // Wait for warm
+        // Wait for pre-warm
         await Task.Delay(100);
 
-        // Assert - Should have created new provider
+        // Assert - Should have created new provider (pre-warm)
         Assert.True(_mockFactory.CreationLog.Count >= 1);
         Assert.Equal("https://new.crm.dynamics.com", _mockFactory.CreationLog[0].EnvironmentUrl);
+
+        // Old provider should still be cached (not invalidated)
+        var oldProvider2 = await session.GetServiceProviderAsync("https://old.crm.dynamics.com");
+        Assert.Same(oldProvider, oldProvider2);
     }
 
     #endregion

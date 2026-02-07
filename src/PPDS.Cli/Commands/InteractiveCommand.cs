@@ -3,7 +3,6 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
-using Spectre.Console;
 using TuiApp = Terminal.Gui.Application;
 using MessageBox = Terminal.Gui.MessageBox;
 
@@ -39,8 +38,9 @@ public static class InteractiveCommand
     /// <returns>Exit code (0 for success).</returns>
     public static int LaunchTui(CancellationToken cancellationToken = default)
     {
-        // Check if we're in a TTY environment
-        if (!AnsiConsole.Profile.Capabilities.Interactive)
+        // Check if we're in a TTY environment (allow override for E2E testing)
+        var forceTui = Environment.GetEnvironmentVariable("PPDS_FORCE_TUI") == "1";
+        if (!forceTui && (Console.IsInputRedirected || Console.IsOutputRedirected))
         {
             Console.Error.WriteLine("Error: Interactive mode requires a terminal (TTY).");
             Console.Error.WriteLine("This may occur in CI/CD pipelines, redirected input, or non-interactive shells.");
