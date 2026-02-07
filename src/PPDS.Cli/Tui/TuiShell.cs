@@ -18,8 +18,6 @@ namespace PPDS.Cli.Tui;
 internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 {
     private readonly string? _profileName;
-    private string? _environmentName;
-    private string? _environmentUrl;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly InteractiveSession _session;
     private readonly ITuiThemeService _themeService;
@@ -30,9 +28,10 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private readonly TuiStatusBar _statusBar;
     private readonly TuiStatusLine _statusLine;
     private readonly FrameView _contentArea;
+    private readonly TabManager _tabManager;
+    private readonly TabBar _tabBar;
     private MenuBar? _menuBar;
 
-    private readonly Stack<ITuiScreen> _screenStack = new();
     private ITuiScreen? _currentScreen;
     private View? _mainMenuContent;
     private SplashView? _splashView;
@@ -56,15 +55,22 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         Height = Dim.Fill();
         ColorScheme = TuiColorPalette.Default;
 
+        // Tab manager and tab bar
+        _tabManager = new TabManager(_themeService);
+        _tabBar = new TabBar(_tabManager);
+
         // Content area where screens are displayed
         _contentArea = new FrameView("Main Menu")
         {
             X = 0,
-            Y = 1, // Below menu bar
+            Y = 2, // Below menu bar + tab bar
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 2, // Leave room for status line and status bar
+            Height = Dim.Fill() - 3, // Leave room for tab bar, status line and status bar
             ColorScheme = TuiColorPalette.Default
         };
+
+        // Wire tab manager to swap content when active tab changes
+        _tabManager.ActiveTabChanged += OnActiveTabChanged;
 
         // Status line for contextual messages (above status bar)
         _statusLine = new TuiStatusLine();
@@ -83,7 +89,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Show splash screen during initialization
         ShowSplash();
 
-        Add(_contentArea, _statusBar, _statusLine);
+        Add(_tabBar, _contentArea, _statusBar, _statusLine);
 
         // Register global hotkeys
         RegisterGlobalHotkeys();
@@ -93,27 +99,28 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     }
 
     /// <summary>
-    /// Navigates to a screen, pushing the current screen onto the stack.
+    /// Opens a screen in a new tab and makes it active.
     /// </summary>
     public void NavigateTo(ITuiScreen screen)
     {
-        // Deactivate current screen (if any) and push to stack
+        // Clear splash/main menu if still showing
+        ClearSplashAndMainMenu();
+
+        // Deactivate current screen (if any)
         if (_currentScreen != null)
         {
             _currentScreen.CloseRequested -= OnScreenCloseRequested;
             _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
             _currentScreen.OnDeactivating();
             _contentArea.Remove(_currentScreen.Content);
-            _screenStack.Push(_currentScreen);
-        }
-        else if (_mainMenuContent != null)
-        {
-            // Clear main menu content
-            _contentArea.Remove(_mainMenuContent);
-            _mainMenuContent = null;
         }
 
-        // Activate new screen
+        // Add screen as a new tab
+        var envUrl = (screen as TuiScreenBase)?.EnvironmentUrl ?? _session.CurrentEnvironmentUrl;
+        var envName = _session.CurrentEnvironmentDisplayName;
+        _tabManager.AddTab(screen, envUrl, envName);
+
+        // Activate the new screen
         _currentScreen = screen;
         _currentScreen.CloseRequested += OnScreenCloseRequested;
         _currentScreen.MenuStateChanged += OnScreenMenuStateChanged;
@@ -140,30 +147,51 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     }
 
     /// <summary>
-    /// Navigates back to the previous screen, or to the main menu if no previous screen.
+    /// Closes the active tab. If no tabs remain, shows main menu.
     /// </summary>
     public void NavigateBack()
     {
-        // Deactivate and dispose current screen
+        // Deactivate current screen (TabManager.CloseTab will dispose it)
         if (_currentScreen != null)
         {
             _currentScreen.CloseRequested -= OnScreenCloseRequested;
             _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
             _currentScreen.OnDeactivating();
             _contentArea.Remove(_currentScreen.Content);
-            _currentScreen.Dispose();
             _currentScreen = null;
         }
 
-        if (_screenStack.Count == 0)
+        var activeIndex = _tabManager.ActiveIndex;
+        if (activeIndex >= 0)
         {
-            // No previous screen - show main menu
+            _tabManager.CloseTab(activeIndex);
+        }
+
+        // OnActiveTabChanged will handle activating the next tab or showing main menu
+    }
+
+    private void OnActiveTabChanged()
+    {
+        // Deactivate current screen if any
+        if (_currentScreen != null)
+        {
+            _currentScreen.CloseRequested -= OnScreenCloseRequested;
+            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
+            _currentScreen.OnDeactivating();
+            _contentArea.Remove(_currentScreen.Content);
+            _currentScreen = null;
+        }
+
+        var activeTab = _tabManager.ActiveTab;
+        if (activeTab == null)
+        {
+            // No tabs remain - show main menu
             ShowMainMenu();
             return;
         }
 
-        // Pop and activate previous screen
-        _currentScreen = _screenStack.Pop();
+        // Activate the new tab's screen
+        _currentScreen = activeTab.Screen;
         _currentScreen.CloseRequested += OnScreenCloseRequested;
         _currentScreen.MenuStateChanged += OnScreenMenuStateChanged;
         _hotkeyRegistry.SetActiveScreen(_currentScreen);
@@ -173,6 +201,20 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         RebuildMenuBar();
         _currentScreen.Content.SetFocus();
+    }
+
+    private void ClearSplashAndMainMenu()
+    {
+        if (_splashView != null)
+        {
+            _contentArea.Remove(_splashView);
+            _splashView = null;
+        }
+        if (_mainMenuContent != null)
+        {
+            _contentArea.Remove(_mainMenuContent);
+            _mainMenuContent = null;
+        }
     }
 
     private void ShowSplash()
@@ -189,12 +231,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private void ShowMainMenu()
     {
-        // Clear splash if still showing
-        if (_splashView != null)
-        {
-            _contentArea.Remove(_splashView);
-            _splashView = null;
-        }
+        ClearSplashAndMainMenu();
 
         _currentScreen = null;
         _hotkeyRegistry.SetActiveScreen(null);
@@ -361,13 +398,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             Key.AltMask | Key.E,
             HotkeyScope.Global,
             "Switch environment",
-            () =>
-            {
-                if (_hasError)
-                    ShowErrorDetails();
-                else
-                    ShowEnvironmentSelector();
-            }));
+            ShowEnvironmentSelector));
 
         _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
             Key.F1,
@@ -380,25 +411,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             HotkeyScope.Global,
             "Error log",
             ShowErrorDetails));
+
+        // Tab management hotkeys
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.T,
+            HotkeyScope.Global,
+            "New tab",
+            NavigateToSqlQuery));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.W,
+            HotkeyScope.Global,
+            "Close tab",
+            () => { if (_tabManager.ActiveIndex >= 0) NavigateBack(); }));
+
+        _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+            Key.CtrlMask | Key.Tab,
+            HotkeyScope.Global,
+            "Next tab",
+            () => _tabManager.ActivateNext()));
     }
 
     private void NavigateToSqlQuery()
     {
-        // Prevent navigation if already on SQL Query screen
-        if (_currentScreen is SqlQueryScreen)
-            return;
-
         // Clear splash or main menu content
-        if (_splashView != null)
-        {
-            _contentArea.Remove(_splashView);
-            _splashView = null;
-        }
-        if (_mainMenuContent != null)
-        {
-            _contentArea.Remove(_mainMenuContent);
-            _mainMenuContent = null;
-        }
+        ClearSplashAndMainMenu();
 
         // Show centered loading message in content area
         var loadingLabel = new Label("Loading SQL Query...")
@@ -433,14 +470,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private void OnStatusBarEnvironmentClicked()
     {
-        if (_hasError)
-        {
-            ShowErrorDetails();
-        }
-        else
-        {
-            ShowEnvironmentSelector();
-        }
+        ShowEnvironmentSelector();
     }
 
     private void ShowProfileSelector()
@@ -510,9 +540,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private async Task SetActiveProfileAsync(ProfileSummary profile)
     {
-        _environmentName = profile.EnvironmentName;
-        _environmentUrl = profile.EnvironmentUrl;
-
         await _session.SetActiveProfileAsync(
             profile.DisplayIdentifier,
             profile.EnvironmentUrl,
@@ -526,9 +553,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private async Task SetActiveProfileWithEnvironmentAsync(ProfileSummary profile, string? environmentUrl, string? environmentName)
     {
-        _environmentName = environmentName;
-        _environmentUrl = environmentUrl;
-
         await _session.SetActiveProfileAsync(
             profile.DisplayIdentifier,
             environmentUrl,
@@ -542,9 +566,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private async Task SetEnvironmentAsync(string url, string? displayName)
     {
-        _environmentUrl = url;
-        _environmentName = displayName;
-
         await _session.SetEnvironmentAsync(url, displayName);
 
         Application.MainLoop?.Invoke(() =>
@@ -563,16 +584,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
             Application.MainLoop?.Invoke(() =>
             {
-                if (active != null)
-                {
-                    _environmentName = active.EnvironmentName;
-                    _environmentUrl = active.EnvironmentUrl;
-                }
-                else
-                {
-                    _environmentName = null;
-                    _environmentUrl = null;
-                }
                 _statusBar.Refresh();
             });
         }), "RefreshProfileState");
@@ -591,11 +602,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         Application.MainLoop?.Invoke(() =>
         {
-            if (profile != null)
-            {
-                _environmentName = profile.Environment?.DisplayName;
-                _environmentUrl = profile.Environment?.Url;
-            }
             _statusBar.Refresh();
         });
     }
@@ -649,7 +655,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             CurrentScreenTitle: _currentScreen?.Title,
             CurrentScreenType: _currentScreen?.GetType().Name,
             IsMainMenuVisible: _currentScreen == null,
-            ScreenStackDepth: _screenStack.Count,
+            TabCount: _tabManager.TabCount,
             HasErrors: _hasError,
             ErrorCount: _errorService.RecentErrors.Count);
     }
@@ -665,31 +671,19 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             }
             _hotkeyRegistrations.Clear();
 
-            // Dispose current screen
-            _currentScreen?.OnDeactivating();
-            _currentScreen?.Dispose();
-            _currentScreen = null;
-
-            // Dispose stacked screens
-            while (_screenStack.Count > 0)
+            // Deactivate current screen (TabManager.Dispose will handle disposal)
+            if (_currentScreen != null)
             {
-                try
-                {
-                    var screen = _screenStack.Pop();
-                    try
-                    {
-                        screen.Dispose();
-                    }
-                    catch
-                    {
-                        // Continue disposing remaining screens even if one fails
-                    }
-                }
-                catch
-                {
-                    // Continue attempting to dispose remaining screens even if Pop fails
-                }
+                _currentScreen.CloseRequested -= OnScreenCloseRequested;
+                _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
+                _currentScreen.OnDeactivating();
+                _currentScreen = null;
             }
+
+            // Unsubscribe from tab manager events before disposing
+            _tabManager.ActiveTabChanged -= OnActiveTabChanged;
+            _tabManager.Dispose();
+            _tabBar.Dispose();
 
             _errorService.ErrorOccurred -= OnErrorOccurred;
         }
