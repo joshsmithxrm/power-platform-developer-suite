@@ -13,6 +13,7 @@ public sealed class SplashViewTests
         var state = splash.CaptureState();
 
         Assert.False(state.IsReady);
+        Assert.True(state.SpinnerActive);
         Assert.NotNull(state.Version);
         Assert.NotEmpty(state.StatusMessage);
     }
@@ -38,6 +39,7 @@ public sealed class SplashViewTests
         var state = splash.CaptureState();
 
         Assert.True(state.IsReady);
+        Assert.False(state.SpinnerActive);
     }
 
     [Fact]

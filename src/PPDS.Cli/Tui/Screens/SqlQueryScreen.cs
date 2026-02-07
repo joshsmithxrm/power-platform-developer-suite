@@ -250,9 +250,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             _resultsTable.Title = "Results";
         };
 
-        // Subscribe to environment changes from the session
-        Session.EnvironmentChanged += OnEnvironmentChanged;
-
         // Initialize results table with environment URL (already set by base constructor)
         if (EnvironmentUrl != null)
         {
@@ -322,28 +319,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     break;
             }
         };
-    }
-
-    private void OnEnvironmentChanged(string? url, string? displayName)
-    {
-        Application.MainLoop?.Invoke(() =>
-        {
-            if (url != null)
-            {
-                EnvironmentUrl = url;
-                _resultsTable.SetEnvironmentUrl(EnvironmentUrl);
-
-                // Clear stale results from previous environment
-                _resultsTable.ClearData();
-                _lastSql = null;
-                _lastPagingCookie = null;
-                _lastPageNumber = 1;
-            }
-            else
-            {
-                EnvironmentUrl = null;
-            }
-        });
     }
 
     private async Task ExecuteQueryAsync()
@@ -782,6 +757,5 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
     protected override void OnDispose()
     {
-        Session.EnvironmentChanged -= OnEnvironmentChanged;
     }
 }

@@ -100,40 +100,18 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     /// <summary>
     /// Opens a screen in a new tab and makes it active.
+    /// Activation is handled by <see cref="OnActiveTabChanged"/> via the TabManager event.
     /// </summary>
     public void NavigateTo(ITuiScreen screen)
     {
         // Clear splash/main menu if still showing
         ClearSplashAndMainMenu();
 
-        // Deactivate current screen (if any)
-        if (_currentScreen != null)
-        {
-            _currentScreen.CloseRequested -= OnScreenCloseRequested;
-            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
-            _currentScreen.OnDeactivating();
-            _contentArea.Remove(_currentScreen.Content);
-        }
-
-        // Add screen as a new tab
+        // Add screen as a new tab — AddTab fires ActiveTabChanged,
+        // which calls OnActiveTabChanged to handle activation.
         var envUrl = (screen as TuiScreenBase)?.EnvironmentUrl ?? _session.CurrentEnvironmentUrl;
         var envName = _session.CurrentEnvironmentDisplayName;
         _tabManager.AddTab(screen, envUrl, envName);
-
-        // Activate the new screen
-        _currentScreen = screen;
-        _currentScreen.CloseRequested += OnScreenCloseRequested;
-        _currentScreen.MenuStateChanged += OnScreenMenuStateChanged;
-        _hotkeyRegistry.SetActiveScreen(screen);
-        _contentArea.Title = screen.Title;
-        _contentArea.Add(screen.Content);
-        screen.OnActivated(_hotkeyRegistry);
-
-        // Rebuild menu bar with screen-specific items
-        RebuildMenuBar();
-
-        // Set focus to content
-        screen.Content.SetFocus();
     }
 
     private void OnScreenCloseRequested()
@@ -173,10 +151,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private void OnActiveTabChanged()
     {
         var activeTab = _tabManager.ActiveTab;
-
-        // Skip if already showing the correct screen (NavigateTo already activated it)
-        if (activeTab != null && _currentScreen == activeTab.Screen)
-            return;
 
         // Deactivate current screen if any
         if (_currentScreen != null)
@@ -451,6 +425,17 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             HotkeyScope.Global,
             "Previous tab",
             () => _tabManager.ActivatePrevious()));
+
+        // Direct tab selection: Alt+1 through Alt+9
+        for (var i = 0; i < 9; i++)
+        {
+            var index = i;
+            _hotkeyRegistrations.Add(_hotkeyRegistry.Register(
+                Key.AltMask | (Key)('1' + i),
+                HotkeyScope.Global,
+                $"Tab {i + 1}",
+                () => _tabManager.ActivateTab(index)));
+        }
     }
 
     private void NavigateToSqlQuery()

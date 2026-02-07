@@ -45,13 +45,13 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string? _activeEnvironmentUrl;
     private string? _activeEnvironmentDisplayName;
     private bool _disposed;
-    private ITuiErrorService? _errorService;
-    private IHotkeyRegistry? _hotkeyRegistry;
-    private IProfileService? _profileService;
-    private IEnvironmentService? _environmentService;
-    private ITuiThemeService? _themeService;
-    private IQueryHistoryService? _queryHistoryService;
-    private IExportService? _exportService;
+    private readonly Lazy<ITuiErrorService> _errorService;
+    private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
+    private readonly Lazy<IProfileService> _profileService;
+    private readonly Lazy<IEnvironmentService> _environmentService;
+    private readonly Lazy<ITuiThemeService> _themeService;
+    private readonly Lazy<IQueryHistoryService> _queryHistoryService;
+    private readonly Lazy<IExportService> _exportService;
 
     /// <summary>
     /// Event raised when the environment changes (either via initialization or explicit switch).
@@ -104,6 +104,15 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
         _beforeInteractiveAuth = beforeInteractiveAuth;
+
+        // Initialize lazy service instances (thread-safe by default)
+        _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance));
+        _environmentService = new Lazy<IEnvironmentService>(() => new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance));
+        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService());
+        _errorService = new Lazy<ITuiErrorService>(() => new TuiErrorService());
+        _hotkeyRegistry = new Lazy<IHotkeyRegistry>(() => new HotkeyRegistry());
+        _queryHistoryService = new Lazy<IQueryHistoryService>(() => new QueryHistoryService(NullLogger<QueryHistoryService>.Instance));
+        _exportService = new Lazy<IExportService>(() => new ExportService(NullLogger<ExportService>.Instance));
     }
 
     /// <summary>
@@ -452,7 +461,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The profile service.</returns>
     public IProfileService GetProfileService()
     {
-        return _profileService ??= new ProfileService(_profileStore, NullLogger<ProfileService>.Instance);
+        return _profileService.Value;
     }
 
     /// <summary>
@@ -462,7 +471,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The environment service.</returns>
     public IEnvironmentService GetEnvironmentService()
     {
-        return _environmentService ??= new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance);
+        return _environmentService.Value;
     }
 
     /// <summary>
@@ -481,7 +490,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The theme service.</returns>
     public ITuiThemeService GetThemeService()
     {
-        return _themeService ??= new TuiThemeService();
+        return _themeService.Value;
     }
 
     /// <summary>
@@ -491,7 +500,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The error service.</returns>
     public ITuiErrorService GetErrorService()
     {
-        return _errorService ??= new TuiErrorService();
+        return _errorService.Value;
     }
 
     /// <summary>
@@ -501,7 +510,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The hotkey registry.</returns>
     public IHotkeyRegistry GetHotkeyRegistry()
     {
-        return _hotkeyRegistry ??= new HotkeyRegistry();
+        return _hotkeyRegistry.Value;
     }
 
     /// <summary>
@@ -511,7 +520,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The query history service.</returns>
     public IQueryHistoryService GetQueryHistoryService()
     {
-        return _queryHistoryService ??= new QueryHistoryService(NullLogger<QueryHistoryService>.Instance);
+        return _queryHistoryService.Value;
     }
 
     /// <summary>
@@ -521,7 +530,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <returns>The export service.</returns>
     public IExportService GetExportService()
     {
-        return _exportService ??= new ExportService(NullLogger<ExportService>.Instance);
+        return _exportService.Value;
     }
 
     #endregion
