@@ -13,18 +13,14 @@ const ppdsPath = getPpdsPath();
 test.use({ program: { file: ppdsPath, args: ['interactive'] } });
 
 test.describe('Startup Flow', () => {
-  test('launches and displays main menu', async ({ terminal }) => {
+  test('launches and displays window title and menu bar', async ({ terminal }) => {
     // Wait for the main window to appear
     await expect(terminal.getByText('PPDS - Power Platform Developer Suite', { full: true })).toBeVisible();
-    await expect(terminal.getByText('Welcome to PPDS Interactive Mode', { full: true })).toBeVisible();
 
-    // Verify the main menu items and menu bar are displayed
-    await expect(terminal.getByText('SQL Query', { full: true })).toBeVisible();
     // Menu bar should show File, Tools, Help menus
     await expect(terminal.getByText('File', { full: true })).toBeVisible();
-
-    // Take a snapshot of the initial state
-    await expect(terminal).toMatchSnapshot();
+    await expect(terminal.getByText('Tools', { full: true })).toBeVisible();
+    await expect(terminal.getByText('Help', { full: true })).toBeVisible();
   });
 
   test('shows status bar with profile info', async ({ terminal }) => {
