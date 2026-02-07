@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <!-- For IPlugin interface -->
-    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" />
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" />
   </ItemGroup>
 
   <ItemGroup>
