@@ -35,6 +35,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private readonly Stack<ITuiScreen> _screenStack = new();
     private ITuiScreen? _currentScreen;
     private View? _mainMenuContent;
+    private SplashView? _splashView;
     private bool _hasError;
     private DateTime _lastMenuClickTime = DateTime.MinValue;
     private const int MenuClickDebounceMs = 150;
@@ -79,8 +80,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Build initial menu bar
         RebuildMenuBar();
 
-        // Show main menu content
-        ShowMainMenu();
+        // Show splash screen during initialization
+        ShowSplash();
 
         Add(_contentArea, _statusBar, _statusLine);
 
@@ -174,8 +175,27 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _currentScreen.Content.SetFocus();
     }
 
+    private void ShowSplash()
+    {
+        _currentScreen = null;
+        _hotkeyRegistry.SetActiveScreen(null);
+        _contentArea.Title = "PPDS";
+
+        _splashView = new SplashView();
+        _contentArea.Add(_splashView);
+
+        RebuildMenuBar();
+    }
+
     private void ShowMainMenu()
     {
+        // Clear splash if still showing
+        if (_splashView != null)
+        {
+            _contentArea.Remove(_splashView);
+            _splashView = null;
+        }
+
         _currentScreen = null;
         _hotkeyRegistry.SetActiveScreen(null);
         _contentArea.Title = "Main Menu";
@@ -368,7 +388,12 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         if (_currentScreen is SqlQueryScreen)
             return;
 
-        // Clear current content
+        // Clear splash or main menu content
+        if (_splashView != null)
+        {
+            _contentArea.Remove(_splashView);
+            _splashView = null;
+        }
         if (_mainMenuContent != null)
         {
             _contentArea.Remove(_mainMenuContent);
