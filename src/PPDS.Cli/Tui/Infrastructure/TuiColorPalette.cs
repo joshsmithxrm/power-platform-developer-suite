@@ -179,6 +179,36 @@ public static class TuiColorPalette
 
     #endregion
 
+    #region Tab Bar
+
+    /// <summary>
+    /// Active tab in tab bar.
+    /// White text on dark gray background for clear visibility.
+    /// </summary>
+    public static ColorScheme TabActive => new()
+    {
+        Normal = MakeAttr(Color.White, Color.DarkGray),
+        Focus = MakeAttr(Color.White, Color.DarkGray),
+        HotNormal = MakeAttr(Color.BrightCyan, Color.DarkGray),
+        HotFocus = MakeAttr(Color.BrightCyan, Color.DarkGray),
+        Disabled = MakeAttr(Color.Gray, Color.DarkGray)
+    };
+
+    /// <summary>
+    /// Inactive tab in tab bar.
+    /// Gray text on black background for muted appearance.
+    /// </summary>
+    public static ColorScheme TabInactive => new()
+    {
+        Normal = MakeAttr(Color.Gray, Color.Black),
+        Focus = MakeAttr(Color.White, Color.Black),
+        HotNormal = MakeAttr(Color.Cyan, Color.Black),
+        HotFocus = MakeAttr(Color.White, Color.Black),
+        Disabled = MakeAttr(Color.DarkGray, Color.Black)
+    };
+
+    #endregion
+
     #region Accent Colors
 
     /// <summary>
@@ -292,6 +322,8 @@ public static class TuiColorPalette
             (nameof(StatusBar_Trial), StatusBar_Trial),
             (nameof(StatusBar_Default), StatusBar_Default),
             (nameof(MenuBar), MenuBar),
+            (nameof(TabActive), TabActive),
+            (nameof(TabInactive), TabInactive),
             (nameof(TableHeader), TableHeader),
             (nameof(Selected), Selected),
             (nameof(Error), Error),
