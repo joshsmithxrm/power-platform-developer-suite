@@ -13,6 +13,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHistoryDialogState>
 {
     private readonly IQueryHistoryService _historyService;
+    private readonly ITuiErrorService? _errorService;
     private readonly string _environmentUrl;
     private readonly ListView _listView;
     private readonly TextView _previewText;
@@ -38,6 +39,7 @@ internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHist
     {
         _historyService = historyService ?? throw new ArgumentNullException(nameof(historyService));
         _environmentUrl = environmentUrl ?? throw new ArgumentNullException(nameof(environmentUrl));
+        _errorService = session?.GetErrorService();
 
         Width = 80;
         Height = 22;
@@ -144,19 +146,7 @@ internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHist
         Add(searchLabel, _searchField, listFrame, previewFrame, _statusLabel,
             executeButton, copyButton, deleteButton, cancelButton);
 
-        // Load history asynchronously
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = LoadHistoryAsync(null).ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception != null)
-            {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    _statusLabel.Text = $"Error: {t.Exception.InnerException?.Message ?? t.Exception.Message}";
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(LoadHistoryAsync(null), "LoadHistory");
     }
 
     private async Task LoadHistoryAsync(string? searchPattern)
@@ -220,18 +210,7 @@ internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHist
     {
         var searchText = _searchField.Text?.ToString();
 
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = LoadHistoryAsync(searchText).ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                Application.MainLoop?.Invoke(() =>
-                {
-                    _statusLabel.Text = "Search failed";
-                });
-            }
-        }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(LoadHistoryAsync(searchText), "SearchHistory");
     }
 
     private void OnSelectedItemChanged(ListViewItemEventArgs args)
@@ -292,18 +271,7 @@ internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHist
 
         if (result == 0)
         {
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-            _ = DeleteEntryAsync(entry.Id).ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    Application.MainLoop?.Invoke(() =>
-                    {
-                        _statusLabel.Text = "Failed to delete entry";
-                    });
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore PPDS013
+            _errorService?.FireAndForget(DeleteEntryAsync(entry.Id), "DeleteHistoryEntry");
         }
     }
 

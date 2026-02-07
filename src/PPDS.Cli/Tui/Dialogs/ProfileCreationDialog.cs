@@ -32,6 +32,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
     };
     private readonly IProfileService _profileService;
     private readonly IEnvironmentService _environmentService;
+    private readonly ITuiErrorService? _errorService;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
 
     private readonly TextField _nameField;
@@ -87,6 +88,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
     {
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
+        _errorService = session?.GetErrorService();
         _deviceCodeCallback = deviceCodeCallback;
 
         Width = 70;
@@ -405,9 +407,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         _statusLabel.Text = "Authenticating...";
         Application.Refresh();
 
-#pragma warning disable PPDS013 // Fire-and-forget with explicit error handling
-        _ = CreateProfileAndHandleResultAsync(request, deviceCallback);
-#pragma warning restore PPDS013
+        _errorService?.FireAndForget(CreateProfileAndHandleResultAsync(request, deviceCallback), "CreateProfile");
     }
 
     private async Task CreateProfileAndHandleResultAsync(ProfileCreateRequest request, Action<DeviceCodeInfo>? deviceCodeCallback)
