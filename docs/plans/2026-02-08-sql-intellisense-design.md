@@ -183,7 +183,7 @@ This view is language-agnostic. SQL-specific behavior comes from the tokenizer i
 
 **Alias resolution:** The AST's `SqlTableRef` and `SqlJoin` nodes carry table names and aliases. The completion engine builds an alias→entity map from the AST, then resolves which entity's attributes to suggest.
 
-**Partial parse handling:** When the SQL is incomplete (user is mid-typing), the parser may fail. Fall back to lexer tokens + heuristic context detection (reverse word scan from cursor, similar to sql4cds approach) when the AST is unavailable.
+**Partial parse handling:** When the SQL is incomplete (user is mid-typing), the parser may fail. Fall back to lexer tokens + heuristic context detection (reverse word scan from cursor) when the AST is unavailable.
 
 ### Completion Engine
 
@@ -228,7 +228,7 @@ public enum SqlCompletionKind
 - After ORDER BY attr: ASC, DESC
 - After ORDER BY complete: LIMIT
 
-**Relationship-aware JOIN suggestions** (from sql4cds pattern):
+**Relationship-aware JOIN suggestions**:
 - After `JOIN`, in addition to entity names, suggest related entities based on relationships from tables already in the FROM clause
 - Each suggestion includes the full ON clause: `contact ON account.primarycontactid = contact.contactid`
 - Uses `IMetadataService.GetRelationshipsAsync()` via the cached provider
