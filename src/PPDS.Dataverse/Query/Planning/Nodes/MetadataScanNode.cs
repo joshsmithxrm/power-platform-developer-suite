@@ -38,12 +38,12 @@ public sealed class MetadataScanNode : IQueryPlanNode
 
     public MetadataScanNode(
         string metadataTable,
-        IMetadataQueryExecutor metadataExecutor,
+        IMetadataQueryExecutor? metadataExecutor,
         IReadOnlyList<string>? requestedColumns = null,
         ISqlCondition? filter = null)
     {
         MetadataTable = metadataTable ?? throw new ArgumentNullException(nameof(metadataTable));
-        MetadataExecutor = metadataExecutor ?? throw new ArgumentNullException(nameof(metadataExecutor));
+        MetadataExecutor = metadataExecutor!; // May be null at plan time; resolved from context at execution
         RequestedColumns = requestedColumns;
         Filter = filter;
     }
@@ -53,7 +53,12 @@ public sealed class MetadataScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var records = await MetadataExecutor.QueryMetadataAsync(
+        // Use the executor provided at construction, or fall back to the context's executor
+        var executor = MetadataExecutor ?? context.MetadataQueryExecutor
+            ?? throw new InvalidOperationException(
+                "No metadata query executor available. Ensure a MetadataQueryExecutor is configured.");
+
+        var records = await executor.QueryMetadataAsync(
             MetadataTable,
             RequestedColumns,
             cancellationToken).ConfigureAwait(false);

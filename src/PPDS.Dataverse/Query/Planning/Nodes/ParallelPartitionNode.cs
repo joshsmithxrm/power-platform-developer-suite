@@ -40,35 +40,44 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
 
         var semaphore = new SemaphoreSlim(MaxParallelism);
 
-        // Launch all partition tasks
+        // Launch all partition tasks. The try/catch ensures the channel is
+        // always completed (with or without an exception) so the consumer
+        // never deadlocks waiting on a channel that will never close.
         var producerTask = Task.Run(async () =>
         {
-            var tasks = new List<Task>();
-
-            foreach (var partition in Partitions)
+            try
             {
-                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                var tasks = new List<Task>();
 
-                var task = Task.Run(async () =>
+                foreach (var partition in Partitions)
                 {
-                    try
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                    var task = Task.Run(async () =>
                     {
-                        await foreach (var row in partition.ExecuteAsync(context, cancellationToken))
+                        try
                         {
-                            await channel.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
+                            await foreach (var row in partition.ExecuteAsync(context, cancellationToken))
+                            {
+                                await channel.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
+                            }
                         }
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }, cancellationToken);
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }, cancellationToken);
 
-                tasks.Add(task);
+                    tasks.Add(task);
+                }
+
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+                channel.Writer.Complete();
             }
-
-            await Task.WhenAll(tasks).ConfigureAwait(false);
-            channel.Writer.Complete();
+            catch (Exception ex)
+            {
+                channel.Writer.Complete(ex);
+            }
         }, cancellationToken);
 
         // Read results from channel

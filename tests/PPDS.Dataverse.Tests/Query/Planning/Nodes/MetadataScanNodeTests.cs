@@ -284,9 +284,12 @@ public class MetadataScanNodeTests
     }
 
     [Fact]
-    public void Constructor_ThrowsOnNullMetadataExecutor()
+    public void Constructor_AllowsNullMetadataExecutor_ResolvedFromContextAtExecution()
     {
-        Assert.Throws<ArgumentNullException>(() => new MetadataScanNode("entity", null!));
+        // MetadataScanNode accepts null executor at plan time — the executor
+        // is resolved from QueryPlanContext during ExecuteAsync.
+        var node = new MetadataScanNode("entity", null);
+        Assert.Null(node.MetadataExecutor);
     }
 
     [Fact]

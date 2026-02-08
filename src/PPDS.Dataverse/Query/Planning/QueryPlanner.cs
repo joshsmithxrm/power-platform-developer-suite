@@ -96,6 +96,15 @@ public sealed class QueryPlanner
 
     private QueryPlanResult PlanSelect(SqlSelectStatement statement, QueryPlanOptions options)
     {
+        // Phase 6: Metadata virtual table routing. When the FROM clause references
+        // a metadata.* table (e.g., metadata.entity, metadata.attribute), bypass
+        // FetchXML transpilation and route to MetadataScanNode instead.
+        var fromEntityName = statement.GetEntityName();
+        if (fromEntityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
+        {
+            return PlanMetadataQuery(statement, fromEntityName);
+        }
+
         // COUNT(*) optimization: bare SELECT COUNT(*) FROM entity (no WHERE, JOIN, GROUP BY,
         // HAVING) uses RetrieveTotalRecordCountRequest for near-instant metadata read instead
         // of aggregate FetchXML scan. Short-circuits the entire normal plan path.
@@ -865,6 +874,46 @@ public sealed class QueryPlanner
         }
 
         return new ClientWindowNode(input, windows);
+    }
+
+    /// <summary>
+    /// Builds a plan for querying metadata virtual tables (metadata.entity, metadata.attribute, etc.).
+    /// Bypasses FetchXML transpilation entirely — routes to MetadataScanNode which calls
+    /// the Dataverse metadata API.
+    /// </summary>
+    private static QueryPlanResult PlanMetadataQuery(SqlSelectStatement statement, string entityName)
+    {
+        // Extract the table name after "metadata." prefix
+        var metadataTable = entityName;
+
+        // Extract requested column names from SELECT list
+        List<string>? requestedColumns = null;
+        if (statement.Columns.Count > 0 &&
+            !(statement.Columns.Count == 1 && statement.Columns[0] is SqlColumnRef { IsWildcard: true }))
+        {
+            requestedColumns = new List<string>();
+            foreach (var col in statement.Columns)
+            {
+                if (col is SqlColumnRef colRef)
+                {
+                    requestedColumns.Add(colRef.Alias ?? colRef.ColumnName);
+                }
+            }
+        }
+
+        var scanNode = new MetadataScanNode(
+            metadataTable,
+            metadataExecutor: null!, // Will be resolved from context at execution time
+            requestedColumns,
+            statement.Where);
+
+        return new QueryPlanResult
+        {
+            RootNode = scanNode,
+            FetchXml = $"-- Metadata query: {metadataTable}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = metadataTable
+        };
     }
 
     /// <summary>
