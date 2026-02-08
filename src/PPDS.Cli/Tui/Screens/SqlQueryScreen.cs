@@ -127,7 +127,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.Backspace:
                     // Delete word before cursor (Alt variant)
                     DeleteWordBackward();
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -140,7 +139,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.DeleteChar:
                     // Delete word after cursor (Alt variant)
                     DeleteWordForward();
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -153,14 +151,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.CursorLeft:
                     // Word navigation backward (Alt variant) - forward to Ctrl+Left
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorLeft | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
                 case Key.AltMask | Key.CursorRight:
                     // Word navigation forward (Alt variant) - forward to Ctrl+Right
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorRight | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 

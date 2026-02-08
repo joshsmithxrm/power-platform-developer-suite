@@ -1,4 +1,3 @@
-using System.Reflection;
 using PPDS.Auth.Credentials;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Tui.Dialogs;
@@ -30,7 +29,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private readonly FrameView _contentArea;
     private readonly TabManager _tabManager;
     private readonly TabBar _tabBar;
-    private MenuBar? _menuBar;
+    private PpdsMenuBar? _menuBar;
 
     private readonly Task _initializationTask;
 
@@ -264,7 +263,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Exit", "Exit the application", () =>
             {
                 // Close menu before stopping to prevent Terminal.Gui state corruption
-                CloseMenuBar();
+                _menuBar?.CloseMenu();
                 RequestStop();
             })
         }));
@@ -293,43 +292,13 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Error Log", "View recent errors and debug log (F12)", () => ShowErrorDetails()),
         }));
 
-        _menuBar = new MenuBar(menuItems.ToArray());
+        _menuBar = new PpdsMenuBar(menuItems.ToArray());
         _menuBar.ColorScheme = TuiColorPalette.MenuBar;
 
-        // Register MenuBar with HotkeyRegistry for Alt key suppression
-        _hotkeyRegistry.SetMenuBar(_menuBar);
-
-        // Known issue: Terminal.Gui v1.x WindowsDriver has a mouse event handling bug where
-        // Button1Clicked can be delayed or lost (github.com/gui-cs/Terminal.Gui/issues/386,
-        // github.com/gui-cs/Terminal.Gui/issues/1848). This causes menus to occasionally
-        // flicker open/closed on a single click. A debounce handler was tried here previously
-        // but made things worse by suppressing clicks the MenuBar needed to maintain state.
-        // The fix is in Terminal.Gui v2 (milestone: March 2026). Do not add MouseClick
-        // handlers on the MenuBar — they fire before MenuBar.MouseEvent() and interfere
-        // with its internal open/close toggle logic.
+        // Register menu-open check with HotkeyRegistry for letter-blocking
+        _hotkeyRegistry.SetMenuOpenCheck(() => _menuBar?.IsMenuOpen == true);
 
         Add(_menuBar);
-    }
-
-    /// <summary>
-    /// Closes the menu bar dropdown using reflection to call Terminal.Gui's internal CloseAllMenus().
-    /// This prevents state corruption when quitting while menu is open.
-    /// </summary>
-    private void CloseMenuBar()
-    {
-        if (_menuBar == null) return;
-
-        try
-        {
-            var closeMethod = typeof(MenuBar).GetMethod(
-                "CloseAllMenus",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            closeMethod?.Invoke(_menuBar, null);
-        }
-        catch (Exception ex)
-        {
-            TuiDebugLog.Log($"Failed to close menu: {ex.Message}");
-        }
     }
 
     private void RegisterGlobalHotkeys()
