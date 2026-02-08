@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Xml.Linq;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning.Nodes;
@@ -205,6 +206,15 @@ public sealed class QueryPlanner
         // Start with scan as root; apply client-side operators on top.
         IQueryPlanNode rootNode = scanNode;
 
+        // Wrap with PrefetchScanNode for page-ahead buffering when:
+        // - Prefetch is enabled
+        // - Query is not an aggregate (aggregates return few rows — prefetch overhead not worthwhile)
+        // - Query is auto-paging (single-page queries don't benefit from prefetch)
+        if (options.EnablePrefetch && !statement.HasAggregates() && !isCallerPaged)
+        {
+            rootNode = new PrefetchScanNode(rootNode, options.PrefetchBufferSize);
+        }
+
         // Expression conditions in WHERE (column-to-column, computed expressions)
         // cannot be pushed to FetchXML. Extract them and evaluate client-side.
         var clientWhereCondition = ExtractExpressionConditions(statement.Where);
@@ -259,16 +269,20 @@ public sealed class QueryPlanner
             rootNode = DmlExecuteNode.InsertValues(
                 insert.TargetEntity,
                 insert.Columns,
-                insert.ValueRows);
+                insert.ValueRows,
+                rowCap: options.DmlRowCap ?? int.MaxValue);
         }
         else if (insert.SourceQuery != null)
         {
             // INSERT SELECT: plan the source SELECT, wrap with DmlExecuteNode
             var sourceResult = PlanSelect(insert.SourceQuery, options);
+            var sourceColumns = ExtractSelectColumnNames(insert.SourceQuery);
             rootNode = DmlExecuteNode.InsertSelect(
                 insert.TargetEntity,
                 insert.Columns,
-                sourceResult.RootNode);
+                sourceResult.RootNode,
+                sourceColumns: sourceColumns,
+                rowCap: options.DmlRowCap ?? int.MaxValue);
         }
         else
         {
@@ -322,7 +336,8 @@ public sealed class QueryPlanner
         var rootNode = DmlExecuteNode.Update(
             entityName,
             selectResult.RootNode,
-            update.SetClauses);
+            update.SetClauses,
+            rowCap: options.DmlRowCap ?? int.MaxValue);
 
         return new QueryPlanResult
         {
@@ -354,7 +369,8 @@ public sealed class QueryPlanner
 
         var rootNode = DmlExecuteNode.Delete(
             entityName,
-            selectResult.RootNode);
+            selectResult.RootNode,
+            rowCap: options.DmlRowCap ?? int.MaxValue);
 
         return new QueryPlanResult
         {
@@ -402,6 +418,33 @@ public sealed class QueryPlanner
                 ExtractColumnNamesRecursive(cast.Expression, columns);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Extracts the output column names from a SELECT statement for ordinal mapping in INSERT...SELECT.
+    /// </summary>
+    private static List<string> ExtractSelectColumnNames(SqlSelectStatement select)
+    {
+        var names = new List<string>();
+        foreach (var col in select.Columns)
+        {
+            switch (col)
+            {
+                case SqlColumnRef colRef:
+                    names.Add(colRef.Alias ?? colRef.ColumnName);
+                    break;
+                case SqlAggregateColumn agg:
+                    names.Add(agg.Alias ?? agg.GetColumnName() ?? "count");
+                    break;
+                case SqlComputedColumn computed:
+                    names.Add(computed.Alias ?? "computed");
+                    break;
+                default:
+                    names.Add(col.ToString() ?? "unknown");
+                    break;
+            }
+        }
+        return names;
     }
 
     /// <summary>
@@ -885,6 +928,8 @@ public sealed class QueryPlanner
     {
         // Extract the table name after "metadata." prefix
         var metadataTable = entityName;
+        if (metadataTable.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
+            metadataTable = metadataTable["metadata.".Length..];
 
         // Extract requested column names from SELECT list
         List<string>? requestedColumns = null;
@@ -903,7 +948,7 @@ public sealed class QueryPlanner
 
         var scanNode = new MetadataScanNode(
             metadataTable,
-            metadataExecutor: null!, // Will be resolved from context at execution time
+            metadataExecutor: null, // Will be resolved from context at execution time
             requestedColumns,
             statement.Where);
 
@@ -1039,12 +1084,20 @@ public sealed class QueryPlanner
             options.MaxDate!.Value,
             options.MaxRecordsPerPartition);
 
+        // Build MergeAggregateColumn descriptors from the SQL AST
+        var mergeColumns = BuildMergeAggregateColumns(statement);
+        var groupByColumns = statement.GroupBy.Select(g => g.Alias ?? g.ColumnName).ToList();
+
+        // Inject companion COUNT attributes for AVG columns into the FetchXML
+        // so each partition returns the row count needed for weighted average merging.
+        var enrichedFetchXml = InjectAvgCompanionCounts(transpileResult.FetchXml, mergeColumns);
+
         // Create a FetchXmlScanNode per partition, each with date range filter injected
         var partitionNodes = new List<IQueryPlanNode>();
         foreach (var partition in partitions)
         {
             var partitionedFetchXml = InjectDateRangeFilter(
-                transpileResult.FetchXml, partition.Start, partition.End);
+                enrichedFetchXml, partition.Start, partition.End);
 
             var scanNode = new FetchXmlScanNode(
                 partitionedFetchXml,
@@ -1056,10 +1109,6 @@ public sealed class QueryPlanner
 
         // Wrap in ParallelPartitionNode for concurrent execution
         var parallelNode = new ParallelPartitionNode(partitionNodes, options.PoolCapacity);
-
-        // Build MergeAggregateColumn descriptors from the SQL AST
-        var mergeColumns = BuildMergeAggregateColumns(statement);
-        var groupByColumns = statement.GroupBy.Select(g => g.Alias ?? g.ColumnName).ToList();
 
         // Add MergeAggregateNode on top to combine partial results
         IQueryPlanNode rootNode = new MergeAggregateNode(parallelNode, mergeColumns, groupByColumns);
@@ -1121,6 +1170,45 @@ public sealed class QueryPlanner
             SqlAggregateFunction.Max => AggregateFunction.Max,
             _ => throw new ArgumentOutOfRangeException(nameof(sqlFunc), sqlFunc, "Unsupported aggregate function")
         };
+    }
+
+    /// <summary>
+    /// For each AVG aggregate attribute in the FetchXML, injects a companion
+    /// countcolumn aggregate attribute so that MergeAggregateNode can compute
+    /// weighted averages across partitions.
+    /// </summary>
+    internal static string InjectAvgCompanionCounts(string fetchXml, IReadOnlyList<MergeAggregateColumn> mergeColumns)
+    {
+        // Only process if there are AVG columns that need companion counts
+        var avgColumns = mergeColumns.Where(c => c.Function == AggregateFunction.Avg && c.CountAlias != null).ToList();
+        if (avgColumns.Count == 0) return fetchXml;
+
+        var doc = XDocument.Parse(fetchXml);
+        var entityElement = doc.Root?.Element("entity");
+        if (entityElement == null) return fetchXml;
+
+        foreach (var avgCol in avgColumns)
+        {
+            // Find the matching AVG attribute element by alias
+            var avgAttr = entityElement.Elements("attribute")
+                .FirstOrDefault(a => string.Equals(a.Attribute("alias")?.Value, avgCol.Alias, StringComparison.OrdinalIgnoreCase));
+
+            if (avgAttr == null) continue;
+
+            // Get the attribute name from the AVG element
+            var attrName = avgAttr.Attribute("name")?.Value;
+            if (attrName == null) continue;
+
+            // Inject companion countcolumn attribute right after the AVG attribute
+            var countElement = new XElement("attribute",
+                new XAttribute("name", attrName),
+                new XAttribute("alias", avgCol.CountAlias!),
+                new XAttribute("aggregate", "countcolumn"));
+
+            avgAttr.AddAfterSelf(countElement);
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
     }
 
     /// <summary>

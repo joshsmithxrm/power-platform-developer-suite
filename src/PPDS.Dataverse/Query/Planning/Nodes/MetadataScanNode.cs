@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
@@ -55,7 +56,8 @@ public sealed class MetadataScanNode : IQueryPlanNode
     {
         // Use the executor provided at construction, or fall back to the context's executor
         var executor = MetadataExecutor ?? context.MetadataQueryExecutor
-            ?? throw new InvalidOperationException(
+            ?? throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
                 "No metadata query executor available. Ensure a MetadataQueryExecutor is configured.");
 
         var records = await executor.QueryMetadataAsync(

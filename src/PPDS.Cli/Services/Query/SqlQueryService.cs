@@ -1,8 +1,11 @@
 using System.Runtime.CompilerServices;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
+using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
@@ -17,6 +20,8 @@ public sealed class SqlQueryService : ISqlQueryService
 {
     private readonly IQueryExecutor _queryExecutor;
     private readonly ITdsQueryExecutor? _tdsQueryExecutor;
+    private readonly IBulkOperationExecutor? _bulkOperationExecutor;
+    private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly QueryPlanner _planner;
     private readonly PlanExecutor _planExecutor;
     private readonly ExpressionEvaluator _expressionEvaluator = new();
@@ -27,10 +32,18 @@ public sealed class SqlQueryService : ISqlQueryService
     /// </summary>
     /// <param name="queryExecutor">The query executor for FetchXML execution.</param>
     /// <param name="tdsQueryExecutor">Optional TDS Endpoint executor for direct SQL execution.</param>
-    public SqlQueryService(IQueryExecutor queryExecutor, ITdsQueryExecutor? tdsQueryExecutor = null)
+    /// <param name="bulkOperationExecutor">Optional bulk operation executor for DML statements.</param>
+    /// <param name="metadataQueryExecutor">Optional metadata query executor for metadata virtual tables.</param>
+    public SqlQueryService(
+        IQueryExecutor queryExecutor,
+        ITdsQueryExecutor? tdsQueryExecutor = null,
+        IBulkOperationExecutor? bulkOperationExecutor = null,
+        IMetadataQueryExecutor? metadataQueryExecutor = null)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         _tdsQueryExecutor = tdsQueryExecutor;
+        _bulkOperationExecutor = bulkOperationExecutor;
+        _metadataQueryExecutor = metadataQueryExecutor;
         _planner = new QueryPlanner();
         _planExecutor = new PlanExecutor();
     }
@@ -73,9 +86,12 @@ public sealed class SqlQueryService : ISqlQueryService
         // DML safety check: validate DELETE/UPDATE/INSERT before execution.
         // When DmlSafety options are provided, the guard blocks unsafe operations
         // (DELETE/UPDATE without WHERE) and enforces row caps.
+        int? dmlRowCap = null;
+        DmlSafetyResult? safetyResult = null;
+
         if (request.DmlSafety != null)
         {
-            var safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
+            safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
 
             if (safetyResult.IsBlocked)
             {
@@ -84,17 +100,9 @@ public sealed class SqlQueryService : ISqlQueryService
                     safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
             }
 
-            if (safetyResult.IsDryRun)
-            {
-                // Dry run: return the safety result without executing
-                return new SqlQueryResult
-                {
-                    OriginalSql = request.Sql,
-                    TranspiledFetchXml = null,
-                    Result = QueryResult.Empty("dry-run"),
-                    DmlSafetyResult = safetyResult
-                };
-            }
+            // Don't return yet for dry-run — we need to run the planner first
+            // so the user sees the execution plan. The dry-run check moves
+            // to after planning.
 
             if (safetyResult.RequiresConfirmation)
             {
@@ -102,6 +110,8 @@ public sealed class SqlQueryService : ISqlQueryService
                     ErrorCodes.Query.DmlBlocked,
                     "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
             }
+
+            dmlRowCap = safetyResult.RowCap;
         }
 
         // Build execution plan via QueryPlanner
@@ -113,16 +123,32 @@ public sealed class SqlQueryService : ISqlQueryService
             IncludeCount = request.IncludeCount,
             UseTdsEndpoint = request.UseTdsEndpoint,
             OriginalSql = request.Sql,
-            TdsQueryExecutor = _tdsQueryExecutor
+            TdsQueryExecutor = _tdsQueryExecutor,
+            DmlRowCap = dmlRowCap
         };
 
         var planResult = _planner.Plan(statement, planOptions);
+
+        // Dry-run: return the plan without executing. The planner is side-effect-free,
+        // so running it gives the user the FetchXML and execution plan for review.
+        if (safetyResult?.IsDryRun == true)
+        {
+            return new SqlQueryResult
+            {
+                OriginalSql = request.Sql,
+                TranspiledFetchXml = planResult.FetchXml,
+                Result = QueryResult.Empty("dry-run"),
+                DmlSafetyResult = safetyResult
+            };
+        }
 
         // Execute the plan
         var context = new QueryPlanContext(
             _queryExecutor,
             _expressionEvaluator,
-            cancellationToken);
+            cancellationToken,
+            bulkOperationExecutor: _bulkOperationExecutor,
+            metadataQueryExecutor: _metadataQueryExecutor);
 
         var result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
 
@@ -151,6 +177,10 @@ public sealed class SqlQueryService : ISqlQueryService
 
         var planResult = _planner.Plan(statement);
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
+
+        // Extract parallelism metadata from plan tree
+        description.PoolCapacity = ExtractPoolCapacity(planResult.RootNode);
+        description.EffectiveParallelism = ExtractEffectiveParallelism(planResult.RootNode);
 
         return Task.FromResult(description);
     }
@@ -194,7 +224,9 @@ public sealed class SqlQueryService : ISqlQueryService
         var context = new QueryPlanContext(
             _queryExecutor,
             _expressionEvaluator,
-            cancellationToken);
+            cancellationToken,
+            bulkOperationExecutor: _bulkOperationExecutor,
+            metadataQueryExecutor: _metadataQueryExecutor);
 
         var chunkRows = new List<IReadOnlyDictionary<string, QueryValue>>(chunkSize);
         IReadOnlyList<QueryColumn>? columns = null;
@@ -214,10 +246,14 @@ public sealed class SqlQueryService : ISqlQueryService
 
             if (chunkRows.Count >= chunkSize)
             {
+                // Expand virtual columns (owneridname, statuscodename, etc.)
+                var expandedChunk = ExpandStreamingChunk(
+                    chunkRows, columns!, planResult.VirtualColumns);
+
                 yield return new SqlQueryStreamChunk
                 {
-                    Rows = chunkRows.ToList(),
-                    Columns = isFirstChunk ? columns : null,
+                    Rows = expandedChunk.rows,
+                    Columns = isFirstChunk ? expandedChunk.columns : null,
                     EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
                     TotalRowsSoFar = totalRows,
                     IsComplete = false,
@@ -230,10 +266,13 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Yield final chunk with any remaining rows
+        var finalExpanded = ExpandStreamingChunk(
+            chunkRows, columns ?? Array.Empty<QueryColumn>(), planResult.VirtualColumns);
+
         yield return new SqlQueryStreamChunk
         {
-            Rows = chunkRows.ToList(),
-            Columns = isFirstChunk ? (columns ?? Array.Empty<QueryColumn>()) : null,
+            Rows = finalExpanded.rows,
+            Columns = isFirstChunk ? finalExpanded.columns : null,
             EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
             TotalRowsSoFar = totalRows,
             IsComplete = true,
@@ -244,14 +283,70 @@ public sealed class SqlQueryService : ISqlQueryService
     private static IReadOnlyList<QueryColumn> InferColumnsFromRow(QueryRow row)
     {
         var columns = new List<QueryColumn>();
-        foreach (var key in row.Values.Keys)
+        foreach (var kvp in row.Values)
         {
+            var value = kvp.Value;
+            var dataType = value.IsLookup ? QueryColumnType.Lookup
+                : value.IsOptionSet ? QueryColumnType.OptionSet
+                : value.IsBoolean ? QueryColumnType.Boolean
+                : QueryColumnType.Unknown;
+
             columns.Add(new QueryColumn
             {
-                LogicalName = key,
-                DataType = QueryColumnType.Unknown
+                LogicalName = kvp.Key,
+                DataType = dataType
             });
         }
         return columns;
+    }
+
+    private static (List<IReadOnlyDictionary<string, QueryValue>> rows, IReadOnlyList<QueryColumn> columns) ExpandStreamingChunk(
+        List<IReadOnlyDictionary<string, QueryValue>> chunkRows,
+        IReadOnlyList<QueryColumn> columns,
+        IReadOnlyDictionary<string, VirtualColumnInfo> virtualColumns)
+    {
+        // Build a mini QueryResult for the chunk so we can reuse the expander
+        var chunkResult = new QueryResult
+        {
+            EntityLogicalName = "chunk",
+            Columns = columns.ToList(),
+            Records = chunkRows,
+            Count = chunkRows.Count,
+            MoreRecords = false,
+            PageNumber = 1
+        };
+
+        var expanded = SqlQueryResultExpander.ExpandFormattedValueColumns(
+            chunkResult, virtualColumns);
+
+        return (expanded.Records.ToList(), expanded.Columns);
+    }
+
+    private static int? ExtractPoolCapacity(IQueryPlanNode node)
+    {
+        if (node is ParallelPartitionNode ppn)
+            return ppn.MaxParallelism;
+
+        foreach (var child in node.Children)
+        {
+            var result = ExtractPoolCapacity(child);
+            if (result.HasValue) return result;
+        }
+
+        return null;
+    }
+
+    private static int? ExtractEffectiveParallelism(IQueryPlanNode node)
+    {
+        if (node is ParallelPartitionNode ppn)
+            return ppn.Partitions.Count;
+
+        foreach (var child in node.Children)
+        {
+            var result = ExtractEffectiveParallelism(child);
+            if (result.HasValue) return result;
+        }
+
+        return null;
     }
 }

@@ -83,4 +83,13 @@ public sealed class QueryPlanOptions
     /// with literal values before FetchXML transpilation.
     /// </summary>
     public VariableScope? VariableScope { get; init; }
+
+    /// <summary>Row cap for DML operations. null = unlimited, default comes from DmlSafetyGuard (10,000).</summary>
+    public int? DmlRowCap { get; init; }
+
+    /// <summary>Whether to wrap scan nodes with PrefetchScanNode for page-ahead buffering. Default false (opt-in).</summary>
+    public bool EnablePrefetch { get; init; } = false;
+
+    /// <summary>Number of rows to buffer ahead for prefetch. Default 5000 (~3 FetchXML pages).</summary>
+    public int PrefetchBufferSize { get; init; } = 5000;
 }
