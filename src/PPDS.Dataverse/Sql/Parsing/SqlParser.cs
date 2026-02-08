@@ -26,6 +26,8 @@ namespace PPDS.Dataverse.Sql.Parsing;
 /// - INSERT INTO entity (cols) VALUES (...) / INSERT INTO entity (cols) SELECT ...
 /// - UPDATE entity SET col = expr WHERE ...
 /// - DELETE FROM entity WHERE ...
+/// - IF condition BEGIN...END [ELSE BEGIN...END]
+/// - Multi-statement scripts with semicolons
 ///
 /// Not Supported (for now):
 /// - INTERSECT/EXCEPT
@@ -62,6 +64,8 @@ public sealed class SqlParser
 
     /// <summary>
     /// Parses SQL text into an AST statement (supports all statement types).
+    /// For multi-statement scripts (containing DECLARE/SET/IF/ELSE or multiple
+    /// statements separated by semicolons), returns a <see cref="SqlBlockStatement"/>.
     /// </summary>
     /// <exception cref="SqlParseException">If parsing fails.</exception>
     public ISqlStatement ParseStatement()
@@ -74,73 +78,83 @@ public sealed class SqlParser
         _tokens = result.Tokens;
         _comments = result.Comments;
 
-        // Dispatch based on the first keyword
+        // Parse the first statement
+        var firstStmt = ParseSingleStatementBody();
+        SkipSemicolons();
+
+        // If there are more statements, this is a multi-statement script
+        if (!IsAtEnd())
+        {
+            var statements = new List<ISqlStatement> { firstStmt };
+            while (!IsAtEnd())
+            {
+                statements.Add(ParseSingleStatementBody());
+                SkipSemicolons();
+            }
+            return new SqlBlockStatement(statements, statements[0].SourcePosition);
+        }
+
+        return firstStmt;
+    }
+
+    /// <summary>
+    /// Dispatches and parses a single statement based on the current token.
+    /// Does NOT check for EOF — the caller is responsible for that.
+    /// </summary>
+    private ISqlStatement ParseSingleStatementBody()
+    {
         if (Check(SqlTokenType.Declare))
         {
-            var stmt = ParseDeclareStatement();
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return stmt;
+            return ParseDeclareStatement();
         }
 
         // SET @variable = expression (variable assignment)
         // Note: SET without @ is handled by UPDATE parsing (UPDATE ... SET col = expr)
         if (Check(SqlTokenType.Set) && PeekAt(_position + 1).Type == SqlTokenType.Variable)
         {
-            var stmt = ParseSetVariableStatement();
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return stmt;
+            return ParseSetVariableStatement();
+        }
+
+        if (Check(SqlTokenType.If))
+        {
+            return ParseIfStatement();
         }
 
         if (Check(SqlTokenType.Insert))
         {
-            var stmt = ParseInsertStatement();
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return stmt;
+            return ParseInsertStatement();
         }
 
         if (Check(SqlTokenType.Update))
         {
-            var stmt = ParseUpdateStatement();
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return stmt;
+            return ParseUpdateStatement();
         }
 
         if (Check(SqlTokenType.Delete))
         {
-            var stmt = ParseDeleteStatement();
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return stmt;
+            return ParseDeleteStatement();
         }
 
         var firstSelect = ParseSelectStatementWithoutEndCheck();
 
         // Check for UNION / UNION ALL following the first SELECT
-        if (!Check(SqlTokenType.Union))
+        if (Check(SqlTokenType.Union))
         {
-            // No UNION: ensure we've consumed all tokens and return plain SELECT
-            if (!IsAtEnd())
-            {
-                throw Error($"Unexpected token: {Peek().Value}");
-            }
-            return firstSelect;
+            return ParseUnionStatement(firstSelect);
         }
 
-        return ParseUnionStatement(firstSelect);
+        return firstSelect;
+    }
+
+    /// <summary>
+    /// Skips optional semicolons between statements.
+    /// </summary>
+    private void SkipSemicolons()
+    {
+        while (Match(SqlTokenType.Semicolon))
+        {
+            // consume
+        }
     }
 
     /// <summary>
@@ -643,6 +657,53 @@ public sealed class SqlParser
         var value = ParseExpression();
 
         return new SqlSetVariableStatement(variableName, value, sourcePosition);
+    }
+
+    /// <summary>
+    /// Parses an IF statement:
+    ///   IF condition BEGIN ... END [ELSE BEGIN ... END]
+    /// The condition is a standard SQL condition (comparison, logical, etc.).
+    /// </summary>
+    private SqlIfStatement ParseIfStatement()
+    {
+        var sourcePosition = Peek().Position;
+        Expect(SqlTokenType.If);
+
+        var condition = ParseCondition();
+
+        var thenBlock = ParseBlockStatement();
+
+        SqlBlockStatement? elseBlock = null;
+        if (Match(SqlTokenType.Else))
+        {
+            elseBlock = ParseBlockStatement();
+        }
+
+        return new SqlIfStatement(condition, thenBlock, elseBlock, sourcePosition);
+    }
+
+    /// <summary>
+    /// Parses a BEGIN...END block containing a sequence of statements.
+    ///   BEGIN statement [; statement ...] END
+    /// Statements within the block may be separated by optional semicolons.
+    /// </summary>
+    private SqlBlockStatement ParseBlockStatement()
+    {
+        var sourcePosition = Peek().Position;
+        Expect(SqlTokenType.Begin);
+
+        var statements = new List<ISqlStatement>();
+        SkipSemicolons();
+
+        while (!Check(SqlTokenType.End) && !IsAtEnd())
+        {
+            statements.Add(ParseSingleStatementBody());
+            SkipSemicolons();
+        }
+
+        Expect(SqlTokenType.End);
+
+        return new SqlBlockStatement(statements, sourcePosition);
     }
 
     #endregion
@@ -1785,6 +1846,25 @@ public sealed class SqlParser
             return condition;
         }
 
+        // Variable or numeric literal on left side of condition (e.g., IF @count > 0)
+        if (Check(SqlTokenType.Variable) || Check(SqlTokenType.Number) || Check(SqlTokenType.String))
+        {
+            var leftExpr = ParseExpression();
+            var op = ParseComparisonOperator();
+            var rightExpr = ParseExpression();
+
+            if (leftExpr is SqlColumnExpression colExpr2 && rightExpr is SqlLiteralExpression litExpr2)
+            {
+                var compCond = new SqlComparisonCondition(colExpr2.Column, op, litExpr2.Value);
+                AttachTrailingComment(compCond);
+                return compCond;
+            }
+
+            var exprCond2 = new SqlExpressionCondition(leftExpr, op, rightExpr);
+            AttachTrailingComment(exprCond2);
+            return exprCond2;
+        }
+
         // Column-based condition
         var column = ParseColumnRef();
 
@@ -1848,21 +1928,21 @@ public sealed class SqlParser
         // column-to-column (WHERE revenue > cost) and computed conditions
         // (WHERE revenue * 0.1 > 100). If right side is a simple literal,
         // produce SqlComparisonCondition for FetchXML pushdown compatibility.
-        var op = ParseComparisonOperator();
-        var rightExpr = ParseExpression();
+        var op2 = ParseComparisonOperator();
+        var rightExpr2 = ParseExpression();
 
-        if (rightExpr is SqlLiteralExpression litExpr)
+        if (rightExpr2 is SqlLiteralExpression litExpr)
         {
             // Simple column op literal: backward-compatible SqlComparisonCondition
-            var compCond = new SqlComparisonCondition(column, op, litExpr.Value);
+            var compCond = new SqlComparisonCondition(column, op2, litExpr.Value);
             AttachTrailingComment(compCond);
             return compCond;
         }
         else
         {
             // Expression on right side (column, arithmetic, etc.): use SqlExpressionCondition
-            var leftExpr = new SqlColumnExpression(column);
-            var exprCond = new SqlExpressionCondition(leftExpr, op, rightExpr);
+            var leftExpr2 = new SqlColumnExpression(column);
+            var exprCond = new SqlExpressionCondition(leftExpr2, op2, rightExpr2);
             AttachTrailingComment(exprCond);
             return exprCond;
         }

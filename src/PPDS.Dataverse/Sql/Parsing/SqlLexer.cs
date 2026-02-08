@@ -87,6 +87,9 @@ public sealed class SqlLexer
             case ')':
                 Advance();
                 return new SqlToken(SqlTokenType.RightParen, ")", startPosition);
+            case ';':
+                Advance();
+                return new SqlToken(SqlTokenType.Semicolon, ";", startPosition);
             case '+':
                 Advance();
                 return new SqlToken(SqlTokenType.Plus, "+", startPosition);

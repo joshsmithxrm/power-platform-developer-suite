@@ -110,6 +110,10 @@ public enum SqlTokenType
     DenseRank,
     /// <summary>DECLARE keyword.</summary>
     Declare,
+    /// <summary>IF keyword.</summary>
+    If,
+    /// <summary>BEGIN keyword.</summary>
+    Begin,
 
     #endregion
 
@@ -165,6 +169,8 @@ public enum SqlTokenType
     LeftParen,
     /// <summary>Right parenthesis ()).</summary>
     RightParen,
+    /// <summary>Semicolon statement terminator (;).</summary>
+    Semicolon,
 
     #endregion
 
@@ -246,6 +252,8 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.Rank,
         SqlTokenType.DenseRank,
         SqlTokenType.Declare,
+        SqlTokenType.If,
+        SqlTokenType.Begin,
         SqlTokenType.Count,
         SqlTokenType.Sum,
         SqlTokenType.Avg,
@@ -356,6 +364,8 @@ public static class SqlTokenTypeExtensions
         ["RANK"] = SqlTokenType.Rank,
         ["DENSE_RANK"] = SqlTokenType.DenseRank,
         ["DECLARE"] = SqlTokenType.Declare,
+        ["IF"] = SqlTokenType.If,
+        ["BEGIN"] = SqlTokenType.Begin,
         ["COUNT"] = SqlTokenType.Count,
         ["SUM"] = SqlTokenType.Sum,
         ["AVG"] = SqlTokenType.Avg,
