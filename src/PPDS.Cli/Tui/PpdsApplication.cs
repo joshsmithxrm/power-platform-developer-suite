@@ -113,6 +113,15 @@ internal sealed class PpdsApplication : IDisposable
 
         Application.Init();
 
+        // Override Terminal.Gui's global color defaults with our palette.
+        // Without this, the first render frame uses Terminal.Gui's built-in theme
+        // (blue/white) for any view that falls back to Colors.Base/TopLevel/etc.
+        Colors.Base = TuiColorPalette.Default;
+        Colors.TopLevel = TuiColorPalette.Default;
+        Colors.Menu = TuiColorPalette.MenuBar;
+        Colors.Dialog = TuiColorPalette.Default;
+        Colors.Error = TuiColorPalette.Error;
+
         // Wire up global key interception via HotkeyRegistry
         // This intercepts ALL keys before any view processes them
         Application.RootKeyEvent += (keyEvent) =>
