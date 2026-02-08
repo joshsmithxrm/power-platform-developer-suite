@@ -10,7 +10,7 @@ namespace PPDS.Cli.Tui.Testing.States;
 /// <param name="StatusBar">The status bar state.</param>
 /// <param name="CurrentScreenTitle">Title of the current screen (null if showing main menu).</param>
 /// <param name="CurrentScreenType">Type name of the current screen (null if showing main menu).</param>
-/// <param name="IsMainMenuVisible">Whether the main menu content is displayed.</param>
+/// <param name="IsMainMenuVisible">Whether the splash home screen is displayed (no active tool tab).</param>
 /// <param name="TabCount">Number of open tabs.</param>
 /// <param name="HasErrors">Whether there are errors in the error service.</param>
 /// <param name="ErrorCount">Number of errors in the error service.</param>

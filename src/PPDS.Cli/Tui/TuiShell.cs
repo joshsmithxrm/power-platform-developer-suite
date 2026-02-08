@@ -35,7 +35,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private readonly Task _initializationTask;
 
     private ITuiScreen? _currentScreen;
-    private View? _mainMenuContent;
     private SplashView? _splashView;
 
     public TuiShell(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session, Task initializationTask)
@@ -100,7 +99,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Load initial profile info
         LoadProfileInfoAsync();
 
-        // Wire session initialization to splash → main menu transition
+        // Wire session initialization to splash ready state
         WireInitializationToSplash();
     }
 
@@ -110,8 +109,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     /// </summary>
     public void NavigateTo(ITuiScreen screen)
     {
-        // Clear splash/main menu if still showing
-        ClearSplashAndMainMenu();
+        // Hide splash if still showing
+        HideSplash();
 
         // Add screen as a new tab — AddTab fires ActiveTabChanged,
         // which calls OnActiveTabChanged to handle activation.
@@ -131,7 +130,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     }
 
     /// <summary>
-    /// Closes the active tab. If no tabs remain, shows main menu.
+    /// Closes the active tab. If no tabs remain, shows splash home.
     /// </summary>
     public void NavigateBack()
     {
@@ -163,7 +162,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _tabManager.CloseTab(activeIndex);
         }
 
-        // OnActiveTabChanged will handle activating the next tab or showing main menu
+        // OnActiveTabChanged will handle activating the next tab or showing splash home
     }
 
     private void OnActiveTabChanged()
@@ -182,8 +181,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (activeTab == null)
         {
-            // No tabs remain - show main menu
-            ShowMainMenu();
+            // No tabs remain - show splash home
+            ShowSplashHome();
             return;
         }
 
@@ -203,18 +202,10 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _currentScreen.Content.SetFocus();
     }
 
-    private void ClearSplashAndMainMenu()
+    private void HideSplash()
     {
         if (_splashView != null)
-        {
-            _contentArea.Remove(_splashView);
-            _splashView = null;
-        }
-        if (_mainMenuContent != null)
-        {
-            _contentArea.Remove(_mainMenuContent);
-            _mainMenuContent = null;
-        }
+            _splashView.Visible = false;
     }
 
     private void ShowSplash()
@@ -232,47 +223,16 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         RebuildMenuBar();
     }
 
-    private void ShowMainMenu()
+    private void ShowSplashHome()
     {
-        ClearSplashAndMainMenu();
-
         _currentScreen = null;
         _hotkeyRegistry.SetActiveScreen(null);
-        _contentArea.Title = "Main Menu";
+        _contentArea.Title = "PPDS";
 
-        _mainMenuContent = CreateMainMenuContent();
-        _contentArea.Add(_mainMenuContent);
+        if (_splashView != null)
+            _splashView.Visible = true;
 
         RebuildMenuBar();
-    }
-
-    private View CreateMainMenuContent()
-    {
-        var container = new View
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill()
-        };
-
-        var label = new Label("Welcome to PPDS Interactive Mode\n\nSelect an option from the menu or use keyboard shortcuts:")
-        {
-            X = 2,
-            Y = 1,
-            Width = Dim.Fill() - 4,
-            Height = 3
-        };
-
-        var buttonSql = new Button("SQL Query")
-        {
-            X = 2,
-            Y = 5
-        };
-        buttonSql.Clicked += () => NavigateToSqlQuery();
-
-        container.Add(label, buttonSql);
-        return container;
     }
 
     private void RebuildMenuBar()
@@ -445,7 +405,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private void NavigateToSqlQuery()
     {
         // Clear splash or main menu content
-        ClearSplashAndMainMenu();
+        HideSplash();
 
         // Show centered loading message in content area
         var loadingLabel = new Label("Loading SQL Query...")
@@ -478,7 +438,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     /// </summary>
     private void NavigateToSqlQueryOnEnvironment(string environmentUrl, string? displayName)
     {
-        ClearSplashAndMainMenu();
+        HideSplash();
 
         var loadingLabel = new Label("Loading SQL Query...")
         {
@@ -536,7 +496,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     /// <summary>
     /// Deactivates the current screen and closes all tabs.
-    /// OnActiveTabChanged will show the main menu when no tabs remain.
+    /// OnActiveTabChanged will show the splash home when no tabs remain.
     /// </summary>
     private void CloseAllTabs()
     {
@@ -580,14 +540,17 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
                 _errorService.FireAndForget(SetEnvironmentAsync(url, name), "SetEnvironment");
 
                 // If tabs are open, switch to existing tab on that env or open a new one
-                var existingTab = _tabManager.FindTabByEnvironment(url);
-                if (existingTab >= 0)
+                if (_tabManager.TabCount > 0)
                 {
-                    _tabManager.ActivateTab(existingTab);
-                }
-                else
-                {
-                    NavigateToSqlQueryOnEnvironment(url, name);
+                    var existingTab = _tabManager.FindTabByEnvironment(url);
+                    if (existingTab >= 0)
+                    {
+                        _tabManager.ActivateTab(existingTab);
+                    }
+                    else
+                    {
+                        NavigateToSqlQueryOnEnvironment(url, name);
+                    }
                 }
             }
         }
@@ -751,7 +714,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     /// <summary>
     /// Wires the session initialization task to splash screen state transitions.
-    /// When initialization completes, marks splash as ready, then transitions to main menu.
+    /// When initialization completes, marks splash as ready. Splash stays as home screen.
     /// </summary>
     private void WireInitializationToSplash()
     {
@@ -766,7 +729,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         }
         catch (Exception ex)
         {
-            // Initialization failed — update splash with error but still transition
+            // Initialization failed — show error on splash
             TuiDebugLog.Log($"Session initialization failed: {ex.Message}");
             Application.MainLoop?.Invoke(() =>
             {
@@ -776,23 +739,10 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             await Task.Delay(2000).ConfigureAwait(false);
         }
 
-        // Mark splash as ready (on UI thread)
+        // Mark splash as ready — it stays as home screen
         Application.MainLoop?.Invoke(() =>
         {
             _splashView?.SetReady();
-        });
-
-        // Brief delay so user sees the branded splash before transitioning
-        await Task.Delay(1000).ConfigureAwait(false);
-
-        // Transition to main menu (on UI thread)
-        Application.MainLoop?.Invoke(() =>
-        {
-            // Only transition if splash is still showing (user may have already navigated)
-            if (_splashView != null)
-            {
-                ShowMainMenu();
-            }
         });
     }
 
