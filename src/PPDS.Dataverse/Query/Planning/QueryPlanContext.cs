@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning;
@@ -27,13 +28,17 @@ public sealed class QueryPlanContext
     /// <summary>Optional TDS Endpoint executor for direct SQL execution (Phase 3.5).</summary>
     public ITdsQueryExecutor? TdsQueryExecutor { get; }
 
+    /// <summary>Optional metadata query executor for metadata virtual tables (Phase 6).</summary>
+    public IMetadataQueryExecutor? MetadataQueryExecutor { get; }
+
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
         IExpressionEvaluator expressionEvaluator,
         CancellationToken cancellationToken = default,
         QueryPlanStatistics? statistics = null,
         IQueryProgressReporter? progressReporter = null,
-        ITdsQueryExecutor? tdsQueryExecutor = null)
+        ITdsQueryExecutor? tdsQueryExecutor = null,
+        IMetadataQueryExecutor? metadataQueryExecutor = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         ExpressionEvaluator = expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
@@ -41,5 +46,6 @@ public sealed class QueryPlanContext
         Statistics = statistics ?? new QueryPlanStatistics();
         ProgressReporter = progressReporter;
         TdsQueryExecutor = tdsQueryExecutor;
+        MetadataQueryExecutor = metadataQueryExecutor;
     }
 }
