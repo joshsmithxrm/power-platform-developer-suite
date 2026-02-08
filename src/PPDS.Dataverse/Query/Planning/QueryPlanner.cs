@@ -40,6 +40,14 @@ public sealed class QueryPlanner
 
     private QueryPlanResult PlanSelect(SqlSelectStatement statement, QueryPlanOptions options)
     {
+        // COUNT(*) optimization: bare SELECT COUNT(*) FROM entity (no WHERE, JOIN, GROUP BY,
+        // HAVING) uses RetrieveTotalRecordCountRequest for near-instant metadata read instead
+        // of aggregate FetchXML scan. Short-circuits the entire normal plan path.
+        if (IsBareCountStar(statement))
+        {
+            return PlanBareCountStar(statement);
+        }
+
         // Phase 0: transpile to FetchXML and create a simple scan node.
         //
         // NOTE: Virtual column expansion (e.g., owneridname from FormattedValues) stays
@@ -62,13 +70,71 @@ public sealed class QueryPlanner
             initialPagingCookie: options.PagingCookie,
             includeCount: options.IncludeCount);
 
+        // Start with scan as root; apply client-side operators on top.
+        IQueryPlanNode rootNode = scanNode;
+
+        // HAVING clause: add client-side filter after aggregate FetchXML scan.
+        // FetchXML doesn't support HAVING natively, so we filter client-side.
+        if (statement.Having != null)
+        {
+            rootNode = new ClientFilterNode(rootNode, statement.Having);
+        }
+
         return new QueryPlanResult
         {
-            RootNode = scanNode,
+            RootNode = rootNode,
             FetchXml = transpileResult.FetchXml,
             VirtualColumns = transpileResult.VirtualColumns,
             EntityLogicalName = statement.GetEntityName()
         };
+    }
+
+    /// <summary>
+    /// Builds an optimized plan for bare COUNT(*) queries using
+    /// RetrieveTotalRecordCountRequest with FetchXML as fallback.
+    /// </summary>
+    private QueryPlanResult PlanBareCountStar(SqlSelectStatement statement)
+    {
+        var countAlias = GetCountAlias(statement);
+        var transpileResult = _transpiler.TranspileWithVirtualColumns(statement);
+        var fallbackNode = new FetchXmlScanNode(
+            transpileResult.FetchXml,
+            statement.GetEntityName(),
+            autoPage: false);
+        var countNode = new CountOptimizedNode(statement.GetEntityName(), countAlias, fallbackNode);
+
+        return new QueryPlanResult
+        {
+            RootNode = countNode,
+            FetchXml = transpileResult.FetchXml,
+            VirtualColumns = transpileResult.VirtualColumns,
+            EntityLogicalName = statement.GetEntityName()
+        };
+    }
+
+    /// <summary>
+    /// Detects whether a SELECT statement is a bare COUNT(*) query with no
+    /// WHERE, JOIN, GROUP BY, or HAVING clauses — eligible for the optimized
+    /// RetrieveTotalRecordCountRequest path.
+    /// </summary>
+    private static bool IsBareCountStar(SqlSelectStatement statement)
+    {
+        return statement.Columns.Count == 1
+            && statement.Columns[0] is SqlAggregateColumn agg
+            && agg.IsCountAll
+            && statement.Where == null
+            && statement.Joins.Count == 0
+            && statement.GroupBy.Count == 0
+            && statement.Having == null;
+    }
+
+    /// <summary>
+    /// Gets the alias for the COUNT(*) column, defaulting to "count" if unaliased.
+    /// </summary>
+    private static string GetCountAlias(SqlSelectStatement statement)
+    {
+        var agg = (SqlAggregateColumn)statement.Columns[0];
+        return agg.Alias ?? "count";
     }
 }
 

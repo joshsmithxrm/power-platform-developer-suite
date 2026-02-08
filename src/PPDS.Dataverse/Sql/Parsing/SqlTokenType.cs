@@ -60,6 +60,8 @@ public enum SqlTokenType
     Distinct,
     /// <summary>GROUP keyword.</summary>
     Group,
+    /// <summary>HAVING keyword.</summary>
+    Having,
 
     #endregion
 
@@ -161,6 +163,7 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.As,
         SqlTokenType.Distinct,
         SqlTokenType.Group,
+        SqlTokenType.Having,
         SqlTokenType.Count,
         SqlTokenType.Sum,
         SqlTokenType.Avg,
@@ -232,6 +235,7 @@ public static class SqlTokenTypeExtensions
         ["AS"] = SqlTokenType.As,
         ["DISTINCT"] = SqlTokenType.Distinct,
         ["GROUP"] = SqlTokenType.Group,
+        ["HAVING"] = SqlTokenType.Having,
         ["COUNT"] = SqlTokenType.Count,
         ["SUM"] = SqlTokenType.Sum,
         ["AVG"] = SqlTokenType.Avg,

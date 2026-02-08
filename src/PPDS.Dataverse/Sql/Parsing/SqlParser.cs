@@ -16,6 +16,7 @@ namespace PPDS.Dataverse.Sql.Parsing;
 /// - Aggregate functions: COUNT(*), COUNT(column), SUM, AVG, MIN, MAX
 /// - COUNT(DISTINCT column)
 /// - GROUP BY column1, column2
+/// - HAVING clause (post-aggregation filter)
 /// - WHERE with comparison, LIKE, IS NULL, IN operators
 /// - AND/OR logical operators with parentheses
 /// - ORDER BY column ASC/DESC
@@ -24,7 +25,6 @@ namespace PPDS.Dataverse.Sql.Parsing;
 /// Not Supported (for now):
 /// - Subqueries
 /// - UNION/INTERSECT/EXCEPT
-/// - HAVING clause
 /// </remarks>
 public sealed class SqlParser
 {
@@ -280,6 +280,13 @@ public sealed class SqlParser
             }
         }
 
+        // Optional HAVING clause
+        ISqlCondition? having = null;
+        if (Match(SqlTokenType.Having))
+        {
+            having = ParseCondition();
+        }
+
         // Optional ORDER BY clause
         var orderBy = new List<SqlOrderByItem>();
         if (Match(SqlTokenType.Order))
@@ -322,7 +329,8 @@ public sealed class SqlParser
             orderBy,
             top,
             distinct,
-            groupBy);
+            groupBy,
+            having);
         statement.LeadingComments.AddRange(leadingComments);
 
         return statement;
@@ -435,6 +443,7 @@ public sealed class SqlParser
         return Check(SqlTokenType.From) ||
                Check(SqlTokenType.Where) ||
                Check(SqlTokenType.Group) ||
+               Check(SqlTokenType.Having) ||
                Check(SqlTokenType.Order) ||
                Check(SqlTokenType.Limit) ||
                Check(SqlTokenType.Join) ||

@@ -36,4 +36,20 @@ public interface IQueryExecutor
         string fetchXml,
         int maxRecords = 5000,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the total record count for an entity using RetrieveTotalRecordCountRequest.
+    /// This is a near-instant metadata read, not a full table scan.
+    /// </summary>
+    /// <param name="entityLogicalName">The logical name of the entity to count.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The total count, or null if not supported for this entity.</returns>
+    Task<long?> GetTotalRecordCountAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        // Default implementation returns null (not supported) so existing
+        // implementations don't break. Override in concrete classes to enable.
+        return Task.FromResult<long?>(null);
+    }
 }
