@@ -1,5 +1,6 @@
 using PPDS.Auth.Credentials;
 using PPDS.Dataverse.Configuration;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
 using PPDS.Migration.Import;
@@ -57,6 +58,9 @@ public static class ExceptionMapper
             // Validation/argument errors
             ArgumentException => ExitCodes.InvalidArguments,
             ConfigurationException => ExitCodes.InvalidArguments,
+
+            // Query execution errors
+            QueryExecutionException => ExitCodes.Failure,
 
             // Cancellation
             OperationCanceledException => ExitCodes.Failure,
@@ -136,6 +140,10 @@ public static class ExceptionMapper
 
             ArgumentException argEx =>
                 (ErrorCodes.Validation.InvalidValue, argEx.ParamName),
+
+            // Query execution exceptions (must be before InvalidOperationException — subclass)
+            QueryExecutionException queryEx =>
+                (queryEx.ErrorCode, null),
 
             // Operation exceptions
             OperationCanceledException =>
