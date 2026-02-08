@@ -571,8 +571,8 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         TuiDebugLog.Log($"[ProfileCreate] CreateProfileAndHandleResultAsync ENTERED. AuthMethod={request.AuthMethod}, beforeInteractiveAuth={( beforeInteractiveAuth != null ? "SET" : "NULL")}");
         try
         {
-            TuiDebugLog.Log("[ProfileCreate] Calling ProfileService.CreateProfileAsync...");
-            var profile = await _profileService.CreateProfileAsync(request, deviceCodeCallback, beforeInteractiveAuth, _cts.Token);
+            TuiDebugLog.Log("[ProfileCreate] Calling ProfileService.CreateProfileAsync via Task.Run...");
+            var profile = await Task.Run(() => _profileService.CreateProfileAsync(request, deviceCodeCallback, beforeInteractiveAuth, _cts.Token));
             TuiDebugLog.Log($"[ProfileCreate] CreateProfileAsync returned. Profile={profile.DisplayIdentifier}");
             Application.MainLoop?.Invoke(() =>
             {
