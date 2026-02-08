@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -30,6 +31,9 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        context.ProgressReporter?.ReportPhase("Parallel Aggregation",
+            $"Executing {Partitions.Count} partitions across {MaxParallelism} connections");
+
         // Use a bounded channel to collect results from all partitions
         var channel = Channel.CreateBounded<QueryRow>(new BoundedChannelOptions(1000)
         {
@@ -38,11 +42,13 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        var semaphore = new SemaphoreSlim(MaxParallelism);
+        using var semaphore = new SemaphoreSlim(MaxParallelism);
 
         // Launch all partition tasks. The try/catch ensures the channel is
         // always completed (with or without an exception) so the consumer
         // never deadlocks waiting on a channel that will never close.
+        var completedCount = 0;
+
         var producerTask = Task.Run(async () =>
         {
             try
@@ -65,6 +71,10 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
                         finally
                         {
                             semaphore.Release();
+                            var completed = Interlocked.Increment(ref completedCount);
+                            context.ProgressReporter?.ReportProgress(
+                                completed, Partitions.Count,
+                                $"Partition {completed}/{Partitions.Count} complete");
                         }
                     }, cancellationToken);
 
@@ -76,7 +86,11 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
             }
             catch (Exception ex)
             {
-                channel.Writer.Complete(ex);
+                // Detect Dataverse AggregateQueryRecordLimit (50K) failures
+                // and wrap in a structured QueryExecutionException so the CLI
+                // can map to ErrorCodes.Query.AggregateLimitExceeded.
+                var wrapped = WrapIfAggregateLimitExceeded(ex);
+                channel.Writer.Complete(wrapped);
             }
         }, cancellationToken);
 
@@ -87,5 +101,33 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
         }
 
         await producerTask.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Detects Dataverse AggregateQueryRecordLimit errors and wraps them
+    /// in a <see cref="QueryExecutionException"/> with a structured error code.
+    /// Returns the original exception if it is not an aggregate limit error.
+    /// </summary>
+    private static Exception WrapIfAggregateLimitExceeded(Exception ex)
+    {
+        // Check the exception chain for aggregate limit messages from Dataverse.
+        // The Dataverse SDK throws FaultException with "AggregateQueryRecordLimit"
+        // in the message text when an aggregate query scans over 50,000 records.
+        var current = ex;
+        while (current != null)
+        {
+            if (current.Message.Contains("AggregateQueryRecordLimit", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("aggregate operation exceeded", StringComparison.OrdinalIgnoreCase))
+            {
+                return new QueryExecutionException(
+                    QueryErrorCode.AggregateLimitExceeded,
+                    "Aggregate query exceeded the Dataverse 50,000 record limit. " +
+                    "Consider partitioning the query by date range or adding more restrictive filters.",
+                    ex);
+            }
+            current = current.InnerException;
+        }
+
+        return ex;
     }
 }
