@@ -490,39 +490,65 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         // Build request
         var request = BuildCreateRequest();
 
-        // Use provided callback if available; otherwise fall back to MessageBox
-        Action<DeviceCodeInfo>? deviceCallback = null;
-        if (method == AuthMethod.DeviceCode)
+        // Always provide device code callback (needed for Browser's device code fallback too)
+        var deviceCallback = _deviceCodeCallback ?? (info =>
         {
-            deviceCallback = _deviceCodeCallback ?? (info =>
+            Application.MainLoop?.Invoke(() =>
             {
+                // Auto-copy code to clipboard for convenience
+                var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
+
+                // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
+                MessageBox.Query(
+                    "Authentication Required",
+                    $"Visit: {info.VerificationUrl}\n\n" +
+                    $"Enter code: {info.UserCode}{copied}\n\n" +
+                    "Complete authentication in browser, then press OK.",
+                    "OK");
+            });
+        });
+
+        // Pre-auth dialog for Browser auth (matches PpdsApplication.cs pattern)
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeAuth = null;
+        if (method == AuthMethod.InteractiveBrowser)
+        {
+            beforeAuth = (dcCallback) =>
+            {
+                var result = PreAuthDialogResult.Cancel;
+                using var waitHandle = new ManualResetEventSlim(false);
                 Application.MainLoop?.Invoke(() =>
                 {
-                    // Auto-copy code to clipboard for convenience
-                    var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
-
-                    // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
-                    MessageBox.Query(
-                        "Authentication Required",
-                        $"Visit: {info.VerificationUrl}\n\n" +
-                        $"Enter code: {info.UserCode}{copied}\n\n" +
-                        "Complete authentication in browser, then press OK.",
-                        "OK");
+                    try
+                    {
+                        Application.Refresh();
+                        var dialog = new PreAuthenticationDialog(dcCallback);
+                        Application.Run(dialog);
+                        result = dialog.Result;
+                    }
+                    finally
+                    {
+                        waitHandle.Set();
+                    }
                 });
-            });
+                waitHandle.Wait();
+                return result;
+            };
         }
 
         _statusLabel.Text = "Authenticating...";
         Application.Refresh();
 
-        _errorService?.FireAndForget(CreateProfileAndHandleResultAsync(request, deviceCallback), "CreateProfile");
+        _errorService?.FireAndForget(CreateProfileAndHandleResultAsync(request, deviceCallback, beforeAuth), "CreateProfile");
     }
 
-    private async Task CreateProfileAndHandleResultAsync(ProfileCreateRequest request, Action<DeviceCodeInfo>? deviceCodeCallback)
+    private async Task CreateProfileAndHandleResultAsync(
+        ProfileCreateRequest request,
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
     {
         try
         {
-            var profile = await _profileService.CreateProfileAsync(request, deviceCodeCallback, beforeInteractiveAuth: null, _cts.Token);
+            var profile = await _profileService.CreateProfileAsync(request, deviceCodeCallback, beforeInteractiveAuth, _cts.Token);
             Application.MainLoop?.Invoke(() =>
             {
                 _createdProfile = profile;
@@ -585,6 +611,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         {
             Name = string.IsNullOrWhiteSpace(_nameField.Text?.ToString()) ? null : _nameField.Text.ToString()?.Trim(),
             Environment = string.IsNullOrWhiteSpace(_environmentUrlField.Text?.ToString()) ? null : _environmentUrlField.Text.ToString()?.Trim(),
+            AuthMethod = method,
             UseDeviceCode = method == AuthMethod.DeviceCode,
             // SPN fields
             ApplicationId = _appIdField.Text?.ToString()?.Trim(),
