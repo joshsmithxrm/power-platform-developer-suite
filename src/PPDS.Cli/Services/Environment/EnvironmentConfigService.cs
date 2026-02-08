@@ -1,0 +1,148 @@
+using System.Text.RegularExpressions;
+using PPDS.Auth.Profiles;
+
+namespace PPDS.Cli.Services.Environment;
+
+/// <summary>
+/// Default implementation of <see cref="IEnvironmentConfigService"/>.
+/// </summary>
+public sealed partial class EnvironmentConfigService : IEnvironmentConfigService
+{
+    /// <summary>
+    /// Built-in type defaults. Custom user types in environments.json override these.
+    /// </summary>
+    private static readonly Dictionary<string, EnvironmentColor> BuiltInTypeDefaults = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Production"] = EnvironmentColor.Red,
+        ["Sandbox"] = EnvironmentColor.Brown,
+        ["Development"] = EnvironmentColor.Green,
+        ["Test"] = EnvironmentColor.Yellow,
+        ["Trial"] = EnvironmentColor.Cyan,
+    };
+
+    private readonly EnvironmentConfigStore _store;
+
+    public EnvironmentConfigService(EnvironmentConfigStore store)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+    }
+
+    public async Task<EnvironmentConfig?> GetConfigAsync(string url, CancellationToken ct = default)
+        => await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<EnvironmentConfig>> GetAllConfigsAsync(CancellationToken ct = default)
+    {
+        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
+        return collection.Environments.AsReadOnly();
+    }
+
+    public async Task<EnvironmentConfig> SaveConfigAsync(
+        string url, string? label = null, string? type = null, EnvironmentColor? color = null,
+        CancellationToken ct = default)
+        => await _store.SaveConfigAsync(url, label, type, color, ct).ConfigureAwait(false);
+
+    public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
+        => await _store.RemoveConfigAsync(url, ct).ConfigureAwait(false);
+
+    public async Task SaveTypeDefaultAsync(string typeName, EnvironmentColor color, CancellationToken ct = default)
+    {
+        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
+        collection.TypeDefaults[typeName] = color;
+        await _store.SaveAsync(collection, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> RemoveTypeDefaultAsync(string typeName, CancellationToken ct = default)
+    {
+        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
+        if (collection.TypeDefaults.Remove(typeName))
+        {
+            await _store.SaveAsync(collection, ct).ConfigureAwait(false);
+            return true;
+        }
+        return false;
+    }
+
+    public async Task<IReadOnlyDictionary<string, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default)
+    {
+        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
+        var merged = new Dictionary<string, EnvironmentColor>(BuiltInTypeDefaults, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in collection.TypeDefaults)
+        {
+            merged[key] = value;
+        }
+        return merged;
+    }
+
+    public async Task<EnvironmentColor> ResolveColorAsync(string url, CancellationToken ct = default)
+    {
+        var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
+
+        // Priority 1: per-environment explicit color
+        if (config?.Color != null)
+            return config.Color.Value;
+
+        // Priority 2: type-based color (resolve type first)
+        var type = config?.Type ?? DetectTypeFromUrl(url);
+        if (type != null)
+        {
+            var allDefaults = await GetAllTypeDefaultsAsync(ct).ConfigureAwait(false);
+            if (allDefaults.TryGetValue(type, out var typeColor))
+                return typeColor;
+        }
+
+        // Priority 3: fallback
+        return EnvironmentColor.Gray;
+    }
+
+    public async Task<string?> ResolveTypeAsync(string url, string? discoveredType = null, CancellationToken ct = default)
+    {
+        // Priority 1: user config type
+        var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(config?.Type))
+            return config!.Type;
+
+        // Priority 2: discovery API type
+        if (!string.IsNullOrWhiteSpace(discoveredType))
+            return discoveredType;
+
+        // Priority 3: URL heuristics
+        return DetectTypeFromUrl(url);
+    }
+
+    public async Task<string?> ResolveLabelAsync(string url, CancellationToken ct = default)
+    {
+        var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
+        return config?.Label;
+    }
+
+    #region URL Heuristics (fallback only)
+
+    [GeneratedRegex(@"\.crm\d+\.dynamics\.com", RegexOptions.IgnoreCase)]
+    private static partial Regex SandboxRegex();
+
+    private static readonly string[] DevKeywords = ["dev", "develop", "development", "test", "qa", "uat"];
+    private static readonly string[] TrialKeywords = ["trial", "demo", "preview"];
+
+    /// <summary>
+    /// Last-resort URL-based detection. Only used when no config or discovery type exists.
+    /// </summary>
+    internal static string? DetectTypeFromUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        var lower = url.ToLowerInvariant();
+
+        if (DevKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            return "Development";
+        if (TrialKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            return "Trial";
+        if (SandboxRegex().IsMatch(lower))
+            return "Sandbox";
+        if (lower.Contains(".crm.dynamics.com"))
+            return "Production";
+
+        return null;
+    }
+
+    #endregion
+}
