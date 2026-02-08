@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Services.Environment;
 using Terminal.Gui;
@@ -9,7 +8,7 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// Default implementation of <see cref="ITuiThemeService"/>.
 /// Provides environment detection and color scheme selection.
 /// </summary>
-public sealed partial class TuiThemeService : ITuiThemeService
+public sealed class TuiThemeService : ITuiThemeService
 {
     private readonly IEnvironmentConfigService? _configService;
 
@@ -17,12 +16,6 @@ public sealed partial class TuiThemeService : ITuiThemeService
     {
         _configService = configService;
     }
-
-    /// <summary>
-    /// Regex pattern for sandbox environments (e.g., crm9.dynamics.com, crm11.dynamics.com).
-    /// </summary>
-    [GeneratedRegex(@"\.crm\d+\.dynamics\.com", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
-    private static partial Regex SandboxRegex();
 
     /// <inheritdoc />
     public EnvironmentType DetectEnvironmentType(string? environmentUrl)
@@ -34,7 +27,9 @@ public sealed partial class TuiThemeService : ITuiThemeService
 
         var url = environmentUrl.ToLowerInvariant();
 
-        // Check for keywords in the URL/environment name that suggest environment type
+        // Only use keyword detection from the org name portion of the URL.
+        // The CRM regional suffix (crm, crm2, crm4, etc.) indicates geographic
+        // region, NOT environment type — do not use it for classification.
         if (ContainsDevKeyword(url))
         {
             return EnvironmentType.Development;
@@ -45,23 +40,6 @@ public sealed partial class TuiThemeService : ITuiThemeService
             return EnvironmentType.Trial;
         }
 
-        // Sandbox: regional instances like .crm9.dynamics.com, .crm11.dynamics.com
-        // These are typically sandbox/test environments
-        if (SandboxRegex().IsMatch(url))
-        {
-            return EnvironmentType.Sandbox;
-        }
-
-        // Production: standard .crm.dynamics.com (no number suffix)
-        // This is the default production region
-        if (url.Contains(".crm.dynamics.com"))
-        {
-            return EnvironmentType.Production;
-        }
-
-        // Other regional production instances
-        // Note: Some regions like .crm4.dynamics.com (EMEA) can be production
-        // We default these to Unknown since we can't reliably distinguish
         return EnvironmentType.Unknown;
     }
 

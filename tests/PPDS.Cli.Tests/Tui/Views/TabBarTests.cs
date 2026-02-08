@@ -96,10 +96,10 @@ public sealed class TabBarTests : IDisposable
     public void TabManager_TracksEnvironmentType_ForBadgeRendering()
     {
         // Arrange - add tabs with different environment types
-        // TabManager.AddTab uses TuiThemeService to detect type from URL
+        // TabManager.AddTab uses TuiThemeService to detect type from URL keywords
         _tabManager.AddTab(
             new StubScreen(_session, "SQL DEV"),
-            "https://dev.crm.dynamics.com", "DEV");
+            "https://contoso-dev.crm.dynamics.com", "DEV");
         _tabManager.AddTab(
             new StubScreen(_session, "SQL PROD"),
             "https://contoso.crm.dynamics.com", "PROD");
@@ -107,9 +107,9 @@ public sealed class TabBarTests : IDisposable
         // Act
         var state = _tabManager.CaptureState();
 
-        // Assert - environment types are correctly detected for badge rendering
+        // Assert - dev keyword detected; plain URL is Unknown (region != type)
         Assert.Equal(EnvironmentType.Development, state.Tabs[0].EnvironmentType);
-        Assert.Equal(EnvironmentType.Production, state.Tabs[1].EnvironmentType);
+        Assert.Equal(EnvironmentType.Unknown, state.Tabs[1].EnvironmentType);
     }
 
     [Fact]

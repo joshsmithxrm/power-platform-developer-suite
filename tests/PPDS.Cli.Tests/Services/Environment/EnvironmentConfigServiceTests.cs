@@ -46,10 +46,19 @@ public class EnvironmentConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ResolveColorAsync_NoConfig_FallsBackToUrlHeuristics()
+    public async Task ResolveColorAsync_NoConfig_FallsBackToUrlKeywords()
     {
+        // URL with dev keyword → Development → Green
+        var color = await _service.ResolveColorAsync("https://org-dev.crm.dynamics.com");
+        Assert.Equal(EnvironmentColor.Green, color);
+    }
+
+    [Fact]
+    public async Task ResolveColorAsync_NoConfig_PlainUrl_ReturnsGray()
+    {
+        // Plain CRM URL with no keywords → no type detected → Gray
         var color = await _service.ResolveColorAsync("https://org.crm.dynamics.com");
-        Assert.Equal(EnvironmentColor.Red, color);
+        Assert.Equal(EnvironmentColor.Gray, color);
     }
 
     [Fact]
@@ -116,15 +125,17 @@ public class EnvironmentConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public void DetectTypeFromUrl_ProductionUrl()
+    public void DetectTypeFromUrl_PlainCrmUrl_ReturnsNull()
     {
-        Assert.Equal("Production", EnvironmentConfigService.DetectTypeFromUrl("https://org.crm.dynamics.com"));
+        // CRM regional suffix tells us nothing about environment type
+        Assert.Null(EnvironmentConfigService.DetectTypeFromUrl("https://org.crm.dynamics.com"));
     }
 
     [Fact]
-    public void DetectTypeFromUrl_SandboxUrl()
+    public void DetectTypeFromUrl_RegionalCrmUrl_ReturnsNull()
     {
-        Assert.Equal("Sandbox", EnvironmentConfigService.DetectTypeFromUrl("https://org.crm9.dynamics.com"));
+        // crm9 is UK region, not a sandbox indicator
+        Assert.Null(EnvironmentConfigService.DetectTypeFromUrl("https://org.crm9.dynamics.com"));
     }
 
     [Fact]

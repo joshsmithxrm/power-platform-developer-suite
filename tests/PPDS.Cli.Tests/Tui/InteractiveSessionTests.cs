@@ -134,9 +134,9 @@ public class InteractiveSessionTests : IAsyncLifetime
     {
         var service = _session.GetThemeService();
 
-        // Verify the service actually works
-        var envType = service.DetectEnvironmentType("https://contoso.crm.dynamics.com");
-        Assert.Equal(EnvironmentType.Production, envType);
+        // Verify the service actually works — use URL with keyword for detection
+        var envType = service.DetectEnvironmentType("https://contoso-dev.crm.dynamics.com");
+        Assert.Equal(EnvironmentType.Development, envType);
     }
 
     #endregion

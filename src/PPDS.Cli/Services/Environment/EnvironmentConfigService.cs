@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using PPDS.Auth.Profiles;
 
 namespace PPDS.Cli.Services.Environment;
@@ -6,7 +5,7 @@ namespace PPDS.Cli.Services.Environment;
 /// <summary>
 /// Default implementation of <see cref="IEnvironmentConfigService"/>.
 /// </summary>
-public sealed partial class EnvironmentConfigService : IEnvironmentConfigService
+public sealed class EnvironmentConfigService : IEnvironmentConfigService
 {
     /// <summary>
     /// Built-in type defaults. Custom user types in environments.json override these.
@@ -117,14 +116,14 @@ public sealed partial class EnvironmentConfigService : IEnvironmentConfigService
 
     #region URL Heuristics (fallback only)
 
-    [GeneratedRegex(@"\.crm\d+\.dynamics\.com", RegexOptions.IgnoreCase)]
-    private static partial Regex SandboxRegex();
-
     private static readonly string[] DevKeywords = ["dev", "develop", "development", "test", "qa", "uat"];
     private static readonly string[] TrialKeywords = ["trial", "demo", "preview"];
 
     /// <summary>
-    /// Last-resort URL-based detection. Only used when no config or discovery type exists.
+    /// Last-resort keyword-based detection from the org name portion of the URL.
+    /// Only used when no user config or Discovery API type exists.
+    /// Does NOT use the CRM regional suffix (crm, crm2, crm4, etc.) — those
+    /// indicate geographic region, not environment type.
     /// </summary>
     internal static string? DetectTypeFromUrl(string? url)
     {
@@ -136,10 +135,6 @@ public sealed partial class EnvironmentConfigService : IEnvironmentConfigService
             return "Development";
         if (TrialKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase)))
             return "Trial";
-        if (SandboxRegex().IsMatch(lower))
-            return "Sandbox";
-        if (lower.Contains(".crm.dynamics.com"))
-            return "Production";
 
         return null;
     }
