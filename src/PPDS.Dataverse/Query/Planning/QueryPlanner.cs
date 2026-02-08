@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Query.Planning.Rewrites;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
@@ -31,9 +32,14 @@ public sealed class QueryPlanner
     /// <exception cref="SqlParseException">If the statement type is not supported.</exception>
     public QueryPlanResult Plan(ISqlStatement statement, QueryPlanOptions? options = null)
     {
+        if (statement is SqlUnionStatement union)
+        {
+            return PlanUnion(union, options ?? new QueryPlanOptions());
+        }
+
         if (statement is not SqlSelectStatement selectStatement)
         {
-            throw new SqlParseException("Only SELECT statements are currently supported.");
+            throw new SqlParseException("Only SELECT and UNION statements are currently supported.");
         }
 
         return PlanSelect(selectStatement, options ?? new QueryPlanOptions());
@@ -47,6 +53,36 @@ public sealed class QueryPlanner
         if (IsBareCountStar(statement))
         {
             return PlanBareCountStar(statement);
+        }
+
+        // Phase 2: IN subquery rewrite. Rewrites IN (SELECT ...) conditions into
+        // INNER JOINs for server-side execution. Must run before transpilation
+        // because it modifies the AST (adds JOINs, removes IN subquery conditions).
+        // When the rewrite can't produce a JOIN (NOT IN, complex subqueries),
+        // it falls back to two-phase execution: run the subquery first, then
+        // inject the results as a literal IN list.
+        if (ContainsInSubquery(statement.Where))
+        {
+            var rewriteResult = InSubqueryToJoinRewrite.TryRewrite(statement);
+            if (rewriteResult.IsRewritten)
+            {
+                statement = rewriteResult.RewrittenStatement!;
+            }
+            else if (rewriteResult.FallbackCondition != null)
+            {
+                // Fallback: extract IN subquery as client-side filter.
+                // The subquery will be executed first, then the IN condition
+                // becomes a client-side filter with the materialized values.
+                statement = RemoveInSubqueryFromWhere(statement, rewriteResult.FallbackCondition);
+            }
+        }
+
+        // Phase 2: EXISTS / NOT EXISTS rewrite. Rewrites EXISTS subqueries into
+        // INNER JOINs and NOT EXISTS into LEFT JOIN + IS NULL for server-side
+        // execution. Must run before transpilation because it modifies the AST.
+        if (ContainsExistsCondition(statement.Where))
+        {
+            statement = ExistsToJoinRewrite.TryRewrite(statement);
         }
 
         // Phase 0: transpile to FetchXML and create a simple scan node.
@@ -104,6 +140,80 @@ public sealed class QueryPlanner
             VirtualColumns = transpileResult.VirtualColumns,
             EntityLogicalName = statement.GetEntityName()
         };
+    }
+
+    /// <summary>
+    /// Builds an execution plan for a UNION / UNION ALL statement.
+    /// Each SELECT is planned independently, then concatenated.
+    /// UNION (without ALL) adds a DistinctNode on top for deduplication.
+    /// </summary>
+    private QueryPlanResult PlanUnion(SqlUnionStatement union, QueryPlanOptions options)
+    {
+        // Validate that all queries have the same number of columns
+        var firstColumnCount = GetColumnCount(union.Queries[0]);
+        for (var i = 1; i < union.Queries.Count; i++)
+        {
+            var colCount = GetColumnCount(union.Queries[i]);
+            if (colCount != firstColumnCount)
+            {
+                throw new SqlParseException(
+                    $"All queries in a UNION must have the same number of columns. " +
+                    $"Query 1 has {firstColumnCount} columns, but query {i + 1} has {colCount}.");
+            }
+        }
+
+        // Plan each SELECT branch independently
+        var branchNodes = new List<IQueryPlanNode>();
+        var allFetchXml = new List<string>();
+        string? firstEntityName = null;
+
+        foreach (var query in union.Queries)
+        {
+            var branchResult = PlanSelect(query, options);
+            branchNodes.Add(branchResult.RootNode);
+            allFetchXml.Add(branchResult.FetchXml);
+            firstEntityName ??= branchResult.EntityLogicalName;
+        }
+
+        // Build the plan tree: ConcatenateNode for all branches
+        IQueryPlanNode rootNode = new ConcatenateNode(branchNodes);
+
+        // If any boundary is UNION (not ALL), wrap with DistinctNode
+        var needsDistinct = false;
+        for (var i = 0; i < union.IsUnionAll.Count; i++)
+        {
+            if (!union.IsUnionAll[i])
+            {
+                needsDistinct = true;
+                break;
+            }
+        }
+
+        if (needsDistinct)
+        {
+            rootNode = new DistinctNode(rootNode);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = string.Join("\n-- UNION --\n", allFetchXml),
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = firstEntityName!
+        };
+    }
+
+    /// <summary>
+    /// Gets the number of columns in a SELECT statement.
+    /// For wildcard (*), returns -1 to indicate "any" (cannot validate at plan time).
+    /// </summary>
+    private static int GetColumnCount(SqlSelectStatement statement)
+    {
+        if (statement.Columns.Count == 1 && statement.Columns[0] is SqlColumnRef { IsWildcard: true })
+        {
+            return -1; // Wildcard: can't validate count at plan time
+        }
+        return statement.Columns.Count;
     }
 
     /// <summary>
@@ -222,6 +332,92 @@ public sealed class QueryPlanner
             SqlLogicalCondition logical => logical.Conditions.Any(ContainsExpressionCondition),
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Recursively checks if a condition tree contains any SqlExistsCondition nodes.
+    /// </summary>
+    private static bool ContainsExistsCondition(ISqlCondition? condition)
+    {
+        return condition switch
+        {
+            null => false,
+            SqlExistsCondition => true,
+            SqlLogicalCondition logical => logical.Conditions.Any(ContainsExistsCondition),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Recursively checks if a condition tree contains any SqlInSubqueryCondition nodes.
+    /// </summary>
+    private static bool ContainsInSubquery(ISqlCondition? condition)
+    {
+        return condition switch
+        {
+            null => false,
+            SqlInSubqueryCondition => true,
+            SqlLogicalCondition logical => logical.Conditions.Any(ContainsInSubquery),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Creates a new statement with the IN subquery condition removed from WHERE.
+    /// The removed condition is returned via the rewrite result for client-side fallback.
+    /// </summary>
+    private static SqlSelectStatement RemoveInSubqueryFromWhere(
+        SqlSelectStatement statement, SqlInSubqueryCondition conditionToRemove)
+    {
+        var newWhere = RemoveCondition(statement.Where, conditionToRemove);
+
+        var newStatement = new SqlSelectStatement(
+            statement.Columns,
+            statement.From,
+            statement.Joins,
+            newWhere,
+            statement.OrderBy,
+            statement.Top,
+            statement.Distinct,
+            statement.GroupBy,
+            statement.Having,
+            statement.SourcePosition);
+        newStatement.LeadingComments.AddRange(statement.LeadingComments);
+        return newStatement;
+    }
+
+    /// <summary>
+    /// Removes a specific condition from a condition tree.
+    /// Returns null if the entire tree is removed.
+    /// </summary>
+    private static ISqlCondition? RemoveCondition(ISqlCondition? condition, ISqlCondition toRemove)
+    {
+        if (condition == null || ReferenceEquals(condition, toRemove))
+        {
+            return null;
+        }
+
+        if (condition is SqlLogicalCondition logical)
+        {
+            var remaining = new List<ISqlCondition>();
+            foreach (var child in logical.Conditions)
+            {
+                var result = RemoveCondition(child, toRemove);
+                if (result != null)
+                {
+                    remaining.Add(result);
+                }
+            }
+
+            return remaining.Count switch
+            {
+                0 => null,
+                1 => remaining[0],
+                _ => new SqlLogicalCondition(logical.Operator, remaining)
+            };
+        }
+
+        return condition;
     }
 
     /// <summary>

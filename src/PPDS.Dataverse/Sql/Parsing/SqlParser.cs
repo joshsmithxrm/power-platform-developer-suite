@@ -22,9 +22,11 @@ namespace PPDS.Dataverse.Sql.Parsing;
 /// - ORDER BY column ASC/DESC
 /// - JOIN (INNER, LEFT, RIGHT)
 ///
+/// - EXISTS / NOT EXISTS (SELECT ...)
+/// - UNION / UNION ALL
+///
 /// Not Supported (for now):
-/// - Subqueries
-/// - UNION/INTERSECT/EXCEPT
+/// - INTERSECT/EXCEPT
 /// </remarks>
 public sealed class SqlParser
 {
@@ -70,7 +72,20 @@ public sealed class SqlParser
         _tokens = result.Tokens;
         _comments = result.Comments;
 
-        return ParseSelectStatement();
+        var firstSelect = ParseSelectStatementWithoutEndCheck();
+
+        // Check for UNION / UNION ALL following the first SELECT
+        if (!Check(SqlTokenType.Union))
+        {
+            // No UNION: ensure we've consumed all tokens and return plain SELECT
+            if (!IsAtEnd())
+            {
+                throw Error($"Unexpected token: {Peek().Value}");
+            }
+            return firstSelect;
+        }
+
+        return ParseUnionStatement(firstSelect);
     }
 
     /// <summary>
@@ -216,12 +231,214 @@ public sealed class SqlParser
     #region Statement Parsing
 
     /// <summary>
-    /// Parses a complete SELECT statement.
+    /// Parses a complete SELECT statement and enforces end-of-input.
     /// </summary>
     private SqlSelectStatement ParseSelectStatement()
     {
+        var statement = ParseSelectStatementWithoutEndCheck();
+
+        // Ensure we've consumed all tokens
+        if (!IsAtEnd())
+        {
+            throw Error($"Unexpected token: {Peek().Value}");
+        }
+
+        return statement;
+    }
+
+    /// <summary>
+    /// Parses a SELECT statement body without checking for end-of-input.
+    /// Used by both standalone SELECT and UNION parsing.
+    /// Does not consume ORDER BY or LIMIT — for UNION branches those belong
+    /// to the outer statement. Individual SELECTs inside a UNION should not
+    /// have their own ORDER BY.
+    /// </summary>
+    private SqlSelectStatement ParseSelectStatementWithoutEndCheck()
+    {
         var leadingComments = GetLeadingComments();
 
+        Expect(SqlTokenType.Select);
+
+        // Optional DISTINCT keyword
+        var distinct = Match(SqlTokenType.Distinct);
+
+        // Optional TOP clause
+        int? top = null;
+        if (Match(SqlTokenType.Top))
+        {
+            var topToken = Expect(SqlTokenType.Number);
+            top = int.Parse(topToken.Value);
+        }
+
+        // SELECT columns (may include aggregates)
+        var columns = ParseSelectColumnList();
+
+        // FROM clause
+        Expect(SqlTokenType.From);
+        var from = ParseTableRef();
+        AttachTrailingComment(from);
+
+        // Optional JOIN clauses
+        var joins = new List<SqlJoin>();
+        while (MatchJoinKeyword())
+        {
+            var join = ParseJoin();
+            AttachTrailingComment(join);
+            joins.Add(join);
+        }
+
+        // Optional WHERE clause
+        ISqlCondition? where = null;
+        if (Match(SqlTokenType.Where))
+        {
+            where = ParseCondition();
+        }
+
+        // Optional GROUP BY clause — supports both plain column refs and
+        // function expressions like YEAR(createdon) for date grouping pushdown.
+        var groupBy = new List<SqlColumnRef>();
+        var groupByExpressions = new List<ISqlExpression>();
+        if (Match(SqlTokenType.Group))
+        {
+            Expect(SqlTokenType.By);
+            ParseGroupByItem(groupBy, groupByExpressions);
+
+            while (Match(SqlTokenType.Comma))
+            {
+                if (groupBy.Count > 0)
+                {
+                    var prevGroupBy = groupBy[^1];
+                    AttachTrailingComment(prevGroupBy);
+                }
+                ParseGroupByItem(groupBy, groupByExpressions);
+            }
+
+            if (groupBy.Count > 0)
+            {
+                var lastGroupBy = groupBy[^1];
+                if (lastGroupBy.TrailingComment == null)
+                {
+                    AttachTrailingComment(lastGroupBy);
+                }
+            }
+        }
+
+        // Optional HAVING clause
+        ISqlCondition? having = null;
+        if (Match(SqlTokenType.Having))
+        {
+            having = ParseCondition();
+        }
+
+        // ORDER BY and LIMIT: only consume if not followed by UNION
+        // (If UNION follows, ORDER BY belongs to the combined result, not this branch.)
+        var orderBy = new List<SqlOrderByItem>();
+        if (Match(SqlTokenType.Order))
+        {
+            Expect(SqlTokenType.By);
+            orderBy.Add(ParseOrderByItem());
+
+            while (Match(SqlTokenType.Comma))
+            {
+                var prevOrderBy = orderBy[^1];
+                AttachTrailingComment(prevOrderBy);
+                orderBy.Add(ParseOrderByItem());
+            }
+
+            var lastOrderBy = orderBy[^1];
+            if (lastOrderBy.TrailingComment == null)
+            {
+                AttachTrailingComment(lastOrderBy);
+            }
+        }
+
+        // Optional LIMIT clause (alternative to TOP)
+        if (Match(SqlTokenType.Limit))
+        {
+            var limitToken = Expect(SqlTokenType.Number);
+            top ??= int.Parse(limitToken.Value);
+        }
+
+        var statement = new SqlSelectStatement(
+            columns,
+            from,
+            joins,
+            where,
+            orderBy,
+            top,
+            distinct,
+            groupBy,
+            having,
+            groupByExpressions: groupByExpressions.Count > 0 ? groupByExpressions : null);
+        statement.LeadingComments.AddRange(leadingComments);
+
+        return statement;
+    }
+
+    /// <summary>
+    /// Parses a UNION statement given that the first SELECT has already been parsed
+    /// and the current token is UNION.
+    /// </summary>
+    private SqlUnionStatement ParseUnionStatement(SqlSelectStatement firstSelect)
+    {
+        var queries = new List<SqlSelectStatement> { firstSelect };
+        var unionAllFlags = new List<bool>();
+        var sourcePosition = firstSelect.SourcePosition;
+
+        while (Match(SqlTokenType.Union))
+        {
+            var isAll = Match(SqlTokenType.All);
+            unionAllFlags.Add(isAll);
+
+            var nextSelect = ParseSelectStatementWithoutEndCheck();
+            queries.Add(nextSelect);
+        }
+
+        // Optional trailing ORDER BY for the combined result
+        List<SqlOrderByItem>? orderBy = null;
+        if (Match(SqlTokenType.Order))
+        {
+            Expect(SqlTokenType.By);
+            orderBy = new List<SqlOrderByItem>();
+            orderBy.Add(ParseOrderByItem());
+
+            while (Match(SqlTokenType.Comma))
+            {
+                var prevOrderBy = orderBy[^1];
+                AttachTrailingComment(prevOrderBy);
+                orderBy.Add(ParseOrderByItem());
+            }
+
+            var lastOrderBy = orderBy[^1];
+            if (lastOrderBy.TrailingComment == null)
+            {
+                AttachTrailingComment(lastOrderBy);
+            }
+        }
+
+        // Optional trailing LIMIT
+        int? top = null;
+        if (Match(SqlTokenType.Limit))
+        {
+            var limitToken = Expect(SqlTokenType.Number);
+            top = int.Parse(limitToken.Value);
+        }
+
+        // Ensure we've consumed all tokens
+        if (!IsAtEnd())
+        {
+            throw Error($"Unexpected token: {Peek().Value}");
+        }
+
+        return new SqlUnionStatement(queries, unionAllFlags, orderBy, top, sourcePosition);
+    }
+
+    /// <summary>
+    /// Parses a SELECT statement used as a subquery (inside parentheses).
+    /// Does not enforce end-of-input — the caller handles the closing paren.
+    /// </summary>
+    private SqlSelectStatement ParseSubquerySelectStatement()
+    {
         Expect(SqlTokenType.Select);
 
         // Optional DISTINCT keyword
@@ -315,13 +532,9 @@ public sealed class SqlParser
             top ??= int.Parse(limitToken.Value);
         }
 
-        // Ensure we've consumed all tokens
-        if (!IsAtEnd())
-        {
-            throw Error($"Unexpected token: {Peek().Value}");
-        }
+        // NOTE: No end-of-input check here — subquery stops at closing paren.
 
-        var statement = new SqlSelectStatement(
+        return new SqlSelectStatement(
             columns,
             from,
             joins,
@@ -331,9 +544,6 @@ public sealed class SqlParser
             distinct,
             groupBy,
             having);
-        statement.LeadingComments.AddRange(leadingComments);
-
-        return statement;
     }
 
     #endregion
@@ -577,6 +787,25 @@ public sealed class SqlParser
         return null;
     }
 
+    /// <summary>
+    /// Parses a single GROUP BY item. If the item is an identifier followed by '(',
+    /// it is a function expression (e.g., YEAR(createdon)) added to groupByExpressions.
+    /// Otherwise it is a plain column reference added to groupBy.
+    /// </summary>
+    private void ParseGroupByItem(List<SqlColumnRef> groupBy, List<ISqlExpression> groupByExpressions)
+    {
+        // Check for function expression: identifier followed by '('
+        if (Check(SqlTokenType.Identifier) && PeekAt(_position + 1).Type == SqlTokenType.LeftParen)
+        {
+            var funcName = Advance().Value;
+            var funcExpr = ParseFunctionCall(funcName);
+            groupByExpressions.Add(funcExpr);
+            return;
+        }
+
+        groupBy.Add(ParseColumnRef());
+    }
+
     #endregion
 
     #region Table and Join Parsing
@@ -716,7 +945,7 @@ public sealed class SqlParser
     }
 
     /// <summary>
-    /// Parses primary expressions: literal, column reference, CASE, IIF, or parenthesized expression.
+    /// Parses primary expressions: literal, column reference, CASE, IIF, CAST, CONVERT, or parenthesized expression.
     /// </summary>
     private ISqlExpression ParsePrimaryExpression()
     {
@@ -728,6 +957,16 @@ public sealed class SqlParser
         if (Check(SqlTokenType.Iif))
         {
             return ParseIifExpression();
+        }
+
+        if (Check(SqlTokenType.Cast))
+        {
+            return ParseCastExpression();
+        }
+
+        if (Check(SqlTokenType.Convert))
+        {
+            return ParseConvertExpression();
         }
 
         if (Match(SqlTokenType.LeftParen))
@@ -755,10 +994,17 @@ public sealed class SqlParser
             return new SqlLiteralExpression(SqlLiteral.Null());
         }
 
-        // Column reference (identifier, possibly table.column)
+        // Column reference or function call (identifier, possibly table.column or func(...))
         if (Check(SqlTokenType.Identifier))
         {
             var first = Advance();
+
+            // Function call: identifier followed by '('
+            if (Check(SqlTokenType.LeftParen))
+            {
+                return ParseFunctionCall(first.Value);
+            }
+
             if (Match(SqlTokenType.Dot))
             {
                 var second = Expect(SqlTokenType.Identifier);
@@ -768,6 +1014,189 @@ public sealed class SqlParser
         }
 
         throw Error($"Expected expression, found {Peek().Type}");
+    }
+
+    /// <summary>
+    /// Parses a function call: name(arg1, arg2, ...).
+    /// The function name has already been consumed; the current token is '('.
+    /// Date function datepart arguments (year, month, day, etc.) are unquoted
+    /// identifiers in T-SQL, so they are parsed as identifier-valued expressions
+    /// wrapped in SqlLiteralExpression with string type.
+    /// </summary>
+    private SqlFunctionExpression ParseFunctionCall(string functionName)
+    {
+        Expect(SqlTokenType.LeftParen);
+
+        var args = new List<ISqlExpression>();
+
+        // Handle zero-argument functions like GETDATE()
+        if (!Check(SqlTokenType.RightParen))
+        {
+            args.Add(ParseFunctionArgument());
+
+            while (Match(SqlTokenType.Comma))
+            {
+                args.Add(ParseFunctionArgument());
+            }
+        }
+
+        Expect(SqlTokenType.RightParen);
+
+        return new SqlFunctionExpression(functionName, args);
+    }
+
+    /// <summary>
+    /// Parses a single function argument. Handles the T-SQL convention where
+    /// datepart arguments (year, month, day, hour, minute, second, quarter, week,
+    /// dayofyear) are unquoted identifiers — not column references.
+    /// </summary>
+    private ISqlExpression ParseFunctionArgument()
+    {
+        // Check for datepart-style keyword: unquoted identifier that is a known datepart.
+        // These must not be confused with column references. Peek ahead: if it's an
+        // identifier followed by a comma or right-paren, and it's a known datepart name,
+        // treat it as a string literal.
+        if (Check(SqlTokenType.Identifier))
+        {
+            var name = Peek().Value;
+            if (IsDatePart(name))
+            {
+                var nextAfter = PeekAt(_position + 1);
+                if (nextAfter.Type == SqlTokenType.Comma || nextAfter.Type == SqlTokenType.RightParen)
+                {
+                    Advance();
+                    return new SqlLiteralExpression(SqlLiteral.String(name.ToLowerInvariant()));
+                }
+            }
+        }
+
+        return ParseExpression();
+    }
+
+    /// <summary>
+    /// Checks whether a name is a T-SQL datepart keyword used by date functions
+    /// (DATEADD, DATEDIFF, DATEPART, DATETRUNC).
+    /// </summary>
+    private static bool IsDatePart(string name)
+    {
+        return name.Equals("year", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("yy", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("yyyy", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("quarter", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("qq", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("q", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("month", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("mm", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("m", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("dayofyear", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("dy", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("y", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("day", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("dd", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("d", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("week", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("wk", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ww", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("hour", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("hh", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("minute", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("mi", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("n", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("second", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ss", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("s", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("millisecond", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ms", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Parses CAST(expression AS type_name).
+    /// </summary>
+    private SqlCastExpression ParseCastExpression()
+    {
+        Expect(SqlTokenType.Cast);
+        Expect(SqlTokenType.LeftParen);
+
+        var expression = ParseExpression();
+        Expect(SqlTokenType.As);
+        var typeName = ParseTypeName();
+
+        Expect(SqlTokenType.RightParen);
+
+        return new SqlCastExpression(expression, typeName);
+    }
+
+    /// <summary>
+    /// Parses CONVERT(type_name, expression [, style]).
+    /// </summary>
+    private SqlCastExpression ParseConvertExpression()
+    {
+        Expect(SqlTokenType.Convert);
+        Expect(SqlTokenType.LeftParen);
+
+        var typeName = ParseTypeName();
+        Expect(SqlTokenType.Comma);
+        var expression = ParseExpression();
+
+        int? style = null;
+        if (Match(SqlTokenType.Comma))
+        {
+            var styleToken = Expect(SqlTokenType.Number);
+            style = int.Parse(styleToken.Value);
+        }
+
+        Expect(SqlTokenType.RightParen);
+
+        return new SqlCastExpression(expression, typeName, style);
+    }
+
+    /// <summary>
+    /// Parses a SQL type name, including parameterized types like nvarchar(100) or decimal(18,2).
+    /// Accepts identifiers and keywords (e.g., "date" is a keyword-like identifier).
+    /// </summary>
+    private string ParseTypeName()
+    {
+        // Type name can be an identifier or a keyword used as type (e.g., "float", "date")
+        string typeName;
+        if (Check(SqlTokenType.Identifier))
+        {
+            typeName = Advance().Value;
+        }
+        else if (Peek().Type.IsKeyword())
+        {
+            // Allow keywords to be used as type names (e.g., "float", "date")
+            typeName = Advance().Value;
+        }
+        else
+        {
+            throw Error($"Expected type name, found {Peek().Type}");
+        }
+
+        // Check for parameterized type: type(params)
+        if (Match(SqlTokenType.LeftParen))
+        {
+            var paramBuilder = new System.Text.StringBuilder();
+            paramBuilder.Append(typeName);
+            paramBuilder.Append('(');
+
+            // Read first parameter
+            var firstParam = Expect(SqlTokenType.Number);
+            paramBuilder.Append(firstParam.Value);
+
+            // Optional second parameter: decimal(18,2)
+            if (Match(SqlTokenType.Comma))
+            {
+                var secondParam = Expect(SqlTokenType.Number);
+                paramBuilder.Append(',');
+                paramBuilder.Append(secondParam.Value);
+            }
+
+            Expect(SqlTokenType.RightParen);
+            paramBuilder.Append(')');
+            return paramBuilder.ToString();
+        }
+
+        return typeName;
     }
 
     /// <summary>
@@ -866,10 +1295,23 @@ public sealed class SqlParser
     }
 
     /// <summary>
-    /// Parses primary conditions (comparison, LIKE, IS NULL, IN, or parenthesized).
+    /// Parses primary conditions (comparison, LIKE, IS NULL, IN, EXISTS, or parenthesized).
     /// </summary>
     private ISqlCondition ParsePrimaryCondition()
     {
+        // EXISTS (SELECT ...)
+        if (Check(SqlTokenType.Exists))
+        {
+            return ParseExistsCondition(false);
+        }
+
+        // NOT EXISTS (SELECT ...)
+        if (Check(SqlTokenType.Not) && PeekAt(_position + 1).Type == SqlTokenType.Exists)
+        {
+            Advance(); // consume NOT
+            return ParseExistsCondition(true);
+        }
+
         // Parenthesized condition
         if (Match(SqlTokenType.LeftParen))
         {
@@ -948,11 +1390,20 @@ public sealed class SqlParser
     }
 
     /// <summary>
-    /// Parses IN (value1, value2, ...) list.
+    /// Parses IN (value1, value2, ...) list or IN (SELECT ...) subquery.
     /// </summary>
-    private SqlInCondition ParseInList(SqlColumnRef column, bool isNegated)
+    private ISqlCondition ParseInList(SqlColumnRef column, bool isNegated)
     {
         Expect(SqlTokenType.LeftParen);
+
+        // Check if this is a subquery: IN (SELECT ...)
+        if (Check(SqlTokenType.Select))
+        {
+            var subquery = ParseSubquerySelectStatement();
+            Expect(SqlTokenType.RightParen);
+            return new SqlInSubqueryCondition(column, subquery, isNegated);
+        }
+
         var values = new List<SqlLiteral>();
 
         do
@@ -962,6 +1413,22 @@ public sealed class SqlParser
 
         Expect(SqlTokenType.RightParen);
         return new SqlInCondition(column, values, isNegated);
+    }
+
+    /// <summary>
+    /// Parses EXISTS (SELECT ...) or NOT EXISTS (SELECT ...).
+    /// The NOT token has already been consumed by the caller if isNegated is true.
+    /// </summary>
+    private SqlExistsCondition ParseExistsCondition(bool isNegated)
+    {
+        Expect(SqlTokenType.Exists);
+        Expect(SqlTokenType.LeftParen);
+        var subquery = ParseSubquerySelectStatement();
+        Expect(SqlTokenType.RightParen);
+
+        var cond = new SqlExistsCondition(subquery, isNegated);
+        AttachTrailingComment(cond);
+        return cond;
     }
 
     /// <summary>

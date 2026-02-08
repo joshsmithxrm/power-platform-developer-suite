@@ -74,6 +74,16 @@ public enum SqlTokenType
     End,
     /// <summary>IIF keyword (conditional function).</summary>
     Iif,
+    /// <summary>EXISTS keyword.</summary>
+    Exists,
+    /// <summary>UNION keyword.</summary>
+    Union,
+    /// <summary>ALL keyword.</summary>
+    All,
+    /// <summary>CAST keyword.</summary>
+    Cast,
+    /// <summary>CONVERT keyword.</summary>
+    Convert,
 
     #endregion
 
@@ -190,6 +200,11 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.Else,
         SqlTokenType.End,
         SqlTokenType.Iif,
+        SqlTokenType.Exists,
+        SqlTokenType.Union,
+        SqlTokenType.All,
+        SqlTokenType.Cast,
+        SqlTokenType.Convert,
         SqlTokenType.Count,
         SqlTokenType.Sum,
         SqlTokenType.Avg,
@@ -282,6 +297,11 @@ public static class SqlTokenTypeExtensions
         ["ELSE"] = SqlTokenType.Else,
         ["END"] = SqlTokenType.End,
         ["IIF"] = SqlTokenType.Iif,
+        ["EXISTS"] = SqlTokenType.Exists,
+        ["UNION"] = SqlTokenType.Union,
+        ["ALL"] = SqlTokenType.All,
+        ["CAST"] = SqlTokenType.Cast,
+        ["CONVERT"] = SqlTokenType.Convert,
         ["COUNT"] = SqlTokenType.Count,
         ["SUM"] = SqlTokenType.Sum,
         ["AVG"] = SqlTokenType.Avg,
