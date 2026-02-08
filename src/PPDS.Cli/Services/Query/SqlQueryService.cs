@@ -14,6 +14,7 @@ namespace PPDS.Cli.Services.Query;
 public sealed class SqlQueryService : ISqlQueryService
 {
     private readonly IQueryExecutor _queryExecutor;
+    private readonly ITdsQueryExecutor? _tdsQueryExecutor;
     private readonly QueryPlanner _planner;
     private readonly PlanExecutor _planExecutor;
     private readonly ExpressionEvaluator _expressionEvaluator = new();
@@ -22,9 +23,11 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Creates a new instance of <see cref="SqlQueryService"/>.
     /// </summary>
     /// <param name="queryExecutor">The query executor for FetchXML execution.</param>
-    public SqlQueryService(IQueryExecutor queryExecutor)
+    /// <param name="tdsQueryExecutor">Optional TDS Endpoint executor for direct SQL execution.</param>
+    public SqlQueryService(IQueryExecutor queryExecutor, ITdsQueryExecutor? tdsQueryExecutor = null)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
+        _tdsQueryExecutor = tdsQueryExecutor;
         _planner = new QueryPlanner();
         _planExecutor = new PlanExecutor();
     }
@@ -70,7 +73,10 @@ public sealed class SqlQueryService : ISqlQueryService
             MaxRows = request.TopOverride,
             PageNumber = request.PageNumber,
             PagingCookie = request.PagingCookie,
-            IncludeCount = request.IncludeCount
+            IncludeCount = request.IncludeCount,
+            UseTdsEndpoint = request.UseTdsEndpoint,
+            OriginalSql = request.Sql,
+            TdsQueryExecutor = _tdsQueryExecutor
         };
 
         var planResult = _planner.Plan(statement, planOptions);

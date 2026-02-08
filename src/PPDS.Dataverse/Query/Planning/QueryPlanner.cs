@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Rewrites;
 using PPDS.Dataverse.Sql.Ast;
@@ -53,6 +54,24 @@ public sealed class QueryPlanner
         if (IsBareCountStar(statement))
         {
             return PlanBareCountStar(statement);
+        }
+
+        // Phase 3.5: TDS Endpoint routing. When TDS is enabled and the query is
+        // compatible, bypass FetchXML transpilation and send SQL directly to TDS.
+        // Falls back to the FetchXML path for incompatible queries (DML, elastic
+        // tables, virtual entities).
+        if (options.UseTdsEndpoint
+            && options.TdsQueryExecutor != null
+            && !string.IsNullOrEmpty(options.OriginalSql))
+        {
+            var entityName = statement.GetEntityName();
+            var compatibility = TdsCompatibilityChecker.CheckCompatibility(
+                options.OriginalSql, entityName);
+
+            if (compatibility == TdsCompatibility.Compatible)
+            {
+                return PlanTds(statement, options);
+            }
         }
 
         // Phase 2: IN subquery rewrite. Rewrites IN (SELECT ...) conditions into
@@ -214,6 +233,28 @@ public sealed class QueryPlanner
             return -1; // Wildcard: can't validate count at plan time
         }
         return statement.Columns.Count;
+    }
+
+    /// <summary>
+    /// Builds a TDS Endpoint plan that sends SQL directly to the TDS wire protocol.
+    /// No FetchXML transpilation is performed — the original SQL is passed through.
+    /// </summary>
+    private static QueryPlanResult PlanTds(SqlSelectStatement statement, QueryPlanOptions options)
+    {
+        var entityName = statement.GetEntityName();
+        var tdsNode = new TdsScanNode(
+            options.OriginalSql!,
+            entityName,
+            options.TdsQueryExecutor!,
+            maxRows: options.MaxRows ?? statement.Top);
+
+        return new QueryPlanResult
+        {
+            RootNode = tdsNode,
+            FetchXml = $"-- TDS Endpoint: SQL passed directly --\n{options.OriginalSql}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = entityName
+        };
     }
 
     /// <summary>

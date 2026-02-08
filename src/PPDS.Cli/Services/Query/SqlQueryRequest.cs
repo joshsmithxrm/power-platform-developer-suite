@@ -31,4 +31,10 @@ public sealed record SqlQueryRequest
     /// Note: Cannot be used with TOP queries due to Dataverse limitation.
     /// </summary>
     public bool IncludeCount { get; init; }
+
+    /// <summary>
+    /// Whether to route the query through the TDS Endpoint (direct SQL)
+    /// instead of transpiling to FetchXML.
+    /// </summary>
+    public bool UseTdsEndpoint { get; init; }
 }

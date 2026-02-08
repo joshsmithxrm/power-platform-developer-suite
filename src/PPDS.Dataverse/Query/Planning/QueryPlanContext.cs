@@ -24,17 +24,22 @@ public sealed class QueryPlanContext
     /// <summary>Optional progress reporter for long-running operations.</summary>
     public IQueryProgressReporter? ProgressReporter { get; }
 
+    /// <summary>Optional TDS Endpoint executor for direct SQL execution (Phase 3.5).</summary>
+    public ITdsQueryExecutor? TdsQueryExecutor { get; }
+
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
         IExpressionEvaluator expressionEvaluator,
         CancellationToken cancellationToken = default,
         QueryPlanStatistics? statistics = null,
-        IQueryProgressReporter? progressReporter = null)
+        IQueryProgressReporter? progressReporter = null,
+        ITdsQueryExecutor? tdsQueryExecutor = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         ExpressionEvaluator = expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
         CancellationToken = cancellationToken;
         Statistics = statistics ?? new QueryPlanStatistics();
         ProgressReporter = progressReporter;
+        TdsQueryExecutor = tdsQueryExecutor;
     }
 }

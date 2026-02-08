@@ -40,12 +40,18 @@ public static class SqlCommand
             Description = "Output the transpiled FetchXML instead of executing the query"
         };
 
+        var tdsOption = new Option<bool>("--tds")
+        {
+            Description = "Route query through the TDS Endpoint (direct SQL) instead of FetchXML"
+        };
+
         var command = new Command("sql", "Execute a SQL query against Dataverse (transpiled to FetchXML)")
         {
             sqlArgument,
             fileOption,
             stdinOption,
             showFetchXmlOption,
+            tdsOption,
             QueryCommandGroup.ProfileOption,
             QueryCommandGroup.EnvironmentOption,
             QueryCommandGroup.TopOption,
@@ -83,6 +89,7 @@ public static class SqlCommand
             var file = parseResult.GetValue(fileOption);
             var stdin = parseResult.GetValue(stdinOption);
             var showFetchXml = parseResult.GetValue(showFetchXmlOption);
+            var useTds = parseResult.GetValue(tdsOption);
             var profile = parseResult.GetValue(QueryCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(QueryCommandGroup.EnvironmentOption);
             var top = parseResult.GetValue(QueryCommandGroup.TopOption);
@@ -92,7 +99,7 @@ public static class SqlCommand
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAsync(
-                sql, file, stdin, showFetchXml,
+                sql, file, stdin, showFetchXml, useTds,
                 profile, environment,
                 top, page, pagingCookie, count,
                 globalOptions, cancellationToken);
@@ -106,6 +113,7 @@ public static class SqlCommand
         FileInfo? file,
         bool stdin,
         bool showFetchXml,
+        bool useTds,
         string? profile,
         string? environment,
         int? top,
@@ -170,7 +178,8 @@ public static class SqlCommand
                 TopOverride = top,
                 PageNumber = page,
                 PagingCookie = pagingCookie,
-                IncludeCount = count
+                IncludeCount = count,
+                UseTdsEndpoint = useTds
             };
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);

@@ -1,3 +1,5 @@
+using PPDS.Dataverse.Query;
+
 namespace PPDS.Dataverse.Query.Planning;
 
 /// <summary>
@@ -31,4 +33,17 @@ public sealed class QueryPlanOptions
 
     /// <summary>Whether to include total record count in the result.</summary>
     public bool IncludeCount { get; init; }
+
+    /// <summary>
+    /// The original SQL text, needed for TDS Endpoint routing.
+    /// When <see cref="UseTdsEndpoint"/> is true, this SQL is passed directly
+    /// to the TDS Endpoint instead of being transpiled to FetchXML.
+    /// </summary>
+    public string? OriginalSql { get; init; }
+
+    /// <summary>
+    /// The TDS query executor for direct SQL execution (Phase 3.5).
+    /// Required when <see cref="UseTdsEndpoint"/> is true.
+    /// </summary>
+    public ITdsQueryExecutor? TdsQueryExecutor { get; init; }
 }
