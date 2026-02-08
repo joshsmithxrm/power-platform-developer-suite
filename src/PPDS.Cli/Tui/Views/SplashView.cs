@@ -353,7 +353,7 @@ internal sealed class SplashView : View, ITuiStateCapture<SplashViewState>
                 ? Application.Driver.MakeAttribute(Color.BrightCyan, Color.Black)
                 : Application.Driver.MakeAttribute(Color.Green, Color.Black);
 
-            var logoColor = Application.Driver.MakeAttribute(Color.BrightGreen, Color.Black);
+            var logoColor = Application.Driver.MakeAttribute(Color.BrightCyan, Color.Black);
             var taglineColor = Application.Driver.MakeAttribute(Color.BrightCyan, Color.Black);
 
             var y = centerY - 11;
