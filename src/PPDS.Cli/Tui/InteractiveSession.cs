@@ -45,6 +45,8 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string? _activeEnvironmentUrl;
     private string? _activeEnvironmentDisplayName;
     private bool _disposed;
+    private readonly EnvironmentConfigStore _envConfigStore = new();
+    private readonly EnvironmentConfigService _envConfigService;
     private readonly Lazy<ITuiErrorService> _errorService;
     private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
     private readonly Lazy<IProfileService> _profileService;
@@ -84,6 +86,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public string? CurrentProfileIdentity { get; private set; }
 
     /// <summary>
+    /// Gets the environment configuration service for label, type, and color resolution.
+    /// </summary>
+    public IEnvironmentConfigService EnvironmentConfigService => _envConfigService;
+
+    /// <summary>
     /// Creates a new interactive session for the specified profile.
     /// </summary>
     /// <param name="profileName">The profile name (null for active profile).</param>
@@ -104,11 +111,12 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
         _beforeInteractiveAuth = beforeInteractiveAuth;
+        _envConfigService = new EnvironmentConfigService(_envConfigStore);
 
         // Initialize lazy service instances (thread-safe by default)
         _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance));
         _environmentService = new Lazy<IEnvironmentService>(() => new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance));
-        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService());
+        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService(_envConfigService));
         _errorService = new Lazy<ITuiErrorService>(() => new TuiErrorService());
         _hotkeyRegistry = new Lazy<IHotkeyRegistry>(() => new HotkeyRegistry());
         _queryHistoryService = new Lazy<IQueryHistoryService>(() => new QueryHistoryService(NullLogger<QueryHistoryService>.Instance));
@@ -593,6 +601,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
             _providers.Clear();
         }
 
+        _envConfigStore.Dispose();
         _lock.Dispose();
         TuiDebugLog.Log("InteractiveSession disposed");
     }
