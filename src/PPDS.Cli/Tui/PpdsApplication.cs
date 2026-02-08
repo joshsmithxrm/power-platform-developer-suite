@@ -101,7 +101,10 @@ internal sealed class PpdsApplication : IDisposable
         // Enable auth debug logging - redirect to TuiDebugLog for diagnostics
         AuthDebugLog.Writer = msg => TuiDebugLog.Log($"[Auth] {msg}");
 
-        // Override terminal's 16-color palette for consistent appearance across terminals
+        Application.Init();
+
+        // Override terminal's 16-color palette AFTER Init so OSC 4 sequences
+        // apply to the screen buffer Terminal.Gui is actually rendering on.
         TuiTerminalPalette.Apply();
 
         // Set block cursor for better visibility in text fields (DECSCUSR)
@@ -111,16 +114,18 @@ internal sealed class PpdsApplication : IDisposable
         Console.Out.Write("\x1b[2 q\x1b]12;black\x07");
         Console.Out.Flush();
 
-        Application.Init();
-
         // Override Terminal.Gui's global color defaults with our palette.
-        // Without this, the first render frame uses Terminal.Gui's built-in theme
-        // (blue/white) for any view that falls back to Colors.Base/TopLevel/etc.
+        // Without this, views that fall back to Colors.Base/TopLevel/etc.
+        // use Terminal.Gui's built-in theme instead of our dark theme.
         Colors.Base = TuiColorPalette.Default;
         Colors.TopLevel = TuiColorPalette.Default;
         Colors.Menu = TuiColorPalette.MenuBar;
         Colors.Dialog = TuiColorPalette.Default;
         Colors.Error = TuiColorPalette.Error;
+
+        // Application.Top was created by Init() with the old Colors.TopLevel.
+        // Changing Colors.TopLevel doesn't retroactively update Top's scheme.
+        Application.Top.ColorScheme = TuiColorPalette.Default;
 
         // Wire up global key interception via HotkeyRegistry
         // This intercepts ALL keys before any view processes them
