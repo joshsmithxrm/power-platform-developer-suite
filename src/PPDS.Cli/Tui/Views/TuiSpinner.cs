@@ -20,9 +20,6 @@ namespace PPDS.Cli.Tui.Views;
 /// spinner.Stop();
 /// </code>
 /// </para>
-/// <para>
-/// See docs/patterns/tui-loading.md for usage guidelines.
-/// </para>
 /// </remarks>
 public sealed class TuiSpinner : View
 {

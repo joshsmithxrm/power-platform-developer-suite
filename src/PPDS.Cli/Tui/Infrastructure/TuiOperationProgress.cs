@@ -10,9 +10,6 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// </summary>
 /// <remarks>
 /// <para>
-/// See ADR-0025 for architectural context.
-/// </para>
-/// <para>
 /// When a <see cref="TuiSpinner"/> is provided, status messages will animate
 /// with a braille spinner to indicate ongoing activity. The spinner is stopped
 /// automatically when <see cref="ReportComplete"/> or <see cref="ReportError"/> is called.

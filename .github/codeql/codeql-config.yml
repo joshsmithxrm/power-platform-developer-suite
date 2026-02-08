@@ -18,7 +18,7 @@ queries:
 query-filters:
   - exclude:
       id:
-        # LINQ style suggestions - conflicts with ADR-0024 (prefer explicit foreach)
+        # LINQ style suggestions - prefer explicit foreach
         - cs/linq/missed-where
         - cs/linq/missed-select
         # Style preferences - not quality issues

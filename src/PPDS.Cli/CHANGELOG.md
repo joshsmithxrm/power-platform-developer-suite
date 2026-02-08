@@ -59,8 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Enhanced interactive table view** - Cell-level navigation with left/right arrows, improved keyboard handling, and better UX in SQL query wizard ([#225](https://github.com/joshsmithxrm/power-platform-developer-suite/pull/225))
-- **Release workflow uses draft-first flow** - CLI releases now create draft releases first, upload binaries, then publish. Fixes binary attachment failures due to GitHub's immutable releases. See [ADR-0023](../../docs/adr/0023_CLI_BINARY_RELEASE_PROCESS.md).
-
+- **Release workflow uses draft-first flow** - CLI releases now create draft releases first, upload binaries, then publish. Fixes binary attachment failures due to GitHub's immutable releases. 
 ## [1.0.0-beta.10] - 2026-01-06
 
 ### Added
@@ -74,8 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Query history with up/down arrow recall
   - Session-scoped connection pooling for faster subsequent queries
   - Graceful degradation when not in a TTY environment
-- **Version header at startup** - CLI now outputs diagnostic header to stderr: version info (CLI, SDK, .NET runtime) and platform. Enables correlating issues to specific builds. Skipped for `--help`, `--version`, or no arguments. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
-- **`ppds solutions` command group** - Manage Power Platform solutions ([#137](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/137)):
+- **Version header at startup** - CLI now outputs diagnostic header to stderr: version info (CLI, SDK, .NET runtime) and platform. Enables correlating issues to specific builds. Skipped for `--help`, `--version`, or no arguments. - **`ppds solutions` command group** - Manage Power Platform solutions ([#137](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/137)):
   - `ppds solutions list` - List solutions in environment (supports `--include-managed`, `--filter`)
   - `ppds solutions get <name>` - Get solution details by unique name
   - `ppds solutions export <name>` - Export solution as ZIP file (supports `--managed`)
@@ -104,8 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ppds roles show <role>` - Show role details and assigned users (by GUID or name)
   - `ppds roles assign <role> --user <user>` - Assign a role to a user
   - `ppds roles remove <role> --user <user>` - Remove a role from a user
-- **`ppds data truncate` command** - Delete ALL records from an entity for dev/test scenarios. See [ADR-0021](../../docs/adr/0021_TRUNCATE_COMMAND.md).
-  - Required confirmation prompt (type `TRUNCATE <entity> <count>` to proceed)
+- **`ppds data truncate` command** - Delete ALL records from an entity for dev/test scenarios.   - Required confirmation prompt (type `TRUNCATE <entity> <count>` to proceed)
   - `--dry-run` to preview record count without deleting
   - `--force` to skip confirmation for automation/CI
   - `--batch-size` to control delete batch size (default 1000, max 1000)
@@ -182,16 +179,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Expanded exit codes** - New exit codes 4 (ConnectionError), 5 (AuthError), 6 (NotFoundError) for finer-grained status ([#77](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/77))
 - **Global options** - `--quiet`/`-q`, `--verbose`/`-v`, `--debug`, `--correlation-id` flags available on all commands ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76))
 - **JSON output schema versioning** - JSON output now includes `version: "1.0"` field for future compatibility ([#77](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/77))
-- **ADR-0008** - Architecture decision record documenting CLI output architecture (ILogger, IOutputWriter, IProgressReporter separation)
+- **CLI output architecture** - Documented CLI output architecture (ILogger, IOutputWriter, IProgressReporter separation)
 
 ### Changed
 
-- **BREAKING: Renamed `--what-if` to `--dry-run`** - `ppds plugins deploy` and `ppds plugins clean` now use `--dry-run` for preview mode, aligning with Unix CLI conventions. PowerShell module (PPDS.Tools) will use `-WhatIf`. ([ADR-0013](docs/adr/0013_CLI_DRY_RUN_CONVENTION.md))
-- **Progress output to stderr** - Progress messages now write to stderr, enabling clean piping: `ppds data export -f json | jq` ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76))
+- **BREAKING: Renamed `--what-if` to `--dry-run`** - `ppds plugins deploy` and `ppds plugins clean` now use `--dry-run` for preview mode, aligning with Unix CLI conventions. PowerShell module (PPDS.Tools) will use `-WhatIf`. - **Progress output to stderr** - Progress messages now write to stderr, enabling clean piping: `ppds data export -f json | jq` ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76))
 - **Status messages to stderr** - Operational messages (connecting, authenticating, etc.) now write to stderr, keeping stdout for data only ([#76](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/76))
 - **Centralized CSV column matching** - Extracted shared column-to-attribute matching logic to `ColumnMatcher` class for code reuse between data loading and mapping generation
 - **Centralized schema versioning** - Schema version constants centralized in `CsvMappingSchema` class (single source of truth)
-- **ADR-0014** - Architecture decision record documenting CSV mapping schema versioning and underscore prefix convention
+- **CSV mapping schema** - Documented CSV mapping schema versioning and underscore prefix convention
 
 ## [1.0.0-beta.6] - 2026-01-03
 

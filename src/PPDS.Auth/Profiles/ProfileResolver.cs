@@ -8,9 +8,6 @@ namespace PPDS.Auth.Profiles;
 /// 2. PPDS_PROFILE environment variable
 /// 3. Global active profile from profiles.json
 /// </summary>
-/// <remarks>
-/// See ADR-0018 for the profile session isolation design.
-/// </remarks>
 public static class ProfileResolver
 {
     /// <summary>

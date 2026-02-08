@@ -271,16 +271,6 @@ dotnet test --filter Category=TuiUnit
 
 ---
 
-## Architecture Decisions
-
-Key design decisions are documented as ADRs in [docs/adr/](docs/adr/README.md):
-
-- [ADR-0002: Multi-Connection Pooling](docs/adr/0002_MULTI_CONNECTION_POOLING.md)
-- [ADR-0005: DOP-Based Parallelism](docs/adr/0005_DOP_BASED_PARALLELISM.md)
-- [ADR-0007: Unified CLI and Shared Authentication](docs/adr/0007_UNIFIED_CLI_AND_AUTH.md)
-- [ADR-0008: CLI Output Architecture](docs/adr/0008_CLI_OUTPUT_ARCHITECTURE.md)
-- [ADR-0015: Application Service Layer](docs/adr/0015_APPLICATION_SERVICE_LAYER.md)
-
 ## Patterns
 
 - [Connection Pooling](docs/architecture/CONNECTION_POOLING_PATTERNS.md) - When and how to use connection pooling

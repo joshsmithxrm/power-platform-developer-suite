@@ -10,20 +10,20 @@ This file guides GitHub Copilot's code review behavior for the PPDS repository.
 - Application Services own all business logic
 - Services are UI-agnostic - no `Console.WriteLine`, no Spectre/Terminal.Gui references
 
-### File I/O (ADR-0024: Shared Local State)
+### File I/O
 
 - UIs never read/write files directly
 - All file access through Application Services
 - WRONG: `File.ReadAllText` in command handler
 - CORRECT: `await _profileService.GetProfilesAsync()`
 
-### Progress Reporting (ADR-0025: UI-Agnostic Progress)
+### Progress Reporting
 
 - Services accept `IProgressReporter`, not write to console
 - UIs implement adapters for their display medium
 - Services return data, presentation layers format it
 
-### Error Handling (ADR-0026: Structured Error Model)
+### Error Handling
 
 - Services throw `PpdsException` with `ErrorCode` and `UserMessage`
 - Never expose technical details (GUIDs, stack traces) in `UserMessage`

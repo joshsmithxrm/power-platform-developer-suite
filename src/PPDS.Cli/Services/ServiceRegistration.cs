@@ -20,7 +20,6 @@ namespace PPDS.Cli.Services;
 /// <remarks>
 /// Application services encapsulate business logic shared between
 /// CLI commands, TUI wizards, and daemon RPC handlers.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public static class ServiceRegistration
 {

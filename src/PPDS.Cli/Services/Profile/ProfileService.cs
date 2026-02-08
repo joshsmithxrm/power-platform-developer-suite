@@ -12,9 +12,6 @@ namespace PPDS.Cli.Services.Profile;
 /// <summary>
 /// Application service for managing authentication profiles.
 /// </summary>
-/// <remarks>
-/// See ADR-0015 for architectural context.
-/// </remarks>
 public sealed class ProfileService : IProfileService
 {
     /// <summary>

@@ -9,7 +9,6 @@ namespace PPDS.Cli.Services.Profile;
 /// </summary>
 /// <remarks>
 /// This service encapsulates profile management logic shared between CLI, TUI, and RPC interfaces.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public interface IProfileService
 {

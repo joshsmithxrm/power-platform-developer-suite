@@ -26,9 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Error report v1.1 with execution context** - Import error reports now include `executionContext` object with CLI/SDK versions, runtime, platform, import mode, and option flags. Enables reproducing and troubleshooting imports after the fact. Version bumped from "1.0" to "1.1". See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
-- **Bulk operation probe-once optimization** - When detecting if an entity supports bulk operations (UpsertMultiple), now probes with 1 record first instead of sending the full batch. Reduces wasted records from N to 1 for unsupported entities (e.g., `team` entity). Cache is per-import-session. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
-
+- **Error report v1.1 with execution context** - Import error reports now include `executionContext` object with CLI/SDK versions, runtime, platform, import mode, and option flags. Enables reproducing and troubleshooting imports after the fact. Version bumped from "1.0" to "1.1". - **Bulk operation probe-once optimization** - When detecting if an entity supports bulk operations (UpsertMultiple), now probes with 1 record first instead of sending the full batch. Reduces wasted records from N to 1 for unsupported entities (e.g., `team` entity). Cache is per-import-session. 
 ### Changed
 
 - **M2M relationship import parallelized** - M2M associations now process in parallel using the connection pool's DOP (previously sequential). Progress reporting now shows actual `Current/Total` counts instead of `0/0`. Expected 4-8x performance improvement depending on DOP. ([#196](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/196))

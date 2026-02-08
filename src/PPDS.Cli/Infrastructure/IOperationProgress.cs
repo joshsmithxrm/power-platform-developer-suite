@@ -7,7 +7,6 @@ namespace PPDS.Cli.Infrastructure;
 /// <para>
 /// This interface enables Application Services to report progress without coupling
 /// to any specific UI framework (CLI, TUI, RPC). Each UI implements its own adapter.
-/// See ADR-0025 for architectural context.
 /// </para>
 /// <para>
 /// Note: This is different from <see cref="PPDS.Migration.Progress.IProgressReporter"/>

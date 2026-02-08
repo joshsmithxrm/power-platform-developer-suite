@@ -133,7 +133,7 @@ public class PluginTraceService : IPluginTraceService
 
         int deleted = 0;
 
-        // Use pool parallelism for efficient deletion (ADR-0002)
+        // Use pool parallelism for efficient deletion
         var parallelism = Math.Min(_pool.GetTotalRecommendedParallelism(), ids.Count);
 
         await Parallel.ForEachAsync(

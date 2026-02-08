@@ -92,7 +92,7 @@ public static class ProfileServiceFactory
         var credentialStore = new NativeCredentialStore();
 
         // Callback to persist HomeAccountId and LastUsedAt after authentication
-        // This enables token cache reuse across sessions (ADR-0027) and tracks usage
+        // This enables token cache reuse across sessions and tracks usage
         Action<AuthProfile> onProfileUpdated = p =>
         {
             // Fire-and-forget with error swallowing - don't fail connection if persist fails
@@ -310,7 +310,6 @@ public static class ProfileServiceFactory
         services.RegisterDataverseServices();
 
         // Register CLI application services (ISqlQueryService, etc.)
-        // See ADR-0015 for architectural context
         services.AddCliApplicationServices();
 
         // Connection pool - CLI uses factory delegate because it gets IConnectionSource[] from auth profiles

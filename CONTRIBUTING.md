@@ -97,10 +97,10 @@ The pre-commit hook automatically runs unit tests (~10s).
 
 | Pattern | Reference |
 |---------|-----------|
-| Connection pooling | ADR-0002, `ServiceClientPool.cs` |
-| Bulk operations | ADR-0005, `BulkOperationExecutor.cs` |
-| CLI output | ADR-0008 |
-| Application services | ADR-0015 |
+| Connection pooling | `ServiceClientPool.cs` |
+| Bulk operations | `BulkOperationExecutor.cs` |
+| CLI output | `src/PPDS.Cli/Services/` |
+| Application services | `src/PPDS.Cli/Services/` |
 
 ### What to Avoid
 
@@ -122,7 +122,7 @@ power-platform-developer-suite/
 │   └── PPDS.Mcp/            # MCP server
 ├── extension/               # VS Code extension
 ├── tests/                   # Test projects
-├── docs/adr/               # Architecture Decision Records
+├── docs/specs/             # Feature specifications
 └── templates/claude/       # Claude Code integration
 ```
 
@@ -130,7 +130,7 @@ power-platform-developer-suite/
 
 - **Questions**: Open a [Discussion](https://github.com/joshsmithxrm/power-platform-developer-suite/discussions)
 - **Bugs**: Open an [Issue](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
-- **Architecture**: Check [ADRs](docs/adr/README.md) for design decisions
+- **Architecture**: Check `docs/specs/` for design decisions
 
 ## License
 

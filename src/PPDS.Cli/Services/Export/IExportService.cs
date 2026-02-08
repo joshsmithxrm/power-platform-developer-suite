@@ -9,7 +9,6 @@ namespace PPDS.Cli.Services.Export;
 /// </summary>
 /// <remarks>
 /// This service handles CSV, TSV, and clipboard export operations.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public interface IExportService
 {

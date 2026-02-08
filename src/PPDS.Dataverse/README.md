@@ -115,7 +115,7 @@ To scale throughput, add more Application Users - each multiplies your API quota
 4 Application Users @ DOP=4  → 16 parallel requests
 ```
 
-See [ADR-0005](docs/adr/0005_DOP_BASED_PARALLELISM.md) for details.
+The pool uses the server's `RecommendedDegreesOfParallelism` (`x-ms-dop-hint` header) to optimize throughput.
 
 ### Affinity Cookie Disabled by Default
 

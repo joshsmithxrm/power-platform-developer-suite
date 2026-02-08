@@ -37,4 +37,4 @@ VS Code Extension (TypeScript)
    Application Services
 ```
 
-See [ADR-0015](../docs/adr/0015_APPLICATION_SERVICE_LAYER.md) for the service layer architecture.
+All business logic lives in Application Services, keeping the extension UI-agnostic.

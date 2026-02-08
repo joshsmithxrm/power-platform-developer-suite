@@ -6,17 +6,17 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 - Regenerate `PPDS.Plugins.snk` - breaks strong naming for all assemblies
 - Create new `ServiceClient` per request - 42,000x slower than pool; use `IDataverseConnectionPool`
-- Hold single pooled client for multiple queries - defeats pool parallelism; see ADR-0002
+- Hold single pooled client for multiple queries - defeats pool parallelism
 - Write CLI status messages to stdout - use `Console.Error.WriteLine`; stdout is for data
 - Throw raw exceptions from Application Services - wrap in `PpdsException` with ErrorCode
 
 ## ALWAYS
 
-- Use connection pool for multi-request scenarios - see ADR-0002, ADR-0005
+- Use connection pool for multi-request scenarios
 - Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) - 5x faster than `ExecuteMultiple`
-- Use Application Services for all persistent state - single code path for CLI/TUI/RPC (ADR-0024)
-- Accept `IProgressReporter` for operations >1 second - all UIs need feedback (ADR-0025)
-- Include ErrorCode in `PpdsException` - enables programmatic handling (ADR-0026)
+- Use Application Services for all persistent state - single code path for CLI/TUI/RPC
+- Accept `IProgressReporter` for operations >1 second - all UIs need feedback
+- Include ErrorCode in `PpdsException` - enables programmatic handling
 
 ## Tech Stack
 
@@ -27,10 +27,9 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 ## Key Files
 
-- `src/PPDS.Cli/Services/` - Application Services (ADR-0015)
+- `src/PPDS.Cli/Services/` - Application Services
 - `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
-- `docs/adr/` - Architecture Decision Records
-- `docs/patterns/` - Canonical code patterns
+- `docs/specs/` - Feature specifications
 
 ## Commands
 
@@ -47,9 +46,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Integration (live): `--filter Category=Integration`
 - TUI: `--filter Category=TuiUnit`
 
-See ADR-0028 (TUI testing), ADR-0029 (full strategy).
+See `docs/specs/` for testing strategy.
 
 ## Architecture
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
-See `docs/patterns/architecture.md` for diagrams.

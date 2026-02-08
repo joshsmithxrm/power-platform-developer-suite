@@ -7,7 +7,6 @@ namespace PPDS.Cli.Services.Query;
 /// <remarks>
 /// This service is the single source of truth for SQL query execution logic,
 /// consumed by CLI commands, TUI wizards, and daemon RPC handlers.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public interface ISqlQueryService
 {

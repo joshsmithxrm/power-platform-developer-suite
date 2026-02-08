@@ -6,7 +6,7 @@ namespace PPDS.Cli.Tui.Testing;
 /// </summary>
 /// <typeparam name="TState">The state record type for this component.</typeparam>
 /// <remarks>
-/// This interface is part of the TUI autonomous feedback loop (ADR-0028 extension).
+/// This interface is part of the TUI autonomous feedback loop.
 /// Components implementing this interface expose their internal state for assertions
 /// without requiring Terminal.Gui rendering or PTY-based testing.
 /// </remarks>

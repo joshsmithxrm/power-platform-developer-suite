@@ -9,7 +9,7 @@ namespace PPDS.Cli.Services.Environment;
 /// </summary>
 /// <remarks>
 /// This service encapsulates environment discovery and selection logic shared between
-/// CLI, TUI, and RPC interfaces. See ADR-0015 for architectural context.
+/// CLI, TUI, and RPC interfaces.
 /// </remarks>
 public interface IEnvironmentService
 {
