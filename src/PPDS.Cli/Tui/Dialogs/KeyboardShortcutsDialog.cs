@@ -17,7 +17,8 @@ internal sealed class KeyboardShortcutsDialog : TuiDialog, ITuiStateCapture<Keyb
         new("Arrows", "Navigate cells", "Table Navigation"),
         new("PgUp/Dn", "Page up/down", "Table Navigation"),
         new("Home/End", "First/last row", "Table Navigation"),
-        new("Ctrl+C", "Copy cell", "Table Navigation"),
+        new("Ctrl+C", "Copy (multi-select includes headers)", "Table Navigation"),
+        new("Ctrl+Shift+C", "Copy (inverted header behavior)", "Table Navigation"),
     };
 
     private readonly IReadOnlyList<ShortcutEntry> _allShortcuts;

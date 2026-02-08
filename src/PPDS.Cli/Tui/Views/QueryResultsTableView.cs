@@ -1,6 +1,7 @@
 using System.Data;
 using System.Net.Http;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Tui.Helpers;
 using PPDS.Dataverse.Query;
 using Terminal.Gui;
 
@@ -282,7 +283,12 @@ internal sealed class QueryResultsTableView : FrameView
             switch (e.KeyEvent.Key)
             {
                 case Key.CtrlMask | Key.C:
-                    CopySelectedCell();
+                    HandleCopy(invertHeaders: false);
+                    e.Handled = true;
+                    break;
+
+                case Key.CtrlMask | Key.ShiftMask | Key.C:
+                    HandleCopy(invertHeaders: true);
                     e.Handled = true;
                     break;
 
@@ -357,32 +363,10 @@ internal sealed class QueryResultsTableView : FrameView
         }
     }
 
-    private void CopySelectedCell()
+    private void HandleCopy(bool invertHeaders)
     {
-        if (_tableView.Table == null || _tableView.SelectedRow < 0)
-        {
-            ShowTemporaryStatus("No cell selected");
-            return;
-        }
-
-        var row = _tableView.SelectedRow;
-        var col = _tableView.SelectedColumn;
-
-        if (row >= 0 && row < _tableView.Table.Rows.Count &&
-            col >= 0 && col < _tableView.Table.Columns.Count)
-        {
-            var value = _tableView.Table.Rows[row][col]?.ToString() ?? string.Empty;
-
-            if (ClipboardHelper.CopyToClipboard(value))
-            {
-                var displayValue = value.Length > 40 ? value[..37] + "..." : value;
-                ShowTemporaryStatus($"Copied: {displayValue}");
-            }
-            else
-            {
-                ShowTemporaryStatus($"Copy failed. Value: {value}");
-            }
-        }
+        var result = TableCopyHelper.CopySelection(_tableView, _dataTable, invertHeaders);
+        ShowTemporaryStatus(result.StatusMessage);
     }
 
     private void CopyRecordUrl()
@@ -467,7 +451,7 @@ internal sealed class QueryResultsTableView : FrameView
             : "";
 
         _statusLabel.TextAlignment = TextAlignment.Left;
-        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | Ctrl+C: copy | Ctrl+U: copy URL | Ctrl+O: open";
+        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | Ctrl+C: copy | Ctrl+Shift+C: copy w/headers | Ctrl+U: URL";
     }
 
     /// <summary>

@@ -97,8 +97,8 @@ public class DialogStateCaptureTests
         using var dialog = new KeyboardShortcutsDialog(registry);
         var state = dialog.CaptureState();
 
-        // 2 registered + 4 built-in table navigation
-        Assert.Equal(6, state.ShortcutCount);
+        // 2 registered + 5 built-in table navigation
+        Assert.Equal(7, state.ShortcutCount);
     }
 
     #endregion
