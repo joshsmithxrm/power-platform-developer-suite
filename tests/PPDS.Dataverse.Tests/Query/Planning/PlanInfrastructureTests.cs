@@ -56,11 +56,54 @@ public class PlanInfrastructureTests
     {
         var stats = new QueryPlanStatistics();
 
-        stats.NodeStats["FetchXmlScan"] = new NodeStatistics { RowsProduced = 100, TimeMs = 50 };
-        stats.NodeStats["Project"] = new NodeStatistics { RowsProduced = 100, TimeMs = 5 };
+        var scanStats = new NodeStatistics();
+        scanStats.AddRowsProduced(100);
+        scanStats.AddTimeMs(50);
+        stats.NodeStats["FetchXmlScan"] = scanStats;
+
+        var projectStats = new NodeStatistics();
+        projectStats.AddRowsProduced(100);
+        projectStats.AddTimeMs(5);
+        stats.NodeStats["Project"] = projectStats;
 
         Assert.Equal(2, stats.NodeStats.Count);
         Assert.Equal(100, stats.NodeStats["FetchXmlScan"].RowsProduced);
+    }
+
+    [Fact]
+    public void QueryPlanStatistics_InterlockedOperations()
+    {
+        var stats = new QueryPlanStatistics();
+
+        stats.IncrementRowsRead();
+        stats.IncrementRowsRead();
+        stats.AddRowsRead(3);
+        Assert.Equal(5, stats.RowsRead);
+
+        stats.IncrementRowsOutput();
+        Assert.Equal(1, stats.RowsOutput);
+
+        stats.IncrementPagesFetched();
+        stats.IncrementPagesFetched();
+        Assert.Equal(2, stats.PagesFetched);
+
+        stats.AddExecutionTimeMs(150);
+        stats.AddExecutionTimeMs(50);
+        Assert.Equal(200, stats.ExecutionTimeMs);
+    }
+
+    [Fact]
+    public void NodeStatistics_InterlockedOperations()
+    {
+        var nodeStats = new NodeStatistics();
+
+        nodeStats.IncrementRowsProduced();
+        nodeStats.IncrementRowsProduced();
+        nodeStats.AddRowsProduced(8);
+        Assert.Equal(10, nodeStats.RowsProduced);
+
+        nodeStats.AddTimeMs(42);
+        Assert.Equal(42, nodeStats.TimeMs);
     }
 
     [Fact]

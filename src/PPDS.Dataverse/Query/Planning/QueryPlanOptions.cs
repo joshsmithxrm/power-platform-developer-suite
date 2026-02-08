@@ -16,4 +16,19 @@ public sealed class QueryPlanOptions
 
     /// <summary>Global row limit, if any.</summary>
     public int? MaxRows { get; init; }
+
+    /// <summary>
+    /// Page number for caller-controlled paging (1-based).
+    /// When set, the plan fetches only this single page instead of auto-paging.
+    /// </summary>
+    public int? PageNumber { get; init; }
+
+    /// <summary>
+    /// Paging cookie from a previous result for continuation.
+    /// Used with <see cref="PageNumber"/> for caller-controlled paging.
+    /// </summary>
+    public string? PagingCookie { get; init; }
+
+    /// <summary>Whether to include total record count in the result.</summary>
+    public bool IncludeCount { get; init; }
 }

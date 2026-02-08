@@ -313,7 +313,9 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
 }
 ```
 
-**ProjectNode** — Maps input rows to output rows (column selection, renaming, virtual column expansion).
+**ProjectNode** — Maps input rows to output rows (column selection, renaming, expression evaluation).
+
+> **Note:** Virtual column expansion (e.g., `owneridname` from `FormattedValues`) is handled by `SqlQueryResultExpander` in the service layer, not by `ProjectNode`. This is because virtual column expansion depends on SDK-specific `FormattedValues` metadata from `Entity` objects, which is not available in the generic `QueryRow` format used by plan nodes.
 
 ```csharp
 public sealed class ProjectNode : IQueryPlanNode

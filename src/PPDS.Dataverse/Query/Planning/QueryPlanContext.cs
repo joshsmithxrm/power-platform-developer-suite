@@ -21,15 +21,20 @@ public sealed class QueryPlanContext
     /// <summary>Mutable statistics: nodes report actual row counts and timing.</summary>
     public QueryPlanStatistics Statistics { get; }
 
+    /// <summary>Optional progress reporter for long-running operations.</summary>
+    public IQueryProgressReporter? ProgressReporter { get; }
+
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
         IExpressionEvaluator expressionEvaluator,
         CancellationToken cancellationToken = default,
-        QueryPlanStatistics? statistics = null)
+        QueryPlanStatistics? statistics = null,
+        IQueryProgressReporter? progressReporter = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         ExpressionEvaluator = expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
         CancellationToken = cancellationToken;
         Statistics = statistics ?? new QueryPlanStatistics();
+        ProgressReporter = progressReporter;
     }
 }

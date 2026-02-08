@@ -40,14 +40,27 @@ public sealed class QueryPlanner
 
     private QueryPlanResult PlanSelect(SqlSelectStatement statement, QueryPlanOptions options)
     {
-        // Phase 0: transpile to FetchXML and create a simple scan node
+        // Phase 0: transpile to FetchXML and create a simple scan node.
+        //
+        // NOTE: Virtual column expansion (e.g., owneridname from FormattedValues) stays
+        // in the service layer (SqlQueryResultExpander) rather than in ProjectNode, because
+        // it depends on SDK-specific FormattedValues metadata from the Entity objects.
+        // The generic QueryRow format does not carry FormattedValues, so expansion must
+        // happen after the plan produces a QueryResult. See SqlQueryService.ExecuteAsync.
         var transpileResult = _transpiler.TranspileWithVirtualColumns(statement);
+
+        // When caller provides a page number or paging cookie, use single-page mode
+        // instead of auto-paging, so the caller controls pagination.
+        var isCallerPaged = options.PageNumber.HasValue || options.PagingCookie != null;
 
         var scanNode = new FetchXmlScanNode(
             transpileResult.FetchXml,
             statement.GetEntityName(),
-            autoPage: true,
-            maxRows: options.MaxRows ?? statement.Top);
+            autoPage: !isCallerPaged,
+            maxRows: options.MaxRows ?? statement.Top,
+            initialPageNumber: options.PageNumber,
+            initialPagingCookie: options.PagingCookie,
+            includeCount: options.IncludeCount);
 
         return new QueryPlanResult
         {

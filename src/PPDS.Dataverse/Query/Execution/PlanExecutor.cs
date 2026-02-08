@@ -34,7 +34,7 @@ public sealed class PlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             records.Add(row.Values);
-            context.Statistics.RowsOutput++;
+            context.Statistics.IncrementRowsOutput();
 
             // Infer columns from first row if not yet determined
             if (columns == null)
@@ -44,7 +44,7 @@ public sealed class PlanExecutor
         }
 
         stopwatch.Stop();
-        context.Statistics.ExecutionTimeMs = stopwatch.ElapsedMilliseconds;
+        context.Statistics.AddExecutionTimeMs(stopwatch.ElapsedMilliseconds);
 
         return new QueryResult
         {
@@ -52,8 +52,12 @@ public sealed class PlanExecutor
             Columns = columns ?? Array.Empty<QueryColumn>(),
             Records = records,
             Count = records.Count,
-            MoreRecords = false,
-            PageNumber = 1,
+            TotalCount = context.Statistics.LastTotalCount,
+            MoreRecords = context.Statistics.LastMoreRecords,
+            PagingCookie = context.Statistics.LastPagingCookie,
+            PageNumber = context.Statistics.LastPageNumber > 0
+                ? context.Statistics.LastPageNumber
+                : 1,
             ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
             ExecutedFetchXml = planResult.FetchXml
         };

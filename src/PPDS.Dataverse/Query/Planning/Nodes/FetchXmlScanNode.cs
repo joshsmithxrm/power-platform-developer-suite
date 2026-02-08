@@ -23,6 +23,20 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
     /// <summary>Maximum rows to return, if any.</summary>
     public int? MaxRows { get; }
 
+    /// <summary>
+    /// Starting page number for caller-controlled paging (1-based).
+    /// When set with <see cref="AutoPage"/> = false, fetches only this page.
+    /// </summary>
+    public int? InitialPageNumber { get; }
+
+    /// <summary>
+    /// Paging cookie for caller-controlled paging continuation.
+    /// </summary>
+    public string? InitialPagingCookie { get; }
+
+    /// <summary>Whether to request total record count from Dataverse.</summary>
+    public bool IncludeCount { get; }
+
     /// <inheritdoc />
     public string Description => $"FetchXmlScan: {EntityLogicalName}" +
         (AutoPage ? " (all pages)" : " (single page)") +
@@ -34,12 +48,22 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
-    public FetchXmlScanNode(string fetchXml, string entityLogicalName, bool autoPage = true, int? maxRows = null)
+    public FetchXmlScanNode(
+        string fetchXml,
+        string entityLogicalName,
+        bool autoPage = true,
+        int? maxRows = null,
+        int? initialPageNumber = null,
+        string? initialPagingCookie = null,
+        bool includeCount = false)
     {
         FetchXml = fetchXml ?? throw new ArgumentNullException(nameof(fetchXml));
         EntityLogicalName = entityLogicalName ?? throw new ArgumentNullException(nameof(entityLogicalName));
         AutoPage = autoPage;
         MaxRows = maxRows;
+        InitialPageNumber = initialPageNumber;
+        InitialPagingCookie = initialPagingCookie;
+        IncludeCount = includeCount;
     }
 
     /// <inheritdoc />
@@ -48,8 +72,8 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var rowCount = 0;
-        string? pagingCookie = null;
-        var pageNumber = 1;
+        string? pagingCookie = InitialPagingCookie;
+        var pageNumber = InitialPageNumber ?? 1;
 
         while (true)
         {
@@ -59,10 +83,16 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
                 FetchXml,
                 pageNumber,
                 pagingCookie,
-                includeCount: false,
+                includeCount: IncludeCount,
                 cancellationToken).ConfigureAwait(false);
 
-            context.Statistics.PagesFetched++;
+            context.Statistics.IncrementPagesFetched();
+
+            // Store paging metadata for caller-controlled paging scenarios
+            context.Statistics.LastPagingCookie = result.PagingCookie;
+            context.Statistics.LastMoreRecords = result.MoreRecords;
+            context.Statistics.LastPageNumber = result.PageNumber;
+            context.Statistics.LastTotalCount = result.TotalCount;
 
             foreach (var record in result.Records)
             {
@@ -73,7 +103,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
 
                 yield return QueryRow.FromRecord(record, result.EntityLogicalName);
                 rowCount++;
-                context.Statistics.RowsRead++;
+                context.Statistics.IncrementRowsRead();
             }
 
             if (!AutoPage || !result.MoreRecords)

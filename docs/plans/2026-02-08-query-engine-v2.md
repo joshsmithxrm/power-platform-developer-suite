@@ -291,7 +291,6 @@ results. Adds ExplainAsync for future EXPLAIN command support.
 - Modify: `src/PPDS.Dataverse/Sql/Parsing/SqlTokenType.cs` (add Having token)
 - Modify: `src/PPDS.Dataverse/Sql/Parsing/SqlLexer.cs` (add HAVING keyword)
 - Modify: `src/PPDS.Dataverse/Sql/Parsing/SqlParser.cs` (parse HAVING)
-- Modify: `src/PPDS.Dataverse/Sql/Ast/SqlSelectStatement.cs` (Having property)
 - Create: `src/PPDS.Dataverse/Query/Planning/Nodes/ClientFilterNode.cs`
 - Modify: `src/PPDS.Dataverse/Query/Planning/QueryPlanner.cs` (emit ClientFilterNode for HAVING)
 - Create: `tests/PPDS.Dataverse.Tests/Sql/Parsing/HavingParserTests.cs`
@@ -427,7 +426,7 @@ evaluated client-side via ClientFilterNode.
 
 ## Phase 2: Query Composition
 
-**Depends on:** Phase 0 complete, Task 1.1 (ClientFilterNode exists)
+**Depends on:** Phase 0 complete. Task 2.1/2.2 JOIN rewrite path needs only Phase 0. Large-result-set fallback path needs Task 1.1 (ClientFilterNode).
 **Parallelizable:** Tasks 2.1+2.2 can run together, then 2.3
 
 ---
@@ -695,6 +694,8 @@ with --tds CLI flag override.
 3. Implement `MergeAggregateNode`: merges partial aggregates (COUNT=sum, SUM=sum, AVG=weighted, MIN/MAX=extremes)
 4. Add retry logic in planner: if FetchXML aggregate fails with 50K limit → re-plan with partitioning
 5. Test with mock data: verify parallel execution, correct merge results
+
+**Note:** `COUNT(DISTINCT column)` cannot be parallel-partitioned by summing partial counts (duplicates across partitions). Falls back to single-query execution.
 
 **Commit:**
 ```

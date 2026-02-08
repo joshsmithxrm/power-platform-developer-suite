@@ -1,4 +1,5 @@
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
@@ -14,6 +15,8 @@ public sealed class SqlQueryService : ISqlQueryService
 {
     private readonly IQueryExecutor _queryExecutor;
     private readonly QueryPlanner _planner;
+    private readonly PlanExecutor _planExecutor;
+    private readonly ExpressionEvaluator _expressionEvaluator = new();
 
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
@@ -23,6 +26,7 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         _planner = new QueryPlanner();
+        _planExecutor = new PlanExecutor();
     }
 
     /// <inheritdoc />
@@ -50,35 +54,46 @@ public sealed class SqlQueryService : ISqlQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
-        // Parse and transpile with virtual column detection
+        // Parse SQL into AST
         var parser = new SqlParser(request.Sql);
-        var ast = parser.Parse();
+        var statement = parser.ParseStatement();
 
-        if (request.TopOverride.HasValue)
+        // Apply TopOverride if the statement is a SELECT
+        if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
         {
-            ast = ast.WithTop(request.TopOverride.Value);
+            statement = selectStmt.WithTop(request.TopOverride.Value);
         }
 
-        var transpiler = new SqlToFetchXmlTranspiler();
-        var transpileResult = transpiler.TranspileWithVirtualColumns(ast);
+        // Build execution plan via QueryPlanner
+        var planOptions = new QueryPlanOptions
+        {
+            MaxRows = request.TopOverride,
+            PageNumber = request.PageNumber,
+            PagingCookie = request.PagingCookie,
+            IncludeCount = request.IncludeCount
+        };
 
-        var result = await _queryExecutor.ExecuteFetchXmlAsync(
-            transpileResult.FetchXml,
-            request.PageNumber,
-            request.PagingCookie,
-            request.IncludeCount,
+        var planResult = _planner.Plan(statement, planOptions);
+
+        // Execute the plan
+        var context = new QueryPlanContext(
+            _queryExecutor,
+            _expressionEvaluator,
             cancellationToken);
 
-        // Expand lookup, optionset, and boolean columns to include *name variants
-        // Pass virtual column info so we can handle explicitly queried *name columns
+        var result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
+
+        // Expand lookup, optionset, and boolean columns to include *name variants.
+        // Virtual column expansion stays in the service layer because it depends on
+        // SDK-specific FormattedValues metadata from the Entity objects.
         var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
             result,
-            transpileResult.VirtualColumns);
+            planResult.VirtualColumns);
 
         return new SqlQueryResult
         {
             OriginalSql = request.Sql,
-            TranspiledFetchXml = transpileResult.FetchXml,
+            TranspiledFetchXml = planResult.FetchXml,
             Result = expandedResult
         };
     }

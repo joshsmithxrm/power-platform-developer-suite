@@ -153,7 +153,9 @@ public class SqlQueryServiceTests
         Assert.NotNull(result);
         Assert.Equal(request.Sql, result.OriginalSql);
         Assert.NotNull(result.TranspiledFetchXml);
-        Assert.Equal(expectedResult, result.Result);
+        Assert.Equal("account", result.Result.EntityLogicalName);
+        Assert.Equal(0, result.Result.Count);
+        Assert.Empty(result.Result.Records);
     }
 
     [Fact]

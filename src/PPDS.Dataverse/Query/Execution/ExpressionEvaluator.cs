@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text.RegularExpressions;
 using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Execution;
@@ -218,8 +217,7 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
         }
 
         var str = Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
-        var pattern = LikeToRegex(cond.Pattern);
-        var matches = Regex.IsMatch(str, pattern, RegexOptions.IgnoreCase);
+        var matches = MatchLikePattern(str, cond.Pattern);
 
         return cond.IsNegated ? !matches : matches;
     }
@@ -461,13 +459,52 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
         return value is int or long or short or byte or decimal or double or float;
     }
 
-    private static string LikeToRegex(string pattern)
+    /// <summary>
+    /// Matches a string against a SQL LIKE pattern without regex (prevents ReDoS).
+    /// % matches any sequence of characters (including empty).
+    /// _ matches exactly one character.
+    /// All other characters match literally (case-insensitive).
+    /// </summary>
+    private static bool MatchLikePattern(string input, string pattern)
     {
-        // Escape regex special characters, then convert SQL wildcards
-        var escaped = Regex.Escape(pattern);
-        escaped = escaped.Replace("%", ".*");
-        escaped = escaped.Replace("_", ".");
-        return "^" + escaped + "$";
+        int inputIdx = 0;
+        int patternIdx = 0;
+        int starInputIdx = -1;
+        int starPatternIdx = -1;
+
+        while (inputIdx < input.Length)
+        {
+            if (patternIdx < pattern.Length &&
+                (pattern[patternIdx] == '_' ||
+                 char.ToUpperInvariant(pattern[patternIdx]) == char.ToUpperInvariant(input[inputIdx])))
+            {
+                inputIdx++;
+                patternIdx++;
+            }
+            else if (patternIdx < pattern.Length && pattern[patternIdx] == '%')
+            {
+                starPatternIdx = patternIdx;
+                starInputIdx = inputIdx;
+                patternIdx++;
+            }
+            else if (starPatternIdx >= 0)
+            {
+                patternIdx = starPatternIdx + 1;
+                starInputIdx++;
+                inputIdx = starInputIdx;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        while (patternIdx < pattern.Length && pattern[patternIdx] == '%')
+        {
+            patternIdx++;
+        }
+
+        return patternIdx == pattern.Length;
     }
 
     #endregion
