@@ -108,8 +108,7 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     public override void Redraw(Rect bounds)
     {
         // Get environment-aware color scheme
-        var envType = _themeService.DetectEnvironmentType(_session.CurrentEnvironmentUrl);
-        var colorScheme = _themeService.GetStatusBarScheme(envType);
+        var colorScheme = _themeService.GetStatusBarSchemeForUrl(_session.CurrentEnvironmentUrl);
 
         // Apply the color scheme
         Driver.SetAttribute(colorScheme.Normal);
@@ -185,8 +184,7 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     private void UpdateDisplay()
     {
         // Get environment type label
-        var envType = _themeService.DetectEnvironmentType(_session.CurrentEnvironmentUrl);
-        var envLabel = _themeService.GetEnvironmentLabel(envType);
+        var envLabel = _themeService.GetEnvironmentLabelForUrl(_session.CurrentEnvironmentUrl);
         var labelSuffix = !string.IsNullOrEmpty(envLabel) ? $" [{envLabel}]" : "";
 
         // Profile section - show name and identity (e.g., "Josh (josh@contoso.com)")

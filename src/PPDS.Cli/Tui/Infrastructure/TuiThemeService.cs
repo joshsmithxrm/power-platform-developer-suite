@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Environment;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Infrastructure;
@@ -9,6 +11,13 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// </summary>
 public sealed partial class TuiThemeService : ITuiThemeService
 {
+    private readonly IEnvironmentConfigService? _configService;
+
+    public TuiThemeService(IEnvironmentConfigService? configService = null)
+    {
+        _configService = configService;
+    }
+
     /// <summary>
     /// Regex pattern for sandbox environments (e.g., crm9.dynamics.com, crm11.dynamics.com).
     /// </summary>
@@ -81,6 +90,75 @@ public sealed partial class TuiThemeService : ITuiThemeService
         EnvironmentType.Trial => "TRIAL",
         _ => ""
     };
+
+    /// <inheritdoc />
+    public ColorScheme GetStatusBarSchemeForUrl(string? environmentUrl)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return TuiColorPalette.StatusBar_Default;
+
+        if (_configService != null)
+        {
+            // Terminal.Gui Redraw() must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            var color = _configService.ResolveColorAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+            return TuiColorPalette.GetStatusBarScheme(color);
+        }
+
+        var envType = DetectEnvironmentType(environmentUrl);
+        return TuiColorPalette.GetStatusBarScheme(envType);
+    }
+
+    /// <inheritdoc />
+    public string GetEnvironmentLabelForUrl(string? environmentUrl)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return "";
+
+        if (_configService != null)
+        {
+            // Terminal.Gui UI thread must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            var type = _configService.ResolveTypeAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+            return type?.ToUpperInvariant() switch
+            {
+                "PRODUCTION" => "PROD",
+                "DEVELOPMENT" => "DEV",
+                var t when t != null && t.Length <= 8 => t,
+                var t when t != null => t[..8],
+                _ => ""
+            };
+        }
+
+        return GetEnvironmentLabel(DetectEnvironmentType(environmentUrl));
+    }
+
+    /// <inheritdoc />
+    public EnvironmentColor GetResolvedColor(string? environmentUrl)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return EnvironmentColor.Gray;
+
+        if (_configService != null)
+        {
+            // Terminal.Gui UI thread must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            return _configService.ResolveColorAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+        }
+
+        var envType = DetectEnvironmentType(environmentUrl);
+        return envType switch
+        {
+            EnvironmentType.Production => EnvironmentColor.Red,
+            EnvironmentType.Sandbox => EnvironmentColor.Brown,
+            EnvironmentType.Development => EnvironmentColor.Green,
+            EnvironmentType.Trial => EnvironmentColor.Cyan,
+            _ => EnvironmentColor.Gray
+        };
+    }
 
     #region Keyword Detection
 

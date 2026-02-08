@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Infrastructure;
@@ -308,6 +309,122 @@ public static class TuiColorPalette
         EnvironmentType.Trial => StatusBar_Trial,
         _ => StatusBar_Default
     };
+
+    /// <summary>
+    /// Gets the status bar color scheme for a user-configured environment color.
+    /// </summary>
+    public static ColorScheme GetStatusBarScheme(EnvironmentColor envColor) => envColor switch
+    {
+        EnvironmentColor.Red => StatusBar_Production,
+        EnvironmentColor.Brown => StatusBar_Sandbox,
+        EnvironmentColor.Green => StatusBar_Development,
+        EnvironmentColor.Cyan => StatusBar_Trial,
+        EnvironmentColor.Yellow => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.BrightYellow),
+            Focus = MakeAttr(Color.Black, Color.BrightYellow),
+            HotNormal = MakeAttr(Color.Red, Color.BrightYellow),
+            HotFocus = MakeAttr(Color.Red, Color.BrightYellow),
+            Disabled = MakeAttr(Color.DarkGray, Color.BrightYellow)
+        },
+        EnvironmentColor.Blue => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.Blue),
+            Focus = MakeAttr(Color.Black, Color.BrightBlue),
+            HotNormal = MakeAttr(Color.Black, Color.Blue),
+            HotFocus = MakeAttr(Color.Black, Color.BrightBlue),
+            Disabled = MakeAttr(Color.Black, Color.Blue)
+        },
+        EnvironmentColor.Gray => StatusBar_Default,
+        EnvironmentColor.BrightRed => new ColorScheme
+        {
+            Normal = MakeAttr(Color.White, Color.BrightRed),
+            Focus = MakeAttr(Color.White, Color.BrightRed),
+            HotNormal = MakeAttr(Color.BrightYellow, Color.BrightRed),
+            HotFocus = MakeAttr(Color.BrightYellow, Color.BrightRed),
+            Disabled = MakeAttr(Color.Gray, Color.BrightRed)
+        },
+        EnvironmentColor.BrightGreen => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.BrightGreen),
+            Focus = MakeAttr(Color.Black, Color.BrightGreen),
+            HotNormal = MakeAttr(Color.Black, Color.BrightGreen),
+            HotFocus = MakeAttr(Color.Black, Color.BrightGreen),
+            Disabled = MakeAttr(Color.DarkGray, Color.BrightGreen)
+        },
+        EnvironmentColor.BrightYellow => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.BrightYellow),
+            Focus = MakeAttr(Color.Black, Color.BrightYellow),
+            HotNormal = MakeAttr(Color.Red, Color.BrightYellow),
+            HotFocus = MakeAttr(Color.Red, Color.BrightYellow),
+            Disabled = MakeAttr(Color.DarkGray, Color.BrightYellow)
+        },
+        EnvironmentColor.BrightCyan => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.BrightCyan),
+            Focus = MakeAttr(Color.Black, Color.BrightCyan),
+            HotNormal = MakeAttr(Color.Black, Color.BrightCyan),
+            HotFocus = MakeAttr(Color.Black, Color.BrightCyan),
+            Disabled = MakeAttr(Color.Black, Color.BrightCyan)
+        },
+        EnvironmentColor.BrightBlue => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.BrightBlue),
+            Focus = MakeAttr(Color.Black, Color.BrightBlue),
+            HotNormal = MakeAttr(Color.Black, Color.BrightBlue),
+            HotFocus = MakeAttr(Color.Black, Color.BrightBlue),
+            Disabled = MakeAttr(Color.Black, Color.BrightBlue)
+        },
+        EnvironmentColor.White => new ColorScheme
+        {
+            Normal = MakeAttr(Color.Black, Color.White),
+            Focus = MakeAttr(Color.Black, Color.White),
+            HotNormal = MakeAttr(Color.Blue, Color.White),
+            HotFocus = MakeAttr(Color.Blue, Color.White),
+            Disabled = MakeAttr(Color.DarkGray, Color.White)
+        },
+        _ => StatusBar_Default
+    };
+
+    /// <summary>
+    /// Maps EnvironmentColor to Terminal.Gui foreground Color (for tab tinting).
+    /// </summary>
+    public static Color GetForegroundColor(EnvironmentColor envColor) => envColor switch
+    {
+        EnvironmentColor.Red => Color.Red,
+        EnvironmentColor.Green => Color.Green,
+        EnvironmentColor.Yellow => Color.BrightYellow,
+        EnvironmentColor.Cyan => Color.Cyan,
+        EnvironmentColor.Blue => Color.Blue,
+        EnvironmentColor.Gray => Color.Gray,
+        EnvironmentColor.Brown => Color.Brown,
+        EnvironmentColor.BrightRed => Color.BrightRed,
+        EnvironmentColor.BrightGreen => Color.BrightGreen,
+        EnvironmentColor.BrightYellow => Color.BrightYellow,
+        EnvironmentColor.BrightCyan => Color.BrightCyan,
+        EnvironmentColor.BrightBlue => Color.BrightBlue,
+        EnvironmentColor.White => Color.White,
+        _ => Color.Gray
+    };
+
+    /// <summary>
+    /// Gets the tab color scheme using EnvironmentColor.
+    /// </summary>
+    public static ColorScheme GetTabScheme(EnvironmentColor envColor, bool isActive)
+    {
+        if (isActive) return TabActive;
+
+        var fg = GetForegroundColor(envColor);
+        return new ColorScheme
+        {
+            Normal = MakeAttr(fg, Color.Black),
+            Focus = MakeAttr(Color.White, Color.Black),
+            HotNormal = MakeAttr(fg, Color.Black),
+            HotFocus = MakeAttr(Color.White, Color.Black),
+            Disabled = MakeAttr(Color.DarkGray, Color.Black)
+        };
+    }
 
     /// <summary>
     /// Helper to create color attributes safely.

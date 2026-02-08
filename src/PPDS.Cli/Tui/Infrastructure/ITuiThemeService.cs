@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Infrastructure;
@@ -45,4 +46,21 @@ public interface ITuiThemeService
     /// <param name="envType">The environment type.</param>
     /// <returns>A display label (e.g., "PROD", "DEV", "SANDBOX").</returns>
     string GetEnvironmentLabel(EnvironmentType envType);
+
+    /// <summary>
+    /// Gets the status bar color scheme using the environment config service.
+    /// Falls back to URL-based detection if no config exists.
+    /// </summary>
+    ColorScheme GetStatusBarSchemeForUrl(string? environmentUrl);
+
+    /// <summary>
+    /// Gets the environment label using the config service.
+    /// Falls back to URL-based detection if no config exists.
+    /// </summary>
+    string GetEnvironmentLabelForUrl(string? environmentUrl);
+
+    /// <summary>
+    /// Gets the resolved environment color for tab tinting.
+    /// </summary>
+    EnvironmentColor GetResolvedColor(string? environmentUrl);
 }

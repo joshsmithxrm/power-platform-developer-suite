@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -72,7 +73,7 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
                     Y = 0,
                     Width = text.Length,
                     Height = 1,
-                    ColorScheme = TuiColorPalette.GetTabScheme(tab.EnvironmentType, isActive)
+                    ColorScheme = TuiColorPalette.GetTabScheme(tab.EnvironmentColor, isActive)
                 };
 
                 label.MouseClick += (_) =>
