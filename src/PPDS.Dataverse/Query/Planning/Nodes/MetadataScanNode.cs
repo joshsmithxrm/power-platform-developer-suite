@@ -25,7 +25,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
     public ISqlCondition? Filter { get; }
 
     /// <summary>The metadata query executor.</summary>
-    public IMetadataQueryExecutor MetadataExecutor { get; }
+    public IMetadataQueryExecutor? MetadataExecutor { get; }
 
     /// <inheritdoc />
     public string Description => $"MetadataScan: metadata.{MetadataTable}" +
@@ -44,7 +44,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
         ISqlCondition? filter = null)
     {
         MetadataTable = metadataTable ?? throw new ArgumentNullException(nameof(metadataTable));
-        MetadataExecutor = metadataExecutor!; // May be null at plan time; resolved from context at execution
+        MetadataExecutor = metadataExecutor;
         RequestedColumns = requestedColumns;
         Filter = filter;
     }
