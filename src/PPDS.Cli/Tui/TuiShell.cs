@@ -37,8 +37,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private ITuiScreen? _currentScreen;
     private View? _mainMenuContent;
     private SplashView? _splashView;
-    private DateTime _lastMenuClickTime = DateTime.MinValue;
-    private const int MenuClickDebounceMs = 150;
 
     public TuiShell(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session, Task initializationTask)
     {
@@ -340,18 +338,14 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         // Register MenuBar with HotkeyRegistry for Alt key suppression
         _hotkeyRegistry.SetMenuBar(_menuBar);
 
-        // Add debounce handler to prevent double-click flicker
-        _menuBar.MouseClick += (e) =>
-        {
-            var now = DateTime.UtcNow;
-            var timeSinceLastClick = (now - _lastMenuClickTime).TotalMilliseconds;
-            if (timeSinceLastClick < MenuClickDebounceMs)
-            {
-                e.Handled = true;
-                return;
-            }
-            _lastMenuClickTime = now;
-        };
+        // Known issue: Terminal.Gui v1.x WindowsDriver has a mouse event handling bug where
+        // Button1Clicked can be delayed or lost (github.com/gui-cs/Terminal.Gui/issues/386,
+        // github.com/gui-cs/Terminal.Gui/issues/1848). This causes menus to occasionally
+        // flicker open/closed on a single click. A debounce handler was tried here previously
+        // but made things worse by suppressing clicks the MenuBar needed to maintain state.
+        // The fix is in Terminal.Gui v2 (milestone: March 2026). Do not add MouseClick
+        // handlers on the MenuBar — they fire before MenuBar.MouseEvent() and interfere
+        // with its internal open/close toggle logic.
 
         Add(_menuBar);
     }
