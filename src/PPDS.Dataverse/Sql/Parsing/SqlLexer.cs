@@ -87,6 +87,15 @@ public sealed class SqlLexer
             case ')':
                 Advance();
                 return new SqlToken(SqlTokenType.RightParen, ")", startPosition);
+            case '+':
+                Advance();
+                return new SqlToken(SqlTokenType.Plus, "+", startPosition);
+            case '/':
+                Advance();
+                return new SqlToken(SqlTokenType.Slash, "/", startPosition);
+            case '%':
+                Advance();
+                return new SqlToken(SqlTokenType.Percent, "%", startPosition);
         }
 
         // Operators
@@ -130,6 +139,13 @@ public sealed class SqlLexer
             return new SqlToken(SqlTokenType.NotEquals, "!=", startPosition);
         }
 
+        // Minus: emit Minus token always; parser handles unary negation vs subtraction
+        if (ch == '-')
+        {
+            Advance();
+            return new SqlToken(SqlTokenType.Minus, "-", startPosition);
+        }
+
         // String literals
         if (ch == '\'')
         {
@@ -148,7 +164,7 @@ public sealed class SqlLexer
         }
 
         // Numbers
-        if (IsDigit(ch) || (ch == '-' && IsDigit(PeekNext())))
+        if (IsDigit(ch))
         {
             return ReadNumber();
         }
@@ -248,19 +264,12 @@ public sealed class SqlLexer
     }
 
     /// <summary>
-    /// Reads a number (integer or decimal).
+    /// Reads a number (integer or decimal). Negative sign is handled by the parser as unary negation.
     /// </summary>
     private SqlToken ReadNumber()
     {
         var startPosition = _position;
         var value = new System.Text.StringBuilder();
-
-        // Handle negative sign
-        if (Peek() == '-')
-        {
-            value.Append('-');
-            Advance();
-        }
 
         // Integer part
         while (!IsAtEnd() && IsDigit(Peek()))

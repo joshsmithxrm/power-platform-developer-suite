@@ -380,15 +380,76 @@ public sealed class SqlParser
             return ParseAggregateColumn();
         }
 
-        // CASE and IIF produce computed columns
-        if (Check(SqlTokenType.Case) || Check(SqlTokenType.Iif))
+        // Star wildcard: only when * stands alone (not followed by an identifier/literal that could make it multiply)
+        if (Check(SqlTokenType.Star))
         {
-            var expression = ParseExpression();
-            var alias = ParseOptionalAlias();
-            return new SqlComputedColumn(expression, alias);
+            // Look ahead: if next token (after *) is a clause keyword, comma, or EOF, it's a wildcard
+            var next = PeekAt(_position + 1);
+            if (next.Type == SqlTokenType.Eof ||
+                next.Type == SqlTokenType.Comma ||
+                next.Type == SqlTokenType.From ||
+                next.Type == SqlTokenType.Where ||
+                next.Type == SqlTokenType.Order ||
+                next.Type == SqlTokenType.Group ||
+                next.Type == SqlTokenType.Having ||
+                next.Type == SqlTokenType.Limit ||
+                next.Type == SqlTokenType.Join ||
+                next.Type == SqlTokenType.Inner ||
+                next.Type == SqlTokenType.Left ||
+                next.Type == SqlTokenType.Right)
+            {
+                Advance(); // consume *
+                return SqlColumnRef.Wildcard();
+            }
         }
 
-        return ParseColumnRef();
+        // table.* wildcard: identifier.* pattern
+        if (Check(SqlTokenType.Identifier) &&
+            PeekAt(_position + 1).Type == SqlTokenType.Dot &&
+            PeekAt(_position + 2).Type == SqlTokenType.Star)
+        {
+            // Check that * is not followed by an operand (i.e., it's a wildcard, not table.star * expr)
+            var afterStar = PeekAt(_position + 3);
+            if (afterStar.Type == SqlTokenType.Eof ||
+                afterStar.Type == SqlTokenType.Comma ||
+                afterStar.Type == SqlTokenType.From ||
+                afterStar.Type == SqlTokenType.Where ||
+                afterStar.Type == SqlTokenType.Order ||
+                afterStar.Type == SqlTokenType.Group ||
+                afterStar.Type == SqlTokenType.Having ||
+                afterStar.Type == SqlTokenType.Limit ||
+                afterStar.Type == SqlTokenType.Join ||
+                afterStar.Type == SqlTokenType.Inner ||
+                afterStar.Type == SqlTokenType.Left ||
+                afterStar.Type == SqlTokenType.Right)
+            {
+                var tableName = Advance().Value; // consume identifier
+                Advance(); // consume dot
+                Advance(); // consume star
+                return SqlColumnRef.Wildcard(tableName);
+            }
+        }
+
+        // Parse as a full expression (handles arithmetic, CASE, IIF, literals, columns)
+        var expression = ParseExpression();
+        var alias = ParseOptionalAlias();
+
+        // If the expression is a simple column reference with no operators, return SqlColumnRef
+        if (expression is SqlColumnExpression colExpr)
+        {
+            var col = colExpr.Column;
+            if (alias != null)
+            {
+                // Re-create with alias
+                return col.TableName != null
+                    ? SqlColumnRef.Qualified(col.TableName, col.ColumnName!, alias)
+                    : SqlColumnRef.Simple(col.ColumnName!, alias);
+            }
+            return col;
+        }
+
+        // Any other expression (binary, unary, CASE, IIF, literal) → computed column
+        return new SqlComputedColumn(expression, alias);
     }
 
     /// <summary>
@@ -579,10 +640,85 @@ public sealed class SqlParser
     #region Expression Parsing
 
     /// <summary>
-    /// Parses an expression: literal, column reference, CASE, IIF, or parenthesized expression.
-    /// Phase 1: no arithmetic operators (added in Task 1.4).
+    /// Parses an expression with full operator precedence:
+    /// additive → multiplicative → unary → primary.
     /// </summary>
     private ISqlExpression ParseExpression()
+    {
+        return ParseAdditiveExpression();
+    }
+
+    /// <summary>
+    /// Parses additive expressions: multiplicative (('+' | '-') multiplicative)*.
+    /// </summary>
+    private ISqlExpression ParseAdditiveExpression()
+    {
+        var left = ParseMultiplicativeExpression();
+
+        while (Check(SqlTokenType.Plus) || Check(SqlTokenType.Minus))
+        {
+            var opToken = Advance();
+            var op = opToken.Type == SqlTokenType.Plus
+                ? SqlBinaryOperator.Add
+                : SqlBinaryOperator.Subtract;
+            var right = ParseMultiplicativeExpression();
+            left = new SqlBinaryExpression(left, op, right);
+        }
+
+        return left;
+    }
+
+    /// <summary>
+    /// Parses multiplicative expressions: unary (('*' | '/' | '%') unary)*.
+    /// Note: Star token is reused for multiply in expression context.
+    /// </summary>
+    private ISqlExpression ParseMultiplicativeExpression()
+    {
+        var left = ParseUnaryExpression();
+
+        while (Check(SqlTokenType.Star) || Check(SqlTokenType.Slash) || Check(SqlTokenType.Percent))
+        {
+            var opToken = Advance();
+            var op = opToken.Type switch
+            {
+                SqlTokenType.Star => SqlBinaryOperator.Multiply,
+                SqlTokenType.Slash => SqlBinaryOperator.Divide,
+                SqlTokenType.Percent => SqlBinaryOperator.Modulo,
+                _ => throw Error($"Unexpected operator: {opToken.Type}")
+            };
+            var right = ParseUnaryExpression();
+            left = new SqlBinaryExpression(left, op, right);
+        }
+
+        return left;
+    }
+
+    /// <summary>
+    /// Parses unary expressions: ['-'] primary.
+    /// Folds -number into a negative literal for simpler downstream handling.
+    /// </summary>
+    private ISqlExpression ParseUnaryExpression()
+    {
+        if (Match(SqlTokenType.Minus))
+        {
+            var operand = ParsePrimaryExpression();
+
+            // Constant folding: -number → negative literal
+            if (operand is SqlLiteralExpression lit && lit.Value.Type == SqlLiteralType.Number)
+            {
+                return new SqlLiteralExpression(SqlLiteral.Number("-" + lit.Value.Value));
+            }
+
+            return new SqlUnaryExpression(SqlUnaryOperator.Negate, operand);
+        }
+
+        return ParsePrimaryExpression();
+    }
+
+    /// <summary>
+    /// Parses primary expressions: literal, column reference, CASE, IIF, or parenthesized expression.
+    /// </summary>
+    private ISqlExpression ParsePrimaryExpression()
     {
         if (Check(SqlTokenType.Case))
         {
@@ -787,12 +923,28 @@ public sealed class SqlParser
             return cond;
         }
 
-        // Comparison operator
+        // Comparison operator: parse right side as expression to support
+        // column-to-column (WHERE revenue > cost) and computed conditions
+        // (WHERE revenue * 0.1 > 100). If right side is a simple literal,
+        // produce SqlComparisonCondition for FetchXML pushdown compatibility.
         var op = ParseComparisonOperator();
-        var value = ParseLiteral();
-        var compCond = new SqlComparisonCondition(column, op, value);
-        AttachTrailingComment(compCond);
-        return compCond;
+        var rightExpr = ParseExpression();
+
+        if (rightExpr is SqlLiteralExpression litExpr)
+        {
+            // Simple column op literal: backward-compatible SqlComparisonCondition
+            var compCond = new SqlComparisonCondition(column, op, litExpr.Value);
+            AttachTrailingComment(compCond);
+            return compCond;
+        }
+        else
+        {
+            // Expression on right side (column, arithmetic, etc.): use SqlExpressionCondition
+            var leftExpr = new SqlColumnExpression(column);
+            var exprCond = new SqlExpressionCondition(leftExpr, op, rightExpr);
+            AttachTrailingComment(exprCond);
+            return exprCond;
+        }
     }
 
     /// <summary>
@@ -828,13 +980,18 @@ public sealed class SqlParser
     }
 
     /// <summary>
-    /// Parses a literal value.
+    /// Parses a literal value. Handles negative numbers (Minus followed by Number).
     /// </summary>
     private SqlLiteral ParseLiteral()
     {
         if (Match(SqlTokenType.String))
         {
             return SqlLiteral.String(Previous().Value);
+        }
+        if (Match(SqlTokenType.Minus))
+        {
+            var num = Expect(SqlTokenType.Number);
+            return SqlLiteral.Number("-" + num.Value);
         }
         if (Match(SqlTokenType.Number))
         {
@@ -878,6 +1035,9 @@ public sealed class SqlParser
 
     private SqlToken Peek() =>
         _position < _tokens.Count ? _tokens[_position] : new SqlToken(SqlTokenType.Eof, "", _sql.Length);
+
+    private SqlToken PeekAt(int index) =>
+        index < _tokens.Count ? _tokens[index] : new SqlToken(SqlTokenType.Eof, "", _sql.Length);
 
     private SqlToken Previous()
     {

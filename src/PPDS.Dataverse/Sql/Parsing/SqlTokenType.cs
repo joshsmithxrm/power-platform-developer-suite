@@ -106,6 +106,14 @@ public enum SqlTokenType
     LessThanOrEqual,
     /// <summary>Greater than or equal operator (&gt;=).</summary>
     GreaterThanOrEqual,
+    /// <summary>Plus operator (+).</summary>
+    Plus,
+    /// <summary>Minus operator (-).</summary>
+    Minus,
+    /// <summary>Slash operator (/).</summary>
+    Slash,
+    /// <summary>Percent/modulo operator (%).</summary>
+    Percent,
 
     #endregion
 
@@ -199,6 +207,15 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.GreaterThanOrEqual
     };
 
+    private static readonly HashSet<SqlTokenType> ArithmeticOperators = new()
+    {
+        SqlTokenType.Plus,
+        SqlTokenType.Minus,
+        SqlTokenType.Star,
+        SqlTokenType.Slash,
+        SqlTokenType.Percent
+    };
+
     private static readonly HashSet<SqlTokenType> AggregateFunctions = new()
     {
         SqlTokenType.Count,
@@ -217,6 +234,11 @@ public static class SqlTokenTypeExtensions
     /// Checks if this token type is a comparison operator.
     /// </summary>
     public static bool IsComparisonOperator(this SqlTokenType type) => ComparisonOperators.Contains(type);
+
+    /// <summary>
+    /// Checks if this token type is an arithmetic operator (+, -, *, /, %).
+    /// </summary>
+    public static bool IsArithmeticOperator(this SqlTokenType type) => ArithmeticOperators.Contains(type);
 
     /// <summary>
     /// Checks if this token type is an aggregate function.
