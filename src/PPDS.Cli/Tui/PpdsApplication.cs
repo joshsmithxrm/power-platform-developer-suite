@@ -139,6 +139,20 @@ internal sealed class PpdsApplication : IDisposable
             var shell = new TuiShell(_profileName, _deviceCodeCallback, _session, initTask);
             Application.Top.Add(shell);
 
+            // PALETTE RACE FIX: TuiTerminalPalette.Apply() emits OSC 4 sequences that remap
+            // the terminal's 16 ANSI colors. The terminal processes these asynchronously — the
+            // bytes are flushed but the terminal emulator hasn't finished remapping by the time
+            // Application.Run() draws the first frame. This causes the first render to use the
+            // terminal theme's default color mapping (e.g. Cyan renders as green in many themes).
+            // Scheduling a refresh after a short delay ensures a full redraw occurs after the
+            // terminal has processed the palette override.
+            // DO NOT REMOVE — this is the fix for "colors wrong on first load" (#520).
+            Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(100), _ =>
+            {
+                Application.Refresh();
+                return false; // One-shot, don't repeat
+            });
+
             // Global exception handler - catches exceptions from MainLoop.Invoke callbacks
             // that would otherwise crash the TUI. Reports to error service and continues.
             var errorService = _session.GetErrorService();
