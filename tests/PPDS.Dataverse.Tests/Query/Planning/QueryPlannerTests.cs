@@ -150,6 +150,63 @@ public class QueryPlannerTests
         Assert.IsNotType<CountOptimizedNode>(result.RootNode);
     }
 
+    [Fact]
+    public void Plan_WhereWithExpressionCondition_AddsClientFilterNode()
+    {
+        // column-to-column comparison can't be pushed to FetchXML
+        var stmt = SqlParser.Parse("SELECT name FROM account WHERE revenue > cost");
+
+        var result = _planner.Plan(stmt);
+
+        // Root should be ClientFilterNode wrapping FetchXmlScanNode
+        var filterNode = Assert.IsType<ClientFilterNode>(result.RootNode);
+        Assert.IsType<FetchXmlScanNode>(filterNode.Input);
+
+        // Filter condition should be the expression condition
+        Assert.IsType<SqlExpressionCondition>(filterNode.Condition);
+    }
+
+    [Fact]
+    public void Plan_WhereWithOnlyLiterals_NoClientFilterNode()
+    {
+        // Simple literal comparison should NOT add ClientFilterNode
+        var stmt = SqlParser.Parse("SELECT name FROM account WHERE revenue > 1000");
+
+        var result = _planner.Plan(stmt);
+
+        // Root should be FetchXmlScanNode (no ClientFilterNode)
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
+    }
+
+    [Fact]
+    public void Plan_MixedWhere_ClientFilterOnlyForExpressions()
+    {
+        // AND of pushable and non-pushable: ClientFilterNode for expression only
+        var stmt = SqlParser.Parse("SELECT name FROM account WHERE status = 1 AND revenue > cost");
+
+        var result = _planner.Plan(stmt);
+
+        // Root should be ClientFilterNode (for expression condition)
+        var filterNode = Assert.IsType<ClientFilterNode>(result.RootNode);
+        Assert.IsType<FetchXmlScanNode>(filterNode.Input);
+
+        // Only the expression condition should be in the client filter
+        Assert.IsType<SqlExpressionCondition>(filterNode.Condition);
+    }
+
+    [Fact]
+    public void Plan_WhereExpressionCondition_FetchXmlIncludesReferencedColumns()
+    {
+        // Expression condition columns must appear in FetchXML for retrieval
+        var stmt = SqlParser.Parse("SELECT name FROM account WHERE revenue > cost");
+
+        var result = _planner.Plan(stmt);
+
+        // FetchXML should include revenue and cost columns
+        Assert.Contains("revenue", result.FetchXml);
+        Assert.Contains("cost", result.FetchXml);
+    }
+
     /// <summary>
     /// A non-SELECT statement for testing unsupported type handling.
     /// </summary>

@@ -54,6 +54,7 @@ public sealed class ClientFilterNode : IQueryPlanNode
         return Condition switch
         {
             SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
+            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
             SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
             _ => Condition.GetType().Name
         };

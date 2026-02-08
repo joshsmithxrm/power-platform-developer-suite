@@ -79,6 +79,11 @@ public sealed class SqlToFetchXmlTranspiler
         // Pass virtual columns so we can emit base columns instead
         TranspileColumnsWithVirtual(statement.Columns, statement.From, statement.GroupBy, virtualColumns, lines);
 
+        // Emit columns referenced by expression conditions in WHERE.
+        // These conditions are evaluated client-side and won't appear in FetchXML
+        // filters, so we must explicitly request their columns from Dataverse.
+        EmitExpressionConditionColumns(statement.Where, lines);
+
         // Link entities (JOINs)
         foreach (var join in statement.Joins)
         {
@@ -509,6 +514,60 @@ public sealed class SqlToFetchXmlTranspiler
     }
 
     /// <summary>
+    /// Emits FetchXML attribute elements for columns referenced by expression conditions
+    /// in the WHERE clause. These conditions are skipped in FetchXML filter generation
+    /// and evaluated client-side, but their columns must still be fetched from Dataverse.
+    /// </summary>
+    private void EmitExpressionConditionColumns(ISqlCondition? where, List<string> lines)
+    {
+        if (where is null)
+        {
+            return;
+        }
+
+        var columnNames = new List<string>();
+        CollectExpressionConditionColumns(where, columnNames);
+
+        if (columnNames.Count == 0)
+        {
+            return;
+        }
+
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var colName in columnNames)
+        {
+            var attrName = NormalizeAttributeName(colName);
+            if (emitted.Add(attrName))
+            {
+                lines.Add($"    <attribute name=\"{attrName}\" />");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Recursively collects column names from SqlExpressionCondition nodes only.
+    /// Regular conditions (comparison, null, like, in) are handled by FetchXML filters
+    /// and don't need extra attributes.
+    /// </summary>
+    private static void CollectExpressionConditionColumns(ISqlCondition condition, List<string> columnNames)
+    {
+        switch (condition)
+        {
+            case SqlExpressionCondition exprCond:
+                CollectReferencedColumns(exprCond.Left, columnNames);
+                CollectReferencedColumns(exprCond.Right, columnNames);
+                break;
+            case SqlLogicalCondition logical:
+                foreach (var child in logical.Conditions)
+                {
+                    CollectExpressionConditionColumns(child, columnNames);
+                }
+                break;
+            // Other condition types don't need extra column emission
+        }
+    }
+
+    /// <summary>
     /// Recursively collects all column names referenced in an expression or its conditions.
     /// </summary>
     private static void CollectReferencedColumns(ISqlExpression expression, List<string> columnNames)
@@ -569,6 +628,10 @@ public sealed class SqlToFetchXmlTranspiler
                 {
                     CollectReferencedColumnsFromCondition(child, columnNames);
                 }
+                break;
+            case SqlExpressionCondition exprCond:
+                CollectReferencedColumns(exprCond.Left, columnNames);
+                CollectReferencedColumns(exprCond.Right, columnNames);
                 break;
         }
     }
@@ -666,6 +729,11 @@ public sealed class SqlToFetchXmlTranspiler
                 break;
             case SqlLogicalCondition logical:
                 TranspileLogical(logical, lines, indent);
+                break;
+            case SqlExpressionCondition:
+                // Expression conditions (column-to-column, computed) cannot be
+                // represented in FetchXML. Skipped here; handled client-side
+                // via ClientFilterNode in the query planner.
                 break;
         }
     }
@@ -833,6 +901,9 @@ public sealed class SqlToFetchXmlTranspiler
                 lines.Add($"{indent}</filter>");
                 break;
             }
+            case SqlExpressionCondition:
+                // Skipped: evaluated client-side via ClientFilterNode.
+                break;
         }
     }
 

@@ -74,6 +74,14 @@ public sealed class QueryPlanner
         // Start with scan as root; apply client-side operators on top.
         IQueryPlanNode rootNode = scanNode;
 
+        // Expression conditions in WHERE (column-to-column, computed expressions)
+        // cannot be pushed to FetchXML. Extract them and evaluate client-side.
+        var clientWhereCondition = ExtractExpressionConditions(statement.Where);
+        if (clientWhereCondition != null)
+        {
+            rootNode = new ClientFilterNode(rootNode, clientWhereCondition);
+        }
+
         // HAVING clause: add client-side filter after aggregate FetchXML scan.
         // FetchXML doesn't support HAVING natively, so we filter client-side.
         if (statement.Having != null)
@@ -144,6 +152,76 @@ public sealed class QueryPlanner
     {
         var agg = (SqlAggregateColumn)statement.Columns[0];
         return agg.Alias ?? "count";
+    }
+
+    /// <summary>
+    /// Extracts expression conditions from a WHERE clause that must be evaluated
+    /// client-side. Returns null if there are no expression conditions.
+    /// For flat AND conditions, extracts only the SqlExpressionCondition entries.
+    /// For other structures (OR with mixed types), returns the entire condition
+    /// if it contains any expression conditions.
+    /// </summary>
+    private static ISqlCondition? ExtractExpressionConditions(ISqlCondition? where)
+    {
+        if (where is null)
+        {
+            return null;
+        }
+
+        // Single expression condition
+        if (where is SqlExpressionCondition)
+        {
+            return where;
+        }
+
+        // AND of conditions: extract only the expression conditions
+        if (where is SqlLogicalCondition { Operator: SqlLogicalOperator.And } logical)
+        {
+            var exprConditions = new List<ISqlCondition>();
+            foreach (var child in logical.Conditions)
+            {
+                if (child is SqlExpressionCondition)
+                {
+                    exprConditions.Add(child);
+                }
+                else if (child is SqlLogicalCondition nested && ContainsExpressionCondition(nested))
+                {
+                    // Nested logical with expression conditions: include the whole subtree
+                    exprConditions.Add(child);
+                }
+            }
+
+            if (exprConditions.Count == 0)
+            {
+                return null;
+            }
+
+            return exprConditions.Count == 1
+                ? exprConditions[0]
+                : new SqlLogicalCondition(SqlLogicalOperator.And, exprConditions);
+        }
+
+        // OR or other: if it contains expression conditions anywhere, the whole
+        // thing must go client-side (can't partially push an OR to FetchXML).
+        if (ContainsExpressionCondition(where))
+        {
+            return where;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Recursively checks if a condition tree contains any SqlExpressionCondition nodes.
+    /// </summary>
+    private static bool ContainsExpressionCondition(ISqlCondition condition)
+    {
+        return condition switch
+        {
+            SqlExpressionCondition => true,
+            SqlLogicalCondition logical => logical.Conditions.Any(ContainsExpressionCondition),
+            _ => false
+        };
     }
 
     /// <summary>

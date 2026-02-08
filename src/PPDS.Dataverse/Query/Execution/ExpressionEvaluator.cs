@@ -31,6 +31,7 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
         return condition switch
         {
             SqlComparisonCondition comp => EvaluateComparison(comp, row),
+            SqlExpressionCondition exprCond => EvaluateExpressionCondition(exprCond, row),
             SqlNullCondition nullCond => EvaluateNullCheck(nullCond, row),
             SqlLikeCondition like => EvaluateLike(like, row),
             SqlInCondition inCond => EvaluateIn(inCond, row),
@@ -184,6 +185,31 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
             SqlComparisonOperator.LessThanOrEqual => cmp <= 0,
             SqlComparisonOperator.GreaterThanOrEqual => cmp >= 0,
             _ => throw new NotSupportedException($"Operator {comp.Operator} is not supported.")
+        };
+    }
+
+    private bool EvaluateExpressionCondition(SqlExpressionCondition cond, IReadOnlyDictionary<string, QueryValue> row)
+    {
+        var leftValue = Evaluate(cond.Left, row);
+        var rightValue = Evaluate(cond.Right, row);
+
+        // SQL semantics: comparison with NULL always returns false
+        if (leftValue is null || rightValue is null)
+        {
+            return false;
+        }
+
+        int cmp = CompareValues(leftValue, rightValue);
+
+        return cond.Operator switch
+        {
+            SqlComparisonOperator.Equal => cmp == 0,
+            SqlComparisonOperator.NotEqual => cmp != 0,
+            SqlComparisonOperator.LessThan => cmp < 0,
+            SqlComparisonOperator.GreaterThan => cmp > 0,
+            SqlComparisonOperator.LessThanOrEqual => cmp <= 0,
+            SqlComparisonOperator.GreaterThanOrEqual => cmp >= 0,
+            _ => throw new NotSupportedException($"Operator {cond.Operator} is not supported.")
         };
     }
 
