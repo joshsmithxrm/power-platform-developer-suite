@@ -15,6 +15,18 @@ public static class PlanFormatter
         var sb = new StringBuilder();
         sb.AppendLine("Execution Plan:");
         FormatNode(sb, plan, "", true);
+
+        // Append metadata footer if available
+        if (plan.PoolCapacity.HasValue)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Pool capacity: {plan.PoolCapacity.Value}");
+        }
+        if (plan.EffectiveParallelism.HasValue)
+        {
+            sb.AppendLine($"Effective parallelism: {plan.EffectiveParallelism.Value}");
+        }
+
         return sb.ToString();
     }
 

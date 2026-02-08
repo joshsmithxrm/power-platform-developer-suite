@@ -19,6 +19,12 @@ public sealed class QueryPlanDescription
     /// <summary>Child node descriptions.</summary>
     public IReadOnlyList<QueryPlanDescription> Children { get; init; } = System.Array.Empty<QueryPlanDescription>();
 
+    /// <summary>Connection pool capacity, if known.</summary>
+    public int? PoolCapacity { get; set; }
+
+    /// <summary>Effective parallelism (number of partitions), if applicable.</summary>
+    public int? EffectiveParallelism { get; set; }
+
     /// <summary>
     /// Creates a description tree from a plan node.
     /// </summary>
