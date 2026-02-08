@@ -32,6 +32,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
     private readonly IProfileService _profileService;
     private readonly IEnvironmentService _environmentService;
     private readonly ITuiErrorService? _errorService;
+    private readonly InteractiveSession? _session;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
 
     private readonly TextField _nameField;
@@ -95,6 +96,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         _profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
         _errorService = session?.GetErrorService();
+        _session = session;
         _deviceCodeCallback = deviceCodeCallback;
 
         // Build platform-aware auth method list
@@ -579,7 +581,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
                 _createdProfile = profile;
 
                 // Immediately show environment selector after successful auth (no success message)
-                var envDialog = new EnvironmentSelectorDialog(_environmentService, _deviceCodeCallback);
+                var envDialog = new EnvironmentSelectorDialog(_environmentService, _deviceCodeCallback, _session);
                 Application.Run(envDialog);
 
                 // Store selected environment
