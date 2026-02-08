@@ -66,6 +66,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public event Action<string?>? ProfileChanged;
 
     /// <summary>
+    /// Event raised when environment configuration (label, type, color) is saved.
+    /// </summary>
+    public event Action? ConfigChanged;
+
+    /// <summary>
     /// Gets the current environment URL, or null if no connection has been established.
     /// </summary>
     public string? CurrentEnvironmentUrl => _activeEnvironmentUrl;
@@ -181,6 +186,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _activeEnvironmentDisplayName = displayName;
         EnvironmentChanged?.Invoke(environmentUrl, displayName);
     }
+
+    /// <summary>
+    /// Notifies listeners that environment configuration has changed.
+    /// </summary>
+    public void NotifyConfigChanged() => ConfigChanged?.Invoke();
 
     /// <summary>
     /// Switches to a new environment, updating the profile and warming the new connection.

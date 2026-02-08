@@ -268,6 +268,65 @@ public sealed class TabManagerTests : IDisposable
         Assert.Equal(0, _manager.TabCount);
     }
 
+    [Fact]
+    public void RefreshTabColors_UpdatesChangedColors()
+    {
+        var themeService = new ConfigurableThemeService();
+        var manager = new TabManager(themeService);
+
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+        Assert.Equal(EnvironmentColor.Green, manager.Tabs[0].EnvironmentColor);
+
+        // Change what the theme service returns
+        themeService.NextColor = EnvironmentColor.Red;
+        themeService.NextType = EnvironmentType.Production;
+        manager.RefreshTabColors();
+
+        Assert.Equal(EnvironmentColor.Red, manager.Tabs[0].EnvironmentColor);
+        Assert.Equal(EnvironmentType.Production, manager.Tabs[0].EnvironmentType);
+        manager.Dispose();
+    }
+
+    [Fact]
+    public void RefreshTabColors_FiresTabsChanged_WhenColorsDiffer()
+    {
+        var themeService = new ConfigurableThemeService();
+        var manager = new TabManager(themeService);
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+
+        var fired = false;
+        manager.TabsChanged += () => fired = true;
+
+        themeService.NextColor = EnvironmentColor.Red;
+        manager.RefreshTabColors();
+
+        Assert.True(fired);
+        manager.Dispose();
+    }
+
+    [Fact]
+    public void RefreshTabColors_DoesNotFire_WhenColorsUnchanged()
+    {
+        var themeService = new ConfigurableThemeService();
+        var manager = new TabManager(themeService);
+        manager.AddTab(new StubScreen(_session), "https://org.crm.dynamics.com", "ORG");
+
+        var fired = false;
+        manager.TabsChanged += () => fired = true;
+
+        // Same color — should not fire
+        manager.RefreshTabColors();
+
+        Assert.False(fired);
+        manager.Dispose();
+    }
+
+    [Fact]
+    public void RefreshTabColors_NoTabs_NoErrors()
+    {
+        _manager.RefreshTabColors(); // Should not throw
+    }
+
     private sealed class StubScreen : TuiScreenBase
     {
         public override string Title => "Stub";
@@ -282,5 +341,24 @@ public sealed class TabManagerTests : IDisposable
         {
             IsDisposed = true;
         }
+    }
+
+    /// <summary>
+    /// Theme service stub that allows controlling return values for testing.
+    /// </summary>
+    private sealed class ConfigurableThemeService : ITuiThemeService
+    {
+        public EnvironmentColor NextColor { get; set; } = EnvironmentColor.Green;
+        public EnvironmentType NextType { get; set; } = EnvironmentType.Development;
+
+        public EnvironmentType DetectEnvironmentType(string? environmentUrl) => NextType;
+        public EnvironmentColor GetResolvedColor(string? environmentUrl) => NextColor;
+        public string GetEnvironmentLabelForUrl(string? environmentUrl) => "";
+        public string GetEnvironmentLabel(EnvironmentType envType) => "";
+        public ColorScheme GetStatusBarScheme(EnvironmentType envType) => TuiColorPalette.Default;
+        public ColorScheme GetStatusBarSchemeForUrl(string? environmentUrl) => TuiColorPalette.Default;
+        public ColorScheme GetDefaultScheme() => TuiColorPalette.Default;
+        public ColorScheme GetErrorScheme() => TuiColorPalette.Default;
+        public ColorScheme GetSuccessScheme() => TuiColorPalette.Default;
     }
 }

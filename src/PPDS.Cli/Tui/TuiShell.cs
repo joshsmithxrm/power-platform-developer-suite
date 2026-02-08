@@ -83,6 +83,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         // Subscribe to error events
         _errorService.ErrorOccurred += OnErrorOccurred;
+        _session.ConfigChanged += OnConfigChanged;
 
         // Build initial menu bar
         RebuildMenuBar();
@@ -133,6 +134,18 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     /// </summary>
     public void NavigateBack()
     {
+        // Confirm if screen has unsaved work
+        if (_currentScreen?.HasUnsavedWork == true)
+        {
+            var result = MessageBox.Query(
+                "Close Tab",
+                "This tab has unsaved changes. Close anyway?",
+                "Close", "Cancel");
+
+            if (result != 0)
+                return;
+        }
+
         // Deactivate current screen (TabManager.CloseTab will dispose it)
         if (_currentScreen != null)
         {
@@ -257,14 +270,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         };
         buttonSql.Clicked += () => NavigateToSqlQuery();
 
-        var buttonData = new Button("Data Migration (Coming Soon)")
-        {
-            X = 2,
-            Y = 7,
-            Enabled = false
-        };
-
-        container.Add(label, buttonSql, buttonData);
+        container.Add(label, buttonSql);
         return container;
     }
 
@@ -308,19 +314,10 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             menuItems.AddRange(_currentScreen.ScreenMenuItems);
         }
 
-        // Disabled menu items (no underscore hotkeys - they work globally in Terminal.Gui)
-        var dataMigrationItem = new MenuItem("Data Migration (Coming Soon)", "", null, shortcut: Key.Null);
-        var solutionsItem = new MenuItem("Solutions (Coming Soon)", "", null);
-        var pluginTracesItem = new MenuItem("Plugin Traces (Coming Soon)", "", null);
-
         // Tools menu (always present) - contains all workspaces/tools
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
-            dataMigrationItem,
-            new("", "", () => {}, null, null, Key.Null), // Separator
-            solutionsItem,
-            pluginTracesItem,
         }));
 
         // Help menu (always present)
@@ -737,6 +734,15 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         Application.Run(dialog);
     }
 
+    private void OnConfigChanged()
+    {
+        Application.MainLoop?.Invoke(() =>
+        {
+            _statusBar.Refresh();
+            _tabManager.RefreshTabColors();
+        });
+    }
+
     private void OnErrorOccurred(TuiError error)
     {
         Application.MainLoop?.Invoke(() =>
@@ -804,6 +810,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _tabBar.Dispose();
 
             _errorService.ErrorOccurred -= OnErrorOccurred;
+            _session.ConfigChanged -= OnConfigChanged;
         }
 
         base.Dispose(disposing);

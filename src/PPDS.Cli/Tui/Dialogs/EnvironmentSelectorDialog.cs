@@ -394,6 +394,11 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
 
         using var dialog = new EnvironmentConfigDialog(_session, url, displayName);
         Application.Run(dialog);
+
+        if (dialog.ConfigChanged)
+        {
+            _session.NotifyConfigChanged();
+        }
     }
 
     /// <inheritdoc />

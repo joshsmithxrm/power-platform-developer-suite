@@ -39,6 +39,9 @@ internal abstract class TuiScreenBase : ITuiScreen
     public virtual Action? ExportAction => null;
 
     /// <inheritdoc />
+    public virtual bool HasUnsavedWork => false;
+
+    /// <inheritdoc />
     public event Action? CloseRequested;
 
     /// <inheritdoc />

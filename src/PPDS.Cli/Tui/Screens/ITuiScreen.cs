@@ -32,6 +32,11 @@ internal interface ITuiScreen : IDisposable
     Action? ExportAction => null;
 
     /// <summary>
+    /// Gets whether the screen has unsaved work that would be lost on close.
+    /// </summary>
+    bool HasUnsavedWork => false;
+
+    /// <summary>
     /// Raised when the screen wants to close (e.g., user pressed Escape).
     /// The shell subscribes to this and calls NavigateBack().
     /// </summary>

@@ -138,6 +138,30 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
         ActiveTabChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Refreshes environment colors for all tabs from the theme service.
+    /// Call when environment configuration changes.
+    /// </summary>
+    public void RefreshTabColors()
+    {
+        bool changed = false;
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            var tab = _tabs[i];
+            var newColor = _themeService.GetResolvedColor(tab.EnvironmentUrl);
+            var newType = _themeService.DetectEnvironmentType(tab.EnvironmentUrl);
+
+            if (tab.EnvironmentColor != newColor || tab.EnvironmentType != newType)
+            {
+                _tabs[i] = tab with { EnvironmentColor = newColor, EnvironmentType = newType };
+                changed = true;
+            }
+        }
+
+        if (changed)
+            TabsChanged?.Invoke();
+    }
+
     /// <inheritdoc />
     public TabManagerState CaptureState()
     {

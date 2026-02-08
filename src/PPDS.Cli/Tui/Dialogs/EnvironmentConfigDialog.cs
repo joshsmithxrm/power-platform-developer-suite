@@ -1,5 +1,7 @@
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Cli.Tui.Testing;
+using PPDS.Cli.Tui.Testing.States;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Dialogs;
@@ -7,7 +9,7 @@ namespace PPDS.Cli.Tui.Dialogs;
 /// <summary>
 /// Dialog for configuring environment display settings (label, type, color).
 /// </summary>
-internal sealed class EnvironmentConfigDialog : TuiDialog
+internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<EnvironmentConfigDialogState>
 {
     private readonly InteractiveSession _session;
     private readonly string _environmentUrl;
@@ -196,5 +198,23 @@ internal sealed class EnvironmentConfigDialog : TuiDialog
         }
 
         Application.RequestStop();
+    }
+
+    /// <inheritdoc />
+    public EnvironmentConfigDialogState CaptureState()
+    {
+        var selectedColor = _colorList.SelectedItem >= 0 && _colorList.SelectedItem < _colorValues.Length
+            ? _colorValues[_colorList.SelectedItem]
+            : null;
+
+        return new EnvironmentConfigDialogState(
+            Title: Title?.ToString() ?? string.Empty,
+            Url: _environmentUrl,
+            Label: _labelField.Text?.ToString() ?? string.Empty,
+            Type: _typeField.Text?.ToString() ?? string.Empty,
+            SelectedColorIndex: _colorList.SelectedItem,
+            SelectedColor: selectedColor,
+            ConfigChanged: ConfigChanged,
+            IsVisible: Visible);
     }
 }

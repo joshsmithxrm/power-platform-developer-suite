@@ -418,6 +418,36 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
 
     #endregion
 
+    #region ConfigChanged Event Tests
+
+    [Fact]
+    public void NotifyConfigChanged_FiresConfigChangedEvent()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var fired = false;
+        session.ConfigChanged += () => fired = true;
+
+        // Act
+        session.NotifyConfigChanged();
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void NotifyConfigChanged_NoSubscribers_DoesNotThrow()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+
+        // Act & Assert - should not throw
+        var ex = Record.Exception(() => session.NotifyConfigChanged());
+        Assert.Null(ex);
+    }
+
+    #endregion
+
     #region Error Handling Tests
 
     [Fact]

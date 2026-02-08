@@ -98,6 +98,12 @@ public sealed class TuiThemeService : ITuiThemeService
         {
             // Terminal.Gui UI thread must be synchronous; config store is cached after first load
 #pragma warning disable PPDS012
+            // Priority 1: user-configured custom label
+            var label = _configService.ResolveLabelAsync(environmentUrl).GetAwaiter().GetResult();
+            if (!string.IsNullOrWhiteSpace(label))
+                return label.Length <= 8 ? label.ToUpperInvariant() : label[..8].ToUpperInvariant();
+
+            // Priority 2: abbreviated type
             var type = _configService.ResolveTypeAsync(environmentUrl).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
             return type?.ToUpperInvariant() switch
