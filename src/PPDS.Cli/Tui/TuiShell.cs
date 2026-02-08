@@ -670,7 +670,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private void ShowKeyboardShortcuts()
     {
-        using var dialog = new KeyboardShortcutsDialog();
+        using var dialog = new KeyboardShortcutsDialog(_hotkeyRegistry, _session);
         Application.Run(dialog);
     }
 

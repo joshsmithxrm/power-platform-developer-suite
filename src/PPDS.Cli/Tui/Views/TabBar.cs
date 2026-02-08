@@ -24,7 +24,7 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
         _tabManager = tabManager ?? throw new ArgumentNullException(nameof(tabManager));
 
         X = 0;
-        Y = 0;
+        Y = 1; // Below menu bar
         Width = Dim.Fill();
         Height = 1;
         ColorScheme = TuiColorPalette.MenuBar;
