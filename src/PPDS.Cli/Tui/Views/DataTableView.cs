@@ -339,13 +339,15 @@ internal class DataTableView : FrameView
         var filteredCount = _filteredView.Count;
         var moreText = MoreRecordsAvailable ? " (more)" : "";
 
+        var copyHint = TableCopyHelper.GetCopyHint(_tableView);
+
         if (!string.IsNullOrEmpty(_currentFilter))
         {
-            _statusLabel.Text = $"{filteredCount} of {rowCount} rows{moreText} | Ctrl+C: copy | Ctrl+Shift+C: copy w/headers | /: filter";
+            _statusLabel.Text = $"{filteredCount} of {rowCount} rows{moreText} | {copyHint} | /: filter";
         }
         else
         {
-            _statusLabel.Text = $"{rowCount} rows{moreText} | Ctrl+C: copy | Ctrl+Shift+C: copy w/headers | /: filter";
+            _statusLabel.Text = $"{rowCount} rows{moreText} | {copyHint} | /: filter";
         }
     }
 
@@ -429,6 +431,7 @@ internal class DataTableView : FrameView
         _tableView.SelectedCellChanged += (e) =>
         {
             SelectionChanged?.Invoke(e.NewRow, e.NewCol);
+            UpdateStatus();
         };
     }
 

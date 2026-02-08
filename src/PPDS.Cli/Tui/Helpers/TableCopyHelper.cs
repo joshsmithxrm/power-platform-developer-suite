@@ -18,6 +18,17 @@ internal static class TableCopyHelper
     internal readonly record struct CopyResult(bool Success, string StatusMessage);
 
     /// <summary>
+    /// Returns the copy-related hint text for the status bar, varying by selection state.
+    /// </summary>
+    internal static string GetCopyHint(TableView tableView)
+    {
+        var selection = GetSelectionExtent(tableView);
+        return selection.IsSingleCell
+            ? "Ctrl+C: copy value | Ctrl+Shift+C: with header"
+            : "Ctrl+C: copy with headers | Ctrl+Shift+C: values only";
+    }
+
+    /// <summary>
     /// Performs a smart copy based on the current selection in a TableView.
     /// </summary>
     /// <param name="tableView">The Terminal.Gui TableView with selection state.</param>

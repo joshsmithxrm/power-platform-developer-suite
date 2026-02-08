@@ -103,6 +103,8 @@ internal sealed class QueryResultsTableView : FrameView
 
         Add(_tableView, _statusLabel, _emptyStateLabel);
         SetupKeyboardShortcuts();
+
+        _tableView.SelectedCellChanged += (e) => UpdateStatus();
     }
 
     /// <summary>
@@ -450,8 +452,10 @@ internal sealed class QueryResultsTableView : FrameView
             ? $" (filtered: {displayCount} of {sourceCount})"
             : "";
 
+        var copyHint = TableCopyHelper.GetCopyHint(_tableView);
+
         _statusLabel.TextAlignment = TextAlignment.Left;
-        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | Ctrl+C: copy | Ctrl+Shift+C: copy w/headers | Ctrl+U: URL";
+        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | {copyHint}";
     }
 
     /// <summary>
