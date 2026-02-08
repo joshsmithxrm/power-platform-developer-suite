@@ -24,7 +24,6 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly QueryPlanner _planner;
     private readonly PlanExecutor _planExecutor;
-    private readonly ExpressionEvaluator _expressionEvaluator = new();
     private readonly DmlSafetyGuard _dmlSafetyGuard = new();
 
     /// <summary>
@@ -143,9 +142,10 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Execute the plan
+        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            _expressionEvaluator,
+            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);
@@ -221,9 +221,10 @@ public sealed class SqlQueryService : ISqlQueryService
         var planResult = _planner.Plan(statement, planOptions);
 
         // Execute the plan with streaming
+        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            _expressionEvaluator,
+            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);
