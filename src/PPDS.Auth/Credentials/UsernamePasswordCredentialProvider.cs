@@ -104,10 +104,15 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
 
         try
         {
+            // ROPC flow is deprecated but still functional. PPDS intentionally supports
+            // username/password auth for environments where interactive auth isn't viable.
+            // Revisit if Microsoft announces removal: https://aka.ms/msal-ropc-migration
+#pragma warning disable CS0618 // AcquireTokenByUsernamePassword is obsolete
             _cachedResult = await _msalClient!
                 .AcquireTokenByUsernamePassword(scopes, _username, _password)
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
+#pragma warning restore CS0618
         }
         catch (MsalUiRequiredException ex)
         {
