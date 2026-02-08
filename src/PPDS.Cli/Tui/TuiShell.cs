@@ -472,6 +472,34 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         });
     }
 
+    /// <summary>
+    /// Opens a new SQL Query tab bound to a specific environment.
+    /// </summary>
+    private void NavigateToSqlQueryOnEnvironment(string environmentUrl, string? displayName)
+    {
+        ClearSplashAndMainMenu();
+
+        var loadingLabel = new Label("Loading SQL Query...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var sqlScreen = new SqlQueryScreen(_deviceCodeCallback, _session, environmentUrl, displayName);
+            NavigateTo(sqlScreen);
+
+            return false;
+        });
+    }
+
     private void OnStatusBarProfileClicked()
     {
         ShowProfileSelector();
@@ -491,6 +519,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.SelectedProfile != null)
         {
+            // Profile change invalidates all connections — close all tabs
+            CloseAllTabs();
             _errorService.FireAndForget(SetActiveProfileAsync(dialog.SelectedProfile), "SwitchProfile");
         }
         else if (dialog.CreateNewSelected)
@@ -501,6 +531,24 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         {
             RefreshProfileState();
         }
+    }
+
+    /// <summary>
+    /// Deactivates the current screen and closes all tabs.
+    /// OnActiveTabChanged will show the main menu when no tabs remain.
+    /// </summary>
+    private void CloseAllTabs()
+    {
+        if (_currentScreen != null)
+        {
+            _currentScreen.CloseRequested -= OnScreenCloseRequested;
+            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
+            _currentScreen.OnDeactivating();
+            _contentArea.Remove(_currentScreen.Content);
+            _currentScreen = null;
+        }
+
+        _tabManager.CloseAllTabs();
     }
 
     private void ShowEnvironmentSelector()
@@ -523,7 +571,19 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
             if (url != null)
             {
+                // Persist selection as profile default
                 _errorService.FireAndForget(SetEnvironmentAsync(url, name), "SetEnvironment");
+
+                // If tabs are open, switch to existing tab on that env or open a new one
+                var existingTab = _tabManager.FindTabByEnvironment(url);
+                if (existingTab >= 0)
+                {
+                    _tabManager.ActivateTab(existingTab);
+                }
+                else
+                {
+                    NavigateToSqlQueryOnEnvironment(url, name);
+                }
             }
         }
     }
@@ -538,6 +598,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.CreatedProfile != null)
         {
+            // New profile = new credentials — close all tabs
+            CloseAllTabs();
+
             var envUrl = dialog.SelectedEnvironmentUrl ?? dialog.CreatedProfile.EnvironmentUrl;
             var envName = dialog.SelectedEnvironmentName ?? dialog.CreatedProfile.EnvironmentName;
 

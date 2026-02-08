@@ -190,6 +190,84 @@ public sealed class TabManagerTests : IDisposable
         Assert.True(state.Tabs[1].IsActive);
     }
 
+    [Fact]
+    public void FindTabByEnvironment_ReturnsIndex_WhenTabExists()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(new StubScreen(_session), "https://prod.crm.dynamics.com", "PROD");
+
+        Assert.Equal(0, _manager.FindTabByEnvironment("https://dev.crm.dynamics.com"));
+        Assert.Equal(1, _manager.FindTabByEnvironment("https://prod.crm.dynamics.com"));
+    }
+
+    [Fact]
+    public void FindTabByEnvironment_CaseInsensitive()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.Equal(0, _manager.FindTabByEnvironment("https://DEV.CRM.DYNAMICS.COM"));
+    }
+
+    [Fact]
+    public void FindTabByEnvironment_ReturnsNegativeOne_WhenNotFound()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.Equal(-1, _manager.FindTabByEnvironment("https://prod.crm.dynamics.com"));
+    }
+
+    [Fact]
+    public void FindTabByEnvironment_ReturnsNegativeOne_WhenNull()
+    {
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+
+        Assert.Equal(-1, _manager.FindTabByEnvironment(null));
+    }
+
+    [Fact]
+    public void CloseAllTabs_DisposesAllScreens()
+    {
+        var screen1 = new StubScreen(_session);
+        var screen2 = new StubScreen(_session);
+        _manager.AddTab(screen1, "https://dev.crm.dynamics.com", "DEV");
+        _manager.AddTab(screen2, "https://prod.crm.dynamics.com", "PROD");
+
+        _manager.CloseAllTabs();
+
+        Assert.True(screen1.IsDisposed);
+        Assert.True(screen2.IsDisposed);
+        Assert.Equal(0, _manager.TabCount);
+        Assert.Equal(-1, _manager.ActiveIndex);
+        Assert.Null(_manager.ActiveTab);
+    }
+
+    [Fact]
+    public void CloseAllTabs_FiresEvents()
+    {
+        var tabsChangedCount = 0;
+        var activeChangedCount = 0;
+        _manager.TabsChanged += () => tabsChangedCount++;
+        _manager.ActiveTabChanged += () => activeChangedCount++;
+
+        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
+        tabsChangedCount = 0;
+        activeChangedCount = 0;
+
+        _manager.CloseAllTabs();
+
+        Assert.Equal(1, tabsChangedCount);
+        Assert.Equal(1, activeChangedCount);
+    }
+
+    [Fact]
+    public void CloseAllTabs_NoTabs_NoErrors()
+    {
+        // Should not throw when no tabs exist
+        _manager.CloseAllTabs();
+
+        Assert.Equal(0, _manager.TabCount);
+    }
+
     private sealed class StubScreen : TuiScreenBase
     {
         public override string Title => "Stub";

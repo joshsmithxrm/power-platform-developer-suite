@@ -59,9 +59,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// <inheritdoc />
     public override Action? ExportAction => _resultsTable.GetDataTable() != null ? ShowExportDialog : null;
 
-    public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
-        : base(session)
+    public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session, string? environmentUrl = null, string? environmentDisplayName = null)
+        : base(session, environmentUrl)
     {
+        if (environmentDisplayName != null)
+            EnvironmentDisplayName = environmentDisplayName;
         _deviceCodeCallback = deviceCodeCallback;
 
         // Query input area
