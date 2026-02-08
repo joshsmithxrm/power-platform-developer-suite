@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Xml;
 using System.Xml.Linq;
 using PPDS.Dataverse.Query.Execution;
 
@@ -186,9 +187,9 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
 
             return doc.ToString(SaveOptions.DisableFormatting);
         }
-        catch
+        catch (XmlException)
         {
-            return fetchXml; // If parsing fails, return original
+            return fetchXml; // If FetchXML is malformed, return original and let Dataverse report the error
         }
     }
 }
