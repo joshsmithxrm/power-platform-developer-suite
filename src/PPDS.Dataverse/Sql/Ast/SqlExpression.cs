@@ -153,7 +153,7 @@ public sealed class SqlIifExpression : ISqlExpression
 }
 
 /// <summary>
-/// CAST(expression AS type).
+/// CAST(expression AS type) or CONVERT(type, expression [, style]).
 /// </summary>
 public sealed class SqlCastExpression : ISqlExpression
 {
@@ -163,10 +163,14 @@ public sealed class SqlCastExpression : ISqlExpression
     /// <summary>The target type name: "int", "nvarchar(100)", "datetime", etc.</summary>
     public string TargetType { get; }
 
-    public SqlCastExpression(ISqlExpression expression, string targetType)
+    /// <summary>Optional CONVERT style code (e.g., 120 for ODBC canonical datetime). Null for CAST.</summary>
+    public int? Style { get; }
+
+    public SqlCastExpression(ISqlExpression expression, string targetType, int? style = null)
     {
         Expression = expression ?? throw new ArgumentNullException(nameof(expression));
         TargetType = targetType ?? throw new ArgumentNullException(nameof(targetType));
+        Style = style;
     }
 }
 

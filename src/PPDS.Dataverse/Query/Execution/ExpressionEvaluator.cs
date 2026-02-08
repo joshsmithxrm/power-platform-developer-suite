@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using PPDS.Dataverse.Query.Execution.Functions;
 using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Execution;
@@ -10,6 +11,23 @@ namespace PPDS.Dataverse.Query.Execution;
 /// </summary>
 public sealed class ExpressionEvaluator : IExpressionEvaluator
 {
+    private readonly FunctionRegistry _functionRegistry;
+
+    /// <summary>
+    /// Creates an evaluator with the default function registry (all built-in functions).
+    /// </summary>
+    public ExpressionEvaluator()
+        : this(FunctionRegistry.CreateDefault())
+    {
+    }
+
+    /// <summary>
+    /// Creates an evaluator with a custom function registry.
+    /// </summary>
+    public ExpressionEvaluator(FunctionRegistry functionRegistry)
+    {
+        _functionRegistry = functionRegistry ?? throw new ArgumentNullException(nameof(functionRegistry));
+    }
     /// <inheritdoc />
     public object? Evaluate(ISqlExpression expression, IReadOnlyDictionary<string, QueryValue> row)
     {
@@ -21,6 +39,7 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
             SqlUnaryExpression unary => EvaluateUnary(unary, row),
             SqlCaseExpression caseExpr => EvaluateCase(caseExpr, row),
             SqlIifExpression iif => EvaluateIif(iif, row),
+            SqlFunctionExpression func => EvaluateFunction(func, row),
             _ => throw new NotSupportedException($"Expression type {expression.GetType().Name} is not yet supported.")
         };
     }
@@ -138,6 +157,17 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
         return EvaluateCondition(iif.Condition, row)
             ? Evaluate(iif.TrueValue, row)
             : Evaluate(iif.FalseValue, row);
+    }
+
+    private object? EvaluateFunction(SqlFunctionExpression func, IReadOnlyDictionary<string, QueryValue> row)
+    {
+        var args = new object?[func.Arguments.Count];
+        for (int i = 0; i < func.Arguments.Count; i++)
+        {
+            args[i] = Evaluate(func.Arguments[i], row);
+        }
+
+        return _functionRegistry.Invoke(func.FunctionName, args);
     }
 
     #endregion
