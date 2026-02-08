@@ -60,6 +60,7 @@ public sealed class FunctionRegistry
     {
         var registry = new FunctionRegistry();
         StringFunctions.RegisterAll(registry);
+        DateFunctions.RegisterAll(registry);
         return registry;
     }
 }

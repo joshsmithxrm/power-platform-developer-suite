@@ -79,6 +79,10 @@ public sealed class SqlToFetchXmlTranspiler
         // Pass virtual columns so we can emit base columns instead
         TranspileColumnsWithVirtual(statement.Columns, statement.From, statement.GroupBy, virtualColumns, lines);
 
+        // Emit FetchXML dategrouping attributes for GROUP BY expressions
+        // like YEAR(createdon), MONTH(createdon), DAY(createdon).
+        EmitDateGroupingAttributes(statement.GroupByExpressions, statement.Columns, lines);
+
         // Emit columns referenced by expression conditions in WHERE.
         // These conditions are evaluated client-side and won't appear in FetchXML
         // filters, so we must explicitly request their columns from Dataverse.
@@ -600,6 +604,12 @@ public sealed class SqlToFetchXmlTranspiler
             case SqlUnaryExpression unary:
                 CollectReferencedColumns(unary.Operand, columnNames);
                 break;
+            case SqlFunctionExpression func:
+                foreach (var arg in func.Arguments)
+                {
+                    CollectReferencedColumns(arg, columnNames);
+                }
+                break;
             // SqlLiteralExpression has no columns to collect
         }
     }
@@ -634,6 +644,84 @@ public sealed class SqlToFetchXmlTranspiler
                 CollectReferencedColumns(exprCond.Right, columnNames);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Emits FetchXML attribute elements with dategrouping for GROUP BY expressions
+    /// like YEAR(createdon), MONTH(createdon), DAY(createdon).
+    /// FetchXML syntax: &lt;attribute name="createdon" groupby="true" dategrouping="year" alias="yr" /&gt;
+    /// </summary>
+    private void EmitDateGroupingAttributes(
+        IReadOnlyList<ISqlExpression> groupByExpressions,
+        IReadOnlyList<ISqlSelectColumn> selectColumns,
+        List<string> lines)
+    {
+        if (groupByExpressions.Count == 0) return;
+
+        foreach (var expr in groupByExpressions)
+        {
+            if (expr is not SqlFunctionExpression func) continue;
+
+            var dategrouping = func.FunctionName.ToUpperInvariant() switch
+            {
+                "YEAR" => "year",
+                "MONTH" => "month",
+                "DAY" => "day",
+                "QUARTER" => "quarter",
+                "WEEK" => "week",
+                _ => null
+            };
+
+            if (dategrouping is null) continue;
+            if (func.Arguments.Count != 1) continue;
+
+            // Extract the column name from the function argument
+            string? columnName = null;
+            if (func.Arguments[0] is SqlColumnExpression colExpr)
+            {
+                columnName = colExpr.Column.ColumnName;
+            }
+
+            if (columnName is null) continue;
+
+            var attrName = NormalizeAttributeName(columnName);
+
+            // Find alias from the SELECT list if there is a matching computed column
+            var alias = FindDateGroupingAlias(func, selectColumns)
+                     ?? $"{dategrouping}_{attrName}";
+
+            lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" dategrouping=\"{dategrouping}\" alias=\"{alias}\" />");
+        }
+    }
+
+    /// <summary>
+    /// Finds the alias for a date grouping function by matching it against
+    /// computed columns in the SELECT list.
+    /// </summary>
+    private static string? FindDateGroupingAlias(
+        SqlFunctionExpression groupByFunc,
+        IReadOnlyList<ISqlSelectColumn> selectColumns)
+    {
+        foreach (var col in selectColumns)
+        {
+            if (col is SqlComputedColumn computed && computed.Alias != null)
+            {
+                if (computed.Expression is SqlFunctionExpression selectFunc
+                    && string.Equals(selectFunc.FunctionName, groupByFunc.FunctionName, StringComparison.OrdinalIgnoreCase)
+                    && selectFunc.Arguments.Count == groupByFunc.Arguments.Count)
+                {
+                    // Check if arguments match (same column)
+                    if (selectFunc.Arguments.Count == 1
+                        && selectFunc.Arguments[0] is SqlColumnExpression selCol
+                        && groupByFunc.Arguments[0] is SqlColumnExpression grpCol
+                        && string.Equals(selCol.Column.ColumnName, grpCol.Column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return computed.Alias;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     #endregion
