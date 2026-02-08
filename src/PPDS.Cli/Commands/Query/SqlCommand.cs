@@ -236,7 +236,13 @@ public static class SqlCommand
                 PageNumber = page,
                 PagingCookie = pagingCookie,
                 IncludeCount = count,
-                UseTdsEndpoint = useTds
+                UseTdsEndpoint = useTds,
+                DmlSafety = new DmlSafetyOptions
+                {
+                    IsConfirmed = confirm,
+                    IsDryRun = dryRun,
+                    NoLimit = noLimit
+                }
             };
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);

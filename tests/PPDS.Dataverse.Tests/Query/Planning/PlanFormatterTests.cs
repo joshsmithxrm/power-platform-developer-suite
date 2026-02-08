@@ -1,4 +1,8 @@
+using System.Collections.Generic;
+using System.Threading;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
+using PPDS.Dataverse.Query.Planning.Nodes;
 using Xunit;
 
 namespace PPDS.Dataverse.Tests.Query.Planning;
@@ -188,5 +192,281 @@ public class PlanFormatterTests
         // Verify all three nodes appear on separate lines
         var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(4, lines.Length); // header + 3 nodes
+    }
+
+    [Fact]
+    public void Format_CountOptimizedNode_ShowsDescription()
+    {
+        var fallback = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "FetchXmlScan: account (single page)",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var count = new QueryPlanDescription
+        {
+            NodeType = "CountOptimizedNode",
+            Description = "CountOptimized: account",
+            EstimatedRows = 1,
+            Children = new[] { fallback }
+        };
+
+        var result = PlanFormatter.Format(count);
+
+        Assert.Contains("Execution Plan:", result);
+        Assert.Contains("CountOptimized: account", result);
+        Assert.Contains("(est. 1 rows)", result);
+        Assert.Contains("FetchXmlScan: account", result);
+
+        var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(3, lines.Length); // header + count node + fallback node
+    }
+
+    [Fact]
+    public void Format_FromIQueryPlanNode_ConvertsAndFormats()
+    {
+        // Use a real FetchXmlScanNode to test the IQueryPlanNode overload
+        var scanNode = new FetchXmlScanNode(
+            "<fetch><entity name='account'><attribute name='name'/></entity></fetch>",
+            "account",
+            autoPage: true,
+            maxRows: 100);
+
+        var result = PlanFormatter.Format((IQueryPlanNode)scanNode);
+
+        Assert.Contains("Execution Plan:", result);
+        Assert.Contains("FetchXmlScan: account", result);
+        Assert.Contains("(est. 100 rows)", result);
+    }
+
+    [Fact]
+    public void Format_FromIQueryPlanNode_NestedTree_ConvertsRecursively()
+    {
+        var scanNode = new FetchXmlScanNode(
+            "<fetch><entity name='account'><attribute name='name'/></entity></fetch>",
+            "account",
+            autoPage: true);
+
+        var projectNode = new ProjectNode(scanNode, new[]
+        {
+            ProjectColumn.PassThrough("name")
+        });
+
+        var result = PlanFormatter.Format((IQueryPlanNode)projectNode);
+
+        Assert.Contains("Execution Plan:", result);
+        Assert.Contains("Project: [name]", result);
+        Assert.Contains("FetchXmlScan: account", result);
+
+        var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(3, lines.Length); // header + project + scan
+    }
+
+    [Fact]
+    public void Format_ConcatenateWithThreeChildren_AllConnectorsCorrect()
+    {
+        var scan1 = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan account",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var scan2 = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan contact",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var scan3 = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan lead",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var concatenate = new QueryPlanDescription
+        {
+            NodeType = "ConcatenateNode",
+            Description = "Concatenate: 3 inputs",
+            EstimatedRows = -1,
+            Children = new[] { scan1, scan2, scan3 }
+        };
+
+        var result = PlanFormatter.Format(concatenate);
+
+        // First two children use branch connector, last child uses end connector
+        Assert.Contains("\u251C\u2500\u2500 Scan account", result);
+        Assert.Contains("\u251C\u2500\u2500 Scan contact", result);
+        Assert.Contains("\u2514\u2500\u2500 Scan lead", result);
+
+        var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(5, lines.Length); // header + concatenate + 3 children
+    }
+
+    [Fact]
+    public void Format_LargeEstimatedRows_FormatsWithThousandsSeparator()
+    {
+        var plan = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan account",
+            EstimatedRows = 1_234_567,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var result = PlanFormatter.Format(plan);
+
+        Assert.Contains("(est. 1,234,567 rows)", result);
+    }
+
+    [Fact]
+    public void Format_CountOptimizedNode_FromRealNode()
+    {
+        var fallbackScan = new FetchXmlScanNode(
+            "<fetch aggregate='true'><entity name='account'><attribute name='accountid' alias='count' aggregate='count'/></entity></fetch>",
+            "account",
+            autoPage: false);
+
+        var countNode = new CountOptimizedNode("account", "count", fallbackScan);
+
+        var result = PlanFormatter.Format((IQueryPlanNode)countNode);
+
+        Assert.Contains("Execution Plan:", result);
+        Assert.Contains("CountOptimized: account", result);
+        Assert.Contains("(est. 1 rows)", result);
+        // Fallback node should appear as child
+        Assert.Contains("FetchXmlScan: account", result);
+    }
+
+    [Fact]
+    public void Format_ConcatenateNode_FromRealNodes()
+    {
+        var scan1 = new FetchXmlScanNode(
+            "<fetch><entity name='account'><attribute name='name'/></entity></fetch>",
+            "account",
+            autoPage: true);
+
+        var scan2 = new FetchXmlScanNode(
+            "<fetch><entity name='contact'><attribute name='fullname'/></entity></fetch>",
+            "contact",
+            autoPage: true);
+
+        var concatenateNode = new ConcatenateNode(new IQueryPlanNode[] { scan1, scan2 });
+
+        var result = PlanFormatter.Format((IQueryPlanNode)concatenateNode);
+
+        Assert.Contains("Execution Plan:", result);
+        Assert.Contains("Concatenate: 2 inputs", result);
+        Assert.Contains("FetchXmlScan: account", result);
+        Assert.Contains("FetchXmlScan: contact", result);
+    }
+
+    [Fact]
+    public void Format_DistinctOverConcatenate_ProducesCorrectHierarchy()
+    {
+        var scan1 = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan account",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var scan2 = new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Scan contact",
+            EstimatedRows = -1,
+            Children = System.Array.Empty<QueryPlanDescription>()
+        };
+
+        var concatenate = new QueryPlanDescription
+        {
+            NodeType = "ConcatenateNode",
+            Description = "Concatenate: 2 inputs",
+            EstimatedRows = -1,
+            Children = new[] { scan1, scan2 }
+        };
+
+        var distinct = new QueryPlanDescription
+        {
+            NodeType = "DistinctNode",
+            Description = "Distinct",
+            EstimatedRows = -1,
+            Children = new[] { concatenate }
+        };
+
+        var result = PlanFormatter.Format(distinct);
+
+        Assert.Contains("Distinct", result);
+        Assert.Contains("Concatenate: 2 inputs", result);
+        Assert.Contains("Scan account", result);
+        Assert.Contains("Scan contact", result);
+
+        var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(5, lines.Length); // header + distinct + concatenate + 2 scans
+    }
+
+    [Fact]
+    public void QueryPlanDescription_FromNode_MapsAllProperties()
+    {
+        var scanNode = new FetchXmlScanNode(
+            "<fetch><entity name='account'></entity></fetch>",
+            "account",
+            autoPage: true,
+            maxRows: 500);
+
+        var description = QueryPlanDescription.FromNode(scanNode);
+
+        Assert.Equal("FetchXmlScanNode", description.NodeType);
+        Assert.Contains("FetchXmlScan: account", description.Description);
+        Assert.Equal(500, description.EstimatedRows);
+        Assert.Empty(description.Children);
+    }
+
+    [Fact]
+    public void QueryPlanDescription_FromNode_RecursivelyMapsChildren()
+    {
+        var scanNode = new FetchXmlScanNode(
+            "<fetch><entity name='account'></entity></fetch>",
+            "account");
+
+        var projectNode = new ProjectNode(scanNode, new[]
+        {
+            ProjectColumn.PassThrough("name"),
+            ProjectColumn.PassThrough("revenue")
+        });
+
+        var description = QueryPlanDescription.FromNode(projectNode);
+
+        Assert.Equal("ProjectNode", description.NodeType);
+        Assert.Single(description.Children);
+        Assert.Equal("FetchXmlScanNode", description.Children[0].NodeType);
+    }
+
+    [Fact]
+    public void QueryPlanDescription_FromNode_CountOptimized_IncludesFallback()
+    {
+        var fallbackScan = new FetchXmlScanNode(
+            "<fetch aggregate='true'><entity name='account'></entity></fetch>",
+            "account",
+            autoPage: false);
+
+        var countNode = new CountOptimizedNode("account", "total", fallbackScan);
+
+        var description = QueryPlanDescription.FromNode(countNode);
+
+        Assert.Equal("CountOptimizedNode", description.NodeType);
+        Assert.Equal("CountOptimized: account", description.Description);
+        Assert.Equal(1, description.EstimatedRows);
+        Assert.Single(description.Children);
+        Assert.Equal("FetchXmlScanNode", description.Children[0].NodeType);
     }
 }

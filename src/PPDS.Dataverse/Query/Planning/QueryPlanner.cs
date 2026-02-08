@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Query.Planning.Partitioning;
 using PPDS.Dataverse.Query.Planning.Rewrites;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
@@ -112,6 +114,15 @@ public sealed class QueryPlanner
         // The generic QueryRow format does not carry FormattedValues, so expansion must
         // happen after the plan produces a QueryResult. See SqlQueryService.ExecuteAsync.
         var transpileResult = _transpiler.TranspileWithVirtualColumns(statement);
+
+        // Phase 4: Aggregate partitioning. When aggregate queries might exceed the
+        // 50K AggregateQueryRecordLimit, partition by date range and execute in parallel.
+        // Must check before building the normal scan node flow because partitioning
+        // replaces the single FetchXmlScanNode with ParallelPartitionNode + MergeAggregateNode.
+        if (ShouldPartitionAggregate(statement, options))
+        {
+            return PlanAggregateWithPartitioning(statement, options, transpileResult);
+        }
 
         // When caller provides a page number or paging cookie, use single-page mode
         // instead of auto-paging, so the caller controls pagination.
@@ -502,6 +513,198 @@ public sealed class QueryPlanner
         }
 
         return new ProjectNode(input, projections);
+    }
+
+    /// <summary>
+    /// Determines whether an aggregate query should be partitioned for parallel execution.
+    /// Requirements:
+    /// - Query must use aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+    /// - Pool capacity must be > 1 (partitioning needs parallelism)
+    /// - Estimated record count must exceed the aggregate record limit
+    /// - Date range bounds (MinDate, MaxDate) must be provided
+    /// - Query must NOT contain COUNT(DISTINCT) (can't be partitioned correctly)
+    /// </summary>
+    public static bool ShouldPartitionAggregate(SqlSelectStatement statement, QueryPlanOptions options)
+    {
+        // Must have aggregate functions
+        if (!statement.HasAggregates())
+        {
+            return false;
+        }
+
+        // Need pool capacity > 1 for parallelism to be worthwhile
+        if (options.PoolCapacity <= 1)
+        {
+            return false;
+        }
+
+        // Need estimated record count that exceeds the limit
+        if (!options.EstimatedRecordCount.HasValue
+            || options.EstimatedRecordCount.Value <= options.AggregateRecordLimit)
+        {
+            return false;
+        }
+
+        // Need date range bounds for partitioning
+        if (!options.MinDate.HasValue || !options.MaxDate.HasValue)
+        {
+            return false;
+        }
+
+        // COUNT(DISTINCT) cannot be parallel-partitioned because summing partial
+        // distinct counts would double-count values appearing in multiple partitions.
+        if (ContainsCountDistinct(statement))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks if the SELECT list contains any COUNT(DISTINCT ...) aggregate.
+    /// COUNT(DISTINCT) cannot be parallel-partitioned because partial distinct counts
+    /// from different date ranges may contain overlapping values.
+    /// </summary>
+    public static bool ContainsCountDistinct(SqlSelectStatement statement)
+    {
+        return statement.GetAggregateColumns().Any(agg =>
+            agg.Function == SqlAggregateFunction.Count && agg.IsDistinct);
+    }
+
+    /// <summary>
+    /// Builds a partitioned aggregate plan that splits the query into date-range
+    /// partitions, executes each partition in parallel, and merges the partial
+    /// aggregate results.
+    ///
+    /// Plan tree:
+    ///   MergeAggregateNode
+    ///     ParallelPartitionNode (max parallelism = PoolCapacity)
+    ///       FetchXmlScanNode (partition 0: [minDate, boundary1))
+    ///       FetchXmlScanNode (partition 1: [boundary1, boundary2))
+    ///       ...
+    ///       FetchXmlScanNode (partition N: [boundaryN, maxDate+1s))
+    /// </summary>
+    private QueryPlanResult PlanAggregateWithPartitioning(
+        SqlSelectStatement statement,
+        QueryPlanOptions options,
+        TranspileResult transpileResult)
+    {
+        var entityName = statement.GetEntityName();
+        var partitioner = new DateRangePartitioner();
+        var partitions = partitioner.CalculatePartitions(
+            options.EstimatedRecordCount!.Value,
+            options.MinDate!.Value,
+            options.MaxDate!.Value,
+            options.MaxRecordsPerPartition);
+
+        // Create a FetchXmlScanNode per partition, each with date range filter injected
+        var partitionNodes = new List<IQueryPlanNode>();
+        foreach (var partition in partitions)
+        {
+            var partitionedFetchXml = InjectDateRangeFilter(
+                transpileResult.FetchXml, partition.Start, partition.End);
+
+            var scanNode = new FetchXmlScanNode(
+                partitionedFetchXml,
+                entityName,
+                autoPage: false); // Aggregate queries return a single page
+
+            partitionNodes.Add(scanNode);
+        }
+
+        // Wrap in ParallelPartitionNode for concurrent execution
+        var parallelNode = new ParallelPartitionNode(partitionNodes, options.PoolCapacity);
+
+        // Build MergeAggregateColumn descriptors from the SQL AST
+        var mergeColumns = BuildMergeAggregateColumns(statement);
+        var groupByColumns = statement.GroupBy.Select(g => g.Alias ?? g.ColumnName).ToList();
+
+        // Add MergeAggregateNode on top to combine partial results
+        IQueryPlanNode rootNode = new MergeAggregateNode(parallelNode, mergeColumns, groupByColumns);
+
+        // HAVING clause: apply after merging (filters on merged aggregate results)
+        if (statement.Having != null)
+        {
+            rootNode = new ClientFilterNode(rootNode, statement.Having);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = transpileResult.FetchXml,
+            VirtualColumns = transpileResult.VirtualColumns,
+            EntityLogicalName = entityName
+        };
+    }
+
+    /// <summary>
+    /// Builds <see cref="MergeAggregateColumn"/> descriptors from the SQL SELECT columns.
+    /// Maps <see cref="SqlAggregateFunction"/> to <see cref="AggregateFunction"/> and
+    /// generates companion COUNT aliases for AVG columns to enable weighted average merging.
+    /// </summary>
+    public static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumns(SqlSelectStatement statement)
+    {
+        var columns = new List<MergeAggregateColumn>();
+
+        foreach (var agg in statement.GetAggregateColumns())
+        {
+            var alias = agg.Alias ?? agg.GetColumnName() ?? "count";
+            var function = MapToMergeFunction(agg.Function);
+
+            // For AVG, we need a companion COUNT column to compute weighted averages.
+            // The FetchXML aggregate will return the partition's average, and we need
+            // the partition's row count to properly weight them during merge.
+            // Convention: companion count alias = "{alias}_count"
+            string? countAlias = function == AggregateFunction.Avg
+                ? $"{alias}_count"
+                : null;
+
+            columns.Add(new MergeAggregateColumn(alias, function, countAlias));
+        }
+
+        return columns;
+    }
+
+    /// <summary>
+    /// Maps SQL AST aggregate function to the plan node aggregate function enum.
+    /// </summary>
+    private static AggregateFunction MapToMergeFunction(SqlAggregateFunction sqlFunc)
+    {
+        return sqlFunc switch
+        {
+            SqlAggregateFunction.Count => AggregateFunction.Count,
+            SqlAggregateFunction.Sum => AggregateFunction.Sum,
+            SqlAggregateFunction.Avg => AggregateFunction.Avg,
+            SqlAggregateFunction.Min => AggregateFunction.Min,
+            SqlAggregateFunction.Max => AggregateFunction.Max,
+            _ => throw new ArgumentOutOfRangeException(nameof(sqlFunc), sqlFunc, "Unsupported aggregate function")
+        };
+    }
+
+    /// <summary>
+    /// Injects a date range filter (createdon ge start AND createdon lt end) into FetchXML.
+    /// The filter is added just before the closing &lt;/entity&gt; tag as an AND filter.
+    /// </summary>
+    public static string InjectDateRangeFilter(string fetchXml, DateTime start, DateTime end)
+    {
+        var startStr = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+        var endStr = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+
+        var filterXml =
+            $"    <filter type=\"and\">\n" +
+            $"      <condition attribute=\"createdon\" operator=\"ge\" value=\"{startStr}\" />\n" +
+            $"      <condition attribute=\"createdon\" operator=\"lt\" value=\"{endStr}\" />\n" +
+            $"    </filter>";
+
+        // Insert the filter before the closing </entity> tag
+        var entityCloseIndex = fetchXml.LastIndexOf("</entity>", StringComparison.Ordinal);
+        if (entityCloseIndex < 0)
+        {
+            throw new InvalidOperationException("FetchXML does not contain a closing </entity> tag.");
+        }
+
+        return fetchXml[..entityCloseIndex] + filterXml + "\n" + fetchXml[entityCloseIndex..];
     }
 }
 

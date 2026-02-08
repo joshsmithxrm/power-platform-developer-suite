@@ -37,4 +37,11 @@ public sealed record SqlQueryRequest
     /// instead of transpiling to FetchXML.
     /// </summary>
     public bool UseTdsEndpoint { get; init; }
+
+    /// <summary>
+    /// DML safety options. When non-null, the service validates DML statements
+    /// (DELETE, UPDATE, INSERT) before execution. When null, DML safety checks
+    /// are skipped (e.g., for non-CLI callers that handle safety externally).
+    /// </summary>
+    public DmlSafetyOptions? DmlSafety { get; init; }
 }

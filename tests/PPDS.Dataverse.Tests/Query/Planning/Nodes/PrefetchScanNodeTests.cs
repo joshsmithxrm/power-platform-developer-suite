@@ -350,4 +350,221 @@ public class PrefetchScanNodeTests
         Assert.Single(results);
         Assert.Equal(0, results[0].Values["id"].Value);
     }
+
+    [Fact]
+    public async Task LargeRowCount_AllRowsPassThroughCorrectly()
+    {
+        // Arrange: 10,000 rows with default buffer size
+        const int rowCount = 10_000;
+        var sourceRows = MakeRows(rowCount);
+        var source = new MockSourceNode(sourceRows);
+        var node = new PrefetchScanNode(source, bufferSize: 500);
+        var ctx = CreateContext();
+
+        // Act
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results.Add(row);
+        }
+
+        // Assert: all 10,000 rows yielded in order
+        Assert.Equal(rowCount, results.Count);
+        for (var i = 0; i < rowCount; i++)
+        {
+            Assert.Equal(i, results[i].Values["id"].Value);
+        }
+    }
+
+    [Fact]
+    public async Task MinimumBufferSize_OneRow_AllRowsYielded()
+    {
+        // Arrange: buffer of 1 forces maximum backpressure (producer blocks after every row)
+        var sourceRows = MakeRows(100);
+        var source = new MockSourceNode(sourceRows);
+        var node = new PrefetchScanNode(source, bufferSize: 1);
+        var ctx = CreateContext();
+
+        // Act
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results.Add(row);
+        }
+
+        // Assert: all rows yielded in order despite minimal buffer
+        Assert.Equal(100, results.Count);
+        for (var i = 0; i < 100; i++)
+        {
+            Assert.Equal(i, results[i].Values["id"].Value);
+        }
+    }
+
+    [Fact]
+    public async Task Backpressure_ProducerBlocksWhenBufferFull()
+    {
+        // Arrange: a tracking source that records how many rows have been produced.
+        // With a buffer of 5 and a slow consumer, the producer should not get
+        // too far ahead of the consumer.
+        var produced = new TrackingSourceNode(200);
+        var node = new PrefetchScanNode(produced, bufferSize: 5);
+        var ctx = CreateContext();
+
+        // Act: consume slowly and track the max producer lead
+        var consumed = 0;
+        var maxLead = 0;
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            consumed++;
+            var currentProduced = produced.ProducedCount;
+            var lead = currentProduced - consumed;
+            if (lead > maxLead)
+                maxLead = lead;
+
+            // Slow down consumer every 10 rows to let producer potentially fill buffer
+            if (consumed % 10 == 0)
+            {
+                await Task.Delay(5).ConfigureAwait(false);
+            }
+        }
+
+        // Assert: all rows consumed
+        Assert.Equal(200, consumed);
+        // The producer should never get more than bufferSize + small margin ahead
+        // (margin accounts for in-flight items and timing)
+        Assert.True(maxLead <= 10, $"Producer lead was {maxLead}, expected <= ~bufferSize (5) + margin");
+    }
+
+    /// <summary>
+    /// A source node that tracks how many rows have been produced via an atomic counter.
+    /// </summary>
+    private sealed class TrackingSourceNode : IQueryPlanNode
+    {
+        private readonly int _rowCount;
+        private int _producedCount;
+
+        public int ProducedCount => Volatile.Read(ref _producedCount);
+
+        public string Description => "TrackingSource";
+        public long EstimatedRows => _rowCount;
+        public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
+
+        public TrackingSourceNode(int rowCount) => _rowCount = rowCount;
+
+        public async IAsyncEnumerable<QueryRow> ExecuteAsync(
+            QueryPlanContext context,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            for (var i = 0; i < _rowCount; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                Interlocked.Increment(ref _producedCount);
+                yield return MakeRow(i);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SourceException_ImmediateFailure_PropagatedToConsumer()
+    {
+        // Arrange: source throws immediately before yielding any rows
+        var expectedException = new InvalidOperationException("Immediate failure");
+        var source = new FailingSourceNode(failAfterRows: 0, expectedException);
+        var node = new PrefetchScanNode(source, bufferSize: 50);
+        var ctx = CreateContext();
+
+        // Act & Assert: exception propagated even with zero rows
+        var results = new List<QueryRow>();
+        var caughtException = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var row in node.ExecuteAsync(ctx))
+            {
+                results.Add(row);
+            }
+        });
+
+        Assert.Equal("Immediate failure", caughtException.Message);
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task MultipleExecutions_EachYieldsAllRows()
+    {
+        // Arrange: same PrefetchScanNode can be executed multiple times
+        var sourceRows = MakeRows(50);
+        var source = new MockSourceNode(sourceRows);
+        var node = new PrefetchScanNode(source, bufferSize: 20);
+        var ctx = CreateContext();
+
+        // Act: execute twice
+        var results1 = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results1.Add(row);
+        }
+
+        var results2 = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results2.Add(row);
+        }
+
+        // Assert: both executions yield all rows in order
+        Assert.Equal(50, results1.Count);
+        Assert.Equal(50, results2.Count);
+        for (var i = 0; i < 50; i++)
+        {
+            Assert.Equal(i, results1[i].Values["id"].Value);
+            Assert.Equal(i, results2[i].Values["id"].Value);
+        }
+    }
+
+    [Fact]
+    public async Task BufferSizeMatchesSourceSize_AllRowsYielded()
+    {
+        // Arrange: buffer exactly equals source row count (boundary case)
+        var sourceRows = MakeRows(25);
+        var source = new MockSourceNode(sourceRows);
+        var node = new PrefetchScanNode(source, bufferSize: 25);
+        var ctx = CreateContext();
+
+        // Act
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results.Add(row);
+        }
+
+        // Assert
+        Assert.Equal(25, results.Count);
+        for (var i = 0; i < 25; i++)
+        {
+            Assert.Equal(i, results[i].Values["id"].Value);
+        }
+    }
+
+    [Fact]
+    public async Task BufferLargerThanSource_AllRowsYielded()
+    {
+        // Arrange: buffer is much larger than source (no backpressure needed)
+        var sourceRows = MakeRows(10);
+        var source = new MockSourceNode(sourceRows);
+        var node = new PrefetchScanNode(source, bufferSize: 5000);
+        var ctx = CreateContext();
+
+        // Act
+        var results = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            results.Add(row);
+        }
+
+        // Assert
+        Assert.Equal(10, results.Count);
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.Equal(i, results[i].Values["id"].Value);
+        }
+    }
 }

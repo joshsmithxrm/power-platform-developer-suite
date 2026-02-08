@@ -1,3 +1,4 @@
+using System;
 using PPDS.Dataverse.Query;
 
 namespace PPDS.Dataverse.Query.Planning;
@@ -46,4 +47,33 @@ public sealed class QueryPlanOptions
     /// Required when <see cref="UseTdsEndpoint"/> is true.
     /// </summary>
     public ITdsQueryExecutor? TdsQueryExecutor { get; init; }
+
+    /// <summary>
+    /// Estimated total record count for the query's entity. When set for aggregate queries
+    /// and the count exceeds <see cref="AggregateRecordLimit"/>, the planner partitions the
+    /// query by date range and executes partitions in parallel across the connection pool.
+    /// Obtained from <see cref="IQueryExecutor.GetTotalRecordCountAsync"/> by the caller.
+    /// </summary>
+    public long? EstimatedRecordCount { get; init; }
+
+    /// <summary>
+    /// Earliest createdon date in the target entity. Required for aggregate partitioning.
+    /// </summary>
+    public DateTime? MinDate { get; init; }
+
+    /// <summary>
+    /// Latest createdon date in the target entity. Required for aggregate partitioning.
+    /// </summary>
+    public DateTime? MaxDate { get; init; }
+
+    /// <summary>
+    /// Maximum records per partition for aggregate partitioning. Default is 40,000
+    /// to stay safely below the Dataverse 50K AggregateQueryRecordLimit.
+    /// </summary>
+    public int AggregateRecordLimit { get; init; } = 50_000;
+
+    /// <summary>
+    /// Maximum records per partition. Default is 40,000 to provide headroom below the 50K limit.
+    /// </summary>
+    public int MaxRecordsPerPartition { get; init; } = 40_000;
 }

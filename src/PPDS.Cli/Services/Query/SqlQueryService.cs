@@ -1,3 +1,4 @@
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
@@ -18,6 +19,7 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly QueryPlanner _planner;
     private readonly PlanExecutor _planExecutor;
     private readonly ExpressionEvaluator _expressionEvaluator = new();
+    private readonly DmlSafetyGuard _dmlSafetyGuard = new();
 
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
@@ -65,6 +67,40 @@ public sealed class SqlQueryService : ISqlQueryService
         if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
         {
             statement = selectStmt.WithTop(request.TopOverride.Value);
+        }
+
+        // DML safety check: validate DELETE/UPDATE/INSERT before execution.
+        // When DmlSafety options are provided, the guard blocks unsafe operations
+        // (DELETE/UPDATE without WHERE) and enforces row caps.
+        if (request.DmlSafety != null)
+        {
+            var safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
+
+            if (safetyResult.IsBlocked)
+            {
+                throw new PpdsException(
+                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
+            }
+
+            if (safetyResult.IsDryRun)
+            {
+                // Dry run: return the safety result without executing
+                return new SqlQueryResult
+                {
+                    OriginalSql = request.Sql,
+                    TranspiledFetchXml = null,
+                    Result = QueryResult.Empty("dry-run"),
+                    DmlSafetyResult = safetyResult
+                };
+            }
+
+            if (safetyResult.RequiresConfirmation)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
+            }
         }
 
         // Build execution plan via QueryPlanner
