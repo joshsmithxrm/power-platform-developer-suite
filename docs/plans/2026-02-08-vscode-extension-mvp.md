@@ -351,15 +351,36 @@ git commit -m "feat(extension): add activity bar with profile and tools tree vie
 Create `extension/src/commands/profileCommands.ts`:
 
 - `selectProfile`: QuickPick with all profiles → calls `daemonClient.authSelect()`
-- `profileDetails`: Shows `authWho()` result in an information panel or QuickPick detail view
+- `profileDetails`: Shows `authWho()` result in a multi-section QuickPick detail view:
+  - **Identity**: Name, Username/App ID, Auth Method, Cloud
+  - **Token**: Status with color icon (green circle=valid, red circle=expired, gray=unknown), expiration countdown ("expires in 2h 15m"), expiration timestamp
+  - **Entra ID**: Tenant ID, Object ID, PUID, Authority URL
+  - **Environment**: Display name, URL, Type
+  - **Usage**: Created timestamp, Last Used timestamp (or "never")
+  - Refresh button re-queries `authWho()` for live token status
 - `createProfile`:
-  1. QuickPick for auth method (Device Code, Interactive Browser, Client Secret, Certificate File, Certificate Store)
-  2. InputBox for profile name
-  3. For SPN methods: InputBox chain for App ID, Secret/Cert, Tenant, Environment URL
-  4. For user methods: trigger device code flow or browser auth
-  5. Device code: show notification with user code + verification URL, listen for `auth/deviceCode` notification
-- `deleteProfile`: Confirmation dialog → RPC call (needs new daemon endpoint `profiles/delete`)
-- `renameProfile`: InputBox for new name → RPC call (needs new daemon endpoint `profiles/rename`)
+  1. QuickPick for auth method:
+     - Device Code (Interactive) — always shown
+     - Interactive Browser — always shown
+     - Client Secret (Service Principal)
+     - Certificate File (Service Principal)
+     - Certificate Store (Service Principal, Windows only — check `process.platform === 'win32'`)
+     - Username & Password (ROPC)
+  2. InputBox for profile name (required for SPN methods, optional for user methods)
+  3. Method-specific InputBox chain:
+     - **Device Code / Browser**: Environment URL InputBox only
+     - **Client Secret**: App ID → Client Secret (password=true) → Tenant ID → Environment URL
+     - **Certificate File**: App ID → Certificate Path → Certificate Password (password=true) → Tenant ID → Environment URL
+     - **Certificate Store**: App ID → Certificate Thumbprint → Tenant ID → Environment URL
+     - **Username/Password**: Username → Password (password=true) → Environment URL
+  4. Call `daemon.profilesCreate()` with collected parameters
+  5. For device code: listen for `auth/deviceCode` notification, show code + browser prompt
+  6. On success: immediately open environment selector (`ppds.selectEnvironment`)
+- `deleteProfile`:
+  - If deleting active profile: warning message "This is your active profile. Deleting it will sign you out."
+  - Confirmation dialog → `daemon.profilesDelete()`
+  - Refresh profile tree view
+- `renameProfile`: InputBox with validation (non-empty) → `daemon.profilesRename()`
 - `refreshProfiles`: Refresh tree view
 
 **Step 3: Wire commands in extension.ts**
@@ -550,6 +571,68 @@ public class EnvWhoResponse
 ```bash
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
 git commit -m "feat(daemon): add env/who RPC method for WhoAmI details"
+```
+
+---
+
+### Task 7b: Environment Configuration
+
+The TUI has `EnvironmentConfigDialog` that lets users set custom Label, Type, and Color for each environment. This persists and affects display everywhere.
+
+**Files:**
+- Create: `extension/src/commands/environmentConfigCommand.ts`
+- Modify: `extension/package.json` (add command)
+- Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` (add daemon endpoints)
+
+**Step 1: Add daemon RPC endpoints for environment config**
+
+```csharp
+[JsonRpcMethod("env/config/get")]
+public async Task<EnvConfigGetResponse> EnvConfigGetAsync(
+    string environmentUrl,
+    CancellationToken cancellationToken = default)
+
+[JsonRpcMethod("env/config/set")]
+public async Task<EnvConfigSetResponse> EnvConfigSetAsync(
+    string environmentUrl,
+    string? label = null,
+    string? type = null,
+    string? color = null,
+    CancellationToken cancellationToken = default)
+```
+
+Use existing `IEnvironmentConfigService` from Application Services.
+
+**Step 2: Register VS Code command**
+
+```json
+{ "command": "ppds.configureEnvironment", "title": "PPDS: Configure Environment", "icon": "$(gear)" }
+```
+
+**Step 3: Implement environment config command**
+
+Create `extension/src/commands/environmentConfigCommand.ts`:
+
+Multi-step InputBox flow:
+1. Show current config (if any) as placeholder text
+2. InputBox for Label (free text, placeholder: current label or "e.g., My Dev Org")
+3. InputBox for Type (free text, placeholder: current type or "e.g., Production, Sandbox, Dev, UAT")
+4. QuickPick for Color:
+   - "(Use type default)" — null value
+   - All EnvironmentColor enum values (Red, Yellow, Green, Blue, etc.)
+5. Call `daemon.envConfigSet()` with values
+6. Show confirmation: "Environment configured"
+7. Refresh environment display in status bar and profile tree
+
+**Step 4: Add to environment selector context**
+
+In the environment QuickPick (Task 6), add a "Configure" action button that opens this command for the selected environment.
+
+**Step 5: Commit**
+
+```bash
+git add extension/src/commands/environmentConfigCommand.ts extension/package.json src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
+git commit -m "feat: add environment configuration with custom label, type, and color"
 ```
 
 ---
@@ -747,51 +830,78 @@ git commit -m "feat(extension): add SQL query panel with execution and results"
 
 ---
 
-### Task 10: Results Table — Data Grid with Sorting & Copy
+### Task 10: Results Table — Data Grid with Sorting, Copy & Filter
 
 **Files:**
 - Modify: `extension/src/panels/webview/queryPanel.ts`
+- Modify: `extension/src/panels/webview/queryPanel.css`
 
 **Step 1: Implement data grid rendering**
 
 The `vscode-data-grid` component from the toolkit handles basic table rendering. Enhance with:
-- Column headers from `QueryResultResponse.columns`
+- Column headers from `QueryResultResponse.columns` (use alias ?? displayName ?? logicalName)
 - Row data from `QueryResultResponse.records`
-- Click-to-copy cell value
-- Column sorting (client-side)
-- Formatted value display (use `formatted` field from lookup values)
-- Row count badge
+- Formatted value display (use `formatted` field from lookup/optionset values)
+- Row count badge in toolbar: "X rows" or "X of Y rows (more available)"
+- Execution time display: "in Yms"
 
-**Step 2: Implement "Load More" pagination**
+**Step 2: Implement copy from results**
+
+Multi-mode copy support matching TUI behavior:
+
+- **Click cell**: Select single cell, show subtle highlight
+- **Ctrl+C**: Copy selected cells as TSV text
+  - If multiple cells selected: include column headers in first row
+  - If single cell: copy just the value
+- **Ctrl+Shift+C**: Copy with inverted header behavior (headers if single cell, no headers if multi-select)
+- **Right-click context menu**: "Copy Cell Value", "Copy Row", "Copy All Results"
+
+Implementation in webview script:
+```javascript
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        e.preventDefault();
+        const includeHeaders = e.shiftKey ? !hasMultiSelect : hasMultiSelect;
+        copySelectedCells(includeHeaders);
+    }
+});
+```
+
+**Step 3: Implement "Load More" pagination**
 
 When `QueryResultResponse.moreRecords === true`:
 - Show "Load More" button below grid
 - On click: send `loadMore` message with `pagingCookie` and `page + 1`
-- Append results to existing grid
+- Append results to existing grid (don't replace)
+- Update row count
 
-**Step 3: Implement client-side filter**
+**Step 4: Implement client-side filter**
 
-Add filter input above results:
+Add filter input above results (toggle with "/" key or Filter button):
 ```html
 <vscode-text-field id="filter-input" placeholder="Filter results..." type="text">
     <span slot="start" class="codicon codicon-filter"></span>
 </vscode-text-field>
 ```
 
-Filter rows client-side by matching any cell value.
+- Filter rows client-side by matching any cell value (case-insensitive substring)
+- Live filtering as user types
+- Show filtered count: "Showing X of Y rows"
+- Escape key hides filter and restores all rows
+- "/" key toggles filter visibility (when focus not in SQL editor)
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
 git add extension/src/panels/webview/
-git commit -m "feat(extension): add results grid with sorting, pagination, and filtering"
+git commit -m "feat(extension): add results grid with sorting, multi-mode copy, pagination, and filtering"
 ```
 
 ---
 
 ## Phase 4: Query Features
 
-### Task 11: New Daemon Endpoint — `query/history`
+### Task 11: New Daemon Endpoints — Query History (List, Save, Delete)
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
@@ -806,9 +916,22 @@ public async Task<QueryHistoryListResponse> QueryHistoryListAsync(
     CancellationToken cancellationToken = default)
 ```
 
-This should use the existing `IQueryHistoryService` from Application Services.
+This should use the existing `IQueryHistoryService` from Application Services. Returns entries for the current environment (active profile's environment URL).
 
-**Step 2: Add `query/history/delete` RPC method**
+**Step 2: Add `query/history/save` RPC method**
+
+```csharp
+[JsonRpcMethod("query/history/save")]
+public async Task<QueryHistorySaveResponse> QueryHistorySaveAsync(
+    string sql,
+    int rowCount,
+    long executionTimeMs,
+    CancellationToken cancellationToken = default)
+```
+
+The TUI auto-saves every successful query execution. The extension needs this too. Saves to the active profile's environment-specific history.
+
+**Step 3: Add `query/history/delete` RPC method**
 
 ```csharp
 [JsonRpcMethod("query/history/delete")]
@@ -817,11 +940,11 @@ public async Task<QueryHistoryDeleteResponse> QueryHistoryDeleteAsync(
     CancellationToken cancellationToken = default)
 ```
 
-**Step 3: Add response DTOs and commit**
+**Step 4: Add response DTOs and commit**
 
 ```bash
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
-git commit -m "feat(daemon): add query/history RPC methods"
+git commit -m "feat(daemon): add query/history list, save, and delete RPC methods"
 ```
 
 ---
@@ -832,23 +955,39 @@ git commit -m "feat(daemon): add query/history RPC methods"
 - Create: `extension/src/commands/queryHistoryCommand.ts`
 - Modify: `extension/src/panels/QueryPanel.ts`
 
-**Step 1: Implement history as QuickPick**
+**Step 1: Implement history as QuickPick with actions**
 
 When user clicks History button or presses `Ctrl+Shift+H`:
-1. Call `daemonClient.queryHistoryList()`
-2. Show QuickPick with entries: `[MM/dd HH:mm] (N rows) SELECT...`
-3. Search box filters entries
-4. Selected entry → load SQL into query editor
+1. Call `daemonClient.queryHistoryList()` (up to 50 recent entries, per-environment)
+2. Show QuickPick with entries formatted as:
+   - Label: `[MM/dd HH:mm] SELECT TOP 10 FROM account...` (preview truncated to 50 chars, whitespace normalized)
+   - Description: `(1,234 rows)` if row count available
+   - Detail: full SQL text (visible when item selected)
+3. QuickPick has search box that filters entries (QuickPick's built-in filter)
+4. QuickPick buttons on each item:
+   - Run icon `$(play)` → load SQL into query editor and close
+   - Copy icon `$(copy)` → copy full SQL to clipboard, show "Copied!" notification
+   - Delete icon `$(trash)` → confirmation dialog → `daemonClient.queryHistoryDelete(id)` → refresh list
+5. Default action (Enter) on selected item → load SQL into query editor
 
-**Step 2: Wire to query panel**
+**Step 2: Auto-save queries on execution**
 
-Handle `showHistory` message from webview → open QuickPick → send selected SQL back to webview.
+In `QueryPanel.ts`, after successful query execution:
+```typescript
+// Fire-and-forget — don't block the UI for history save
+daemon.queryHistorySave({ sql, rowCount: result.count, executionTimeMs: result.executionTimeMs })
+    .catch(() => { /* silently ignore history save failures */ });
+```
 
-**Step 3: Commit**
+**Step 3: Wire to query panel**
+
+Handle `showHistory` message from webview → open QuickPick → send selected SQL back to webview via `{ command: 'loadQuery', sql: selectedSql }` message.
+
+**Step 4: Commit**
 
 ```bash
 git add extension/src/commands/queryHistoryCommand.ts extension/src/panels/QueryPanel.ts
-git commit -m "feat(extension): add query history dialog"
+git commit -m "feat(extension): add query history with run, copy, and delete actions"
 ```
 
 ---
@@ -926,26 +1065,44 @@ git commit -m "feat(daemon): add query/export RPC method"
 ### Task 15: Export Dialog in Extension
 
 **Files:**
+- Create: `extension/src/commands/exportCommand.ts`
 - Modify: `extension/src/panels/QueryPanel.ts`
 
 **Step 1: Implement export flow**
 
 When user clicks Export button or presses `Ctrl+E`:
-1. QuickPick for format: CSV, TSV, JSON, Clipboard
-2. For file formats:
-   - Call `daemonClient.queryExport({ sql, format })`
-   - Show save dialog with appropriate filter
-   - Write content to file
-3. For clipboard:
-   - Call `daemonClient.queryExport({ sql, format: 'tsv' })`
-   - Copy to clipboard via `vscode.env.clipboard.writeText()`
-   - Show confirmation notification
 
-**Step 2: Commit**
+1. **Format selection** — QuickPick:
+   - CSV (Comma-separated)
+   - TSV (Tab-separated)
+   - JSON (with type metadata)
+   - Clipboard (copy as TSV)
+
+2. **Include headers toggle** — after format selection, show QuickPick:
+   - "Include column headers" (default, pre-selected)
+   - "Data only (no headers)"
+
+3. **File export** (CSV/TSV/JSON):
+   - Call `daemonClient.queryExport({ sql, format, includeHeaders })`
+   - Show save dialog with format-specific filter (*.csv, *.tsv, *.json)
+   - Auto-append extension if missing
+   - Write content to file
+   - Show confirmation: "Exported X rows to {path}"
+
+4. **Clipboard export**:
+   - Call `daemonClient.queryExport({ sql, format: 'tsv', includeHeaders })`
+   - Copy to clipboard via `vscode.env.clipboard.writeText()`
+   - Show confirmation notification: "Copied X rows to clipboard"
+
+**Step 2: Show row count in export prompt**
+
+The format QuickPick title should show: "Export {X} rows" so the user knows what they're exporting.
+
+**Step 3: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
-git commit -m "feat(extension): add export dialog with CSV/TSV/JSON/clipboard"
+git add extension/src/commands/exportCommand.ts extension/src/panels/QueryPanel.ts
+git commit -m "feat(extension): add export with format selection, header toggle, and clipboard"
 ```
 
 ---
@@ -2392,7 +2549,10 @@ git commit -m "test(extension): add end-to-end smoke tests"
 | `profiles/delete` | Task 5 | Delete auth profile |
 | `profiles/rename` | Task 5 | Rename auth profile |
 | `env/who` | Task 7 | WhoAmI environment details |
+| `env/config/get` | Task 7b | Get environment display config |
+| `env/config/set` | Task 7b | Set environment label/type/color |
 | `query/history/list` | Task 11 | List query history entries |
+| `query/history/save` | Task 11 | Auto-save executed query to history |
 | `query/history/delete` | Task 11 | Delete history entry |
 | `query/export` | Task 14 | Export query results |
 | `query/explain` | Task 16 | Show query execution plan |
@@ -2404,16 +2564,21 @@ git commit -m "test(extension): add end-to-end smoke tests"
 | TUI Feature | VS Code Equivalent | Task |
 |-------------|-------------------|------|
 | SqlQueryScreen | QueryPanel webview | Task 9-10 |
+| SqlQueryScreen streaming | Batch load + virtual scrolling (acceptable — archived extension also non-streaming) | Task 9 |
+| SqlQueryScreen auto-save to history | Fire-and-forget `query/history/save` after execution | Task 12 |
+| SqlQueryScreen copy (Ctrl+C/Ctrl+Shift+C) | Multi-mode copy with header toggling | Task 10 |
+| SqlQueryScreen filter (/) | Client-side filter with toggle visibility | Task 10 |
 | ProfileSelectorDialog | Profile tree view + QuickPick | Task 3-4 |
-| ProfileCreationDialog | Create profile command chain | Task 4-5 |
-| ProfileDetailsDialog | auth/who QuickPick details | Task 4 |
-| EnvironmentSelectorDialog | Environment QuickPick | Task 6 |
+| ProfileCreationDialog | Create profile command chain with method-specific fields | Task 4-5 |
+| ProfileDetailsDialog | auth/who multi-section detail view with token countdown | Task 4 |
+| EnvironmentSelectorDialog | Environment QuickPick with filter | Task 6 |
 | EnvironmentDetailsDialog | env/who display | Task 6-7 |
+| EnvironmentConfigDialog | Environment config command with label/type/color | Task 7b |
 | PreAuthenticationDialog | Device code notification | Task 20 |
 | ReAuthenticationDialog | Re-auth notification | Task 21 |
-| QueryHistoryDialog | History QuickPick | Task 12 |
-| ExportDialog | Export command chain | Task 15 |
+| QueryHistoryDialog (Run/Copy/Delete) | History QuickPick with action buttons per item | Task 12 |
+| ExportDialog (CSV/TSV/JSON/Clipboard + headers toggle) | Export command with format + header toggle QuickPicks | Task 15 |
 | FetchXmlPreviewDialog | Side-by-side XML document | Task 13 |
 | TuiStatusBar | VS Code status bar items | Task 6, 9 |
 | Keyboard shortcuts | VS Code keybindings + webview | Task 22 |
-| N/A (new) | .ppdsnb notebooks | Task 17-19 |
+| N/A (new) | .ppdsnb notebooks with virtual scrolling + clickable links | Task 17-19 |
