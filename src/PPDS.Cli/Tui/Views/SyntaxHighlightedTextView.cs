@@ -660,6 +660,20 @@ internal sealed class SyntaxHighlightedTextView : TextView
             }
         }
 
+        // Draw visible subviews (autocomplete popup) on top of text content.
+        // Required because we override Redraw without calling base.Redraw(),
+        // which means Terminal.Gui's default subview rendering is skipped.
+        foreach (var sub in Subviews)
+        {
+            if (sub.Visible)
+            {
+                // Set clip region to the subview's frame so it draws at the right position
+                var subFrame = sub.Frame;
+                Driver.SetAttribute(_defaultAttr);
+                sub.Redraw(sub.Bounds);
+            }
+        }
+
         PositionCursor();
     }
 
