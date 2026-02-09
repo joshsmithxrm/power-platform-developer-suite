@@ -248,6 +248,7 @@ public class QueryExecutorGetMinMaxCreatedOnTests
         // Assert
         Assert.Equal(minDate, min);
         Assert.Equal(maxDate, max);
+        Assert.Equal(2, capturedQueries.Count); // one ascending (min) + one descending (max) query
     }
 
     [Fact]

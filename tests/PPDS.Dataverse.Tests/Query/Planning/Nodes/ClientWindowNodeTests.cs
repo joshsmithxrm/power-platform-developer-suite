@@ -600,7 +600,7 @@ public class ClientWindowNodeTests
 
         var ctx = CreateContext();
 
-        // Act & Assert
+        // Act & Assert — result list drives async enumeration; exception is expected before it's read
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
             var result = new List<QueryRow>();
@@ -608,6 +608,7 @@ public class ClientWindowNodeTests
             {
                 result.Add(row);
             }
+            Assert.Fail("Expected OperationCanceledException before enumeration completed");
         });
     }
 

@@ -82,7 +82,7 @@ public class ParallelPartitionNodeTests
             QueryPlanContext context,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var current = Interlocked.Increment(ref s_currentConcurrency);
+            var current = Interlocked.Increment(ref s_currentConcurrency); // CodeQL [cs/static-field-written-by-instance] Intentional: tracks cross-instance concurrency for parallelism verification
             _concurrencySnapshots.Add(current);
 
             // Simulate some work to allow other partitions to overlap
@@ -94,7 +94,7 @@ public class ParallelPartitionNodeTests
                 yield return row;
             }
 
-            Interlocked.Decrement(ref s_currentConcurrency);
+            Interlocked.Decrement(ref s_currentConcurrency); // CodeQL [cs/static-field-written-by-instance] Intentional: see Increment above
         }
 
         /// <summary>Reset the static concurrency counter between tests.</summary>

@@ -188,6 +188,7 @@ public class MetadataScanNodeTests
         }
 
         // Assert
+        Assert.Equal(2, rows.Count);
         Assert.Equal(2, ctx.Statistics.RowsRead);
     }
 

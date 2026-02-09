@@ -32,7 +32,7 @@ public class ProfileServiceTests : IDisposable
         if (File.Exists(_tempFilePath))
         {
             // Best-effort cleanup - test temp file deletion should not fail tests
-            try { File.Delete(_tempFilePath); } catch { }
+            try { File.Delete(_tempFilePath); } catch (IOException) { /* Expected: file may be locked or already deleted */ }
         }
     }
 
