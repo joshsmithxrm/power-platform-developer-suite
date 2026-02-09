@@ -82,9 +82,8 @@ public class ExistsRewriteTests
         result.Joins[0].Type.Should().Be(SqlJoinType.Left);
 
         // WHERE should have IS NULL condition on the joined entity's column
-        var isNull = result.Where as SqlNullCondition;
-        isNull.Should().NotBeNull();
-        isNull!.IsNegated.Should().BeFalse();
+        var isNull = (SqlNullCondition)result.Where!;
+        isNull.IsNegated.Should().BeFalse();
         isNull.Column.TableName.Should().Be(result.Joins[0].Table.Alias);
         isNull.Column.ColumnName.Should().Be("parentcustomerid");
     }
@@ -105,9 +104,8 @@ public class ExistsRewriteTests
 
         // The non-correlated subquery condition (statecode = 0) should be merged
         // into the outer WHERE, re-qualified to the new alias
-        var mergedWhere = result.Where as SqlComparisonCondition;
-        mergedWhere.Should().NotBeNull();
-        mergedWhere!.Column.TableName.Should().StartWith("contact_exists");
+        var mergedWhere = (SqlComparisonCondition)result.Where!;
+        mergedWhere.Column.TableName.Should().StartWith("contact_exists");
         mergedWhere.Column.ColumnName.Should().Be("statecode");
         mergedWhere.Value.Value.Should().Be("0");
     }
@@ -125,9 +123,8 @@ public class ExistsRewriteTests
         result.Joins.Should().HaveCount(1);
 
         // The outer statecode condition should remain
-        var remaining = result.Where as SqlComparisonCondition;
-        remaining.Should().NotBeNull();
-        remaining!.Column.ColumnName.Should().Be("statecode");
+        var remaining = (SqlComparisonCondition)result.Where!;
+        remaining.Column.ColumnName.Should().Be("statecode");
         remaining.Value.Value.Should().Be("0");
     }
 
@@ -221,9 +218,8 @@ public class ExistsRewriteTests
         result.Joins[0].Type.Should().Be(SqlJoinType.Left);
 
         // WHERE should combine the IS NULL and the re-qualified statecode condition
-        var logical = result.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Where!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
     }
 

@@ -16,16 +16,14 @@ public class InSubqueryParserTests
         var result = SqlParser.Parse(sql);
 
         result.Where.Should().NotBeNull();
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Column.ColumnName.Should().Be("accountid");
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.Column.ColumnName.Should().Be("accountid");
         inSub.IsNegated.Should().BeFalse();
         inSub.Subquery.Should().NotBeNull();
         inSub.Subquery.GetEntityName().Should().Be("opportunity");
         inSub.Subquery.Columns.Should().HaveCount(1);
-        var subCol = inSub.Subquery.Columns[0] as SqlColumnRef;
-        subCol.Should().NotBeNull();
-        subCol!.ColumnName.Should().Be("accountid");
+        var subCol = (SqlColumnRef)inSub.Subquery.Columns[0];
+        subCol.ColumnName.Should().Be("accountid");
     }
 
     [Fact]
@@ -35,9 +33,8 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.IsNegated.Should().BeTrue();
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.IsNegated.Should().BeTrue();
         inSub.Column.ColumnName.Should().Be("accountid");
         inSub.Subquery.GetEntityName().Should().Be("opportunity");
     }
@@ -49,12 +46,10 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Subquery.Where.Should().NotBeNull();
-        var subWhere = inSub.Subquery.Where as SqlComparisonCondition;
-        subWhere.Should().NotBeNull();
-        subWhere!.Column.ColumnName.Should().Be("statecode");
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.Subquery.Where.Should().NotBeNull();
+        var subWhere = (SqlComparisonCondition)inSub.Subquery.Where!;
+        subWhere.Column.ColumnName.Should().Be("statecode");
         subWhere.Value.Value.Should().Be("0");
     }
 
@@ -65,13 +60,11 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Column.TableName.Should().Be("a");
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.Column.TableName.Should().Be("a");
         inSub.Column.ColumnName.Should().Be("accountid");
-        var subCol = inSub.Subquery.Columns[0] as SqlColumnRef;
-        subCol.Should().NotBeNull();
-        subCol!.TableName.Should().Be("o");
+        var subCol = (SqlColumnRef)inSub.Subquery.Columns[0];
+        subCol.TableName.Should().Be("o");
         subCol.ColumnName.Should().Be("accountid");
     }
 
@@ -82,18 +75,15 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var logical = result.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Where!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
 
-        var comp = logical.Conditions[0] as SqlComparisonCondition;
-        comp.Should().NotBeNull();
-        comp!.Column.ColumnName.Should().Be("statecode");
+        var comp = (SqlComparisonCondition)logical.Conditions[0];
+        comp.Column.ColumnName.Should().Be("statecode");
 
-        var inSub = logical.Conditions[1] as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Subquery.GetEntityName().Should().Be("opportunity");
+        var inSub = (SqlInSubqueryCondition)logical.Conditions[1];
+        inSub.Subquery.GetEntityName().Should().Be("opportunity");
     }
 
     [Fact]
@@ -104,9 +94,8 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inCond = result.Where as SqlInCondition;
-        inCond.Should().NotBeNull();
-        inCond!.Values.Should().HaveCount(3);
+        var inCond = (SqlInCondition)result.Where!;
+        inCond.Values.Should().HaveCount(3);
         inCond.Column.ColumnName.Should().Be("statecode");
     }
 
@@ -117,9 +106,8 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Subquery.Distinct.Should().BeTrue();
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.Subquery.Distinct.Should().BeTrue();
     }
 
     [Fact]
@@ -129,9 +117,8 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        inSub!.Subquery.Top.Should().Be(10);
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        inSub.Subquery.Top.Should().Be(10);
     }
 
     [Fact]
@@ -141,11 +128,9 @@ public class InSubqueryParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var inSub = result.Where as SqlInSubqueryCondition;
-        inSub.Should().NotBeNull();
-        var subWhere = inSub!.Subquery.Where as SqlLogicalCondition;
-        subWhere.Should().NotBeNull();
-        subWhere!.Operator.Should().Be(SqlLogicalOperator.And);
+        var inSub = (SqlInSubqueryCondition)result.Where!;
+        var subWhere = (SqlLogicalCondition)inSub.Subquery.Where!;
+        subWhere.Operator.Should().Be(SqlLogicalOperator.And);
         subWhere.Conditions.Should().HaveCount(2);
     }
 }

@@ -19,21 +19,17 @@ public class ExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("tax");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("tax");
 
-        var binary = computed.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Multiply);
+        var binary = (SqlBinaryExpression)computed.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Multiply);
 
-        var left = binary.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("revenue");
+        var left = (SqlColumnExpression)binary.Left;
+        left.Column.ColumnName.Should().Be("revenue");
 
-        var right = binary.Right as SqlLiteralExpression;
-        right.Should().NotBeNull();
-        right!.Value.Value.Should().Be("0.1");
+        var right = (SqlLiteralExpression)binary.Right;
+        right.Value.Value.Should().Be("0.1");
     }
 
     [Fact]
@@ -47,21 +43,17 @@ public class ExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("total");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("total");
 
-        var binary = computed.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Add);
+        var binary = (SqlBinaryExpression)computed.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Add);
 
-        var left = binary.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("price");
+        var left = (SqlColumnExpression)binary.Left;
+        left.Column.ColumnName.Should().Be("price");
 
-        var right = binary.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.ColumnName.Should().Be("shipping");
+        var right = (SqlColumnExpression)binary.Right;
+        right.Column.ColumnName.Should().Be("shipping");
     }
 
     [Fact]
@@ -74,30 +66,24 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
 
         // Top-level should be Add: a + (b * c)
-        var add = computed!.Expression as SqlBinaryExpression;
-        add.Should().NotBeNull();
-        add!.Operator.Should().Be(SqlBinaryOperator.Add);
+        var add = (SqlBinaryExpression)computed.Expression;
+        add.Operator.Should().Be(SqlBinaryOperator.Add);
 
-        var left = add.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("a");
+        var left = (SqlColumnExpression)add.Left;
+        left.Column.ColumnName.Should().Be("a");
 
         // Right side should be Multiply: b * c
-        var multiply = add.Right as SqlBinaryExpression;
-        multiply.Should().NotBeNull();
-        multiply!.Operator.Should().Be(SqlBinaryOperator.Multiply);
+        var multiply = (SqlBinaryExpression)add.Right;
+        multiply.Operator.Should().Be(SqlBinaryOperator.Multiply);
 
-        var mulLeft = multiply.Left as SqlColumnExpression;
-        mulLeft.Should().NotBeNull();
-        mulLeft!.Column.ColumnName.Should().Be("b");
+        var mulLeft = (SqlColumnExpression)multiply.Left;
+        mulLeft.Column.ColumnName.Should().Be("b");
 
-        var mulRight = multiply.Right as SqlColumnExpression;
-        mulRight.Should().NotBeNull();
-        mulRight!.Column.ColumnName.Should().Be("c");
+        var mulRight = (SqlColumnExpression)multiply.Right;
+        mulRight.Column.ColumnName.Should().Be("c");
     }
 
     [Fact]
@@ -110,30 +96,24 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
 
         // Top-level should be Multiply: (a + b) * c
-        var multiply = computed!.Expression as SqlBinaryExpression;
-        multiply.Should().NotBeNull();
-        multiply!.Operator.Should().Be(SqlBinaryOperator.Multiply);
+        var multiply = (SqlBinaryExpression)computed.Expression;
+        multiply.Operator.Should().Be(SqlBinaryOperator.Multiply);
 
         // Left side should be Add: a + b
-        var add = multiply.Left as SqlBinaryExpression;
-        add.Should().NotBeNull();
-        add!.Operator.Should().Be(SqlBinaryOperator.Add);
+        var add = (SqlBinaryExpression)multiply.Left;
+        add.Operator.Should().Be(SqlBinaryOperator.Add);
 
-        var addLeft = add.Left as SqlColumnExpression;
-        addLeft.Should().NotBeNull();
-        addLeft!.Column.ColumnName.Should().Be("a");
+        var addLeft = (SqlColumnExpression)add.Left;
+        addLeft.Column.ColumnName.Should().Be("a");
 
-        var addRight = add.Right as SqlColumnExpression;
-        addRight.Should().NotBeNull();
-        addRight!.Column.ColumnName.Should().Be("b");
+        var addRight = (SqlColumnExpression)add.Right;
+        addRight.Column.ColumnName.Should().Be("b");
 
-        var mulRight = multiply.Right as SqlColumnExpression;
-        mulRight.Should().NotBeNull();
-        mulRight!.Column.ColumnName.Should().Be("c");
+        var mulRight = (SqlColumnExpression)multiply.Right;
+        mulRight.Column.ColumnName.Should().Be("c");
     }
 
     [Fact]
@@ -146,30 +126,24 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("fullname");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("fullname");
 
         // Top-level: (firstname + ' ') + lastname (left-associative)
-        var outerAdd = computed.Expression as SqlBinaryExpression;
-        outerAdd.Should().NotBeNull();
-        outerAdd!.Operator.Should().Be(SqlBinaryOperator.Add);
+        var outerAdd = (SqlBinaryExpression)computed.Expression;
+        outerAdd.Operator.Should().Be(SqlBinaryOperator.Add);
 
-        var innerAdd = outerAdd.Left as SqlBinaryExpression;
-        innerAdd.Should().NotBeNull();
-        innerAdd!.Operator.Should().Be(SqlBinaryOperator.Add);
+        var innerAdd = (SqlBinaryExpression)outerAdd.Left;
+        innerAdd.Operator.Should().Be(SqlBinaryOperator.Add);
 
-        var firstname = innerAdd.Left as SqlColumnExpression;
-        firstname.Should().NotBeNull();
-        firstname!.Column.ColumnName.Should().Be("firstname");
+        var firstname = (SqlColumnExpression)innerAdd.Left;
+        firstname.Column.ColumnName.Should().Be("firstname");
 
-        var space = innerAdd.Right as SqlLiteralExpression;
-        space.Should().NotBeNull();
-        space!.Value.Value.Should().Be(" ");
+        var space = (SqlLiteralExpression)innerAdd.Right;
+        space.Value.Value.Should().Be(" ");
 
-        var lastname = outerAdd.Right as SqlColumnExpression;
-        lastname.Should().NotBeNull();
-        lastname!.Column.ColumnName.Should().Be("lastname");
+        var lastname = (SqlColumnExpression)outerAdd.Right;
+        lastname.Column.ColumnName.Should().Be("lastname");
     }
 
     [Fact]
@@ -184,17 +158,14 @@ public class ExpressionParserTests
         // Assert
         result.Columns.Should().HaveCount(2);
 
-        var col1 = result.Columns[0] as SqlColumnRef;
-        col1.Should().NotBeNull();
-        col1!.ColumnName.Should().Be("name");
+        var col1 = (SqlColumnRef)result.Columns[0];
+        col1.ColumnName.Should().Be("name");
 
-        var col2 = result.Columns[1] as SqlComputedColumn;
-        col2.Should().NotBeNull();
-        col2!.Alias.Should().Be("tax");
+        var col2 = (SqlComputedColumn)result.Columns[1];
+        col2.Alias.Should().Be("tax");
 
-        var binary = col2.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Multiply);
+        var binary = (SqlBinaryExpression)col2.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Multiply);
     }
 
     [Fact]
@@ -207,21 +178,17 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("profit");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("profit");
 
-        var binary = computed.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Subtract);
+        var binary = (SqlBinaryExpression)computed.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Subtract);
 
-        var left = binary.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("revenue");
+        var left = (SqlColumnExpression)binary.Left;
+        left.Column.ColumnName.Should().Be("revenue");
 
-        var right = binary.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.ColumnName.Should().Be("cost");
+        var right = (SqlColumnExpression)binary.Right;
+        right.Column.ColumnName.Should().Be("cost");
     }
 
     [Fact]
@@ -234,21 +201,17 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("average");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("average");
 
-        var binary = computed.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Divide);
+        var binary = (SqlBinaryExpression)computed.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Divide);
 
-        var left = binary.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("total");
+        var left = (SqlColumnExpression)binary.Left;
+        left.Column.ColumnName.Should().Be("total");
 
-        var right = binary.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.ColumnName.Should().Be("quantity");
+        var right = (SqlColumnExpression)binary.Right;
+        right.Column.ColumnName.Should().Be("quantity");
     }
 
     [Fact]
@@ -261,21 +224,17 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("remainder");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("remainder");
 
-        var binary = computed.Expression as SqlBinaryExpression;
-        binary.Should().NotBeNull();
-        binary!.Operator.Should().Be(SqlBinaryOperator.Modulo);
+        var binary = (SqlBinaryExpression)computed.Expression;
+        binary.Operator.Should().Be(SqlBinaryOperator.Modulo);
 
-        var left = binary.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("value");
+        var left = (SqlColumnExpression)binary.Left;
+        left.Column.ColumnName.Should().Be("value");
 
-        var right = binary.Right as SqlLiteralExpression;
-        right.Should().NotBeNull();
-        right!.Value.Value.Should().Be("2");
+        var right = (SqlLiteralExpression)binary.Right;
+        right.Value.Value.Should().Be("2");
     }
 
     [Fact]
@@ -288,17 +247,14 @@ public class ExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("negated");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("negated");
 
-        var unary = computed.Expression as SqlUnaryExpression;
-        unary.Should().NotBeNull();
-        unary!.Operator.Should().Be(SqlUnaryOperator.Negate);
+        var unary = (SqlUnaryExpression)computed.Expression;
+        unary.Operator.Should().Be(SqlUnaryOperator.Negate);
 
-        var operand = unary.Operand as SqlColumnExpression;
-        operand.Should().NotBeNull();
-        operand!.Column.ColumnName.Should().Be("amount");
+        var operand = (SqlColumnExpression)unary.Operand;
+        operand.Column.ColumnName.Should().Be("amount");
     }
 
     [Fact]
@@ -312,9 +268,8 @@ public class ExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var col = result.Columns[0] as SqlColumnRef;
-        col.Should().NotBeNull();
-        col!.IsWildcard.Should().BeTrue();
+        var col = (SqlColumnRef)result.Columns[0];
+        col.IsWildcard.Should().BeTrue();
     }
 
     [Fact]
@@ -328,9 +283,8 @@ public class ExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var col = result.Columns[0] as SqlColumnRef;
-        col.Should().NotBeNull();
-        col!.IsWildcard.Should().BeTrue();
+        var col = (SqlColumnRef)result.Columns[0];
+        col.IsWildcard.Should().BeTrue();
         col.TableName.Should().Be("a");
     }
 
@@ -345,8 +299,7 @@ public class ExpressionParserTests
 
         // Assert
         result.Where.Should().NotBeNull();
-        var comp = result.Where as SqlComparisonCondition;
-        comp.Should().NotBeNull();
-        comp!.Value.Value.Should().Be("-5");
+        var comp = (SqlComparisonCondition)result.Where!;
+        comp.Value.Value.Should().Be("-5");
     }
 }

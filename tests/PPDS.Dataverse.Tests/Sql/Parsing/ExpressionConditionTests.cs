@@ -19,18 +19,15 @@ public class ExpressionConditionTests
 
         // Assert
         result.Where.Should().NotBeNull();
-        var exprCond = result.Where as SqlExpressionCondition;
-        exprCond.Should().NotBeNull();
+        var exprCond = (SqlExpressionCondition)result.Where!;
 
-        var left = exprCond!.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("revenue");
+        var left = (SqlColumnExpression)exprCond.Left;
+        left.Column.ColumnName.Should().Be("revenue");
 
         exprCond.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
 
-        var right = exprCond.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.ColumnName.Should().Be("cost");
+        var right = (SqlColumnExpression)exprCond.Right;
+        right.Column.ColumnName.Should().Be("cost");
     }
 
     [Fact]
@@ -62,9 +59,8 @@ public class ExpressionConditionTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var exprCond = result.Where as SqlExpressionCondition;
-        exprCond.Should().NotBeNull();
-        exprCond!.Operator.Should().Be(SqlComparisonOperator.Equal);
+        var exprCond = (SqlExpressionCondition)result.Where!;
+        exprCond.Operator.Should().Be(SqlComparisonOperator.Equal);
     }
 
     [Fact]
@@ -78,17 +74,14 @@ public class ExpressionConditionTests
 
         // Assert: left side is parsed as SqlColumnRef (from ParseColumnRef), then
         // wrapped in SqlColumnExpression (from ParsePrimaryCondition)
-        var exprCond = result.Where as SqlExpressionCondition;
-        exprCond.Should().NotBeNull();
+        var exprCond = (SqlExpressionCondition)result.Where!;
 
-        var left = exprCond!.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.TableName.Should().Be("a");
+        var left = (SqlColumnExpression)exprCond.Left;
+        left.Column.TableName.Should().Be("a");
         left.Column.ColumnName.Should().Be("revenue");
 
-        var right = exprCond.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.TableName.Should().Be("a");
+        var right = (SqlColumnExpression)exprCond.Right;
+        right.Column.TableName.Should().Be("a");
         right.Column.ColumnName.Should().Be("cost");
     }
 
@@ -115,26 +108,21 @@ public class ExpressionConditionTests
         var result = SqlParser.Parse(sql);
 
         // Assert: right side is an arithmetic expression
-        var exprCond = result.Where as SqlExpressionCondition;
-        exprCond.Should().NotBeNull();
+        var exprCond = (SqlExpressionCondition)result.Where!;
 
-        var left = exprCond!.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.ColumnName.Should().Be("revenue");
+        var left = (SqlColumnExpression)exprCond.Left;
+        left.Column.ColumnName.Should().Be("revenue");
 
         exprCond.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
 
-        var right = exprCond.Right as SqlBinaryExpression;
-        right.Should().NotBeNull();
-        right!.Operator.Should().Be(SqlBinaryOperator.Multiply);
+        var right = (SqlBinaryExpression)exprCond.Right;
+        right.Operator.Should().Be(SqlBinaryOperator.Multiply);
 
-        var rightLeft = right.Left as SqlColumnExpression;
-        rightLeft.Should().NotBeNull();
-        rightLeft!.Column.ColumnName.Should().Be("cost");
+        var rightLeft = (SqlColumnExpression)right.Left;
+        rightLeft.Column.ColumnName.Should().Be("cost");
 
-        var rightRight = right.Right as SqlLiteralExpression;
-        rightRight.Should().NotBeNull();
-        rightRight!.Value.Value.Should().Be("2");
+        var rightRight = (SqlLiteralExpression)right.Right;
+        rightRight.Value.Value.Should().Be("2");
     }
 
     [Fact]
@@ -147,20 +135,17 @@ public class ExpressionConditionTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var logical = result.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Where!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
 
         // First condition: pushable SqlComparisonCondition
-        var first = logical.Conditions[0] as SqlComparisonCondition;
-        first.Should().NotBeNull();
-        first!.Column.ColumnName.Should().Be("status");
+        var first = (SqlComparisonCondition)logical.Conditions[0];
+        first.Column.ColumnName.Should().Be("status");
 
         // Second condition: client-side SqlExpressionCondition
-        var second = logical.Conditions[1] as SqlExpressionCondition;
-        second.Should().NotBeNull();
-        second!.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
+        var second = (SqlExpressionCondition)logical.Conditions[1];
+        second.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
     }
 
     [Fact]
@@ -173,9 +158,8 @@ public class ExpressionConditionTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var comp = result.Where as SqlComparisonCondition;
-        comp.Should().NotBeNull();
-        comp!.Column.ColumnName.Should().Be("name");
+        var comp = (SqlComparisonCondition)result.Where!;
+        comp.Column.ColumnName.Should().Be("name");
         comp.Value.Type.Should().Be(SqlLiteralType.String);
     }
 
@@ -189,8 +173,7 @@ public class ExpressionConditionTests
         var result = SqlParser.Parse(sql);
 
         // Assert: NULL as literal in comparison stays as SqlComparisonCondition
-        var comp = result.Where as SqlComparisonCondition;
-        comp.Should().NotBeNull();
-        comp!.Value.Type.Should().Be(SqlLiteralType.Null);
+        var comp = (SqlComparisonCondition)result.Where!;
+        comp.Value.Type.Should().Be(SqlLiteralType.Null);
     }
 }

@@ -19,28 +19,23 @@ public class CaseExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("status_label");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("status_label");
 
-        var caseExpr = computed.Expression as SqlCaseExpression;
-        caseExpr.Should().NotBeNull();
-        caseExpr!.WhenClauses.Should().HaveCount(1);
+        var caseExpr = (SqlCaseExpression)computed.Expression;
+        caseExpr.WhenClauses.Should().HaveCount(1);
 
         var when = caseExpr.WhenClauses[0];
-        var condition = when.Condition as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Column.ColumnName.Should().Be("status");
+        var condition = (SqlComparisonCondition)when.Condition;
+        condition.Column.ColumnName.Should().Be("status");
         condition.Operator.Should().Be(SqlComparisonOperator.Equal);
         condition.Value.Value.Should().Be("1");
 
-        var thenResult = when.Result as SqlLiteralExpression;
-        thenResult.Should().NotBeNull();
-        thenResult!.Value.Value.Should().Be("Active");
+        var thenResult = (SqlLiteralExpression)when.Result;
+        thenResult.Value.Value.Should().Be("Active");
 
-        var elseResult = caseExpr.ElseExpression as SqlLiteralExpression;
-        elseResult.Should().NotBeNull();
-        elseResult!.Value.Value.Should().Be("Inactive");
+        var elseResult = (SqlLiteralExpression)caseExpr.ElseExpression;
+        elseResult.Value.Value.Should().Be("Inactive");
     }
 
     [Fact]
@@ -58,31 +53,29 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
 
-        var caseExpr = computed!.Expression as SqlCaseExpression;
-        caseExpr.Should().NotBeNull();
-        caseExpr!.WhenClauses.Should().HaveCount(3);
+        var caseExpr = (SqlCaseExpression)computed.Expression;
+        caseExpr.WhenClauses.Should().HaveCount(3);
 
         // Verify each WHEN clause
-        var when0 = caseExpr.WhenClauses[0].Condition as SqlComparisonCondition;
-        when0!.Value.Value.Should().Be("0");
-        var then0 = caseExpr.WhenClauses[0].Result as SqlLiteralExpression;
-        then0!.Value.Value.Should().Be("Draft");
+        var when0 = (SqlComparisonCondition)caseExpr.WhenClauses[0].Condition;
+        when0.Value.Value.Should().Be("0");
+        var then0 = (SqlLiteralExpression)caseExpr.WhenClauses[0].Result;
+        then0.Value.Value.Should().Be("Draft");
 
-        var when1 = caseExpr.WhenClauses[1].Condition as SqlComparisonCondition;
-        when1!.Value.Value.Should().Be("1");
-        var then1 = caseExpr.WhenClauses[1].Result as SqlLiteralExpression;
-        then1!.Value.Value.Should().Be("Active");
+        var when1 = (SqlComparisonCondition)caseExpr.WhenClauses[1].Condition;
+        when1.Value.Value.Should().Be("1");
+        var then1 = (SqlLiteralExpression)caseExpr.WhenClauses[1].Result;
+        then1.Value.Value.Should().Be("Active");
 
-        var when2 = caseExpr.WhenClauses[2].Condition as SqlComparisonCondition;
-        when2!.Value.Value.Should().Be("2");
-        var then2 = caseExpr.WhenClauses[2].Result as SqlLiteralExpression;
-        then2!.Value.Value.Should().Be("Closed");
+        var when2 = (SqlComparisonCondition)caseExpr.WhenClauses[2].Condition;
+        when2.Value.Value.Should().Be("2");
+        var then2 = (SqlLiteralExpression)caseExpr.WhenClauses[2].Result;
+        then2.Value.Value.Should().Be("Closed");
 
-        var elseExpr = caseExpr.ElseExpression as SqlLiteralExpression;
-        elseExpr!.Value.Value.Should().Be("Unknown");
+        var elseExpr = (SqlLiteralExpression)caseExpr.ElseExpression;
+        elseExpr.Value.Value.Should().Be("Unknown");
     }
 
     [Fact]
@@ -95,12 +88,10 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
 
-        var caseExpr = computed!.Expression as SqlCaseExpression;
-        caseExpr.Should().NotBeNull();
-        caseExpr!.WhenClauses.Should().HaveCount(1);
+        var caseExpr = (SqlCaseExpression)computed.Expression;
+        caseExpr.WhenClauses.Should().HaveCount(1);
         caseExpr.ElseExpression.Should().BeNull();
     }
 
@@ -115,26 +106,21 @@ public class CaseExpressionParserTests
 
         // Assert
         result.Columns.Should().HaveCount(1);
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("tier");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("tier");
 
-        var iifExpr = computed.Expression as SqlIifExpression;
-        iifExpr.Should().NotBeNull();
+        var iifExpr = (SqlIifExpression)computed.Expression;
 
-        var condition = iifExpr!.Condition as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Column.ColumnName.Should().Be("revenue");
+        var condition = (SqlComparisonCondition)iifExpr.Condition;
+        condition.Column.ColumnName.Should().Be("revenue");
         condition.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
         condition.Value.Value.Should().Be("1000000");
 
-        var trueVal = iifExpr.TrueValue as SqlLiteralExpression;
-        trueVal.Should().NotBeNull();
-        trueVal!.Value.Value.Should().Be("High");
+        var trueVal = (SqlLiteralExpression)iifExpr.TrueValue;
+        trueVal.Value.Value.Should().Be("High");
 
-        var falseVal = iifExpr.FalseValue as SqlLiteralExpression;
-        falseVal.Should().NotBeNull();
-        falseVal!.Value.Value.Should().Be("Low");
+        var falseVal = (SqlLiteralExpression)iifExpr.FalseValue;
+        falseVal.Value.Value.Should().Be("Low");
     }
 
     [Fact]
@@ -147,16 +133,13 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
 
-        var caseExpr = computed!.Expression as SqlCaseExpression;
-        caseExpr.Should().NotBeNull();
+        var caseExpr = (SqlCaseExpression)computed.Expression;
 
-        var when = caseExpr!.WhenClauses[0];
-        var logical = when.Condition as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var when = caseExpr.WhenClauses[0];
+        var logical = (SqlLogicalCondition)when.Condition;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
     }
 
@@ -170,9 +153,8 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("my_label");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("my_label");
     }
 
     [Fact]
@@ -185,9 +167,8 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("my_label");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("my_label");
     }
 
     [Fact]
@@ -202,17 +183,14 @@ public class CaseExpressionParserTests
         // Assert
         result.Columns.Should().HaveCount(3);
 
-        var col1 = result.Columns[0] as SqlColumnRef;
-        col1.Should().NotBeNull();
-        col1!.ColumnName.Should().Be("name");
+        var col1 = (SqlColumnRef)result.Columns[0];
+        col1.ColumnName.Should().Be("name");
 
-        var col2 = result.Columns[1] as SqlComputedColumn;
-        col2.Should().NotBeNull();
-        col2!.Alias.Should().Be("status_label");
+        var col2 = (SqlComputedColumn)result.Columns[1];
+        col2.Alias.Should().Be("status_label");
 
-        var col3 = result.Columns[2] as SqlColumnRef;
-        col3.Should().NotBeNull();
-        col3!.ColumnName.Should().Be("revenue");
+        var col3 = (SqlColumnRef)result.Columns[2];
+        col3.ColumnName.Should().Be("revenue");
     }
 
     [Fact]
@@ -225,9 +203,8 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().BeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().BeNull();
     }
 
     [Fact]
@@ -240,16 +217,13 @@ public class CaseExpressionParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var computed = result.Columns[0] as SqlComputedColumn;
-        var caseExpr = computed!.Expression as SqlCaseExpression;
-        caseExpr.Should().NotBeNull();
+        var computed = (SqlComputedColumn)result.Columns[0];
+        var caseExpr = (SqlCaseExpression)computed.Expression;
 
-        var thenResult = caseExpr!.WhenClauses[0].Result as SqlColumnExpression;
-        thenResult.Should().NotBeNull();
-        thenResult!.Column.ColumnName.Should().Be("name");
+        var thenResult = (SqlColumnExpression)caseExpr.WhenClauses[0].Result;
+        thenResult.Column.ColumnName.Should().Be("name");
 
-        var elseResult = caseExpr.ElseExpression as SqlColumnExpression;
-        elseResult.Should().NotBeNull();
-        elseResult!.Column.ColumnName.Should().Be("description");
+        var elseResult = (SqlColumnExpression)caseExpr.ElseExpression;
+        elseResult.Column.ColumnName.Should().Be("description");
     }
 }

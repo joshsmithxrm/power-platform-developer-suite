@@ -65,9 +65,8 @@ public class InSubqueryRewriteTests
         var rewritten = result.RewrittenStatement!;
 
         // The comparison condition should remain
-        var remaining = rewritten.Where as SqlComparisonCondition;
-        remaining.Should().NotBeNull();
-        remaining!.Column.ColumnName.Should().Be("statecode");
+        var remaining = (SqlComparisonCondition)rewritten.Where!;
+        remaining.Column.ColumnName.Should().Be("statecode");
         remaining.Value.Value.Should().Be("0");
 
         // Join should be added
@@ -86,9 +85,8 @@ public class InSubqueryRewriteTests
         var rewritten = result.RewrittenStatement!;
 
         // Subquery's WHERE becomes a condition re-qualified to the new alias
-        var mergedWhere = rewritten.Where as SqlComparisonCondition;
-        mergedWhere.Should().NotBeNull();
-        mergedWhere!.Column.TableName.Should().Be("opportunity_sub0");
+        var mergedWhere = (SqlComparisonCondition)rewritten.Where!;
+        mergedWhere.Column.TableName.Should().Be("opportunity_sub0");
         mergedWhere.Column.ColumnName.Should().Be("statecode");
         mergedWhere.Value.Value.Should().Be("0");
     }
@@ -163,19 +161,16 @@ public class InSubqueryRewriteTests
         var rewritten = result.RewrittenStatement!;
 
         // Both the outer statecode=0 and the subquery's revenue>1000 (re-qualified) should remain
-        var logical = rewritten.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Conditions.Should().HaveCount(2);
+        var logical = (SqlLogicalCondition)rewritten.Where!;
+        logical.Conditions.Should().HaveCount(2);
 
         // First: outer condition
-        var outerCond = logical.Conditions[0] as SqlComparisonCondition;
-        outerCond.Should().NotBeNull();
-        outerCond!.Column.ColumnName.Should().Be("statecode");
+        var outerCond = (SqlComparisonCondition)logical.Conditions[0];
+        outerCond.Column.ColumnName.Should().Be("statecode");
 
         // Second: merged subquery condition, re-qualified to alias
-        var mergedCond = logical.Conditions[1] as SqlComparisonCondition;
-        mergedCond.Should().NotBeNull();
-        mergedCond!.Column.TableName.Should().Be("opportunity_sub0");
+        var mergedCond = (SqlComparisonCondition)logical.Conditions[1];
+        mergedCond.Column.TableName.Should().Be("opportunity_sub0");
         mergedCond.Column.ColumnName.Should().Be("revenue");
     }
 

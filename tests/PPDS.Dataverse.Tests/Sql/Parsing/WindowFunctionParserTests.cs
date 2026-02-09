@@ -18,18 +18,15 @@ public class WindowFunctionParserTests
         result.Columns.Should().HaveCount(2);
 
         // First column: name
-        var nameCol = result.Columns[0] as SqlColumnRef;
-        nameCol.Should().NotBeNull();
-        nameCol!.ColumnName.Should().Be("name");
+        var nameCol = (SqlColumnRef)result.Columns[0];
+        nameCol.ColumnName.Should().Be("name");
 
         // Second column: ROW_NUMBER() OVER (ORDER BY revenue DESC) AS rn
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("rn");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("rn");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("ROW_NUMBER");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("ROW_NUMBER");
         windowExpr.Operand.Should().BeNull();
         windowExpr.PartitionBy.Should().BeNull();
         windowExpr.OrderBy.Should().HaveCount(1);
@@ -46,24 +43,20 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("total_revenue");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("total_revenue");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("SUM");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("SUM");
 
         // Operand should be a column reference to "revenue"
-        var operand = windowExpr.Operand as SqlColumnExpression;
-        operand.Should().NotBeNull();
-        operand!.Column.ColumnName.Should().Be("revenue");
+        var operand = (SqlColumnExpression)windowExpr.Operand;
+        operand.Column.ColumnName.Should().Be("revenue");
 
         // PARTITION BY industrycode
         windowExpr.PartitionBy.Should().HaveCount(1);
-        var partCol = windowExpr.PartitionBy![0] as SqlColumnExpression;
-        partCol.Should().NotBeNull();
-        partCol!.Column.ColumnName.Should().Be("industrycode");
+        var partCol = (SqlColumnExpression)windowExpr.PartitionBy![0];
+        partCol.Column.ColumnName.Should().Be("industrycode");
 
         // No ORDER BY
         windowExpr.OrderBy.Should().BeNull();
@@ -78,19 +71,16 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("rnk");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("rnk");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("RANK");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("RANK");
         windowExpr.Operand.Should().BeNull();
 
         windowExpr.PartitionBy.Should().HaveCount(1);
-        var partCol = windowExpr.PartitionBy![0] as SqlColumnExpression;
-        partCol.Should().NotBeNull();
-        partCol!.Column.ColumnName.Should().Be("ownerid");
+        var partCol = (SqlColumnExpression)windowExpr.PartitionBy![0];
+        partCol.Column.ColumnName.Should().Be("ownerid");
 
         windowExpr.OrderBy.Should().HaveCount(1);
         windowExpr.OrderBy![0].Column.ColumnName.Should().Be("createdon");
@@ -106,13 +96,11 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("dr");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("dr");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("DENSE_RANK");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("DENSE_RANK");
         windowExpr.Operand.Should().BeNull();
         windowExpr.PartitionBy.Should().BeNull();
         windowExpr.OrderBy.Should().HaveCount(1);
@@ -129,20 +117,17 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("cnt");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("cnt");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("COUNT");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("COUNT");
         windowExpr.IsCountStar.Should().BeTrue();
         windowExpr.Operand.Should().BeNull();
 
         windowExpr.PartitionBy.Should().HaveCount(1);
-        var partCol = windowExpr.PartitionBy![0] as SqlColumnExpression;
-        partCol.Should().NotBeNull();
-        partCol!.Column.ColumnName.Should().Be("statecode");
+        var partCol = (SqlColumnExpression)windowExpr.PartitionBy![0];
+        partCol.Column.ColumnName.Should().Be("statecode");
     }
 
     [Fact]
@@ -154,13 +139,11 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(1);
 
-        var computed = result.Columns[0] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("row_num");
+        var computed = (SqlComputedColumn)result.Columns[0];
+        computed.Alias.Should().Be("row_num");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("ROW_NUMBER");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("ROW_NUMBER");
         windowExpr.OrderBy.Should().HaveCount(1);
         windowExpr.OrderBy![0].Column.ColumnName.Should().Be("name");
         windowExpr.OrderBy[0].Direction.Should().Be(SqlSortDirection.Ascending);
@@ -177,9 +160,8 @@ public class WindowFunctionParserTests
         result.Columns.Should().HaveCount(1);
 
         // Should be SqlAggregateColumn, not SqlComputedColumn with SqlWindowExpression
-        var aggCol = result.Columns[0] as SqlAggregateColumn;
-        aggCol.Should().NotBeNull();
-        aggCol!.Function.Should().Be(SqlAggregateFunction.Count);
+        var aggCol = (SqlAggregateColumn)result.Columns[0];
+        aggCol.Function.Should().Be(SqlAggregateFunction.Count);
     }
 
     [Fact]
@@ -200,19 +182,16 @@ public class WindowFunctionParserTests
         nameCol.Should().NotBeNull();
 
         // ROW_NUMBER
-        var rn = (result.Columns[1] as SqlComputedColumn)?.Expression as SqlWindowExpression;
-        rn.Should().NotBeNull();
-        rn!.FunctionName.Should().Be("ROW_NUMBER");
+        var rn = (SqlWindowExpression)((SqlComputedColumn)result.Columns[1]).Expression;
+        rn.FunctionName.Should().Be("ROW_NUMBER");
 
         // RANK
-        var rnk = (result.Columns[2] as SqlComputedColumn)?.Expression as SqlWindowExpression;
-        rnk.Should().NotBeNull();
-        rnk!.FunctionName.Should().Be("RANK");
+        var rnk = (SqlWindowExpression)((SqlComputedColumn)result.Columns[2]).Expression;
+        rnk.FunctionName.Should().Be("RANK");
 
         // DENSE_RANK
-        var dr = (result.Columns[3] as SqlComputedColumn)?.Expression as SqlWindowExpression;
-        dr.Should().NotBeNull();
-        dr!.FunctionName.Should().Be("DENSE_RANK");
+        var dr = (SqlWindowExpression)((SqlComputedColumn)result.Columns[3]).Expression;
+        dr.FunctionName.Should().Be("DENSE_RANK");
     }
 
     [Fact]
@@ -224,17 +203,14 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var computed = result.Columns[1] as SqlComputedColumn;
-        computed.Should().NotBeNull();
-        computed!.Alias.Should().Be("avg_rev");
+        var computed = (SqlComputedColumn)result.Columns[1];
+        computed.Alias.Should().Be("avg_rev");
 
-        var windowExpr = computed.Expression as SqlWindowExpression;
-        windowExpr.Should().NotBeNull();
-        windowExpr!.FunctionName.Should().Be("AVG");
+        var windowExpr = (SqlWindowExpression)computed.Expression;
+        windowExpr.FunctionName.Should().Be("AVG");
 
-        var operand = windowExpr.Operand as SqlColumnExpression;
-        operand.Should().NotBeNull();
-        operand!.Column.ColumnName.Should().Be("revenue");
+        var operand = (SqlColumnExpression)windowExpr.Operand;
+        operand.Column.ColumnName.Should().Be("revenue");
 
         windowExpr.PartitionBy.Should().HaveCount(1);
     }
@@ -248,16 +224,12 @@ public class WindowFunctionParserTests
 
         result.Columns.Should().HaveCount(2);
 
-        var minComputed = result.Columns[0] as SqlComputedColumn;
-        minComputed.Should().NotBeNull();
-        var minWindow = minComputed!.Expression as SqlWindowExpression;
-        minWindow.Should().NotBeNull();
-        minWindow!.FunctionName.Should().Be("MIN");
+        var minComputed = (SqlComputedColumn)result.Columns[0];
+        var minWindow = (SqlWindowExpression)minComputed.Expression;
+        minWindow.FunctionName.Should().Be("MIN");
 
-        var maxComputed = result.Columns[1] as SqlComputedColumn;
-        maxComputed.Should().NotBeNull();
-        var maxWindow = maxComputed!.Expression as SqlWindowExpression;
-        maxWindow.Should().NotBeNull();
-        maxWindow!.FunctionName.Should().Be("MAX");
+        var maxComputed = (SqlComputedColumn)result.Columns[1];
+        var maxWindow = (SqlWindowExpression)maxComputed.Expression;
+        maxWindow.FunctionName.Should().Be("MAX");
     }
 }

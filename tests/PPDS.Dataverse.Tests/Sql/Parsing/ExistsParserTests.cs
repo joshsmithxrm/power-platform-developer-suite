@@ -17,9 +17,8 @@ public class ExistsParserTests
         var result = SqlParser.Parse(sql);
 
         result.Where.Should().NotBeNull();
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.IsNegated.Should().BeFalse();
+        var exists = (SqlExistsCondition)result.Where!;
+        exists.IsNegated.Should().BeFalse();
         exists.Subquery.Should().NotBeNull();
         exists.Subquery.From.TableName.Should().Be("contact");
     }
@@ -33,9 +32,8 @@ public class ExistsParserTests
         var result = SqlParser.Parse(sql);
 
         result.Where.Should().NotBeNull();
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.IsNegated.Should().BeTrue();
+        var exists = (SqlExistsCondition)result.Where!;
+        exists.IsNegated.Should().BeTrue();
         exists.Subquery.Should().NotBeNull();
         exists.Subquery.From.TableName.Should().Be("contact");
     }
@@ -48,22 +46,18 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
+        var exists = (SqlExistsCondition)result.Where!;
 
         // The subquery WHERE should be an expression condition (col = col)
-        var subWhere = exists!.Subquery.Where as SqlExpressionCondition;
-        subWhere.Should().NotBeNull();
-        subWhere!.Operator.Should().Be(SqlComparisonOperator.Equal);
+        var subWhere = (SqlExpressionCondition)exists.Subquery.Where!;
+        subWhere.Operator.Should().Be(SqlComparisonOperator.Equal);
 
-        var left = subWhere.Left as SqlColumnExpression;
-        left.Should().NotBeNull();
-        left!.Column.TableName.Should().Be("c");
+        var left = (SqlColumnExpression)subWhere.Left;
+        left.Column.TableName.Should().Be("c");
         left.Column.ColumnName.Should().Be("parentcustomerid");
 
-        var right = subWhere.Right as SqlColumnExpression;
-        right.Should().NotBeNull();
-        right!.Column.TableName.Should().Be("a");
+        var right = (SqlColumnExpression)subWhere.Right;
+        right.Column.TableName.Should().Be("a");
         right.Column.ColumnName.Should().Be("accountid");
     }
 
@@ -76,20 +70,17 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var logical = result.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Where!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
 
         // First condition: status = 1
-        var comp = logical.Conditions[0] as SqlComparisonCondition;
-        comp.Should().NotBeNull();
-        comp!.Column.ColumnName.Should().Be("status");
+        var comp = (SqlComparisonCondition)logical.Conditions[0];
+        comp.Column.ColumnName.Should().Be("status");
 
         // Second condition: EXISTS
-        var exists = logical.Conditions[1] as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.IsNegated.Should().BeFalse();
+        var exists = (SqlExistsCondition)logical.Conditions[1];
+        exists.IsNegated.Should().BeFalse();
     }
 
     [Fact]
@@ -101,14 +92,12 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var logical = result.Where as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Where!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
 
-        var exists = logical.Conditions[1] as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.IsNegated.Should().BeTrue();
+        var exists = (SqlExistsCondition)logical.Conditions[1];
+        exists.IsNegated.Should().BeTrue();
     }
 
     [Fact]
@@ -119,12 +108,10 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.Subquery.Columns.Should().HaveCount(1);
-        var col = exists.Subquery.Columns[0] as SqlColumnRef;
-        col.Should().NotBeNull();
-        col!.IsWildcard.Should().BeTrue();
+        var exists = (SqlExistsCondition)result.Where!;
+        exists.Subquery.Columns.Should().HaveCount(1);
+        var col = (SqlColumnRef)exists.Subquery.Columns[0];
+        col.IsWildcard.Should().BeTrue();
     }
 
     [Fact]
@@ -139,13 +126,11 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
+        var exists = (SqlExistsCondition)result.Where!;
 
         // Subquery WHERE should be AND of two conditions
-        var subWhere = exists!.Subquery.Where as SqlLogicalCondition;
-        subWhere.Should().NotBeNull();
-        subWhere!.Operator.Should().Be(SqlLogicalOperator.And);
+        var subWhere = (SqlLogicalCondition)exists.Subquery.Where!;
+        subWhere.Operator.Should().Be(SqlLogicalOperator.And);
         subWhere.Conditions.Should().HaveCount(2);
     }
 
@@ -171,8 +156,7 @@ public class ExistsParserTests
 
         var result = SqlParser.Parse(sql);
 
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
-        exists!.IsNegated.Should().BeFalse();
+        var exists = (SqlExistsCondition)result.Where!;
+        exists.IsNegated.Should().BeFalse();
     }
 }

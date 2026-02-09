@@ -19,9 +19,8 @@ public class HavingParserTests
 
         // Assert
         result.Having.Should().NotBeNull();
-        var comparison = result.Having as SqlComparisonCondition;
-        comparison.Should().NotBeNull();
-        comparison!.Column.ColumnName.Should().Be("cnt");
+        var comparison = (SqlComparisonCondition)result.Having!;
+        comparison.Column.ColumnName.Should().Be("cnt");
         comparison.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
         comparison.Value.Value.Should().Be("5");
     }
@@ -37,9 +36,8 @@ public class HavingParserTests
 
         // Assert
         result.Having.Should().NotBeNull();
-        var logical = result.Having as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.And);
+        var logical = (SqlLogicalCondition)result.Having!;
+        logical.Operator.Should().Be(SqlLogicalOperator.And);
         logical.Conditions.Should().HaveCount(2);
     }
 
@@ -54,9 +52,8 @@ public class HavingParserTests
 
         // Assert
         result.Having.Should().NotBeNull();
-        var logical = result.Having as SqlLogicalCondition;
-        logical.Should().NotBeNull();
-        logical!.Operator.Should().Be(SqlLogicalOperator.Or);
+        var logical = (SqlLogicalCondition)result.Having!;
+        logical.Operator.Should().Be(SqlLogicalOperator.Or);
         logical.Conditions.Should().HaveCount(2);
     }
 
@@ -125,9 +122,8 @@ public class HavingParserTests
         var result = SqlParser.Parse(sql);
 
         // Assert
-        var comparison = result.Having as SqlComparisonCondition;
-        comparison.Should().NotBeNull();
-        comparison!.Operator.Should().Be(SqlComparisonOperator.Equal);
+        var comparison = (SqlComparisonCondition)result.Having!;
+        comparison.Operator.Should().Be(SqlComparisonOperator.Equal);
     }
 
     [Fact]
