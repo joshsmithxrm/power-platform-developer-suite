@@ -239,13 +239,11 @@ public static class TuiColorPalette
 
     /// <summary>
     /// Gets the tab color scheme for the given environment type and active state.
-    /// Active tabs use white text on dark gray. Inactive tabs use environment-tinted
-    /// foreground on black to visually distinguish environments.
+    /// Active tabs use environment-colored text on DarkGray background.
+    /// Inactive tabs use environment-colored text on Black background.
     /// </summary>
     public static ColorScheme GetTabScheme(EnvironmentType envType, bool isActive)
     {
-        if (isActive) return TabActive;
-
         var fg = envType switch
         {
             EnvironmentType.Production => Color.Red,
@@ -255,8 +253,18 @@ public static class TuiColorPalette
             _ => Color.Gray
         };
 
-        // For Trial (Cyan foreground), use Black background per blue rule
-        // But Cyan foreground on Black background is fine (rule is about Cyan *background*)
+        if (isActive)
+        {
+            return new ColorScheme
+            {
+                Normal = MakeAttr(fg, Color.DarkGray),
+                Focus = MakeAttr(fg, Color.DarkGray),
+                HotNormal = MakeAttr(fg, Color.DarkGray),
+                HotFocus = MakeAttr(fg, Color.DarkGray),
+                Disabled = MakeAttr(Color.Gray, Color.DarkGray)
+            };
+        }
+
         return new ColorScheme
         {
             Normal = MakeAttr(fg, Color.Black),
@@ -480,12 +488,25 @@ public static class TuiColorPalette
 
     /// <summary>
     /// Gets the tab color scheme using EnvironmentColor.
+    /// Active tabs use environment-colored text on DarkGray background.
+    /// Inactive tabs use environment-colored text on Black background.
     /// </summary>
     public static ColorScheme GetTabScheme(EnvironmentColor envColor, bool isActive)
     {
-        if (isActive) return TabActive;
-
         var fg = GetForegroundColor(envColor);
+
+        if (isActive)
+        {
+            return new ColorScheme
+            {
+                Normal = MakeAttr(fg, Color.DarkGray),
+                Focus = MakeAttr(fg, Color.DarkGray),
+                HotNormal = MakeAttr(fg, Color.DarkGray),
+                HotFocus = MakeAttr(fg, Color.DarkGray),
+                Disabled = MakeAttr(Color.Gray, Color.DarkGray)
+            };
+        }
+
         return new ColorScheme
         {
             Normal = MakeAttr(fg, Color.Black),

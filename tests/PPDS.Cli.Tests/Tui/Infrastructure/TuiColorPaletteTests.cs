@@ -67,13 +67,12 @@ public class TuiColorPaletteTests
     #region GetTabScheme Tests
 
     [Fact]
-    public void GetTabScheme_ActiveTab_ReturnsTabActiveScheme()
+    public void GetTabScheme_ActiveTab_UsesEnvironmentColorOnDarkGray()
     {
-        // Act - any environment type with isActive=true
+        // Act - Production active tab should show red on DarkGray
         var scheme = TuiColorPalette.GetTabScheme(EnvironmentType.Production, isActive: true);
 
-        // Assert - should match TabActive (white on dark gray)
-        Assert.Equal(Color.White, scheme.Normal.Foreground);
+        Assert.Equal(Color.Red, scheme.Normal.Foreground);
         Assert.Equal(Color.DarkGray, scheme.Normal.Background);
     }
 
@@ -83,13 +82,11 @@ public class TuiColorPaletteTests
     [InlineData(EnvironmentType.Development)]
     [InlineData(EnvironmentType.Trial)]
     [InlineData(EnvironmentType.Unknown)]
-    public void GetTabScheme_ActiveTab_ReturnsSameSchemeRegardlessOfType(EnvironmentType envType)
+    public void GetTabScheme_ActiveTab_AlwaysHasDarkGrayBackground(EnvironmentType envType)
     {
         var scheme = TuiColorPalette.GetTabScheme(envType, isActive: true);
-        var expected = TuiColorPalette.TabActive;
 
-        Assert.Equal(expected.Normal.Foreground, scheme.Normal.Foreground);
-        Assert.Equal(expected.Normal.Background, scheme.Normal.Background);
+        Assert.Equal(Color.DarkGray, scheme.Normal.Background);
     }
 
     [Fact]

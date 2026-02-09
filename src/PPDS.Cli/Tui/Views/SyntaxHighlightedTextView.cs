@@ -619,10 +619,10 @@ internal sealed class SyntaxHighlightedTextView : TextView
                     attr = _defaultAttr;
                 }
 
-                // Highlight cursor position with DarkGray background, preserving syntax foreground
+                // Highlight cursor position with high-contrast inverted block
                 if (hasFocus && screenRow == cursorScreenRow && screenCol == cursorScreenCol)
                 {
-                    attr = Driver.MakeAttribute(attr.Foreground, Color.Gray);
+                    attr = Driver.MakeAttribute(Color.Black, Color.White);
                 }
 
                 Driver.SetAttribute(attr);
@@ -651,7 +651,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 for (int c = screenCol; c < bounds.Width; c++)
                 {
                     if (hasFocus && screenRow == cursorScreenRow && c == cursorScreenCol)
-                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.Gray));
+                        Driver.SetAttribute(Driver.MakeAttribute(Color.Black, Color.White));
                     else
                         Driver.SetAttribute(_defaultAttr);
                     AddRune(c, screenRow, ' ');
@@ -670,7 +670,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 for (int c = 0; c < bounds.Width; c++)
                 {
                     if (hasFocus && r == cursorScreenRow && c == cursorScreenCol)
-                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.Gray));
+                        Driver.SetAttribute(Driver.MakeAttribute(Color.Black, Color.White));
                     else
                         Driver.SetAttribute(_defaultAttr);
                     AddRune(c, r, ' ');
@@ -692,7 +692,12 @@ internal sealed class SyntaxHighlightedTextView : TextView
             }
         }
 
+        // Position cursor but hide the hardware cursor — we paint our own block cursor above.
+        // Without this, the terminal's hardware cursor (often a dark block) draws on top
+        // of our painted white-background cursor cell, making it invisible.
         PositionCursor();
+        if (Driver != null)
+            Driver.SetCursorVisibility(CursorVisibility.Invisible);
     }
 
     /// <summary>

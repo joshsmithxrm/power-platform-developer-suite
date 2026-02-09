@@ -68,11 +68,13 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
                     : $" {i + 1}: {tab.Screen.Title} [{envLabel}] ";
 
                 var isActive = i == _tabManager.ActiveIndex;
-                var label = new Label(text)
+                // Active tabs get bracket markers for clear visual distinction
+                var displayText = isActive ? $"[{text}]" : text;
+                var label = new Label(displayText)
                 {
                     X = xPos,
                     Y = 0,
-                    Width = text.Length,
+                    Width = displayText.Length,
                     Height = 1,
                     ColorScheme = TuiColorPalette.GetTabScheme(tab.EnvironmentColor, isActive)
                 };
@@ -84,7 +86,7 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 
                 _tabLabels.Add(label);
                 Add(label);
-                xPos += text.Length;
+                xPos += displayText.Length;
             }
 
             // Add [+] button (separate from tab labels)
@@ -105,15 +107,8 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 
     private void UpdateHighlight()
     {
-        if (Application.Driver == null) return;
-
-        for (int i = 0; i < _tabManager.Tabs.Count && i < _tabLabels.Count; i++)
-        {
-            var isActive = i == _tabManager.ActiveIndex;
-            _tabLabels[i].ColorScheme = TuiColorPalette.GetTabScheme(
-                _tabManager.Tabs[i].EnvironmentColor, isActive);
-        }
-        SetNeedsDisplay();
+        // Rebuild fully to update both bracket markers and color schemes
+        Rebuild();
     }
 
     /// <inheritdoc />
