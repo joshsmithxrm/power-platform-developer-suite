@@ -77,54 +77,55 @@ public class ExplainTests
 
     #endregion
 
-    #region CountOptimized
+    #region COUNT(*) Aggregates
 
     [Fact]
-    public async Task ExplainAsync_BareCountStar_ReturnsCountOptimizedNode()
+    public async Task ExplainAsync_BareCountStar_ReturnsFetchXmlScanNode()
     {
         var plan = await _service.ExplainAsync("SELECT COUNT(*) FROM account");
 
-        Assert.Equal("CountOptimizedNode", plan.NodeType);
-        Assert.Contains("CountOptimized: account", plan.Description);
-        Assert.Equal(1, plan.EstimatedRows);
+        // Bare COUNT(*) now flows through the standard aggregate FetchXML path
+        Assert.Equal("FetchXmlScanNode", plan.NodeType);
+        Assert.Contains("FetchXmlScan: account", plan.Description);
+        // Aggregate scan has no TOP, so estimated rows is unknown (-1)
+        Assert.Equal(-1, plan.EstimatedRows);
     }
 
     [Fact]
-    public async Task ExplainAsync_BareCountStarWithAlias_ReturnsCountOptimizedNode()
+    public async Task ExplainAsync_BareCountStarWithAlias_ReturnsFetchXmlScanNode()
     {
         var plan = await _service.ExplainAsync("SELECT COUNT(*) AS total FROM account");
 
-        Assert.Equal("CountOptimizedNode", plan.NodeType);
+        // Bare COUNT(*) with alias also uses aggregate FetchXML
+        Assert.Equal("FetchXmlScanNode", plan.NodeType);
         Assert.Contains("account", plan.Description);
     }
 
     [Fact]
-    public async Task ExplainAsync_BareCountStar_HasFallbackChild()
+    public async Task ExplainAsync_BareCountStar_IsLeafNode()
     {
         var plan = await _service.ExplainAsync("SELECT COUNT(*) FROM account");
 
-        // CountOptimizedNode has a FetchXmlScan fallback child
-        Assert.Single(plan.Children);
-        Assert.Equal("FetchXmlScanNode", plan.Children[0].NodeType);
+        // Aggregate FetchXmlScanNode is a leaf — no fallback child
+        Assert.Empty(plan.Children);
     }
 
     [Fact]
-    public async Task ExplainAsync_CountStarWithWhere_NotOptimized()
+    public async Task ExplainAsync_CountStarWithWhere_ReturnsFetchXmlScan()
     {
         var plan = await _service.ExplainAsync("SELECT COUNT(*) FROM account WHERE statecode = 0");
 
-        // With a WHERE clause, COUNT(*) cannot use the optimized path
-        Assert.NotEqual("CountOptimizedNode", plan.NodeType);
+        // COUNT(*) with WHERE also uses aggregate FetchXML
         Assert.Equal("FetchXmlScanNode", plan.NodeType);
     }
 
     [Fact]
-    public async Task ExplainAsync_CountStarWithGroupBy_NotOptimized()
+    public async Task ExplainAsync_CountStarWithGroupBy_ReturnsFetchXmlScan()
     {
         var plan = await _service.ExplainAsync("SELECT COUNT(*) FROM account GROUP BY statecode");
 
-        // With GROUP BY, COUNT(*) cannot use the optimized path
-        Assert.NotEqual("CountOptimizedNode", plan.NodeType);
+        // COUNT(*) with GROUP BY uses aggregate FetchXML
+        Assert.Equal("FetchXmlScanNode", plan.NodeType);
     }
 
     #endregion
@@ -212,9 +213,9 @@ public class ExplainTests
         var formatted = PlanFormatter.Format(plan);
 
         Assert.Contains("Execution Plan:", formatted);
-        Assert.Contains("CountOptimized: account", formatted);
-        Assert.Contains("(est. 1 rows)", formatted);
         Assert.Contains("FetchXmlScan: account", formatted);
+        // Aggregate scan has unknown row count, so no "(est. N rows)" suffix
+        Assert.DoesNotContain("est.", formatted);
     }
 
     [Fact]
