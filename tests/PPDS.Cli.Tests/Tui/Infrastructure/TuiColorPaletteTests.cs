@@ -15,20 +15,20 @@ namespace PPDS.Cli.Tests.Tui.Infrastructure;
 public class TuiColorPaletteTests
 {
     /// <summary>
-    /// Validates that all color schemes follow the blue background rule:
-    /// When background is Cyan, BrightCyan, Blue, or BrightBlue, foreground MUST be Black.
+    /// Validates that all color schemes follow the cyan background rule:
+    /// When background is Cyan or BrightCyan, foreground MUST be Black.
     /// </summary>
     [Fact]
-    public void AllColorSchemes_BlueBackgrounds_MustHaveBlackForeground()
+    public void AllColorSchemes_CyanBackgrounds_MustHaveBlackForeground()
     {
-        var violations = TuiColorPalette.ValidateBlueBackgroundRule().ToList();
+        var violations = TuiColorPalette.ValidateCyanBackgroundRule().ToList();
 
         if (violations.Count > 0)
         {
             var message = string.Join(Environment.NewLine, violations.Select(v =>
                 $"  {v.Scheme}.{v.Attribute}: {v.Foreground} on {v.Background} (should be Black on {v.Background})"));
 
-            Assert.Fail($"Blue background rule violations found:{Environment.NewLine}{message}");
+            Assert.Fail($"Cyan background rule violations found:{Environment.NewLine}{message}");
         }
     }
 
@@ -133,11 +133,11 @@ public class TuiColorPaletteTests
     [InlineData(EnvironmentType.Development)]
     [InlineData(EnvironmentType.Trial)]
     [InlineData(EnvironmentType.Unknown)]
-    public void GetTabScheme_AllInactiveSchemes_PassBlueBackgroundRule(EnvironmentType envType)
+    public void GetTabScheme_AllInactiveSchemes_PassCyanBackgroundRule(EnvironmentType envType)
     {
         var scheme = TuiColorPalette.GetTabScheme(envType, isActive: false);
 
-        Color[] blueBackgrounds = { Color.Cyan, Color.BrightCyan, Color.Blue, Color.BrightBlue };
+        Color[] cyanBackgrounds = { Color.Cyan, Color.BrightCyan };
         var attributes = new[]
         {
             ("Normal", scheme.Normal),
@@ -149,10 +149,10 @@ public class TuiColorPaletteTests
 
         foreach (var (name, attr) in attributes)
         {
-            if (blueBackgrounds.Contains(attr.Background))
+            if (cyanBackgrounds.Contains(attr.Background))
             {
                 Assert.True(attr.Foreground == Color.Black,
-                    $"GetTabScheme({envType}, inactive).{name}: {attr.Foreground} on {attr.Background} violates blue background rule");
+                    $"GetTabScheme({envType}, inactive).{name}: {attr.Foreground} on {attr.Background} violates cyan background rule");
             }
         }
     }

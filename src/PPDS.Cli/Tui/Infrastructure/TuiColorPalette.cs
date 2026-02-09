@@ -16,9 +16,10 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// - Status bar: Context-colored based on environment risk level
 /// </para>
 /// <para>
-/// DESIGN RULE - BLUE BACKGROUNDS: When background is Cyan, BrightCyan, Blue, or BrightBlue,
-/// foreground MUST be Black. No exceptions. White/grey text is unreadable on blue backgrounds.
-/// Use <see cref="ValidateBlueBackgroundRule"/> in unit tests to enforce this rule.
+/// DESIGN RULE - CYAN BACKGROUNDS: When background is Cyan or BrightCyan,
+/// foreground MUST be Black. White/grey text is unreadable on cyan backgrounds.
+/// Blue/BrightBlue backgrounds use White foreground for readability.
+/// Use <see cref="ValidateCyanBackgroundRule"/> in unit tests to enforce this rule.
 /// </para>
 /// </remarks>
 public static class TuiColorPalette
@@ -124,14 +125,14 @@ public static class TuiColorPalette
 
     /// <summary>
     /// Status bar for DEVELOPMENT environments.
-    /// Safe theme - white on green.
+    /// Safe theme - black on green.
     /// </summary>
     public static ColorScheme StatusBar_Development => new()
     {
-        Normal = MakeAttr(Color.White, Color.Green),
-        Focus = MakeAttr(Color.White, Color.BrightGreen),
-        HotNormal = MakeAttr(Color.Black, Color.Green),
-        HotFocus = MakeAttr(Color.Black, Color.BrightGreen),
+        Normal = MakeAttr(Color.Black, Color.Green),
+        Focus = MakeAttr(Color.Black, Color.BrightGreen),
+        HotNormal = MakeAttr(Color.White, Color.Green),
+        HotFocus = MakeAttr(Color.White, Color.BrightGreen),
         Disabled = MakeAttr(Color.DarkGray, Color.Green)
     };
 
@@ -329,11 +330,11 @@ public static class TuiColorPalette
         },
         EnvironmentColor.Blue => new ColorScheme
         {
-            Normal = MakeAttr(Color.Black, Color.Blue),
-            Focus = MakeAttr(Color.Black, Color.BrightBlue),
-            HotNormal = MakeAttr(Color.Black, Color.Blue),
-            HotFocus = MakeAttr(Color.Black, Color.BrightBlue),
-            Disabled = MakeAttr(Color.Black, Color.Blue)
+            Normal = MakeAttr(Color.White, Color.Blue),
+            Focus = MakeAttr(Color.White, Color.BrightBlue),
+            HotNormal = MakeAttr(Color.BrightCyan, Color.Blue),
+            HotFocus = MakeAttr(Color.BrightCyan, Color.BrightBlue),
+            Disabled = MakeAttr(Color.Gray, Color.Blue)
         },
         EnvironmentColor.Gray => StatusBar_Default,
         EnvironmentColor.BrightRed => new ColorScheme
@@ -370,11 +371,11 @@ public static class TuiColorPalette
         },
         EnvironmentColor.BrightBlue => new ColorScheme
         {
-            Normal = MakeAttr(Color.Black, Color.BrightBlue),
-            Focus = MakeAttr(Color.Black, Color.BrightBlue),
-            HotNormal = MakeAttr(Color.Black, Color.BrightBlue),
-            HotFocus = MakeAttr(Color.Black, Color.BrightBlue),
-            Disabled = MakeAttr(Color.Black, Color.BrightBlue)
+            Normal = MakeAttr(Color.White, Color.BrightBlue),
+            Focus = MakeAttr(Color.White, Color.BrightBlue),
+            HotNormal = MakeAttr(Color.BrightCyan, Color.BrightBlue),
+            HotFocus = MakeAttr(Color.BrightCyan, Color.BrightBlue),
+            Disabled = MakeAttr(Color.Gray, Color.BrightBlue)
         },
         EnvironmentColor.White => new ColorScheme
         {
@@ -441,20 +442,21 @@ public static class TuiColorPalette
     }
 
     /// <summary>
-    /// Blue background colors that require black foreground.
+    /// Cyan background colors that require black foreground.
+    /// Blue/BrightBlue use white foreground instead.
     /// </summary>
-    private static readonly Color[] BlueBackgrounds = { Color.Cyan, Color.BrightCyan, Color.Blue, Color.BrightBlue };
+    private static readonly Color[] CyanBackgrounds = { Color.Cyan, Color.BrightCyan };
 
     /// <summary>
-    /// Validates all color schemes follow the blue background rule.
+    /// Validates all color schemes follow the cyan background rule.
     /// Returns a list of violations (scheme name, attribute name, foreground, background).
     /// Used in unit tests to prevent regressions.
     /// </summary>
     /// <remarks>
-    /// DESIGN RULE: When background is Cyan, BrightCyan, Blue, or BrightBlue,
-    /// foreground MUST be Black. No exceptions.
+    /// DESIGN RULE: When background is Cyan or BrightCyan,
+    /// foreground MUST be Black. Blue/BrightBlue use White foreground.
     /// </remarks>
-    public static IEnumerable<(string Scheme, string Attribute, Color Foreground, Color Background)> ValidateBlueBackgroundRule()
+    public static IEnumerable<(string Scheme, string Attribute, Color Foreground, Color Background)> ValidateCyanBackgroundRule()
     {
         var schemes = new (string Name, ColorScheme Scheme)[]
         {
@@ -502,7 +504,7 @@ public static class TuiColorPalette
             var bg = attr.Background;
             var fg = attr.Foreground;
 
-            if (BlueBackgrounds.Contains(bg) && fg != Color.Black)
+            if (CyanBackgrounds.Contains(bg) && fg != Color.Black)
             {
                 yield return (schemeName, attrName, fg, bg);
             }
