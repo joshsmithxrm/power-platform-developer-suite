@@ -336,7 +336,7 @@ public static class AuthCommandGroup
             Console.Error.WriteLine($"Authenticating with {authMethod}...");
             Console.Error.WriteLine();
 
-            ICredentialProvider provider = authMethod switch
+            using ICredentialProvider provider = authMethod switch
             {
                 AuthMethod.InteractiveBrowser => new InteractiveBrowserCredentialProvider(options.Cloud, options.Tenant),
                 AuthMethod.DeviceCode => new DeviceCodeCredentialProvider(options.Cloud, options.Tenant),
@@ -470,10 +470,6 @@ public static class AuthCommandGroup
                 await CleanupCredentialsAsync();
                 Console.Error.WriteLine($"Error: Authentication failed: {ex.Message}");
                 return ExitCodes.Failure;
-            }
-            finally
-            {
-                provider.Dispose();
             }
 
             // Add to collection (auto-selects if first profile)

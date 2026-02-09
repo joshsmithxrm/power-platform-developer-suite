@@ -21,7 +21,6 @@ internal sealed class PpdsApplication : IDisposable
 
     private readonly string? _profileName;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
-    private ServiceProvider? _authProvider;
     private ProfileStore? _profileStore;
     private InteractiveSession? _session;
     private bool _disposed;
@@ -45,8 +44,8 @@ internal sealed class PpdsApplication : IDisposable
         TuiDebugLog.Log("TUI session starting");
 
         // Create shared auth service provider for ProfileStore and EnvironmentConfigStore
-        _authProvider = ProfileServiceFactory.CreateLocalProvider();
-        _profileStore = _authProvider.GetRequiredService<ProfileStore>();
+        using var authProvider = ProfileServiceFactory.CreateLocalProvider();
+        _profileStore = authProvider.GetRequiredService<ProfileStore>();
 
         // Callback invoked before browser opens for interactive authentication.
         // Shows a dialog giving user control: Open Browser, Use Device Code, or Cancel.
@@ -92,7 +91,7 @@ internal sealed class PpdsApplication : IDisposable
         _session = new InteractiveSession(
             _profileName,
             _profileStore,
-            _authProvider.GetRequiredService<EnvironmentConfigStore>(),
+            authProvider.GetRequiredService<EnvironmentConfigStore>(),
             serviceProviderFactory: null,
             _deviceCodeCallback,
             beforeInteractiveAuth);
@@ -207,7 +206,6 @@ internal sealed class PpdsApplication : IDisposable
                     _sessionDisposed = true;
                 }
             }
-            _authProvider?.Dispose();
 #pragma warning restore PPDS012
         }
     }
