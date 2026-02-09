@@ -1,0 +1,25 @@
+namespace PPDS.Dataverse.Sql.Intellisense;
+
+/// <summary>
+/// The kind of completion item in SQL IntelliSense results.
+/// </summary>
+public enum SqlCompletionKind
+{
+    /// <summary>SQL keyword (SELECT, WHERE, JOIN, etc.).</summary>
+    Keyword,
+
+    /// <summary>Entity/table name from Dataverse metadata.</summary>
+    Entity,
+
+    /// <summary>Attribute/column name from Dataverse metadata.</summary>
+    Attribute,
+
+    /// <summary>Built-in SQL function (COUNT, SUM, etc.).</summary>
+    Function,
+
+    /// <summary>Option set value for picklist attributes.</summary>
+    OptionSetValue,
+
+    /// <summary>JOIN clause template (INNER JOIN, LEFT JOIN, etc.).</summary>
+    JoinClause
+}

@@ -10,6 +10,7 @@ using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Services;
@@ -48,6 +49,13 @@ public static class ServiceRegistration
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var logger = sp.GetRequiredService<ILogger<PluginRegistrationService>>();
             return new PluginRegistrationService(pool, logger);
+        });
+
+        // SQL language service - uses ICachedMetadataProvider when available
+        services.AddTransient<ISqlLanguageService>(sp =>
+        {
+            var metadataProvider = sp.GetService<ICachedMetadataProvider>();
+            return new SqlLanguageService(metadataProvider);
         });
 
         // TUI theming
