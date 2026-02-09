@@ -46,8 +46,6 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Integration (live): `--filter Category=Integration`
 - TUI: `--filter Category=TuiUnit`
 
-See `docs/specs/` for testing strategy.
-
 ## Architecture
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.

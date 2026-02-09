@@ -22,6 +22,7 @@ internal sealed class PpdsApplication : IDisposable
     private ProfileStore? _profileStore;
     private InteractiveSession? _session;
     private bool _disposed;
+    private bool _sessionDisposed;
 
     public PpdsApplication(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback)
     {
@@ -193,6 +194,7 @@ internal sealed class PpdsApplication : IDisposable
                 else
                 {
                     TuiDebugLog.Log("Session disposed successfully");
+                    _sessionDisposed = true;
                 }
             }
 #pragma warning restore PPDS012
@@ -204,7 +206,7 @@ internal sealed class PpdsApplication : IDisposable
         if (_disposed) return;
         _disposed = true;
 #pragma warning disable PPDS012 // IDisposable.Dispose must be synchronous
-        if (_session != null)
+        if (_session != null && !_sessionDisposed)
         {
             var disposeTask = _session.DisposeAsync().AsTask();
             disposeTask.Wait(SessionDisposeTimeout); // Don't hang forever

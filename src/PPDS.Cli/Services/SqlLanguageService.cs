@@ -80,8 +80,19 @@ public sealed class SqlLanguageService : ISqlLanguageService
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<SqlDiagnostic>> ValidateAsync(string sql, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SqlDiagnostic>> ValidateAsync(string sql, CancellationToken ct = default)
     {
-        return _validator.ValidateAsync(sql, ct);
+        try
+        {
+            return await _validator.ValidateAsync(sql, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.ValidationFailed,
+                "Failed to validate SQL.",
+                ex);
+        }
     }
 }

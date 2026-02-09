@@ -758,6 +758,8 @@ internal sealed class SyntaxHighlightedTextView : TextView
     {
         if (disposing)
         {
+            _autocompletePopup.CompletionAccepted -= OnCompletionAccepted;
+
             _completionCts?.Cancel();
             _completionCts?.Dispose();
             _completionCts = null;

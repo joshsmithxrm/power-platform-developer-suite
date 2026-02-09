@@ -171,6 +171,9 @@ public static class ErrorCodes
 
         /// <summary>IntelliSense completion lookup failed.</summary>
         public const string CompletionFailed = "Query.CompletionFailed";
+
+        /// <summary>SQL validation failed.</summary>
+        public const string ValidationFailed = "Query.ValidationFailed";
     }
 
     /// <summary>
