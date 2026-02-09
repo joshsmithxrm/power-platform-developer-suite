@@ -183,7 +183,7 @@ public static class DateFunctions
                 "month" => dt.Value.AddMonths(number),
                 "day" => dt.Value.AddDays(number),
                 "dayofyear" => dt.Value.AddDays(number),
-                "week" => dt.Value.AddDays(number * 7),
+                "week" => dt.Value.AddDays((double)number * 7),
                 "hour" => dt.Value.AddHours(number),
                 "minute" => dt.Value.AddMinutes(number),
                 "second" => dt.Value.AddSeconds(number),

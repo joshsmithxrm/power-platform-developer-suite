@@ -276,9 +276,11 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
 
     private static bool MatchesFilter(EnvironmentSummary env, string filter)
     {
-        return (env.DisplayName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (env.Url?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (env.Type?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
+        var matchesDisplayName = env.DisplayName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false;
+        var matchesUrl = env.Url?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false;
+        var matchesType = env.Type?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false;
+
+        return matchesDisplayName || matchesUrl || matchesType;
     }
 
     private void UpdateListView()

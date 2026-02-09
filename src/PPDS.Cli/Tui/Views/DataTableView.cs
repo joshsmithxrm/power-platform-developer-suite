@@ -136,7 +136,7 @@ internal class DataTableView : FrameView
             };
             _filterField.TextChanged += OnFilterTextChanged;
             _filterFrame.Add(_filterField);
-            Add(_filterFrame);
+            Add(_filterFrame); // CodeQL [cs/virtual-call-in-constructor] Terminal.Gui requires Add() during construction
         }
 
         // Table view

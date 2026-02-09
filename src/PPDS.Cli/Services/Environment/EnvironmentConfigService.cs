@@ -82,6 +82,7 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
             return config.Color.Value;
 
         // Priority 2: type-based color (resolve type first)
+        // CodeQL [cs/constant-condition] config?.Type is nullable; both branches of ?? are reachable
         var type = config?.Type ?? DetectTypeFromUrl(url);
         if (type != null)
         {

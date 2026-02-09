@@ -81,7 +81,7 @@ public sealed class CachedMetadataProvider : ICachedMetadataProvider, IDisposabl
         await _entityLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Double-check after lock
+            // Double-check after lock — CodeQL [cs/constant-condition] this is the standard double-check-lock pattern
             cached = _entities;
             if (cached != null)
                 return cached;

@@ -109,6 +109,7 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
             // username/password auth for environments where interactive auth isn't viable.
             // Revisit if Microsoft announces removal: https://aka.ms/msal-ropc-migration
 #pragma warning disable CS0618 // AcquireTokenByUsernamePassword is obsolete
+            // CodeQL [cs/call-to-obsolete-method] ROPC is the only auth flow for non-interactive username/password scenarios
             _cachedResult = await _msalClient!
                 .AcquireTokenByUsernamePassword(scopes, _username, _password)
                 .ExecuteAsync(cancellationToken)

@@ -24,6 +24,9 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     /// </summary>
     public bool ConfigChanged { get; private set; }
 
+    /// <summary>
+    /// Creates a new environment configuration dialog for setting label, type, and color.
+    /// </summary>
     /// <param name="session">The interactive session.</param>
     /// <param name="environmentUrl">The environment URL to configure.</param>
     /// <param name="currentDisplayName">Optional display name for the URL header.</param>

@@ -955,7 +955,7 @@ namespace PPDS.Dataverse.Pooling
                 ServicePointManager.UseNagleAlgorithm = false;
 #pragma warning restore SYSLIB0014
 
-                _performanceSettingsApplied = true;
+                _performanceSettingsApplied = true; // CodeQL [cs/static-field-written-by-instance] Intentional: performance settings are process-global, guarded by static lock
                 _logger.LogDebug("Applied performance settings for high-throughput operations");
             }
         }
