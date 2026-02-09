@@ -22,6 +22,7 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly ITdsQueryExecutor? _tdsQueryExecutor;
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
+    private readonly int _poolCapacity;
     private readonly QueryPlanner _planner;
     private readonly PlanExecutor _planExecutor;
     private readonly DmlSafetyGuard _dmlSafetyGuard = new();
@@ -33,16 +34,19 @@ public sealed class SqlQueryService : ISqlQueryService
     /// <param name="tdsQueryExecutor">Optional TDS Endpoint executor for direct SQL execution.</param>
     /// <param name="bulkOperationExecutor">Optional bulk operation executor for DML statements.</param>
     /// <param name="metadataQueryExecutor">Optional metadata query executor for metadata virtual tables.</param>
+    /// <param name="poolCapacity">Connection pool parallelism capacity for aggregate partitioning.</param>
     public SqlQueryService(
         IQueryExecutor queryExecutor,
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
-        IMetadataQueryExecutor? metadataQueryExecutor = null)
+        IMetadataQueryExecutor? metadataQueryExecutor = null,
+        int poolCapacity = 1)
     {
         _queryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         _tdsQueryExecutor = tdsQueryExecutor;
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
+        _poolCapacity = poolCapacity;
         _planner = new QueryPlanner();
         _planExecutor = new PlanExecutor();
     }
@@ -113,6 +117,11 @@ public sealed class SqlQueryService : ISqlQueryService
             dmlRowCap = safetyResult.RowCap;
         }
 
+        // For aggregate queries, fetch metadata needed for partitioning decisions.
+        // This enables the planner to partition large aggregates across the pool.
+        var (estimatedRecordCount, minDate, maxDate) =
+            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
+
         // Build execution plan via QueryPlanner
         var planOptions = new QueryPlanOptions
         {
@@ -123,7 +132,11 @@ public sealed class SqlQueryService : ISqlQueryService
             UseTdsEndpoint = request.UseTdsEndpoint,
             OriginalSql = request.Sql,
             TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap
+            DmlRowCap = dmlRowCap,
+            PoolCapacity = _poolCapacity,
+            EstimatedRecordCount = estimatedRecordCount,
+            MinDate = minDate,
+            MaxDate = maxDate
         };
 
         var planResult = _planner.Plan(statement, planOptions);
@@ -229,6 +242,10 @@ public sealed class SqlQueryService : ISqlQueryService
             dmlRowCap = safetyResult.RowCap;
         }
 
+        // For aggregate queries, fetch metadata needed for partitioning decisions.
+        var (estimatedRecordCount, minDate, maxDate) =
+            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
+
         // Build execution plan via QueryPlanner
         var planOptions = new QueryPlanOptions
         {
@@ -239,7 +256,11 @@ public sealed class SqlQueryService : ISqlQueryService
             UseTdsEndpoint = request.UseTdsEndpoint,
             OriginalSql = request.Sql,
             TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap
+            DmlRowCap = dmlRowCap,
+            PoolCapacity = _poolCapacity,
+            EstimatedRecordCount = estimatedRecordCount,
+            MinDate = minDate,
+            MaxDate = maxDate
         };
 
         var planResult = _planner.Plan(statement, planOptions);
@@ -303,6 +324,30 @@ public sealed class SqlQueryService : ISqlQueryService
             IsComplete = true,
             TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
         };
+    }
+
+    /// <summary>
+    /// Fetches estimated record count and date range for aggregate queries.
+    /// Returns nulls for non-aggregate statements (no metadata fetch needed).
+    /// The two metadata calls run in parallel via Task.WhenAll.
+    /// </summary>
+    private async Task<(long? EstimatedRecordCount, DateTime? MinDate, DateTime? MaxDate)> FetchAggregateMetadataAsync(
+        ISqlStatement statement,
+        CancellationToken cancellationToken)
+    {
+        if (statement is SqlSelectStatement select && select.HasAggregates())
+        {
+            var entityName = select.GetEntityName();
+            var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
+            var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
+            await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+
+            var count = await countTask.ConfigureAwait(false);
+            var dateRange = await dateTask.ConfigureAwait(false);
+            return (count, dateRange.Min, dateRange.Max);
+        }
+
+        return (null, null, null);
     }
 
     private static IReadOnlyList<QueryColumn> InferColumnsFromRow(QueryRow row)

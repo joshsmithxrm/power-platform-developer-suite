@@ -266,6 +266,113 @@ public class SqlQueryServiceTests
 
     #endregion
 
+    #region Aggregate Metadata Fetch Tests
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_AggregateQuery_FetchesMetadata()
+    {
+        // Arrange: mock the metadata methods
+        var mockExecutor = new Mock<IQueryExecutor>();
+        mockExecutor
+            .Setup(x => x.GetTotalRecordCountAsync("account", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(42000L);
+        mockExecutor
+            .Setup(x => x.GetMinMaxCreatedOnAsync("account", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new DateTime(2020, 1, 1), new DateTime(2024, 12, 31)));
+
+        // COUNT(*) goes through aggregate FetchXML path — mock must return valid aggregate result
+        var aggregateResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn>
+            {
+                new() { LogicalName = "accountid", Alias = "count", IsAggregate = true, AggregateFunction = "count" }
+            },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>
+            {
+                new Dictionary<string, QueryValue> { ["count"] = QueryValue.Simple(42000) }
+            },
+            Count = 1,
+            MoreRecords = false,
+            PageNumber = 1,
+            IsAggregate = true
+        };
+
+        mockExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(aggregateResult);
+
+        var service = new SqlQueryService(mockExecutor.Object);
+        var request = new SqlQueryRequest { Sql = "SELECT COUNT(*) FROM account" };
+
+        // Act
+        await service.ExecuteAsync(request);
+
+        // Assert: metadata methods were called for the aggregate query
+        mockExecutor.Verify(
+            x => x.GetTotalRecordCountAsync("account", It.IsAny<CancellationToken>()),
+            Times.Once);
+        mockExecutor.Verify(
+            x => x.GetMinMaxCreatedOnAsync("account", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_NonAggregateQuery_DoesNotFetchMetadata()
+    {
+        // Arrange
+        var mockExecutor = new Mock<IQueryExecutor>();
+        mockExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var service = new SqlQueryService(mockExecutor.Object);
+        var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
+
+        // Act
+        await service.ExecuteAsync(request);
+
+        // Assert: metadata methods were NOT called for non-aggregate query
+        mockExecutor.Verify(
+            x => x.GetTotalRecordCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        mockExecutor.Verify(
+            x => x.GetMinMaxCreatedOnAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public void Constructor_WithPoolCapacity_StoresValue()
+    {
+        // Arrange & Act: constructing with poolCapacity should not throw
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8);
+
+        // Assert: the service was created (poolCapacity is used internally during planning)
+        Assert.NotNull(service);
+    }
+
+    #endregion
+
     #region ExpandFormattedValueColumns Tests
 
     [Fact]

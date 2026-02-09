@@ -10,8 +10,10 @@ using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
 
 namespace PPDS.Cli.Services;
 
@@ -36,8 +38,21 @@ public static class ServiceRegistration
         services.AddTransient<IProfileService, ProfileService>();
         services.AddTransient<IEnvironmentService, EnvironmentService>();
 
-        // Query services
-        services.AddTransient<ISqlQueryService, SqlQueryService>();
+        // Query services — factory delegate provides pool capacity for aggregate partitioning
+        services.AddTransient<ISqlQueryService>(sp =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
+            var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
+            var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            return new SqlQueryService(
+                queryExecutor,
+                tdsExecutor,
+                bulkExecutor,
+                metadataExecutor,
+                pool.GetTotalRecommendedParallelism());
+        });
         services.AddSingleton<IQueryHistoryService, QueryHistoryService>();
 
         // Export services
