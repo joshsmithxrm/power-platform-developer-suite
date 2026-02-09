@@ -342,7 +342,7 @@ public static class TuiColorPalette
     /// </summary>
     private static readonly Dictionary<SourceTokenType, Terminal.Gui.Attribute> SqlSyntaxMap = new()
     {
-        [SourceTokenType.Keyword] = MakeAttr(Color.BrightBlue, Color.Black),
+        [SourceTokenType.Keyword] = MakeAttr(Color.BrightCyan, Color.Black),
         [SourceTokenType.Function] = MakeAttr(Color.Magenta, Color.Black),
         [SourceTokenType.StringLiteral] = MakeAttr(Color.Red, Color.Black),
         [SourceTokenType.NumericLiteral] = MakeAttr(Color.Cyan, Color.Black),

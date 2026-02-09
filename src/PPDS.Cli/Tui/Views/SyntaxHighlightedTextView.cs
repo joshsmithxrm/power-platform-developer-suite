@@ -616,7 +616,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 // Highlight cursor position with DarkGray background, preserving syntax foreground
                 if (hasFocus && screenRow == cursorScreenRow && screenCol == cursorScreenCol)
                 {
-                    attr = Driver.MakeAttribute(attr.Foreground, Color.DarkGray);
+                    attr = Driver.MakeAttribute(attr.Foreground, Color.Gray);
                 }
 
                 Driver.SetAttribute(attr);
@@ -645,7 +645,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 for (int c = screenCol; c < bounds.Width; c++)
                 {
                     if (hasFocus && screenRow == cursorScreenRow && c == cursorScreenCol)
-                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.DarkGray));
+                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.Gray));
                     else
                         Driver.SetAttribute(_defaultAttr);
                     AddRune(c, screenRow, ' ');
@@ -664,7 +664,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 for (int c = 0; c < bounds.Width; c++)
                 {
                     if (hasFocus && r == cursorScreenRow && c == cursorScreenCol)
-                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.DarkGray));
+                        Driver.SetAttribute(Driver.MakeAttribute(Color.White, Color.Gray));
                     else
                         Driver.SetAttribute(_defaultAttr);
                     AddRune(c, r, ' ');
