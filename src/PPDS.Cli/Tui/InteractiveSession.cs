@@ -138,6 +138,9 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         TuiDebugLog.Log($"Initializing session with profile filter: '{_profileName}'");
 
+        // Pre-load environment config so sync-over-async calls in UI thread are cache hits
+        await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
             ? collection.ActiveProfile
