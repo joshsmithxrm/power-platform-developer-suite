@@ -26,14 +26,27 @@ internal static class SqlQueryResultExpander
 
     /// <summary>
     /// Expands a QueryResult to include *name columns for lookups, optionsets, and booleans.
+    /// Aggregate results are returned as-is — aggregate aliases (COUNT, SUM, etc.) are not
+    /// entity attributes and their Dataverse FormattedValues are locale-formatted numbers,
+    /// not meaningful optionset/lookup labels.
     /// </summary>
     /// <param name="result">The original query result.</param>
     /// <param name="virtualColumns">Virtual columns detected by the transpiler.</param>
+    /// <param name="isAggregate">When true, skip all *name expansion.</param>
     /// <returns>A new QueryResult with expanded columns.</returns>
     public static QueryResult ExpandFormattedValueColumns(
         QueryResult result,
-        IReadOnlyDictionary<string, VirtualColumnInfo>? virtualColumns = null)
+        IReadOnlyDictionary<string, VirtualColumnInfo>? virtualColumns = null,
+        bool isAggregate = false)
     {
+        // Aggregate aliases are not entity attributes — their FormattedValues are
+        // locale-formatted numbers (e.g. "43,711"), not optionset labels. Expanding
+        // them would produce spurious *name columns like count_1name.
+        if (isAggregate)
+        {
+            return result;
+        }
+
         virtualColumns ??= new Dictionary<string, VirtualColumnInfo>();
 
         if (result.Records.Count == 0 && virtualColumns.Count == 0)

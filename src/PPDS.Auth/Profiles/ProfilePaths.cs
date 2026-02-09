@@ -24,6 +24,11 @@ public static class ProfilePaths
     public const string ProfilesFileName = "profiles.json";
 
     /// <summary>
+    /// Environment configuration file name.
+    /// </summary>
+    public const string EnvironmentsFileName = "environments.json";
+
+    /// <summary>
     /// MSAL token cache file name.
     /// </summary>
     public const string TokenCacheFileName = "msal_token_cache.bin";
@@ -69,6 +74,11 @@ public static class ProfilePaths
     /// Gets the full path to the profiles file.
     /// </summary>
     public static string ProfilesFile => Path.Combine(DataDirectory, ProfilesFileName);
+
+    /// <summary>
+    /// Gets the full path to the environment configuration file.
+    /// </summary>
+    public static string EnvironmentsFile => Path.Combine(DataDirectory, EnvironmentsFileName);
 
     /// <summary>
     /// Gets the full path to the MSAL token cache file.

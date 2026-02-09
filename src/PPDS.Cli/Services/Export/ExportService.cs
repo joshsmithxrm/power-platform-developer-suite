@@ -10,9 +10,6 @@ namespace PPDS.Cli.Services.Export;
 /// <summary>
 /// Application service for exporting query results to various formats.
 /// </summary>
-/// <remarks>
-/// See ADR-0015 for architectural context.
-/// </remarks>
 public sealed class ExportService : IExportService
 {
     private readonly ILogger<ExportService> _logger;

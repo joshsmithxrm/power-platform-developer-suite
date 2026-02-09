@@ -22,12 +22,10 @@ public class ConnectionStringSourceTests
             MaxPoolSize = 15
         };
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         Assert.Equal("TestConnection", source.Name);
         Assert.Equal(15, source.MaxPoolSize);
-
-        source.Dispose();
     }
 
     [Fact]
@@ -35,11 +33,9 @@ public class ConnectionStringSourceTests
     {
         var config = new DataverseConnection("MySource");
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         Assert.Equal("MySource", source.Name);
-
-        source.Dispose();
     }
 
     [Fact]
@@ -50,11 +46,9 @@ public class ConnectionStringSourceTests
             MaxPoolSize = 25
         };
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         Assert.Equal(25, source.MaxPoolSize);
-
-        source.Dispose();
     }
 
     [Fact]
@@ -68,13 +62,11 @@ public class ConnectionStringSourceTests
             // Missing ClientSecret
         };
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         // GetSeedClient should throw because secret is required for ClientSecret auth
         var ex = Assert.Throws<DataverseConnectionException>(() => source.GetSeedClient());
         Assert.Contains("Invalid", ex.ConnectionName);
-
-        source.Dispose();
     }
 
     [Fact]
@@ -124,12 +116,10 @@ public class ConnectionStringSourceTests
             // Missing Url
         };
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         var ex = Assert.Throws<DataverseConnectionException>(() => source.GetSeedClient());
         Assert.Equal("NoUrl", ex.ConnectionName);
-
-        source.Dispose();
     }
 
     [Fact]
@@ -142,11 +132,9 @@ public class ConnectionStringSourceTests
             // Missing ClientId
         };
 
-        var source = new ConnectionStringSource(config);
+        using var source = new ConnectionStringSource(config);
 
         var ex = Assert.Throws<DataverseConnectionException>(() => source.GetSeedClient());
         Assert.Equal("NoClientId", ex.ConnectionName);
-
-        source.Dispose();
     }
 }

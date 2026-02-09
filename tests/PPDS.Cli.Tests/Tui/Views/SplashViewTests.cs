@@ -52,4 +52,37 @@ public sealed class SplashViewTests
         // Version should contain at least a major.minor pattern
         Assert.Matches(@"\d+\.\d+", state.Version);
     }
+
+    [Fact]
+    public void SetReady_AfterSetStatus_TransitionsCorrectly()
+    {
+        var splash = new SplashView();
+
+        // Simulate init progress
+        splash.SetStatus("Connecting...");
+        var midState = splash.CaptureState();
+        Assert.Equal("Connecting...", midState.StatusMessage);
+        Assert.False(midState.IsReady);
+
+        // Simulate init complete
+        splash.SetReady();
+        var readyState = splash.CaptureState();
+        Assert.True(readyState.IsReady);
+        Assert.False(readyState.SpinnerActive);
+        Assert.Equal("Ready", readyState.StatusMessage);
+    }
+
+    [Fact]
+    public void SetStatus_AfterSetReady_IsIgnored()
+    {
+        var splash = new SplashView();
+
+        splash.SetReady();
+        splash.SetStatus("Should not revert ready");
+        var state = splash.CaptureState();
+
+        // SetStatus is a no-op after SetReady — message stays "Ready"
+        Assert.True(state.IsReady);
+        Assert.Equal("Ready", state.StatusMessage);
+    }
 }

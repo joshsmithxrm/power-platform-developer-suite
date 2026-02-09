@@ -265,8 +265,8 @@ public sealed class McpConnectionPoolManagerTests
         // Arrange - create manager with mock profile loader that returns empty collection
         var emptyCollection = new ProfileCollection();
         await using var manager = new McpConnectionPoolManager(
-            NullLoggerFactory.Instance,
-            _ => Task.FromResult(emptyCollection));
+            loggerFactory: NullLoggerFactory.Instance,
+            loadProfilesAsync: _ => Task.FromResult(emptyCollection));
 
         // Act
         Func<Task> act = () => manager.GetOrCreatePoolAsync(
@@ -285,8 +285,8 @@ public sealed class McpConnectionPoolManagerTests
         var hangingLoader = new TaskCompletionSource<ProfileCollection>();
 
         await using var manager = new McpConnectionPoolManager(
-            NullLoggerFactory.Instance,
-            _ => hangingLoader.Task,
+            loggerFactory: NullLoggerFactory.Instance,
+            loadProfilesAsync: _ => hangingLoader.Task,
             poolCreationTimeout: TimeSpan.FromMilliseconds(50)); // Very short timeout
 
         // Act

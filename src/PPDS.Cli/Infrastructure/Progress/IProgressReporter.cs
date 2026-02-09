@@ -6,7 +6,6 @@ namespace PPDS.Cli.Infrastructure.Progress;
 /// <remarks>
 /// Services accept this interface for operations expected to take more than ~1 second.
 /// Each UI (CLI, TUI, RPC) provides its own adapter implementation.
-/// See ADR-0025 for architectural context.
 /// </remarks>
 public interface IProgressReporter
 {

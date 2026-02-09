@@ -1,6 +1,8 @@
 using System.Data;
 using System.Net.Http;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Tui.Helpers;
+using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Query;
 using Terminal.Gui;
 
@@ -102,6 +104,8 @@ internal sealed class QueryResultsTableView : FrameView
 
         Add(_tableView, _statusLabel, _emptyStateLabel);
         SetupKeyboardShortcuts();
+
+        _tableView.SelectedCellChanged += (e) => UpdateStatus();
     }
 
     /// <summary>
@@ -177,6 +181,86 @@ internal sealed class QueryResultsTableView : FrameView
         MoreRecordsAvailable = result.MoreRecords;
         PagingCookie = result.PagingCookie;
         CurrentPageNumber = result.PageNumber;
+
+        _tableView.SetNeedsDisplay();
+        UpdateStatus();
+    }
+
+    /// <summary>
+    /// Initializes the table with column metadata for streaming results.
+    /// Call this before <see cref="AppendStreamingRows"/> to set up column headers.
+    /// </summary>
+    /// <param name="columns">The column metadata from the first streaming chunk.</param>
+    /// <param name="entityLogicalName">The entity logical name for building record URLs.</param>
+    public void InitializeStreamingColumns(IReadOnlyList<QueryColumn> columns, string entityLogicalName)
+    {
+        _unfilteredDataTable = null;
+        _currentFilter = null;
+
+        var table = new DataTable();
+        var columnTypes = new Dictionary<string, QueryColumnType>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var column in columns)
+        {
+            var name = column.LogicalName;
+            var uniqueName = name;
+            var counter = 1;
+            while (!usedNames.Add(uniqueName))
+            {
+                uniqueName = $"{name}_{counter++}";
+            }
+            table.Columns.Add(uniqueName, typeof(string));
+            columnTypes[uniqueName] = column.DataType;
+        }
+
+        _dataTable = table;
+        _columnTypes = columnTypes;
+        _tableView.Table = _dataTable;
+
+        // Store a synthetic last result for URL building
+        _lastResult = new QueryResult
+        {
+            EntityLogicalName = entityLogicalName,
+            Columns = columns,
+            Records = Array.Empty<IReadOnlyDictionary<string, QueryValue>>(),
+            Count = 0
+        };
+
+        _emptyStateLabel.Visible = false;
+    }
+
+    /// <summary>
+    /// Appends a batch of rows from a streaming chunk.
+    /// Call <see cref="InitializeStreamingColumns"/> first to set up column headers.
+    /// </summary>
+    /// <param name="rows">The row data to append.</param>
+    /// <param name="columns">The column metadata (used for column name ordering).</param>
+    public void AppendStreamingRows(
+        IReadOnlyList<IReadOnlyDictionary<string, QueryValue>> rows,
+        IReadOnlyList<QueryColumn> columns)
+    {
+        var isFirstBatch = _dataTable.Rows.Count == 0;
+
+        foreach (var record in rows)
+        {
+            var row = _dataTable.NewRow();
+            for (int i = 0; i < columns.Count && i < _dataTable.Columns.Count; i++)
+            {
+                var column = columns[i];
+                if (record.TryGetValue(column.LogicalName, out var value))
+                {
+                    row[i] = QueryResultConverter.FormatValue(value);
+                }
+            }
+            _dataTable.Rows.Add(row);
+        }
+
+        // Only apply column sizing on the first batch (expensive operation)
+        if (isFirstBatch)
+        {
+            ApplyColumnSizing();
+        }
 
         _tableView.SetNeedsDisplay();
         UpdateStatus();
@@ -282,7 +366,12 @@ internal sealed class QueryResultsTableView : FrameView
             switch (e.KeyEvent.Key)
             {
                 case Key.CtrlMask | Key.C:
-                    CopySelectedCell();
+                    HandleCopy(invertHeaders: false);
+                    e.Handled = true;
+                    break;
+
+                case Key.CtrlMask | Key.ShiftMask | Key.C:
+                    HandleCopy(invertHeaders: true);
                     e.Handled = true;
                     break;
 
@@ -343,6 +432,10 @@ internal sealed class QueryResultsTableView : FrameView
         {
             await LoadMoreRequested.Invoke();
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is expected during navigation away; silently ignore
+        }
         catch (InvalidOperationException ex)
         {
             ShowTemporaryStatus($"Error loading: {ex.Message}");
@@ -351,38 +444,21 @@ internal sealed class QueryResultsTableView : FrameView
         {
             ShowTemporaryStatus($"Network error: {ex.Message}");
         }
+        catch (Exception ex)
+        {
+            ShowTemporaryStatus($"Error: {ex.Message}");
+            TuiDebugLog.Log($"LoadMoreAsync error: {ex}");
+        }
         finally
         {
             _isLoadingMore = false;
         }
     }
 
-    private void CopySelectedCell()
+    private void HandleCopy(bool invertHeaders)
     {
-        if (_tableView.Table == null || _tableView.SelectedRow < 0)
-        {
-            ShowTemporaryStatus("No cell selected");
-            return;
-        }
-
-        var row = _tableView.SelectedRow;
-        var col = _tableView.SelectedColumn;
-
-        if (row >= 0 && row < _tableView.Table.Rows.Count &&
-            col >= 0 && col < _tableView.Table.Columns.Count)
-        {
-            var value = _tableView.Table.Rows[row][col]?.ToString() ?? string.Empty;
-
-            if (ClipboardHelper.CopyToClipboard(value))
-            {
-                var displayValue = value.Length > 40 ? value[..37] + "..." : value;
-                ShowTemporaryStatus($"Copied: {displayValue}");
-            }
-            else
-            {
-                ShowTemporaryStatus($"Copy failed. Value: {value}");
-            }
-        }
+        var result = TableCopyHelper.CopySelection(_tableView, _dataTable, invertHeaders);
+        ShowTemporaryStatus(result.StatusMessage);
     }
 
     private void CopyRecordUrl()
@@ -466,8 +542,10 @@ internal sealed class QueryResultsTableView : FrameView
             ? $" (filtered: {displayCount} of {sourceCount})"
             : "";
 
+        var copyHint = TableCopyHelper.GetCopyHint(_tableView);
+
         _statusLabel.TextAlignment = TextAlignment.Left;
-        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | Ctrl+C: copy | Ctrl+U: copy URL | Ctrl+O: open";
+        _statusLabel.Text = $"{displayCount} rows{filterText}{moreText}{guidText} | {copyHint}";
     }
 
     /// <summary>
@@ -488,7 +566,7 @@ internal sealed class QueryResultsTableView : FrameView
             Application.MainLoop?.Invoke(() =>
             {
                 // Only restore if this token is still active (not superseded by another message)
-                if (_statusRestoreToken == token)
+                if (ReferenceEquals(_statusRestoreToken, token))
                 {
                     UpdateStatus();
                 }

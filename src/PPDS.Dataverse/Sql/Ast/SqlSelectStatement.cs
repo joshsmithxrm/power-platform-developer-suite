@@ -7,8 +7,11 @@ namespace PPDS.Dataverse.Sql.Ast;
 /// <summary>
 /// Complete SQL SELECT statement AST.
 /// </summary>
-public sealed class SqlSelectStatement
+public sealed class SqlSelectStatement : ISqlStatement
 {
+    /// <inheritdoc />
+    public int SourcePosition { get; }
+
     /// <summary>
     /// The columns in the SELECT clause.
     /// </summary>
@@ -45,9 +48,20 @@ public sealed class SqlSelectStatement
     public bool Distinct { get; }
 
     /// <summary>
-    /// The GROUP BY columns.
+    /// The GROUP BY columns (simple column references).
     /// </summary>
     public IReadOnlyList<SqlColumnRef> GroupBy { get; }
+
+    /// <summary>
+    /// GROUP BY expressions that are function calls (e.g., YEAR(createdon), MONTH(createdon)).
+    /// These are used for FetchXML dategrouping pushdown. Empty when GROUP BY has only simple columns.
+    /// </summary>
+    public IReadOnlyList<ISqlExpression> GroupByExpressions { get; }
+
+    /// <summary>
+    /// The HAVING clause condition, if present.
+    /// </summary>
+    public ISqlCondition? Having { get; }
 
     /// <summary>
     /// Comments that appear before the SELECT keyword.
@@ -65,7 +79,10 @@ public sealed class SqlSelectStatement
         IReadOnlyList<SqlOrderByItem>? orderBy = null,
         int? top = null,
         bool distinct = false,
-        IReadOnlyList<SqlColumnRef>? groupBy = null)
+        IReadOnlyList<SqlColumnRef>? groupBy = null,
+        ISqlCondition? having = null,
+        int sourcePosition = 0,
+        IReadOnlyList<ISqlExpression>? groupByExpressions = null)
     {
         Columns = columns ?? throw new ArgumentNullException(nameof(columns));
         From = from ?? throw new ArgumentNullException(nameof(from));
@@ -75,6 +92,9 @@ public sealed class SqlSelectStatement
         Top = top;
         Distinct = distinct;
         GroupBy = groupBy ?? Array.Empty<SqlColumnRef>();
+        GroupByExpressions = groupByExpressions ?? Array.Empty<ISqlExpression>();
+        Having = having;
+        SourcePosition = sourcePosition;
     }
 
     /// <summary>
@@ -145,7 +165,10 @@ public sealed class SqlSelectStatement
             OrderBy,
             top,
             Distinct,
-            GroupBy);
+            GroupBy,
+            Having,
+            SourcePosition,
+            GroupByExpressions);
         newStatement.LeadingComments.AddRange(LeadingComments);
         return newStatement;
     }
@@ -173,7 +196,10 @@ public sealed class SqlSelectStatement
             OrderBy,
             Top,
             Distinct,
-            GroupBy);
+            GroupBy,
+            Having,
+            SourcePosition,
+            GroupByExpressions);
         newStatement.LeadingComments.AddRange(LeadingComments);
         return newStatement;
     }
@@ -228,7 +254,10 @@ public sealed class SqlSelectStatement
             OrderBy,
             Top,
             Distinct,
-            GroupBy);
+            GroupBy,
+            Having,
+            SourcePosition,
+            GroupByExpressions);
         newStatement.LeadingComments.AddRange(LeadingComments);
         return newStatement;
     }

@@ -21,10 +21,9 @@ public class CredentialProviderFactoryTests
     {
         var profile = new AuthProfile { AuthMethod = AuthMethod.InteractiveBrowser };
 
-        var provider = CredentialProviderFactory.Create(profile);
+        using var provider = CredentialProviderFactory.Create(profile);
 
         provider.Should().BeOfType<InteractiveBrowserCredentialProvider>();
-        provider.Dispose();
     }
 
     [Fact]
@@ -60,10 +59,9 @@ public class CredentialProviderFactoryTests
         try
         {
             Environment.SetEnvironmentVariable(CredentialProviderFactory.SpnSecretEnvVar, "test-secret");
-            var provider = CredentialProviderFactory.Create(profile);
+            using var provider = CredentialProviderFactory.Create(profile);
 
             provider.Should().BeOfType<ClientSecretCredentialProvider>();
-            provider.Dispose();
         }
         finally
         {
@@ -76,10 +74,9 @@ public class CredentialProviderFactoryTests
     {
         var profile = new AuthProfile { AuthMethod = AuthMethod.ManagedIdentity };
 
-        var provider = CredentialProviderFactory.Create(profile);
+        using var provider = CredentialProviderFactory.Create(profile);
 
         provider.Should().BeOfType<ManagedIdentityCredentialProvider>();
-        provider.Dispose();
     }
 
     [Fact]
@@ -92,10 +89,9 @@ public class CredentialProviderFactoryTests
             TenantId = "tenant-id"
         };
 
-        var provider = CredentialProviderFactory.Create(profile);
+        using var provider = CredentialProviderFactory.Create(profile);
 
         provider.Should().BeOfType<GitHubFederatedCredentialProvider>();
-        provider.Dispose();
     }
 
     [Fact]
@@ -108,10 +104,9 @@ public class CredentialProviderFactoryTests
             TenantId = "tenant-id"
         };
 
-        var provider = CredentialProviderFactory.Create(profile);
+        using var provider = CredentialProviderFactory.Create(profile);
 
         provider.Should().BeOfType<AzureDevOpsFederatedCredentialProvider>();
-        provider.Dispose();
     }
 
     [Fact]
@@ -128,6 +123,22 @@ public class CredentialProviderFactoryTests
 
         act.Should().Throw<InvalidOperationException>()
             .Where(ex => ex.Message.Contains("CreateAsync"));
+    }
+
+    [Fact]
+    public void Create_DeviceCode_ReturnsDeviceCodeProvider()
+    {
+        // When a user explicitly selects AuthMethod.DeviceCode, the factory
+        // must return DeviceCodeCredentialProvider, not InteractiveBrowserCredentialProvider.
+        // The current implementation routes DeviceCode through CreateInteractiveProvider()
+        // which returns InteractiveBrowserCredentialProvider when a browser is available,
+        // ignoring the user's explicit choice.
+        var profile = new AuthProfile { AuthMethod = AuthMethod.DeviceCode };
+
+        using var provider = CredentialProviderFactory.Create(profile);
+
+        provider.Should().BeOfType<DeviceCodeCredentialProvider>(
+            because: "when user explicitly selects DeviceCode, their choice must be respected");
     }
 
     [Theory]

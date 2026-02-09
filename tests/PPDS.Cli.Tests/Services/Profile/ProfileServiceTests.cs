@@ -32,7 +32,7 @@ public class ProfileServiceTests : IDisposable
         if (File.Exists(_tempFilePath))
         {
             // Best-effort cleanup - test temp file deletion should not fail tests
-            try { File.Delete(_tempFilePath); } catch { }
+            try { File.Delete(_tempFilePath); } catch (IOException) { /* Expected: file may be locked or already deleted */ }
         }
     }
 
@@ -387,6 +387,89 @@ public class ProfileServiceTests : IDisposable
         // Assert
         Assert.Equal("https://test.crm.dynamics.com", profiles[0].EnvironmentUrl);
         Assert.Equal("Test Environment", profiles[0].EnvironmentName);
+    }
+
+    #endregion
+
+    #region DetermineAuthMethod Tests
+
+    [Fact]
+    public void DetermineAuthMethod_WithExplicitAuthMethod_ReturnsExplicitValue()
+    {
+        var request = new ProfileCreateRequest { AuthMethod = AuthMethod.InteractiveBrowser };
+
+        var result = ProfileService.DetermineAuthMethod(request);
+
+        Assert.Equal(AuthMethod.InteractiveBrowser, result);
+    }
+
+    [Fact]
+    public void DetermineAuthMethod_WithExplicitDeviceCode_ReturnsDeviceCode()
+    {
+        var request = new ProfileCreateRequest { AuthMethod = AuthMethod.DeviceCode };
+
+        var result = ProfileService.DetermineAuthMethod(request);
+
+        Assert.Equal(AuthMethod.DeviceCode, result);
+    }
+
+    [Fact]
+    public void DetermineAuthMethod_WithUseDeviceCodeFlag_ReturnsDeviceCode()
+    {
+        // Backward compat: CLI-style request without explicit AuthMethod
+        var request = new ProfileCreateRequest { UseDeviceCode = true };
+
+        var result = ProfileService.DetermineAuthMethod(request);
+
+        Assert.Equal(AuthMethod.DeviceCode, result);
+    }
+
+    [Fact]
+    public void DetermineAuthMethod_WithClientSecret_ReturnsClientSecret()
+    {
+        var request = new ProfileCreateRequest { ClientSecret = "secret" };
+
+        var result = ProfileService.DetermineAuthMethod(request);
+
+        Assert.Equal(AuthMethod.ClientSecret, result);
+    }
+
+    [Fact]
+    public void DetermineAuthMethod_ExplicitAuthMethod_TakesPriorityOverFlags()
+    {
+        // Explicit AuthMethod should win even if UseDeviceCode is also set
+        var request = new ProfileCreateRequest
+        {
+            AuthMethod = AuthMethod.InteractiveBrowser,
+            UseDeviceCode = true
+        };
+
+        var result = ProfileService.DetermineAuthMethod(request);
+
+        Assert.Equal(AuthMethod.InteractiveBrowser, result);
+    }
+
+    #endregion
+
+    #region ProfileCreateRequest AuthMethod Tests
+
+    [Fact]
+    public void ProfileCreateRequest_AuthMethod_CanBeSetExplicitly()
+    {
+        var request = new ProfileCreateRequest
+        {
+            AuthMethod = AuthMethod.DeviceCode
+        };
+
+        Assert.Equal(AuthMethod.DeviceCode, request.AuthMethod);
+    }
+
+    [Fact]
+    public void ProfileCreateRequest_AuthMethod_DefaultsToNull()
+    {
+        var request = new ProfileCreateRequest();
+
+        Assert.Null(request.AuthMethod);
     }
 
     #endregion

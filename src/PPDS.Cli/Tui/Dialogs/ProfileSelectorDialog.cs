@@ -19,8 +19,6 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
     private readonly ListView _listView;
     private readonly Label _detailLabel;
     private readonly TuiSpinner _spinner;
-    private readonly Label _hintLabel;
-
     private IReadOnlyList<ProfileSummary> _profiles = Array.Empty<ProfileSummary>();
     private bool _createNewSelected;
     private ProfileSummary? _selectedProfile;
@@ -99,35 +97,31 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             Visible = false
         };
 
-        // Hint label for keyboard shortcuts
-        _hintLabel = new Label
-        {
-            X = 1,
-            Y = Pos.Bottom(_detailLabel),
-            Width = Dim.Fill() - 2,
-            Height = 1,
-            Text = "F2 rename | Del delete",
-            ColorScheme = TuiColorPalette.Default
-        };
-
         // Buttons - Row 1 (primary actions)
         var selectButton = new Button("_Select")
         {
-            X = Pos.Center() - 20,
+            X = Pos.Center() - 25,
             Y = Pos.AnchorEnd(2)
         };
         selectButton.Clicked += OnSelectClicked;
 
         var createButton = new Button("Create _New")
         {
-            X = Pos.Center() - 6,
+            X = Pos.Center() - 12,
             Y = Pos.AnchorEnd(2)
         };
         createButton.Clicked += OnCreateClicked;
 
+        var renameButton = new Button("Re_name")
+        {
+            X = Pos.Center() + 3,
+            Y = Pos.AnchorEnd(2)
+        };
+        renameButton.Clicked += () => ShowRenameDialog();
+
         var deleteButton = new Button("_Delete")
         {
-            X = Pos.Center() + 10,
+            X = Pos.Center() + 15,
             Y = Pos.AnchorEnd(2)
         };
         deleteButton.Clicked += OnDeleteClicked;
@@ -154,7 +148,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
         };
         cancelButton.Clicked += () => { Application.RequestStop(); };
 
-        Add(listFrame, _spinner, _detailLabel, _hintLabel, selectButton, createButton, deleteButton, detailsButton, clearAllButton, cancelButton);
+        Add(listFrame, _spinner, _detailLabel, selectButton, createButton, renameButton, deleteButton, detailsButton, clearAllButton, cancelButton);
 
         // Handle keyboard shortcuts
         KeyPress += OnKeyPress;
@@ -457,7 +451,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             return;
         }
 
-        var dialog = new ClearAllProfilesDialog(_profileService, _profiles.Count);
+        var dialog = new ClearAllProfilesDialog(_profileService, _profiles.Count, _session);
         Application.Run(dialog);
 
         if (dialog.Cleared)
@@ -485,6 +479,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             SelectedProfileName: selectedName,
             IsLoading: _isLoading,
             HasCreateButton: true,
+            HasRenameButton: true,
             HasDetailsButton: _session != null,
             ErrorMessage: _errorMessage);
     }

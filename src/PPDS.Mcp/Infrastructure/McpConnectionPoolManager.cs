@@ -38,21 +38,34 @@ public sealed class McpConnectionPoolManager : IMcpConnectionPoolManager
     /// <summary>
     /// Initializes a new instance of the <see cref="McpConnectionPoolManager"/> class.
     /// </summary>
+    /// <param name="profileStore">Optional ProfileStore from DI. If null, DefaultLoadProfilesAsync creates one.</param>
     /// <param name="loggerFactory">Optional logger factory. If null, uses NullLoggerFactory.</param>
     /// <param name="loadProfilesAsync">Optional profile loader for testability. If null, uses ProfileStore.</param>
     /// <param name="poolCreationTimeout">Optional timeout for pool creation. If null, uses 5 minutes.</param>
     public McpConnectionPoolManager(
+        ProfileStore? profileStore = null,
         ILoggerFactory? loggerFactory = null,
         Func<CancellationToken, Task<ProfileCollection>>? loadProfilesAsync = null,
         TimeSpan? poolCreationTimeout = null)
     {
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
-        _loadProfilesAsync = loadProfilesAsync ?? DefaultLoadProfilesAsync;
+        _loadProfilesAsync = loadProfilesAsync
+            ?? (profileStore != null
+                ? CreateProfileLoader(profileStore)
+                : DefaultLoadProfilesAsync);
         _poolCreationTimeout = poolCreationTimeout ?? DefaultPoolCreationTimeout;
     }
 
     /// <summary>
-    /// Default profile loader using ProfileStore.
+    /// Creates a profile loader delegate that uses the injected ProfileStore.
+    /// Extracted to a static method to avoid PPDS013 analyzer false positive
+    /// (async method reference in constructor lambda).
+    /// </summary>
+    private static Func<CancellationToken, Task<ProfileCollection>> CreateProfileLoader(ProfileStore store)
+        => ct => store.LoadAsync(ct);
+
+    /// <summary>
+    /// Default profile loader — fallback when no ProfileStore is injected (test scenarios).
     /// </summary>
     private static async Task<ProfileCollection> DefaultLoadProfilesAsync(CancellationToken cancellationToken)
     {

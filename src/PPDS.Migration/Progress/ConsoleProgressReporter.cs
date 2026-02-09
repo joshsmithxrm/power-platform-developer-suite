@@ -19,7 +19,7 @@ namespace PPDS.Migration.Progress
     /// </para>
     /// <para>
     /// Uses <see cref="OperationClock"/> for elapsed time to stay synchronized with
-    /// MEL log formatters. See ADR-0027.
+    /// MEL log formatters.
     /// </para>
     /// </remarks>
     public class ConsoleProgressReporter : IProgressReporter

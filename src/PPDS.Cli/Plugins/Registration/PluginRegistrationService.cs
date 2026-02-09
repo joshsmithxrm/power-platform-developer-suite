@@ -20,7 +20,6 @@ namespace PPDS.Cli.Plugins.Registration;
 /// <remarks>
 /// This service uses connection pooling to enable parallel Dataverse operations.
 /// Each method acquires its own client from the pool, enabling DOP-based parallelism.
-/// See ADR-0002 and ADR-0005 for pool architecture details.
 /// </remarks>
 public sealed class PluginRegistrationService : IPluginRegistrationService
 {

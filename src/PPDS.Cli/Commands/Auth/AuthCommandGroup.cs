@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text.RegularExpressions;
 using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
@@ -226,7 +227,8 @@ public static class AuthCommandGroup
                 return ExitCodes.Failure;
             }
 
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(options.Name) && collection.IsNameInUse(options.Name))
@@ -334,7 +336,7 @@ public static class AuthCommandGroup
             Console.Error.WriteLine($"Authenticating with {authMethod}...");
             Console.Error.WriteLine();
 
-            ICredentialProvider provider = authMethod switch
+            using ICredentialProvider provider = authMethod switch
             {
                 AuthMethod.InteractiveBrowser => new InteractiveBrowserCredentialProvider(options.Cloud, options.Tenant),
                 AuthMethod.DeviceCode => new DeviceCodeCredentialProvider(options.Cloud, options.Tenant),
@@ -468,10 +470,6 @@ public static class AuthCommandGroup
                 await CleanupCredentialsAsync();
                 Console.Error.WriteLine($"Error: Authentication failed: {ex.Message}");
                 return ExitCodes.Failure;
-            }
-            finally
-            {
-                provider.Dispose();
             }
 
             // Add to collection (auto-selects if first profile)
@@ -655,7 +653,8 @@ public static class AuthCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             if (outputFormat == OutputFormat.Json)
@@ -815,7 +814,8 @@ public static class AuthCommandGroup
                 return ExitCodes.Failure;
             }
 
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             AuthProfile? profile;
@@ -911,7 +911,8 @@ public static class AuthCommandGroup
                 return ExitCodes.Failure;
             }
 
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             AuthProfile? profile;
@@ -962,7 +963,7 @@ public static class AuthCommandGroup
 
                 if (!isShared)
                 {
-                    using var credentialStore = new NativeCredentialStore();
+                    var credentialStore = localProvider.GetRequiredService<ISecureCredentialStore>();
                     await credentialStore.RemoveAsync(credentialKey, cancellationToken);
                 }
             }
@@ -1043,7 +1044,8 @@ public static class AuthCommandGroup
                 return ExitCodes.Failure;
             }
 
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.GetByIndex(index);
@@ -1070,7 +1072,7 @@ public static class AuthCommandGroup
                 Console.Error.WriteLine($"Resolving environment '{newEnvironment}'...");
 
                 // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-                using var credentialStore = new NativeCredentialStore();
+                var credentialStore = localProvider.GetRequiredService<ISecureCredentialStore>();
                 using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
@@ -1156,7 +1158,8 @@ public static class AuthCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.GetByIndex(index);
@@ -1209,7 +1212,8 @@ public static class AuthCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             if (collection.Count == 0)
@@ -1224,7 +1228,7 @@ public static class AuthCommandGroup
             await TokenCacheManager.ClearAllCachesAsync();
 
             // Clear secure credential store
-            using var credentialStore = new NativeCredentialStore();
+            var credentialStore = localProvider.GetRequiredService<ISecureCredentialStore>();
             await credentialStore.ClearAsync(cancellationToken);
 
             Console.Error.WriteLine("Authentication profiles, token cache, and stored credentials removed");
@@ -1268,7 +1272,8 @@ public static class AuthCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.ActiveProfile;

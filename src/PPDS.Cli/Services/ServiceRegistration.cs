@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PPDS.Auth.Credentials;
+using PPDS.Auth.DependencyInjection;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Plugins.Registration;
@@ -10,7 +11,10 @@ using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
 
 namespace PPDS.Cli.Services;
 
@@ -20,7 +24,6 @@ namespace PPDS.Cli.Services;
 /// <remarks>
 /// Application services encapsulate business logic shared between
 /// CLI commands, TUI wizards, and daemon RPC handlers.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public static class ServiceRegistration
 {
@@ -31,13 +34,28 @@ public static class ServiceRegistration
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddCliApplicationServices(this IServiceCollection services)
     {
+        // Auth services (ProfileStore, EnvironmentConfigStore, NativeCredentialStore)
+        services.AddAuthServices();
+
         // Profile management services
-        services.AddSingleton<ProfileStore>();
         services.AddTransient<IProfileService, ProfileService>();
         services.AddTransient<IEnvironmentService, EnvironmentService>();
 
-        // Query services
-        services.AddTransient<ISqlQueryService, SqlQueryService>();
+        // Query services — factory delegate provides pool capacity for aggregate partitioning
+        services.AddTransient<ISqlQueryService>(sp =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
+            var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
+            var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            return new SqlQueryService(
+                queryExecutor,
+                tdsExecutor,
+                bulkExecutor,
+                metadataExecutor,
+                pool.GetTotalRecommendedParallelism());
+        });
         services.AddSingleton<IQueryHistoryService, QueryHistoryService>();
 
         // Export services
@@ -51,8 +69,19 @@ public static class ServiceRegistration
             return new PluginRegistrationService(pool, logger);
         });
 
+        // SQL language service - uses ICachedMetadataProvider when available
+        services.AddTransient<ISqlLanguageService>(sp =>
+        {
+            var metadataProvider = sp.GetService<ICachedMetadataProvider>();
+            return new SqlLanguageService(metadataProvider);
+        });
+
         // TUI theming
         services.AddSingleton<ITuiThemeService, TuiThemeService>();
+
+        // Environment configuration
+        services.AddSingleton<IEnvironmentConfigService>(sp =>
+            new EnvironmentConfigService(sp.GetRequiredService<EnvironmentConfigStore>()));
 
         // Connection service - requires profile-based token provider and environment ID
         // Registered as factory because it needs runtime values from ResolvedConnectionInfo

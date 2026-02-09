@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Query Engine v2** — Execution plan layer with Volcano iterator model for streaming results
+- **SQL parser extensions** — DML (INSERT/UPDATE/DELETE), UNION, subqueries, window functions, variables, IF/ELSE, CASE/WHEN
+- **Expression evaluator** — Client-side computation for CASE, CAST, string/date functions
+- **Parallel partitioned aggregates** — Accurate COUNT(*) beyond Dataverse 50K limit via date-range partitioning
+- **Adaptive aggregate retry** — Binary date-range splitting when partitions exceed limits
+- **TDS Endpoint routing** — Automatic routing of compatible queries to SQL endpoint
+- **Prefetch scan node** — Page-ahead buffering for improved streaming throughput
+- **Metadata query system** — Queryable entity/attribute schema access
+- **Cached metadata provider** — TTL-based caching layer for IntelliSense metadata
+- **DML safety guard** — Structured protections for data modification operations
+
 ## [1.0.0-beta.5] - 2026-01-14
 
 ### Added
@@ -59,16 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`FlowClientDataParser`** - Utility for extracting connection reference logical names from flow clientdata JSON
 - **`Workflow` early-bound entity** - Entity class for Power Automate flows (classic workflows). Supports flow management operations. ([#149](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/149))
 - **`ConnectionReference` early-bound entity** - Entity class for connection references used by flows and canvas apps. Fixed naming from pac modelbuilder's inconsistent lowercase output. ([#149](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/149))
-- **Field-level error context in bulk operation errors** - `BulkOperationError` now includes `FieldName` (extracted from error messages) and `FieldValueDescription` (sanitized value info for EntityReferences). Makes debugging lookup failures and required field errors easier. See [ADR-0022](../../docs/adr/0022_IMPORT_DIAGNOSTICS_ARCHITECTURE.md).
+- **Field-level error context in bulk operation errors** - `BulkOperationError` now includes `FieldName` (extracted from error messages) and `FieldValueDescription` (sanitized value info for EntityReferences). Makes debugging lookup failures and required field errors easier.
 
 ### Changed
 
-- **Increased default AcquireTimeout from 30s to 120s** - With ADR-0019 pool-managed concurrency, tasks queue on the semaphore and need longer timeouts for large imports with many batches. Previously tasks would timeout during normal queuing.
+- **Increased default AcquireTimeout from 30s to 120s** - With pool-managed concurrency, tasks queue on the semaphore and need longer timeouts for large imports with many batches. Previously tasks would timeout during normal queuing.
 - **Reduced pool exhaustion retry attempts from 3 to 1** - With proper pool queuing, exhaustion is rare and typically indicates a real capacity issue rather than transient contention.
 
 ### Fixed
 
-- **Pool exhaustion under concurrent bulk operations** - Multiple consumers (e.g., entities importing in parallel) each assumed they could use full pool capacity, causing N×DOP tasks to compete for DOP semaphore slots. Replaced adaptive parallelism calculation with pool-managed blocking where tasks naturally queue on `GetClientAsync()`. See [ADR-0019](../../docs/adr/0019_POOL_MANAGED_CONCURRENCY.md).
+- **Pool exhaustion under concurrent bulk operations** - Multiple consumers (e.g., entities importing in parallel) each assumed they could use full pool capacity, causing N×DOP tasks to compete for DOP semaphore slots. Replaced adaptive parallelism calculation with pool-managed blocking where tasks naturally queue on `GetClientAsync()`.
 - **Pool exhaustion during throttling** - Capped batch parallelism at pool capacity to prevent over-subscription when throttling reduces effective throughput. On high-core machines, `ProcessorCount * 4` (e.g., 96 tasks on 24-core) far exceeded pool capacity (~20 slots), causing timeout storms when throttled connections held semaphore slots during Retry-After waits.
 
 ## [1.0.0-beta.3] - 2026-01-04
@@ -129,14 +142,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DOP-based parallelism using server's `RecommendedDegreesOfParallelism` (`x-ms-dop-hint` header)
 - Connection selection strategies: RoundRobin, LeastConnections, ThrottleAware
 - Throttle tracking with automatic routing away from throttled connections
-- `IConnectionSource` abstraction for custom authentication methods (ADR-0006)
+- `IConnectionSource` abstraction for custom authentication methods
 - `ServiceClientSource` for integrating pre-authenticated ServiceClient instances
 - `CredentialProviderSource` for integration with PPDS.Auth credential providers
 - Bulk operation wrappers: CreateMultiple, UpdateMultiple, UpsertMultiple, DeleteMultiple
 - `IProgress<ProgressSnapshot>` support for real-time progress reporting
 - Full `appsettings.json` configuration support for all options
 - DI integration via `AddDataverseConnectionPool()` extension method
-- Affinity cookie disabled by default for improved throughput (ADR-0001)
+- Affinity cookie disabled by default for improved throughput
 - TVP race condition retry (SQL error 3732/2812)
 - SQL deadlock retry (SQL error 1205)
 - Connection validation with background health checks

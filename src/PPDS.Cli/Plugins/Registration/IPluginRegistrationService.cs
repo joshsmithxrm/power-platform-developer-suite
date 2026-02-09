@@ -21,10 +21,6 @@ public record PluginListOptions(
 /// This service provides operations for querying, creating, updating, and deleting
 /// plugin assemblies, packages, types, steps, and images in Dataverse.
 /// </para>
-/// <para>
-/// See ADR-0002 and ADR-0005 for pool architecture details.
-/// See ADR-0015 for application service layer pattern.
-/// </para>
 /// </remarks>
 public interface IPluginRegistrationService
 {

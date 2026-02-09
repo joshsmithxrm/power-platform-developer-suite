@@ -9,6 +9,7 @@ namespace PPDS.Cli.Tui.Testing.States;
 /// <param name="SelectedProfileName">Name of the selected profile (null if none).</param>
 /// <param name="IsLoading">Whether the dialog is loading profiles.</param>
 /// <param name="HasCreateButton">Whether the create button is available.</param>
+/// <param name="HasRenameButton">Whether the rename button is available.</param>
 /// <param name="HasDetailsButton">Whether the details button is available.</param>
 /// <param name="ErrorMessage">Error message if loading failed (null if no error).</param>
 public sealed record ProfileSelectorDialogState(
@@ -18,5 +19,6 @@ public sealed record ProfileSelectorDialogState(
     string? SelectedProfileName,
     bool IsLoading,
     bool HasCreateButton,
+    bool HasRenameButton,
     bool HasDetailsButton,
     string? ErrorMessage);

@@ -1,4 +1,3 @@
-using System.Reflection;
 using PPDS.Auth.Credentials;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Tui.Dialogs;
@@ -30,19 +29,19 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private readonly FrameView _contentArea;
     private readonly TabManager _tabManager;
     private readonly TabBar _tabBar;
-    private MenuBar? _menuBar;
+    private PpdsMenuBar? _menuBar;
+
+    private readonly Task _initializationTask;
 
     private ITuiScreen? _currentScreen;
-    private View? _mainMenuContent;
     private SplashView? _splashView;
-    private DateTime _lastMenuClickTime = DateTime.MinValue;
-    private const int MenuClickDebounceMs = 150;
 
-    public TuiShell(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
+    public TuiShell(string? profileName, Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session, Task initializationTask)
     {
         _profileName = profileName;
         _deviceCodeCallback = deviceCodeCallback;
         _session = session;
+        _initializationTask = initializationTask;
         _themeService = session.GetThemeService();
         _errorService = session.GetErrorService();
         _hotkeyRegistry = session.GetHotkeyRegistry();
@@ -56,7 +55,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         // Tab manager and tab bar
         _tabManager = new TabManager(_themeService);
-        _tabBar = new TabBar(_tabManager);
+        _tabBar = new TabBar(_tabManager, _themeService);
 
         // Content area where screens are displayed
         _contentArea = new FrameView("Main Menu")
@@ -79,9 +78,11 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _statusBar = new TuiStatusBar(_session);
         _statusBar.ProfileClicked += OnStatusBarProfileClicked;
         _statusBar.EnvironmentClicked += OnStatusBarEnvironmentClicked;
+        _statusBar.EnvironmentConfigureRequested += OnStatusBarEnvironmentConfigureRequested;
 
         // Subscribe to error events
         _errorService.ErrorOccurred += OnErrorOccurred;
+        _session.ConfigChanged += OnConfigChanged;
 
         // Build initial menu bar
         RebuildMenuBar();
@@ -96,6 +97,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         // Load initial profile info
         LoadProfileInfoAsync();
+
+        // Wire session initialization to splash ready state
+        WireInitializationToSplash();
     }
 
     /// <summary>
@@ -104,8 +108,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     /// </summary>
     public void NavigateTo(ITuiScreen screen)
     {
-        // Clear splash/main menu if still showing
-        ClearSplashAndMainMenu();
+        // Hide splash if still showing
+        HideSplash();
 
         // Add screen as a new tab — AddTab fires ActiveTabChanged,
         // which calls OnActiveTabChanged to handle activation.
@@ -125,10 +129,22 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     }
 
     /// <summary>
-    /// Closes the active tab. If no tabs remain, shows main menu.
+    /// Closes the active tab. If no tabs remain, shows splash home.
     /// </summary>
     public void NavigateBack()
     {
+        // Confirm if screen has unsaved work
+        if (_currentScreen?.HasUnsavedWork == true)
+        {
+            var result = MessageBox.Query(
+                "Close Tab",
+                "This tab has unsaved changes. Close anyway?",
+                "Close", "Cancel");
+
+            if (result != 0)
+                return;
+        }
+
         // Deactivate current screen (TabManager.CloseTab will dispose it)
         if (_currentScreen != null)
         {
@@ -145,7 +161,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _tabManager.CloseTab(activeIndex);
         }
 
-        // OnActiveTabChanged will handle activating the next tab or showing main menu
+        // OnActiveTabChanged will handle activating the next tab or showing splash home
     }
 
     private void OnActiveTabChanged()
@@ -164,8 +180,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (activeTab == null)
         {
-            // No tabs remain - show main menu
-            ShowMainMenu();
+            // No tabs remain - show splash home
+            ShowSplashHome();
             return;
         }
 
@@ -178,22 +194,17 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _contentArea.Add(_currentScreen.Content);
         _currentScreen.OnActivated(_hotkeyRegistry);
 
+        // Sync status bar to reflect this tab's environment
+        _session.UpdateDisplayedEnvironment(activeTab.EnvironmentUrl, activeTab.EnvironmentDisplayName);
+
         RebuildMenuBar();
         _currentScreen.Content.SetFocus();
     }
 
-    private void ClearSplashAndMainMenu()
+    private void HideSplash()
     {
         if (_splashView != null)
-        {
-            _contentArea.Remove(_splashView);
-            _splashView = null;
-        }
-        if (_mainMenuContent != null)
-        {
-            _contentArea.Remove(_mainMenuContent);
-            _mainMenuContent = null;
-        }
+            _splashView.Visible = false;
     }
 
     private void ShowSplash()
@@ -211,54 +222,16 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         RebuildMenuBar();
     }
 
-    private void ShowMainMenu()
+    private void ShowSplashHome()
     {
-        ClearSplashAndMainMenu();
-
         _currentScreen = null;
         _hotkeyRegistry.SetActiveScreen(null);
-        _contentArea.Title = "Main Menu";
+        _contentArea.Title = "PPDS";
 
-        _mainMenuContent = CreateMainMenuContent();
-        _contentArea.Add(_mainMenuContent);
+        if (_splashView != null)
+            _splashView.Visible = true;
 
         RebuildMenuBar();
-    }
-
-    private View CreateMainMenuContent()
-    {
-        var container = new View
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill()
-        };
-
-        var label = new Label("Welcome to PPDS Interactive Mode\n\nSelect an option from the menu or use keyboard shortcuts:")
-        {
-            X = 2,
-            Y = 1,
-            Width = Dim.Fill() - 4,
-            Height = 3
-        };
-
-        var buttonSql = new Button("SQL Query")
-        {
-            X = 2,
-            Y = 5
-        };
-        buttonSql.Clicked += () => NavigateToSqlQuery();
-
-        var buttonData = new Button("Data Migration (Coming Soon)")
-        {
-            X = 2,
-            Y = 7,
-            Enabled = false
-        };
-
-        container.Add(label, buttonSql, buttonData);
-        return container;
     }
 
     private void RebuildMenuBar()
@@ -290,7 +263,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Exit", "Exit the application", () =>
             {
                 // Close menu before stopping to prevent Terminal.Gui state corruption
-                CloseMenuBar();
+                _menuBar?.CloseMenu();
                 RequestStop();
             })
         }));
@@ -301,19 +274,13 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             menuItems.AddRange(_currentScreen.ScreenMenuItems);
         }
 
-        // Disabled menu items (no underscore hotkeys - they work globally in Terminal.Gui)
-        var dataMigrationItem = new MenuItem("Data Migration (Coming Soon)", "", null, shortcut: Key.Null);
-        var solutionsItem = new MenuItem("Solutions (Coming Soon)", "", null);
-        var pluginTracesItem = new MenuItem("Plugin Traces (Coming Soon)", "", null);
-
         // Tools menu (always present) - contains all workspaces/tools
+        var hasEnvironment = _session.CurrentEnvironmentUrl != null;
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
-            dataMigrationItem,
-            new("", "", () => {}, null, null, Key.Null), // Separator
-            solutionsItem,
-            pluginTracesItem,
+            new("Configure Environment...", "Configure label, type, and color",
+                hasEnvironment ? () => ShowEnvironmentConfig() : (Action?)null),
         }));
 
         // Help menu (always present)
@@ -325,47 +292,13 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Error Log", "View recent errors and debug log (F12)", () => ShowErrorDetails()),
         }));
 
-        _menuBar = new MenuBar(menuItems.ToArray());
+        _menuBar = new PpdsMenuBar(menuItems.ToArray());
         _menuBar.ColorScheme = TuiColorPalette.MenuBar;
 
-        // Register MenuBar with HotkeyRegistry for Alt key suppression
-        _hotkeyRegistry.SetMenuBar(_menuBar);
-
-        // Add debounce handler to prevent double-click flicker
-        _menuBar.MouseClick += (e) =>
-        {
-            var now = DateTime.UtcNow;
-            var timeSinceLastClick = (now - _lastMenuClickTime).TotalMilliseconds;
-            if (timeSinceLastClick < MenuClickDebounceMs)
-            {
-                e.Handled = true;
-                return;
-            }
-            _lastMenuClickTime = now;
-        };
+        // Register menu-open check with HotkeyRegistry for letter-blocking
+        _hotkeyRegistry.SetMenuOpenCheck(() => _menuBar?.IsMenuOpen == true);
 
         Add(_menuBar);
-    }
-
-    /// <summary>
-    /// Closes the menu bar dropdown using reflection to call Terminal.Gui's internal CloseAllMenus().
-    /// This prevents state corruption when quitting while menu is open.
-    /// </summary>
-    private void CloseMenuBar()
-    {
-        if (_menuBar == null) return;
-
-        try
-        {
-            var closeMethod = typeof(MenuBar).GetMethod(
-                "CloseAllMenus",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            closeMethod?.Invoke(_menuBar, null);
-        }
-        catch (Exception ex)
-        {
-            TuiDebugLog.Log($"Failed to close menu: {ex.Message}");
-        }
     }
 
     private void RegisterGlobalHotkeys()
@@ -441,7 +374,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private void NavigateToSqlQuery()
     {
         // Clear splash or main menu content
-        ClearSplashAndMainMenu();
+        HideSplash();
 
         // Show centered loading message in content area
         var loadingLabel = new Label("Loading SQL Query...")
@@ -469,6 +402,34 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         });
     }
 
+    /// <summary>
+    /// Opens a new SQL Query tab bound to a specific environment.
+    /// </summary>
+    private void NavigateToSqlQueryOnEnvironment(string environmentUrl, string? displayName)
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading SQL Query...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var sqlScreen = new SqlQueryScreen(_deviceCodeCallback, _session, environmentUrl, displayName);
+            NavigateTo(sqlScreen);
+
+            return false;
+        });
+    }
+
     private void OnStatusBarProfileClicked()
     {
         ShowProfileSelector();
@@ -488,6 +449,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.SelectedProfile != null)
         {
+            // Profile change invalidates all connections — close all tabs
+            CloseAllTabs();
             _errorService.FireAndForget(SetActiveProfileAsync(dialog.SelectedProfile), "SwitchProfile");
         }
         else if (dialog.CreateNewSelected)
@@ -498,6 +461,24 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         {
             RefreshProfileState();
         }
+    }
+
+    /// <summary>
+    /// Deactivates the current screen and closes all tabs.
+    /// OnActiveTabChanged will show the splash home when no tabs remain.
+    /// </summary>
+    private void CloseAllTabs()
+    {
+        if (_currentScreen != null)
+        {
+            _currentScreen.CloseRequested -= OnScreenCloseRequested;
+            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
+            _currentScreen.OnDeactivating();
+            _contentArea.Remove(_currentScreen.Content);
+            _currentScreen = null;
+        }
+
+        _tabManager.CloseAllTabs();
     }
 
     private void ShowEnvironmentSelector()
@@ -517,10 +498,89 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         {
             var url = dialog.UseManualUrl ? dialog.ManualUrl : dialog.SelectedEnvironment?.Url;
             var name = dialog.UseManualUrl ? dialog.ManualUrl : dialog.SelectedEnvironment?.DisplayName;
+            var discoveredType = dialog.SelectedEnvironment?.Type;
 
             if (url != null)
             {
+                // Prompt to configure if this environment is new/unconfigured
+                PromptToConfigureIfNeeded(url, name, discoveredType);
+
+                // Persist selection as profile default
                 _errorService.FireAndForget(SetEnvironmentAsync(url, name), "SetEnvironment");
+
+                // If tabs are open, switch to existing tab on that env or open a new one
+                if (_tabManager.TabCount > 0)
+                {
+                    var existingTab = _tabManager.FindTabByEnvironment(url);
+                    if (existingTab >= 0)
+                    {
+                        _tabManager.ActivateTab(existingTab);
+                    }
+                    else
+                    {
+                        NavigateToSqlQueryOnEnvironment(url, name);
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnStatusBarEnvironmentConfigureRequested()
+    {
+        ShowEnvironmentConfig();
+    }
+
+    private void ShowEnvironmentConfig()
+    {
+        var url = _session.CurrentEnvironmentUrl;
+        if (string.IsNullOrEmpty(url))
+        {
+            MessageBox.ErrorQuery("No Environment", "Please connect to an environment first.", "OK");
+            return;
+        }
+
+        var displayName = _session.CurrentEnvironmentDisplayName;
+        using var dialog = new EnvironmentConfigDialog(_session, url, displayName);
+        Application.Run(dialog);
+
+        if (dialog.ConfigChanged)
+        {
+            _session.NotifyConfigChanged();
+        }
+    }
+
+    /// <summary>
+    /// Prompts the user to configure an environment if it has no saved configuration.
+    /// </summary>
+    private void PromptToConfigureIfNeeded(string url, string? displayName, string? discoveredType)
+    {
+        try
+        {
+#pragma warning disable PPDS012 // Sync-over-async: Terminal.Gui event handler (cached store)
+            var config = _session.EnvironmentConfigService
+                .GetConfigAsync(url).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+
+            if (config != null) return; // Already configured
+        }
+        catch
+        {
+            return; // Can't check — don't nag
+        }
+
+        var result = MessageBox.Query(
+            "Configure Environment",
+            "This environment isn't configured yet.\nSet a label and color for easy identification?",
+            "Yes", "Skip");
+
+        if (result == 0)
+        {
+            using var dialog = new EnvironmentConfigDialog(_session, url, displayName, discoveredType);
+            Application.Run(dialog);
+
+            if (dialog.ConfigChanged)
+            {
+                _session.NotifyConfigChanged();
             }
         }
     }
@@ -530,13 +590,22 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         var profileService = _session.GetProfileService();
         var envService = _session.GetEnvironmentService();
 
-        using var dialog = new ProfileCreationDialog(profileService, envService, _deviceCodeCallback);
+        using var dialog = new ProfileCreationDialog(profileService, envService, _deviceCodeCallback, _session);
         Application.Run(dialog);
 
         if (dialog.CreatedProfile != null)
         {
+            // New profile = new credentials — close all tabs
+            CloseAllTabs();
+
             var envUrl = dialog.SelectedEnvironmentUrl ?? dialog.CreatedProfile.EnvironmentUrl;
             var envName = dialog.SelectedEnvironmentName ?? dialog.CreatedProfile.EnvironmentName;
+
+            // Prompt to configure the environment if unconfigured
+            if (envUrl != null)
+            {
+                PromptToConfigureIfNeeded(envUrl, envName, discoveredType: null);
+            }
 
             _errorService.FireAndForget(
                 SetActiveProfileWithEnvironmentAsync(dialog.CreatedProfile, envUrl, envName),
@@ -585,8 +654,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         _errorService.FireAndForget(Task.Run(async () =>
         {
             var profileService = _session.GetProfileService();
-            var profiles = await profileService.GetProfilesAsync();
-            var active = profiles.FirstOrDefault(p => p.IsActive);
+            await profileService.GetProfilesAsync();
 
             Application.MainLoop?.Invoke(() =>
             {
@@ -603,12 +671,45 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
     private async Task LoadProfileInfoInternalAsync()
     {
         var store = _session.GetProfileStore();
-        var collection = await store.LoadAsync(CancellationToken.None);
-        var profile = collection.ActiveProfile;
+        await store.LoadAsync(CancellationToken.None);
 
         Application.MainLoop?.Invoke(() =>
         {
             _statusBar.Refresh();
+        });
+    }
+
+    /// <summary>
+    /// Wires the session initialization task to splash screen state transitions.
+    /// When initialization completes, marks splash as ready. Splash stays as home screen.
+    /// </summary>
+    private void WireInitializationToSplash()
+    {
+        _errorService.FireAndForget(WireInitializationToSplashAsync(), "SplashTransition");
+    }
+
+    private async Task WireInitializationToSplashAsync()
+    {
+        try
+        {
+            await _initializationTask.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Initialization failed — show error on splash
+            TuiDebugLog.Log($"Session initialization failed: {ex.Message}");
+            Application.MainLoop?.Invoke(() =>
+            {
+                _splashView?.SetStatus($"Init error: {ex.Message}");
+            });
+            // Brief pause so user can see the error
+            await Task.Delay(2000).ConfigureAwait(false);
+        }
+
+        // Mark splash as ready — it stays as home screen
+        Application.MainLoop?.Invoke(() =>
+        {
+            _splashView?.SetReady();
         });
     }
 
@@ -620,8 +721,17 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
     private void ShowKeyboardShortcuts()
     {
-        using var dialog = new KeyboardShortcutsDialog();
+        using var dialog = new KeyboardShortcutsDialog(_hotkeyRegistry, _session);
         Application.Run(dialog);
+    }
+
+    private void OnConfigChanged()
+    {
+        Application.MainLoop?.Invoke(() =>
+        {
+            _statusBar.Refresh();
+            _tabManager.RefreshTabColors();
+        });
     }
 
     private void OnErrorOccurred(TuiError error)
@@ -690,7 +800,11 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _tabManager.Dispose();
             _tabBar.Dispose();
 
+            _statusBar.ProfileClicked -= OnStatusBarProfileClicked;
+            _statusBar.EnvironmentClicked -= OnStatusBarEnvironmentClicked;
+            _statusBar.EnvironmentConfigureRequested -= OnStatusBarEnvironmentConfigureRequested;
             _errorService.ErrorOccurred -= OnErrorOccurred;
+            _session.ConfigChanged -= OnConfigChanged;
         }
 
         base.Dispose(disposing);

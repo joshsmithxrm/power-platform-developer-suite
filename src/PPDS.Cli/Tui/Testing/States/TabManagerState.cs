@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
 
 namespace PPDS.Cli.Tui.Testing.States;
@@ -12,4 +13,5 @@ public sealed record TabSummary(
     string Title,
     string? EnvironmentUrl,
     EnvironmentType EnvironmentType,
+    EnvironmentColor EnvironmentColor,
     bool IsActive);

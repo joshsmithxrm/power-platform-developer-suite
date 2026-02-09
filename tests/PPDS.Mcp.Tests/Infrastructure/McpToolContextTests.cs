@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Moq;
+using PPDS.Auth.Credentials;
+using PPDS.Auth.Profiles;
 using PPDS.Dataverse.Pooling;
 using PPDS.Mcp.Infrastructure;
 using Xunit;
@@ -17,11 +19,39 @@ public sealed class McpToolContextTests
     public void Constructor_NullPoolManager_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => new McpToolContext(null!);
+        var act = () => new McpToolContext(null!, new ProfileStore(), new Mock<ISecureCredentialStore>().Object);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
             .WithParameterName("poolManager");
+    }
+
+    [Fact]
+    public void Constructor_NullProfileStore_ThrowsArgumentNullException()
+    {
+        // Act
+        var act = () => new McpToolContext(
+            new Mock<IMcpConnectionPoolManager>().Object,
+            null!,
+            new Mock<ISecureCredentialStore>().Object);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("profileStore");
+    }
+
+    [Fact]
+    public void Constructor_NullCredentialStore_ThrowsArgumentNullException()
+    {
+        // Act
+        var act = () => new McpToolContext(
+            new Mock<IMcpConnectionPoolManager>().Object,
+            new ProfileStore(),
+            null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("credentialStore");
     }
 
     [Fact]
@@ -31,7 +61,10 @@ public sealed class McpToolContextTests
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
 
         // Act
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
 
         // Assert
         context.Should().NotBeNull();
@@ -44,7 +77,11 @@ public sealed class McpToolContextTests
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
 
         // Act - should not throw even with null logger factory
-        var context = new McpToolContext(mockPoolManager.Object, loggerFactory: null);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object,
+            loggerFactory: null);
 
         // Assert
         context.Should().NotBeNull();
@@ -59,7 +96,10 @@ public sealed class McpToolContextTests
     {
         // Arrange
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
         var environmentUrl = "https://org.crm.dynamics.com";
 
         // Act
@@ -76,7 +116,10 @@ public sealed class McpToolContextTests
     {
         // Arrange
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
         var environmentUrl = "https://org.crm.dynamics.com/with/trailing/slash/";
 
         // Act
@@ -99,7 +142,10 @@ public sealed class McpToolContextTests
         // In development environments with profiles, this test is skipped.
         // Coverage provided by PPDS.LiveTests when run in clean CI environment.
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
 
         // Act
         Func<Task> act = () => context.GetActiveProfileAsync();
@@ -119,7 +165,10 @@ public sealed class McpToolContextTests
         // This test requires no ~/.ppds/profiles.json to exist.
         // In development environments with profiles, this test is skipped.
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
 
         // Act
         Func<Task> act = () => context.GetPoolAsync();
@@ -139,7 +188,10 @@ public sealed class McpToolContextTests
         // This test requires no ~/.ppds/profiles.json to exist.
         // In development environments with profiles, this test is skipped.
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
 
         // Act
         Func<Task> act = () => context.CreateServiceProviderAsync();

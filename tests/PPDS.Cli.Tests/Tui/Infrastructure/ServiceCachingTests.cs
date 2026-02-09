@@ -17,6 +17,7 @@ public sealed class ServiceCachingTests : IDisposable
         _session = new InteractiveSession(
             null,
             _tempStore.Store,
+            new EnvironmentConfigStore(),
             new MockServiceProviderFactory());
     }
 

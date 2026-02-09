@@ -12,9 +12,6 @@ namespace PPDS.Cli.Services.Profile;
 /// <summary>
 /// Application service for managing authentication profiles.
 /// </summary>
-/// <remarks>
-/// See ADR-0015 for architectural context.
-/// </remarks>
 public sealed class ProfileService : IProfileService
 {
     /// <summary>
@@ -220,6 +217,7 @@ public sealed class ProfileService : IProfileService
     public async Task<ProfileSummary> CreateProfileAsync(
         ProfileCreateRequest request,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
         // Validate request
@@ -280,6 +278,16 @@ public sealed class ProfileService : IProfileService
                     await credentialStore.StoreAsync(storedCredential, cancellationToken);
                     storedCredentialKey = request.ApplicationId;
                 }
+                else if (!string.IsNullOrWhiteSpace(request.Username) && !string.IsNullOrWhiteSpace(request.Password))
+                {
+                    var storedCredential = new StoredCredential
+                    {
+                        ApplicationId = request.Username,
+                        Password = request.Password
+                    };
+                    await credentialStore.StoreAsync(storedCredential, cancellationToken);
+                    storedCredentialKey = request.Username;
+                }
             }
 
             // Determine target URL for authentication
@@ -310,7 +318,7 @@ public sealed class ProfileService : IProfileService
             }
 
             // Create credential provider
-            using ICredentialProvider provider = CreateCredentialProvider(request, authMethod, cloud, deviceCodeCallback);
+            using ICredentialProvider provider = CreateCredentialProvider(request, authMethod, cloud, deviceCodeCallback, beforeInteractiveAuth);
 
             try
             {
@@ -350,14 +358,13 @@ public sealed class ProfileService : IProfileService
                 throw new PpdsAuthException(ErrorCodes.Auth.InvalidCredentials, $"Authentication failed: {ex.Message}", ex);
             }
 
-            // Add to collection
-            collection.Add(profile);
+            // Add to collection and set as active
+            collection.Add(profile, setAsActive: true);
             await _store.SaveAsync(collection, cancellationToken);
 
-            _logger.LogInformation("Created profile {ProfileIdentifier}", profile.DisplayIdentifier);
+            _logger.LogInformation("Created and activated profile {ProfileIdentifier}", profile.DisplayIdentifier);
 
-            var isActive = collection.ActiveProfile?.Index == profile.Index;
-            return ProfileSummary.FromAuthProfile(profile, isActive);
+            return ProfileSummary.FromAuthProfile(profile, isActive: true);
         }
         finally
         {
@@ -381,8 +388,11 @@ public sealed class ProfileService : IProfileService
         }
     }
 
-    private static AuthMethod DetermineAuthMethod(ProfileCreateRequest request)
+    internal static AuthMethod DetermineAuthMethod(ProfileCreateRequest request)
     {
+        if (request.AuthMethod.HasValue)
+            return request.AuthMethod.Value;
+
         if (request.UseGitHubFederated)
             return AuthMethod.GitHubFederated;
 
@@ -400,6 +410,9 @@ public sealed class ProfileService : IProfileService
 
         if (!string.IsNullOrWhiteSpace(request.ClientSecret))
             return AuthMethod.ClientSecret;
+
+        if (!string.IsNullOrWhiteSpace(request.Username) && !string.IsNullOrWhiteSpace(request.Password))
+            return AuthMethod.UsernamePassword;
 
         if (request.UseDeviceCode)
             return AuthMethod.DeviceCode;
@@ -446,6 +459,13 @@ public sealed class ProfileService : IProfileService
                     errors.Add(new ValidationError("certificateThumbprint", "Certificate store authentication is only supported on Windows."));
                 break;
 
+            case AuthMethod.UsernamePassword:
+                if (string.IsNullOrWhiteSpace(request.Username))
+                    errors.Add(new ValidationError("username", "Username is required for username/password authentication."));
+                if (string.IsNullOrWhiteSpace(request.Password))
+                    errors.Add(new ValidationError("password", "Password is required for username/password authentication."));
+                break;
+
             case AuthMethod.GitHubFederated:
             case AuthMethod.AzureDevOpsFederated:
                 if (string.IsNullOrWhiteSpace(request.ApplicationId))
@@ -465,11 +485,13 @@ public sealed class ProfileService : IProfileService
         ProfileCreateRequest request,
         AuthMethod authMethod,
         CloudEnvironment cloud,
-        Action<DeviceCodeInfo>? deviceCodeCallback)
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
     {
         return authMethod switch
         {
-            AuthMethod.InteractiveBrowser => new InteractiveBrowserCredentialProvider(cloud, request.TenantId),
+            AuthMethod.InteractiveBrowser => new InteractiveBrowserCredentialProvider(
+                cloud, request.TenantId, deviceCodeCallback: deviceCodeCallback, beforeInteractiveAuth: beforeInteractiveAuth),
             AuthMethod.DeviceCode => new DeviceCodeCredentialProvider(cloud, request.TenantId, deviceCodeCallback: deviceCodeCallback),
             AuthMethod.ClientSecret => new ClientSecretCredentialProvider(
                 request.ApplicationId!, request.ClientSecret!, request.TenantId!, cloud),
@@ -482,6 +504,8 @@ public sealed class ProfileService : IProfileService
                 request.ApplicationId!, request.TenantId!, cloud),
             AuthMethod.AzureDevOpsFederated => new AzureDevOpsFederatedCredentialProvider(
                 request.ApplicationId!, request.TenantId!, cloud),
+            AuthMethod.UsernamePassword => new UsernamePasswordCredentialProvider(
+                request.Username!, request.Password!, cloud, request.TenantId),
             _ => throw new PpdsException(ErrorCodes.Operation.NotSupported, $"Auth method {authMethod} is not supported for profile creation.")
         };
     }

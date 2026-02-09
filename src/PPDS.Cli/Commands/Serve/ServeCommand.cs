@@ -45,8 +45,11 @@ public static class ServeCommand
         // Create the pool manager with daemon lifetime - caches connection pools across RPC calls
         await using var poolManager = new DaemonConnectionPoolManager();
 
+        // Create a lightweight auth service provider for profile/credential store access
+        await using var authProvider = ProfileServiceFactory.CreateLocalProvider();
+
         // Create the RPC target that handles method calls
-        var handler = new RpcMethodHandler(poolManager);
+        var handler = new RpcMethodHandler(poolManager, authProvider);
 
         // Attach JSON-RPC to the duplex stream with our handler
         using var rpc = JsonRpc.Attach(duplexStream, handler);

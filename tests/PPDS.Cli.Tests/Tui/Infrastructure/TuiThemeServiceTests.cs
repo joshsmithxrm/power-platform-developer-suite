@@ -31,11 +31,12 @@ public class TuiThemeServiceTests
     [InlineData("https://contoso.crm.dynamics.com")]
     [InlineData("https://contoso.CRM.DYNAMICS.COM")]
     [InlineData("https://myorg.crm.dynamics.com/")]
-    public void DetectEnvironmentType_StandardCrm_ReturnsProduction(string url)
+    public void DetectEnvironmentType_StandardCrm_ReturnsUnknown(string url)
     {
+        // CRM regional suffix tells us nothing about environment type
         var result = _service.DetectEnvironmentType(url);
 
-        Assert.Equal(EnvironmentType.Production, result);
+        Assert.Equal(EnvironmentType.Unknown, result);
     }
 
     [Theory]
@@ -43,25 +44,34 @@ public class TuiThemeServiceTests
     [InlineData("https://contoso.crm9.dynamics.com")]
     [InlineData("https://contoso.crm11.dynamics.com")]
     [InlineData("https://contoso.CRM9.DYNAMICS.COM")]
-    public void DetectEnvironmentType_RegionalCrm_ReturnsSandbox(string url)
+    public void DetectEnvironmentType_RegionalCrm_ReturnsUnknown(string url)
     {
+        // CRM number suffix (crm4, crm9, etc.) is geographic region, not env type
         var result = _service.DetectEnvironmentType(url);
 
-        Assert.Equal(EnvironmentType.Sandbox, result);
+        Assert.Equal(EnvironmentType.Unknown, result);
     }
 
     [Theory]
     [InlineData("https://contoso-dev.crm.dynamics.com")]
     [InlineData("https://dev-contoso.crm9.dynamics.com")]
     [InlineData("https://contoso-development.crm.dynamics.com")]
-    [InlineData("https://contoso-test.crm.dynamics.com")]
-    [InlineData("https://contoso-qa.crm.dynamics.com")]
-    [InlineData("https://contoso-uat.crm.dynamics.com")]
     public void DetectEnvironmentType_DevKeywords_ReturnsDevelopment(string url)
     {
         var result = _service.DetectEnvironmentType(url);
 
         Assert.Equal(EnvironmentType.Development, result);
+    }
+
+    [Theory]
+    [InlineData("https://contoso-test.crm.dynamics.com")]
+    [InlineData("https://contoso-qa.crm.dynamics.com")]
+    [InlineData("https://contoso-uat.crm.dynamics.com")]
+    public void DetectEnvironmentType_TestKeywords_ReturnsTest(string url)
+    {
+        var result = _service.DetectEnvironmentType(url);
+
+        Assert.Equal(EnvironmentType.Test, result);
     }
 
     [Theory]
@@ -112,6 +122,7 @@ public class TuiThemeServiceTests
     [InlineData(EnvironmentType.Production, "PROD")]
     [InlineData(EnvironmentType.Sandbox, "SANDBOX")]
     [InlineData(EnvironmentType.Development, "DEV")]
+    [InlineData(EnvironmentType.Test, "TEST")]
     [InlineData(EnvironmentType.Trial, "TRIAL")]
     [InlineData(EnvironmentType.Unknown, "")]
     public void GetEnvironmentLabel_ReturnsExpectedLabel(EnvironmentType envType, string expected)
@@ -168,14 +179,15 @@ public class TuiThemeServiceTests
     public void FullWorkflow_DetectAndApplyTheme_DoesNotThrow()
     {
         // Simulate the full workflow of detecting environment and getting theme
-        var url = "https://contoso.crm.dynamics.com";
+        // URL alone can't determine type — use a URL with a keyword for this test
+        var url = "https://contoso-dev.crm.dynamics.com";
 
         var envType = _service.DetectEnvironmentType(url);
         var label = _service.GetEnvironmentLabel(envType);
         var scheme = _service.GetStatusBarScheme(envType);
 
-        Assert.Equal(EnvironmentType.Production, envType);
-        Assert.Equal("PROD", label);
+        Assert.Equal(EnvironmentType.Development, envType);
+        Assert.Equal("DEV", label);
         Assert.NotNull(scheme);
     }
 

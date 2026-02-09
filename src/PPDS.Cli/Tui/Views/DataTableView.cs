@@ -1,7 +1,6 @@
 using System.Data;
-using System.Text;
-using PPDS.Cli.Infrastructure;
-using PPDS.Cli.Services.Export;
+using PPDS.Cli.Tui.Helpers;
+using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Views;
@@ -137,7 +136,7 @@ internal class DataTableView : FrameView
             };
             _filterField.TextChanged += OnFilterTextChanged;
             _filterFrame.Add(_filterField);
-            Add(_filterFrame);
+            Add(_filterFrame); // CodeQL [cs/virtual-call-in-constructor] Terminal.Gui requires Add() during construction
         }
 
         // Table view
@@ -315,83 +314,12 @@ internal class DataTableView : FrameView
     }
 
     /// <summary>
-    /// Copies the selected cell value to clipboard.
+    /// Performs a smart copy based on current selection and header preference.
     /// </summary>
-    public bool CopySelectedCell()
+    private void HandleCopy(bool invertHeaders)
     {
-        var value = GetSelectedValue()?.ToString() ?? string.Empty;
-        var success = ClipboardHelper.CopyToClipboard(value);
-
-        if (success)
-        {
-            var display = value.Length > 40 ? value[..37] + "..." : value;
-            SetStatus($"Copied: {display}");
-        }
-        else
-        {
-            SetStatus($"Copy failed. Value: {value}");
-        }
-
-        return success;
-    }
-
-    /// <summary>
-    /// Copies the selected row(s) to clipboard.
-    /// </summary>
-    public bool CopySelectedRows()
-    {
-        var sb = new StringBuilder();
-
-        // Get selected rows from multi-selection
-        var selectedRows = GetSelectedRowIndices();
-        if (selectedRows.Count == 0 && _tableView.SelectedRow >= 0)
-        {
-            selectedRows = new List<int> { _tableView.SelectedRow };
-        }
-
-        if (selectedRows.Count == 0)
-        {
-            SetStatus("No rows selected");
-            return false;
-        }
-
-        // Header row
-        var headers = new List<string>();
-        foreach (DataColumn col in _sourceTable.Columns)
-        {
-            headers.Add(col.ColumnName);
-        }
-        sb.AppendLine(string.Join("\t", headers));
-
-        // Data rows
-        foreach (var rowIndex in selectedRows.OrderBy(i => i))
-        {
-            if (rowIndex < 0 || rowIndex >= _sourceTable.Rows.Count) continue;
-
-            var row = _sourceTable.Rows[rowIndex];
-            var values = new List<string>();
-            foreach (DataColumn col in _sourceTable.Columns)
-            {
-                var value = row[col]?.ToString() ?? string.Empty;
-                value = value.Replace("\t", " ").Replace("\n", " ").Replace("\r", "");
-                values.Add(value);
-            }
-            sb.AppendLine(string.Join("\t", values));
-        }
-
-        var text = sb.ToString().TrimEnd();
-        var success = ClipboardHelper.CopyToClipboard(text);
-
-        if (success)
-        {
-            SetStatus($"Copied {selectedRows.Count} row(s)");
-        }
-        else
-        {
-            SetStatus("Copy failed");
-        }
-
-        return success;
+        var result = TableCopyHelper.CopySelection(_tableView, _sourceTable, invertHeaders);
+        SetStatus(result.StatusMessage);
     }
 
     /// <summary>
@@ -403,29 +331,6 @@ internal class DataTableView : FrameView
     }
 
     /// <summary>
-    /// Gets the row indices that are currently selected.
-    /// </summary>
-    protected virtual List<int> GetSelectedRowIndices()
-    {
-        var indices = new List<int>();
-
-        // Terminal.Gui MultiSelectedRegions for TableView
-        if (_tableView.MultiSelectedRegions != null)
-        {
-            foreach (var region in _tableView.MultiSelectedRegions)
-            {
-                for (int r = region.Rect.Y; r < region.Rect.Y + region.Rect.Height; r++)
-                {
-                    if (!indices.Contains(r))
-                        indices.Add(r);
-                }
-            }
-        }
-
-        return indices;
-    }
-
-    /// <summary>
     /// Updates the status label with current row count and hints.
     /// </summary>
     protected virtual void UpdateStatus()
@@ -434,13 +339,15 @@ internal class DataTableView : FrameView
         var filteredCount = _filteredView.Count;
         var moreText = MoreRecordsAvailable ? " (more)" : "";
 
+        var copyHint = TableCopyHelper.GetCopyHint(_tableView);
+
         if (!string.IsNullOrEmpty(_currentFilter))
         {
-            _statusLabel.Text = $"{filteredCount} of {rowCount} rows{moreText} | Ctrl+C: copy | /: filter";
+            _statusLabel.Text = $"{filteredCount} of {rowCount} rows{moreText} | {copyHint} | /: filter";
         }
         else
         {
-            _statusLabel.Text = $"{rowCount} rows{moreText} | Ctrl+C: copy | /: filter";
+            _statusLabel.Text = $"{rowCount} rows{moreText} | {copyHint} | /: filter";
         }
     }
 
@@ -451,12 +358,12 @@ internal class DataTableView : FrameView
             switch (e.KeyEvent.Key)
             {
                 case Key.CtrlMask | Key.C:
-                    CopySelectedCell();
+                    HandleCopy(invertHeaders: false);
                     e.Handled = true;
                     break;
 
                 case Key.CtrlMask | Key.ShiftMask | Key.C:
-                    CopySelectedRows();
+                    HandleCopy(invertHeaders: true);
                     e.Handled = true;
                     break;
 
@@ -524,6 +431,7 @@ internal class DataTableView : FrameView
         _tableView.SelectedCellChanged += (e) =>
         {
             SelectionChanged?.Invoke(e.NewRow, e.NewCol);
+            UpdateStatus();
         };
     }
 
@@ -548,11 +456,11 @@ internal class DataTableView : FrameView
 
     private void ShowContextMenu(int x, int y)
     {
-        var menu = new ContextMenu(x, y,
+        using var menu = new ContextMenu(x, y,
             new MenuBarItem(null, new MenuItem[]
             {
-                new MenuItem("Copy Cell", "Ctrl+C", () => CopySelectedCell()),
-                new MenuItem("Copy Row(s)", "Ctrl+Shift+C", () => CopySelectedRows()),
+                new MenuItem("Copy", "Ctrl+C", () => HandleCopy(invertHeaders: false)),
+                new MenuItem("Copy (no headers)", "Ctrl+Shift+C", () => HandleCopy(invertHeaders: true)),
                 null!, // Separator
                 new MenuItem("Clear Filter", "", ClearFilter, canExecute: () => !string.IsNullOrEmpty(_currentFilter))
             }));
@@ -608,6 +516,7 @@ internal class DataTableView : FrameView
         return value
             .Replace("'", "''")
             .Replace("[", "[[]")
+            .Replace("]", "[]]")
             .Replace("%", "[%]")
             .Replace("*", "[*]");
     }

@@ -7,9 +7,6 @@ namespace PPDS.Cli.Infrastructure;
 /// Factory for creating service providers with Dataverse connection pools.
 /// Abstracted to enable mock injection for TUI testing.
 /// </summary>
-/// <remarks>
-/// See ADR-0028 for rationale on TUI testability architecture.
-/// </remarks>
 public interface IServiceProviderFactory
 {
     /// <summary>

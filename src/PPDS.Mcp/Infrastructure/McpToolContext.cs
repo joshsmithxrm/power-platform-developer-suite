@@ -24,18 +24,26 @@ namespace PPDS.Mcp.Infrastructure;
 public sealed class McpToolContext
 {
     private readonly IMcpConnectionPoolManager _poolManager;
+    private readonly ProfileStore _profileStore;
+    private readonly ISecureCredentialStore _credentialStore;
     private readonly ILoggerFactory _loggerFactory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="McpToolContext"/> class.
     /// </summary>
     /// <param name="poolManager">The connection pool manager.</param>
+    /// <param name="profileStore">The profile store for loading/saving auth profiles.</param>
+    /// <param name="credentialStore">The secure credential store.</param>
     /// <param name="loggerFactory">Optional logger factory.</param>
     public McpToolContext(
         IMcpConnectionPoolManager poolManager,
+        ProfileStore profileStore,
+        ISecureCredentialStore credentialStore,
         ILoggerFactory? loggerFactory = null)
     {
         _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
+        _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
+        _credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
     }
 
@@ -47,7 +55,7 @@ public sealed class McpToolContext
     /// <exception cref="InvalidOperationException">Thrown if no profile is active.</exception>
     public async Task<AuthProfile> GetActiveProfileAsync(CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
+        var store = _profileStore;
         var collection = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         var profile = collection.ActiveProfile
@@ -64,7 +72,7 @@ public sealed class McpToolContext
     /// <returns>The profile collection.</returns>
     public async Task<ProfileCollection> GetProfileCollectionAsync(CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
+        var store = _profileStore;
         return await store.LoadAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -116,7 +124,6 @@ public sealed class McpToolContext
                 "No environment selected. Run 'ppds env select <url>' to select an environment.");
         }
 
-        var credentialStore = new NativeCredentialStore();
         var sources = new List<IConnectionSource>();
 
         try
@@ -127,12 +134,12 @@ public sealed class McpToolContext
                 maxPoolSize: 52,
                 deviceCodeCallback: null,
                 environmentDisplayName: profile.Environment.DisplayName,
-                credentialStore: credentialStore);
+                credentialStore: _credentialStore);
 
             var adapter = new ProfileConnectionSourceAdapter(source);
             sources.Add(adapter);
 
-            return CreateProviderFromSources(sources.ToArray(), credentialStore);
+            return CreateProviderFromSources(sources.ToArray(), _credentialStore);
         }
         catch
         {
@@ -140,7 +147,6 @@ public sealed class McpToolContext
             {
                 source.Dispose();
             }
-            credentialStore.Dispose();
             throw;
         }
     }
@@ -152,7 +158,7 @@ public sealed class McpToolContext
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SaveProfileCollectionAsync(ProfileCollection collection, CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
+        var store = _profileStore;
         await store.SaveAsync(collection, cancellationToken).ConfigureAwait(false);
     }
 
@@ -181,7 +187,7 @@ public sealed class McpToolContext
             builder.AddProvider(new LoggerFactoryProvider(_loggerFactory));
         });
 
-        // Register credential store for disposal with service provider.
+        // Register credential store (DI owns lifecycle, not this child provider).
         services.AddSingleton<ISecureCredentialStore>(credentialStore);
 
         var dataverseOptions = new DataverseOptions();

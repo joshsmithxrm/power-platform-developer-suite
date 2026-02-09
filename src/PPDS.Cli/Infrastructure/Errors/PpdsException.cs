@@ -6,7 +6,6 @@ namespace PPDS.Cli.Infrastructure.Errors;
 /// <remarks>
 /// <para>
 /// Services throw <see cref="PpdsException"/> (or subclasses) with structured error information.
-/// See ADR-0026 for architectural context.
 /// </para>
 /// <para>
 /// Use specific subclasses for error types that require programmatic handling:

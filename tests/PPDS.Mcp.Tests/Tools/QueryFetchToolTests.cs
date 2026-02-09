@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Moq;
+using PPDS.Auth.Credentials;
+using PPDS.Auth.Profiles;
 using PPDS.Mcp.Infrastructure;
 using PPDS.Mcp.Tools;
 using Xunit;
@@ -33,7 +35,10 @@ public sealed class QueryFetchToolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
         var tool = new QueryFetchTool(context);
 
         // Act
@@ -50,7 +55,10 @@ public sealed class QueryFetchToolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
         var tool = new QueryFetchTool(context);
 
         // Act
@@ -66,7 +74,10 @@ public sealed class QueryFetchToolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IMcpConnectionPoolManager>();
-        var context = new McpToolContext(mockPoolManager.Object);
+        var context = new McpToolContext(
+            mockPoolManager.Object,
+            new ProfileStore(),
+            new Mock<ISecureCredentialStore>().Object);
         var tool = new QueryFetchTool(context);
 
         // Act

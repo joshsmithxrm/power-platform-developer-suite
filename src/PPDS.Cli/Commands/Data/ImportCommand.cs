@@ -161,7 +161,7 @@ public static class ImportCommand
         FileInfo? errorReport,
         CancellationToken cancellationToken)
     {
-        // Start the operation clock for synchronized elapsed time (ADR-0027)
+        // Start the operation clock for synchronized elapsed time
         OperationClock.Start();
 
         var progressReporter = ServiceFactory.CreateProgressReporter(outputFormat, "Import");

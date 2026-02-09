@@ -52,7 +52,8 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// </summary>
     private static async Task<ProfileCollection> DefaultLoadProfilesAsync(CancellationToken cancellationToken)
     {
-        using var store = new ProfileStore();
+        await using var provider = ProfileServiceFactory.CreateLocalProvider();
+        var store = provider.GetRequiredService<ProfileStore>();
         return await store.LoadAsync(cancellationToken).ConfigureAwait(false);
     }
 

@@ -45,7 +45,7 @@
 - Power Apps Admin API for connections (different from Dataverse)
 - Orphaned connection reference detection (port from extension)
 - Deployment settings sync with value preservation and deterministic sorting
-- PAC-compatible format (see [ADR-0011](adr/0011_DEPLOYMENT_SETTINGS_FORMAT.md))
+- PAC-compatible format
 
 ---
 
@@ -55,7 +55,7 @@
 
 **Scope:**
 - Full filtering (25 fields, 11 operators, 8 quick filters)
-- Hybrid filter approach: inline flags + filter file (see [ADR-0012](adr/0012_HYBRID_FILTER_DESIGN.md))
+- Hybrid filter approach: inline flags + filter file
 - Timeline correlation view
 - Trace level management (off/exception/all)
 - Export/delete operations
@@ -67,7 +67,7 @@
 **Design Session:** 2026-01-04 - Completed
 
 **Scope:**
-- Published vs unpublished content (default: published per [ADR-0010](adr/0010_PUBLISHED_UNPUBLISHED_DEFAULT.md))
+- Published vs unpublished content (default: published, `--unpublished` flag)
 - Conflict detection on push (timestamp-based with hash tracking)
 - Efficient filtering for 60K+ resources
 - Hierarchical pull with `--strip-prefix` option
@@ -90,17 +90,6 @@ Full plugin lifecycle: assemblies, packages, steps, images, service endpoints, w
 
 ---
 
-## Architecture Decision Records
-
-| ADR | Decision |
-|-----|----------|
-| [ADR-0009](adr/0009_CLI_COMMAND_TAXONOMY.md) | Use `ppds plugintraces` (not `traces` or `plugins traces`) |
-| [ADR-0010](adr/0010_PUBLISHED_UNPUBLISHED_DEFAULT.md) | Default to published, `--unpublished` flag |
-| [ADR-0011](adr/0011_DEPLOYMENT_SETTINGS_FORMAT.md) | Use PAC-compatible deployment settings format |
-| [ADR-0012](adr/0012_HYBRID_FILTER_DESIGN.md) | Hybrid filter design: inline flags + filter file |
-
----
-
 ## Key Design Decisions
 
 ### JSON Output Strategy
@@ -120,5 +109,4 @@ Every command serves Extension (JSON-RPC), Humans (tables), AI/Tooling (structur
 
 ## References
 
-- [CLI Output Architecture (ADR-0008)](adr/0008_CLI_OUTPUT_ARCHITECTURE.md)
 - [Extension CLI Migration Issues](https://github.com/joshsmithxrm/power-platform-developer-suite/issues?q=is%3Aissue+label%3Aepic%3Acli-daemon)

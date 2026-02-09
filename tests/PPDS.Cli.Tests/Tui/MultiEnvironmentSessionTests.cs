@@ -23,7 +23,7 @@ public sealed class MultiEnvironmentSessionTests : IDisposable
     }
 
     private InteractiveSession CreateSession() =>
-        new(null, _tempStore.Store, _mockFactory);
+        new(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
     [Fact]
     public async Task GetServiceProvider_CachesByUrl_IndependentProviders()
@@ -93,7 +93,7 @@ public sealed class MultiEnvironmentSessionTests : IDisposable
         var profile2 = TempProfileStore.CreateTestProfile("profile2", environmentUrl: "https://dev.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("profile1", profile1, profile2);
 
-        await using var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        await using var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         await session.GetServiceProviderAsync("https://dev.crm.dynamics.com");
         await session.GetServiceProviderAsync("https://prod.crm.dynamics.com");
@@ -115,7 +115,7 @@ public sealed class MultiEnvironmentSessionTests : IDisposable
         var profile = TempProfileStore.CreateTestProfile("TestProfile", environmentUrl: "https://dev.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
-        await using var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        await using var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         var providerDev = await session.GetServiceProviderAsync("https://dev.crm.dynamics.com");
 

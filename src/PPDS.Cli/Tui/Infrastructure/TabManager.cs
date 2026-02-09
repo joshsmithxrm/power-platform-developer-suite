@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Screens;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -39,7 +40,8 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
     public void AddTab(ITuiScreen screen, string? environmentUrl, string? environmentDisplayName = null)
     {
         var envType = _themeService.DetectEnvironmentType(environmentUrl);
-        var tab = new TabInfo(screen, environmentUrl, environmentDisplayName, envType);
+        var envColor = _themeService.GetResolvedColor(environmentUrl);
+        var tab = new TabInfo(screen, environmentUrl, environmentDisplayName, envType, envColor);
         _tabs.Add(tab);
         _activeIndex = _tabs.Count - 1;
 
@@ -95,12 +97,69 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
         ActiveTabChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Finds the index of the first tab bound to the given environment URL.
+    /// Returns -1 if no tab matches.
+    /// </summary>
+    public int FindTabByEnvironment(string? environmentUrl)
+    {
+        if (environmentUrl == null) return -1;
+
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (string.Equals(_tabs[i].EnvironmentUrl, environmentUrl, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Closes all tabs, disposing their screens.
+    /// </summary>
+    public void CloseAllTabs()
+    {
+        foreach (var tab in _tabs)
+        {
+            try { tab.Screen.Dispose(); }
+            catch { /* continue */ }
+        }
+        _tabs.Clear();
+        _activeIndex = -1;
+
+        TabsChanged?.Invoke();
+        ActiveTabChanged?.Invoke();
+    }
+
     /// <summary>Cycles to the previous tab (wraps around).</summary>
     public void ActivatePrevious()
     {
         if (_tabs.Count <= 1) return;
         _activeIndex = (_activeIndex - 1 + _tabs.Count) % _tabs.Count;
         ActiveTabChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Refreshes environment colors for all tabs from the theme service.
+    /// Call when environment configuration changes.
+    /// </summary>
+    public void RefreshTabColors()
+    {
+        bool changed = false;
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            var tab = _tabs[i];
+            var newColor = _themeService.GetResolvedColor(tab.EnvironmentUrl);
+            var newType = _themeService.DetectEnvironmentType(tab.EnvironmentUrl);
+
+            if (tab.EnvironmentColor != newColor || tab.EnvironmentType != newType)
+            {
+                _tabs[i] = tab with { EnvironmentColor = newColor, EnvironmentType = newType };
+                changed = true;
+            }
+        }
+
+        if (changed)
+            TabsChanged?.Invoke();
     }
 
     /// <inheritdoc />
@@ -111,6 +170,7 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
             Title: t.Screen.Title,
             EnvironmentUrl: t.EnvironmentUrl,
             EnvironmentType: t.EnvironmentType,
+            EnvironmentColor: t.EnvironmentColor,
             IsActive: i == _activeIndex
         )).ToList();
 
@@ -139,4 +199,5 @@ internal sealed record TabInfo(
     ITuiScreen Screen,
     string? EnvironmentUrl,
     string? EnvironmentDisplayName,
-    EnvironmentType EnvironmentType);
+    EnvironmentType EnvironmentType,
+    EnvironmentColor EnvironmentColor);

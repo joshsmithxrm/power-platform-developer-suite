@@ -47,6 +47,18 @@ public sealed class ResolvedConnectionInfo
 public static class ProfileServiceFactory
 {
     /// <summary>
+    /// Creates a lightweight service provider with auth and CLI application services (no Dataverse connection).
+    /// Use for commands that need ProfileStore, EnvironmentConfigStore, or NativeCredentialStore
+    /// but don't connect to a Dataverse environment.
+    /// </summary>
+    public static ServiceProvider CreateLocalProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddCliApplicationServices();
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
     /// Creates a service provider using a single profile.
     /// </summary>
     /// <param name="profileName">Profile name (null for active profile).</param>
@@ -92,7 +104,7 @@ public static class ProfileServiceFactory
         var credentialStore = new NativeCredentialStore();
 
         // Callback to persist HomeAccountId and LastUsedAt after authentication
-        // This enables token cache reuse across sessions (ADR-0027) and tracks usage
+        // This enables token cache reuse across sessions and tracks usage
         Action<AuthProfile> onProfileUpdated = p =>
         {
             // Fire-and-forget with error swallowing - don't fail connection if persist fails
@@ -310,7 +322,6 @@ public static class ProfileServiceFactory
         services.RegisterDataverseServices();
 
         // Register CLI application services (ISqlQueryService, etc.)
-        // See ADR-0015 for architectural context
         services.AddCliApplicationServices();
 
         // Connection pool - CLI uses factory delegate because it gets IConnectionSource[] from auth profiles

@@ -89,15 +89,10 @@ public interface IHotkeyRegistry
     void SetActiveDialog(object? dialog);
 
     /// <summary>
-    /// Suppresses the next bare Alt key from focusing the menu bar.
-    /// Call this after handling Alt+key combinations to prevent menu focus on Alt release.
+    /// Sets a function to check whether the menu bar is currently open.
+    /// Used to block letter keys from triggering first-letter navigation.
     /// </summary>
-    void SuppressNextAltMenuFocus();
-
-    /// <summary>
-    /// Sets the menu bar reference for Alt key suppression.
-    /// </summary>
-    void SetMenuBar(MenuBar? menuBar);
+    void SetMenuOpenCheck(Func<bool>? isMenuOpen);
 }
 
 /// <summary>
@@ -108,9 +103,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
     private readonly List<HotkeyBinding> _bindings = new();
     private readonly object _lock = new();
     private bool _globalHandlerExecuting;
-    private bool _suppressAltMenuFocus;
-    private MenuBar? _menuBar;
-    private System.Reflection.FieldInfo? _openedByAltKeyField;
+    private Func<bool>? _isMenuOpen;
 
     private object? _activeScreen;
     private object? _activeDialog;
@@ -123,7 +116,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             var conflict = _bindings.FirstOrDefault(b =>
                 b.Key == key &&
                 b.Scope == scope &&
-                (scope == HotkeyScope.Global || b.Owner == owner));
+                (scope == HotkeyScope.Global || ReferenceEquals(b.Owner, owner)));
 
             if (conflict != null)
             {
@@ -147,43 +140,17 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
         }
     }
 
-    public void SetMenuBar(MenuBar? menuBar)
+    public void SetMenuOpenCheck(Func<bool>? isMenuOpen)
     {
-        _menuBar = menuBar;
-        if (menuBar != null)
-        {
-            // Cache the reflection field for performance
-            _openedByAltKeyField = typeof(MenuBar).GetField(
-                "openedByAltKey",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        }
-    }
-
-    public void SuppressNextAltMenuFocus()
-    {
-        _suppressAltMenuFocus = true;
-
-        // Reset the MenuBar's internal state using reflection
-        // This prevents OnKeyUp from opening the menu when Alt is released
-        if (_menuBar != null && _openedByAltKeyField != null)
-        {
-            _openedByAltKeyField.SetValue(_menuBar, false);
-        }
+        _isMenuOpen = isMenuOpen;
     }
 
     public bool TryHandle(KeyEvent keyEvent)
     {
-        // Suppress bare Alt key to prevent menu focus after Alt+modifier combinations
-        if (keyEvent.Key == Key.AltMask && _suppressAltMenuFocus)
-        {
-            _suppressAltMenuFocus = false;
-            return true;
-        }
-
         // Block letter keys when menu dropdown is open to prevent first-letter navigation
         // This prevents accidental menu item selection (e.g., Q selecting Quit when File menu is open)
-        // Block both plain letters and Alt+letter combinations
-        if (_menuBar != null && _menuBar.IsMenuOpen)
+        // Only block plain letters; Alt+letter combinations pass through for menu accelerators
+        if (_isMenuOpen?.Invoke() == true)
         {
             var key = keyEvent.Key;
             var baseKey = key & ~Key.AltMask & ~Key.CtrlMask & ~Key.ShiftMask;
@@ -192,11 +159,12 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             bool isLetter = (keyValue >= 'a' && keyValue <= 'z') ||
                             (keyValue >= 'A' && keyValue <= 'Z');
 
-            // Block plain letters and Alt+letter (but not Ctrl+letter which might be shortcuts)
+            // Block plain letters only (not Ctrl+letter or Alt+letter which are shortcuts/accelerators)
             bool hasCtrl = (key & Key.CtrlMask) != 0;
-            if (isLetter && !hasCtrl)
+            bool hasAlt = (key & Key.AltMask) != 0;
+            if (isLetter && !hasCtrl && !hasAlt)
             {
-                TuiDebugLog.Log($"Blocking letter key '{(char)keyValue}' (Alt={(key & Key.AltMask) != 0}) while menu is open");
+                TuiDebugLog.Log($"Blocking plain letter key '{(char)keyValue}' while menu is open");
                 return true; // Consume the key - prevents first-letter navigation
             }
         }
@@ -214,7 +182,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
                 matchedBinding = _bindings.FirstOrDefault(b =>
                     b.Key == keyEvent.Key &&
                     b.Scope == HotkeyScope.Dialog &&
-                    b.Owner == _activeDialog);
+                    ReferenceEquals(b.Owner, _activeDialog));
             }
 
             // 2. Check screen-scope bindings (only if no dialog is open)
@@ -223,7 +191,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
                 matchedBinding = _bindings.FirstOrDefault(b =>
                     b.Key == keyEvent.Key &&
                     b.Scope == HotkeyScope.Screen &&
-                    b.Owner == _activeScreen);
+                    ReferenceEquals(b.Owner, _activeScreen));
             }
 
             // 3. Check global bindings (always available)
@@ -336,7 +304,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             {
                 result.AddRange(_bindings.Where(b =>
                     b.Scope == HotkeyScope.Screen &&
-                    b.Owner == _activeScreen));
+                    ReferenceEquals(b.Owner, _activeScreen)));
             }
 
             // Include active dialog bindings
@@ -344,7 +312,7 @@ internal sealed class HotkeyRegistry : IHotkeyRegistry
             {
                 result.AddRange(_bindings.Where(b =>
                     b.Scope == HotkeyScope.Dialog &&
-                    b.Owner == _activeDialog));
+                    ReferenceEquals(b.Owner, _activeDialog)));
             }
 
             return result.AsReadOnly();

@@ -1,4 +1,5 @@
-using System.Text.RegularExpressions;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Environment;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Infrastructure;
@@ -7,13 +8,14 @@ namespace PPDS.Cli.Tui.Infrastructure;
 /// Default implementation of <see cref="ITuiThemeService"/>.
 /// Provides environment detection and color scheme selection.
 /// </summary>
-public sealed partial class TuiThemeService : ITuiThemeService
+public sealed class TuiThemeService : ITuiThemeService
 {
-    /// <summary>
-    /// Regex pattern for sandbox environments (e.g., crm9.dynamics.com, crm11.dynamics.com).
-    /// </summary>
-    [GeneratedRegex(@"\.crm\d+\.dynamics\.com", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
-    private static partial Regex SandboxRegex();
+    private readonly IEnvironmentConfigService? _configService;
+
+    public TuiThemeService(IEnvironmentConfigService? configService = null)
+    {
+        _configService = configService;
+    }
 
     /// <inheritdoc />
     public EnvironmentType DetectEnvironmentType(string? environmentUrl)
@@ -23,37 +25,15 @@ public sealed partial class TuiThemeService : ITuiThemeService
             return EnvironmentType.Unknown;
         }
 
-        var url = environmentUrl.ToLowerInvariant();
-
-        // Check for keywords in the URL/environment name that suggest environment type
-        if (ContainsDevKeyword(url))
+        // Delegate to EnvironmentConfigService for segment-based keyword matching
+        var detectedType = EnvironmentConfigService.DetectTypeFromUrl(environmentUrl);
+        return detectedType switch
         {
-            return EnvironmentType.Development;
-        }
-
-        if (ContainsTrialKeyword(url))
-        {
-            return EnvironmentType.Trial;
-        }
-
-        // Sandbox: regional instances like .crm9.dynamics.com, .crm11.dynamics.com
-        // These are typically sandbox/test environments
-        if (SandboxRegex().IsMatch(url))
-        {
-            return EnvironmentType.Sandbox;
-        }
-
-        // Production: standard .crm.dynamics.com (no number suffix)
-        // This is the default production region
-        if (url.Contains(".crm.dynamics.com"))
-        {
-            return EnvironmentType.Production;
-        }
-
-        // Other regional production instances
-        // Note: Some regions like .crm4.dynamics.com (EMEA) can be production
-        // We default these to Unknown since we can't reliably distinguish
-        return EnvironmentType.Unknown;
+            "Development" => EnvironmentType.Development,
+            "Test" => EnvironmentType.Test,
+            "Trial" => EnvironmentType.Trial,
+            _ => EnvironmentType.Unknown
+        };
     }
 
     /// <inheritdoc />
@@ -78,27 +58,84 @@ public sealed partial class TuiThemeService : ITuiThemeService
         EnvironmentType.Production => "PROD",
         EnvironmentType.Sandbox => "SANDBOX",
         EnvironmentType.Development => "DEV",
+        EnvironmentType.Test => "TEST",
         EnvironmentType.Trial => "TRIAL",
         _ => ""
     };
 
-    #region Keyword Detection
-
-    private static bool ContainsDevKeyword(string url)
+    /// <inheritdoc />
+    public ColorScheme GetStatusBarSchemeForUrl(string? environmentUrl)
     {
-        // Common development environment naming patterns
-        string[] devKeywords = ["dev", "develop", "development", "test", "qa", "uat"];
-        return devKeywords.Any(keyword =>
-            url.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return TuiColorPalette.StatusBar_Default;
+
+        if (_configService != null)
+        {
+            // Terminal.Gui Redraw() must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            var color = _configService.ResolveColorAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+            return TuiColorPalette.GetStatusBarScheme(color);
+        }
+
+        var envType = DetectEnvironmentType(environmentUrl);
+        return TuiColorPalette.GetStatusBarScheme(envType);
     }
 
-    private static bool ContainsTrialKeyword(string url)
+    /// <inheritdoc />
+    public string GetEnvironmentLabelForUrl(string? environmentUrl)
     {
-        // Trial environment indicators
-        string[] trialKeywords = ["trial", "demo", "preview"];
-        return trialKeywords.Any(keyword =>
-            url.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return "";
+
+        if (_configService != null)
+        {
+            // Terminal.Gui UI thread must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            // Priority 1: user-configured custom label
+            var label = _configService.ResolveLabelAsync(environmentUrl).GetAwaiter().GetResult();
+            if (!string.IsNullOrWhiteSpace(label))
+                return label.Length <= 8 ? label.ToUpperInvariant() : label[..8].ToUpperInvariant();
+
+            // Priority 2: abbreviated type
+            var type = _configService.ResolveTypeAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+            return type?.ToUpperInvariant() switch
+            {
+                "PRODUCTION" => "PROD",
+                "DEVELOPMENT" => "DEV",
+                var t when t != null && t.Length <= 8 => t,
+                var t when t != null => t[..8],
+                _ => ""
+            };
+        }
+
+        return GetEnvironmentLabel(DetectEnvironmentType(environmentUrl));
     }
 
-    #endregion
+    /// <inheritdoc />
+    public EnvironmentColor GetResolvedColor(string? environmentUrl)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+            return EnvironmentColor.Gray;
+
+        if (_configService != null)
+        {
+            // Terminal.Gui UI thread must be synchronous; config store is cached after first load
+#pragma warning disable PPDS012
+            return _configService.ResolveColorAsync(environmentUrl).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+        }
+
+        var envType = DetectEnvironmentType(environmentUrl);
+        return envType switch
+        {
+            EnvironmentType.Production => EnvironmentColor.Red,
+            EnvironmentType.Sandbox => EnvironmentColor.Brown,
+            EnvironmentType.Development => EnvironmentColor.Green,
+            EnvironmentType.Trial => EnvironmentColor.Cyan,
+            _ => EnvironmentColor.Gray
+        };
+    }
+
 }

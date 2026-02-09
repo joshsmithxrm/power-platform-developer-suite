@@ -60,6 +60,60 @@ public enum SqlTokenType
     Distinct,
     /// <summary>GROUP keyword.</summary>
     Group,
+    /// <summary>HAVING keyword.</summary>
+    Having,
+    /// <summary>CASE keyword.</summary>
+    Case,
+    /// <summary>WHEN keyword.</summary>
+    When,
+    /// <summary>THEN keyword.</summary>
+    Then,
+    /// <summary>ELSE keyword.</summary>
+    Else,
+    /// <summary>END keyword.</summary>
+    End,
+    /// <summary>IIF keyword (conditional function).</summary>
+    Iif,
+    /// <summary>EXISTS keyword.</summary>
+    Exists,
+    /// <summary>UNION keyword.</summary>
+    Union,
+    /// <summary>ALL keyword.</summary>
+    All,
+    /// <summary>CAST keyword.</summary>
+    Cast,
+    /// <summary>CONVERT keyword.</summary>
+    Convert,
+    /// <summary>INSERT keyword.</summary>
+    Insert,
+    /// <summary>INTO keyword.</summary>
+    Into,
+    /// <summary>VALUES keyword.</summary>
+    Values,
+    /// <summary>UPDATE keyword.</summary>
+    Update,
+    /// <summary>SET keyword.</summary>
+    Set,
+    /// <summary>DELETE keyword.</summary>
+    Delete,
+    /// <summary>BETWEEN keyword.</summary>
+    Between,
+    /// <summary>OVER keyword (window functions).</summary>
+    Over,
+    /// <summary>PARTITION keyword (window functions).</summary>
+    Partition,
+    /// <summary>ROW_NUMBER window function.</summary>
+    RowNumber,
+    /// <summary>RANK window function.</summary>
+    Rank,
+    /// <summary>DENSE_RANK window function.</summary>
+    DenseRank,
+    /// <summary>DECLARE keyword.</summary>
+    Declare,
+    /// <summary>IF keyword.</summary>
+    If,
+    /// <summary>BEGIN keyword.</summary>
+    Begin,
 
     #endregion
 
@@ -92,6 +146,14 @@ public enum SqlTokenType
     LessThanOrEqual,
     /// <summary>Greater than or equal operator (&gt;=).</summary>
     GreaterThanOrEqual,
+    /// <summary>Plus operator (+).</summary>
+    Plus,
+    /// <summary>Minus operator (-).</summary>
+    Minus,
+    /// <summary>Slash operator (/).</summary>
+    Slash,
+    /// <summary>Percent/modulo operator (%).</summary>
+    Percent,
 
     #endregion
 
@@ -107,6 +169,8 @@ public enum SqlTokenType
     LeftParen,
     /// <summary>Right parenthesis ()).</summary>
     RightParen,
+    /// <summary>Semicolon statement terminator (;).</summary>
+    Semicolon,
 
     #endregion
 
@@ -118,6 +182,8 @@ public enum SqlTokenType
     String,
     /// <summary>Numeric literal.</summary>
     Number,
+    /// <summary>Variable reference (@name).</summary>
+    Variable,
 
     #endregion
 
@@ -161,6 +227,33 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.As,
         SqlTokenType.Distinct,
         SqlTokenType.Group,
+        SqlTokenType.Having,
+        SqlTokenType.Case,
+        SqlTokenType.When,
+        SqlTokenType.Then,
+        SqlTokenType.Else,
+        SqlTokenType.End,
+        SqlTokenType.Iif,
+        SqlTokenType.Exists,
+        SqlTokenType.Union,
+        SqlTokenType.All,
+        SqlTokenType.Cast,
+        SqlTokenType.Convert,
+        SqlTokenType.Insert,
+        SqlTokenType.Into,
+        SqlTokenType.Values,
+        SqlTokenType.Update,
+        SqlTokenType.Set,
+        SqlTokenType.Delete,
+        SqlTokenType.Between,
+        SqlTokenType.Over,
+        SqlTokenType.Partition,
+        SqlTokenType.RowNumber,
+        SqlTokenType.Rank,
+        SqlTokenType.DenseRank,
+        SqlTokenType.Declare,
+        SqlTokenType.If,
+        SqlTokenType.Begin,
         SqlTokenType.Count,
         SqlTokenType.Sum,
         SqlTokenType.Avg,
@@ -176,6 +269,15 @@ public static class SqlTokenTypeExtensions
         SqlTokenType.GreaterThan,
         SqlTokenType.LessThanOrEqual,
         SqlTokenType.GreaterThanOrEqual
+    };
+
+    private static readonly HashSet<SqlTokenType> ArithmeticOperators = new()
+    {
+        SqlTokenType.Plus,
+        SqlTokenType.Minus,
+        SqlTokenType.Star,
+        SqlTokenType.Slash,
+        SqlTokenType.Percent
     };
 
     private static readonly HashSet<SqlTokenType> AggregateFunctions = new()
@@ -196,6 +298,11 @@ public static class SqlTokenTypeExtensions
     /// Checks if this token type is a comparison operator.
     /// </summary>
     public static bool IsComparisonOperator(this SqlTokenType type) => ComparisonOperators.Contains(type);
+
+    /// <summary>
+    /// Checks if this token type is an arithmetic operator (+, -, *, /, %).
+    /// </summary>
+    public static bool IsArithmeticOperator(this SqlTokenType type) => ArithmeticOperators.Contains(type);
 
     /// <summary>
     /// Checks if this token type is an aggregate function.
@@ -232,6 +339,33 @@ public static class SqlTokenTypeExtensions
         ["AS"] = SqlTokenType.As,
         ["DISTINCT"] = SqlTokenType.Distinct,
         ["GROUP"] = SqlTokenType.Group,
+        ["HAVING"] = SqlTokenType.Having,
+        ["CASE"] = SqlTokenType.Case,
+        ["WHEN"] = SqlTokenType.When,
+        ["THEN"] = SqlTokenType.Then,
+        ["ELSE"] = SqlTokenType.Else,
+        ["END"] = SqlTokenType.End,
+        ["IIF"] = SqlTokenType.Iif,
+        ["EXISTS"] = SqlTokenType.Exists,
+        ["UNION"] = SqlTokenType.Union,
+        ["ALL"] = SqlTokenType.All,
+        ["CAST"] = SqlTokenType.Cast,
+        ["CONVERT"] = SqlTokenType.Convert,
+        ["INSERT"] = SqlTokenType.Insert,
+        ["INTO"] = SqlTokenType.Into,
+        ["VALUES"] = SqlTokenType.Values,
+        ["UPDATE"] = SqlTokenType.Update,
+        ["SET"] = SqlTokenType.Set,
+        ["DELETE"] = SqlTokenType.Delete,
+        ["BETWEEN"] = SqlTokenType.Between,
+        ["OVER"] = SqlTokenType.Over,
+        ["PARTITION"] = SqlTokenType.Partition,
+        ["ROW_NUMBER"] = SqlTokenType.RowNumber,
+        ["RANK"] = SqlTokenType.Rank,
+        ["DENSE_RANK"] = SqlTokenType.DenseRank,
+        ["DECLARE"] = SqlTokenType.Declare,
+        ["IF"] = SqlTokenType.If,
+        ["BEGIN"] = SqlTokenType.Begin,
         ["COUNT"] = SqlTokenType.Count,
         ["SUM"] = SqlTokenType.Sum,
         ["AVG"] = SqlTokenType.Avg,

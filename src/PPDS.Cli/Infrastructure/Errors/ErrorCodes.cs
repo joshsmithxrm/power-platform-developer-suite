@@ -150,6 +150,30 @@ public static class ErrorCodes
 
         /// <summary>Query execution failed.</summary>
         public const string ExecutionFailed = "Query.ExecutionFailed";
+
+        /// <summary>Aggregate query exceeded the Dataverse 50,000-record limit.</summary>
+        public const string AggregateLimitExceeded = "Query.AggregateLimitExceeded";
+
+        /// <summary>DML statement blocked by safety guard (e.g., DELETE/UPDATE without WHERE).</summary>
+        public const string DmlBlocked = "Query.DmlBlocked";
+
+        /// <summary>DML operation would affect more rows than the configured cap.</summary>
+        public const string DmlRowCapExceeded = "Query.DmlRowCapExceeded";
+
+        /// <summary>Query plan generation timed out.</summary>
+        public const string PlanTimeout = "Query.PlanTimeout";
+
+        /// <summary>Expression type mismatch (e.g., comparing string to int).</summary>
+        public const string TypeMismatch = "Query.TypeMismatch";
+
+        /// <summary>Query exceeded the in-memory working set limit.</summary>
+        public const string MemoryLimitExceeded = "Query.MemoryLimitExceeded";
+
+        /// <summary>IntelliSense completion lookup failed.</summary>
+        public const string CompletionFailed = "Query.CompletionFailed";
+
+        /// <summary>SQL validation failed.</summary>
+        public const string ValidationFailed = "Query.ValidationFailed";
     }
 
     /// <summary>

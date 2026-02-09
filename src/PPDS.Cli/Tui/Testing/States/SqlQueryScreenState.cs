@@ -16,6 +16,7 @@ namespace PPDS.Cli.Tui.Testing.States;
 /// <param name="FilterVisible">Whether the filter input is visible.</param>
 /// <param name="CanExport">Whether export is available (results exist).</param>
 /// <param name="ErrorMessage">Error message if query failed (null if no error).</param>
+/// <param name="EditorHeight">Current height of the query editor frame in rows.</param>
 public sealed record SqlQueryScreenState(
     string QueryText,
     bool IsExecuting,
@@ -29,4 +30,5 @@ public sealed record SqlQueryScreenState(
     string FilterText,
     bool FilterVisible,
     bool CanExport,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    int EditorHeight = 6);

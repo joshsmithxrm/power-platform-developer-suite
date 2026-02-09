@@ -14,6 +14,9 @@ public enum EnvironmentType
     /// <summary>Development environment - safe for experimentation (green theme).</summary>
     Development,
 
+    /// <summary>Test/QA/UAT environment - verification stage (yellow theme).</summary>
+    Test,
+
     /// <summary>Trial environment - temporary, limited (cyan theme).</summary>
     Trial,
 

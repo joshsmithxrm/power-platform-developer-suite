@@ -38,7 +38,7 @@ public class PoolSizingTests
         // Arrange & Act
         var options = new ConnectionPoolOptions();
 
-        // Assert - 120s allows for large imports with many batches queuing (ADR-0019)
+        // Assert - 120s allows for large imports with many batches queuing
         options.AcquireTimeout.Should().Be(TimeSpan.FromSeconds(120));
     }
 

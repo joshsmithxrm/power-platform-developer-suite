@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -60,6 +61,18 @@ public class QueryExecutor : IQueryExecutor
 
         // Extract column metadata before execution
         var columns = ExtractColumns(entityElement, entityLogicalName, isAggregate);
+
+        // Resolve top/page conflict: Dataverse rejects FetchXML with both top and page attributes.
+        // If top is present and we're about to add paging, convert top to count.
+        var topAttr = fetchElement.Attribute("top");
+        if (topAttr != null && (pageNumber.HasValue || !string.IsNullOrEmpty(pagingCookie)))
+        {
+            if (int.TryParse(topAttr.Value, out var topInt))
+            {
+                topAttr.Remove();
+                fetchElement.SetAttributeValue("count", Math.Min(topInt, 5000).ToString());
+            }
+        }
 
         // Apply paging if specified
         var effectivePageNumber = pageNumber ?? 1;
@@ -181,6 +194,79 @@ public class QueryExecutor : IQueryExecutor
             ExecutedFetchXml = executedFetchXml,
             IsAggregate = isAggregate
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<long?> GetTotalRecordCountAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+
+        await using var client = await _connectionPool.GetClientAsync(
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        var request = new RetrieveTotalRecordCountRequest
+        {
+            EntityNames = new[] { entityLogicalName }
+        };
+
+        var response = (RetrieveTotalRecordCountResponse)await client.ExecuteAsync(
+            request, cancellationToken).ConfigureAwait(false);
+
+        if (response.EntityRecordCountCollection != null
+            && response.EntityRecordCountCollection.TryGetValue(entityLogicalName, out var count))
+        {
+            return count;
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<(DateTime? Min, DateTime? Max)> GetMinMaxCreatedOnAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+
+        // Use sorted top-1 queries instead of aggregate MIN/MAX to avoid the
+        // Dataverse 50K AggregateQueryRecordLimit. Two simple queries with
+        // ascending/descending sort on the indexed createdon column are fast
+        // and never hit the aggregate limit.
+        var minFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+            "<attribute name='createdon' />" +
+            "<order attribute='createdon' descending='false' />" +
+            "</entity></fetch>";
+
+        var maxFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+            "<attribute name='createdon' />" +
+            "<order attribute='createdon' descending='true' />" +
+            "</entity></fetch>";
+
+        var minTask = ExecuteFetchXmlAsync(minFetchXml, cancellationToken: cancellationToken);
+        var maxTask = ExecuteFetchXmlAsync(maxFetchXml, cancellationToken: cancellationToken);
+        await Task.WhenAll(minTask, maxTask).ConfigureAwait(false);
+
+        var minResult = await minTask.ConfigureAwait(false);
+        var maxResult = await maxTask.ConfigureAwait(false);
+
+        DateTime? min = null, max = null;
+        if (minResult.Records.Count > 0)
+        {
+            var row = minResult.Records[0];
+            if (row.TryGetValue("createdon", out var minVal) && minVal.Value is DateTime minDt)
+                min = minDt;
+        }
+
+        if (maxResult.Records.Count > 0)
+        {
+            var row = maxResult.Records[0];
+            if (row.TryGetValue("createdon", out var maxVal) && maxVal.Value is DateTime maxDt)
+                max = maxDt;
+        }
+
+        return (min, max);
     }
 
     /// <summary>

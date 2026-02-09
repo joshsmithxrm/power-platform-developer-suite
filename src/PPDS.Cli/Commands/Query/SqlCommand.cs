@@ -5,6 +5,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Sql.Parsing;
 
 namespace PPDS.Cli.Commands.Query;
@@ -40,12 +41,42 @@ public static class SqlCommand
             Description = "Output the transpiled FetchXML instead of executing the query"
         };
 
+        var explainOption = new Option<bool>("--explain")
+        {
+            Description = "Show the execution plan without executing the query"
+        };
+
+        var tdsOption = new Option<bool>("--tds")
+        {
+            Description = "Route query through the TDS Endpoint (direct SQL) instead of FetchXML"
+        };
+
+        var confirmOption = new Option<bool>("--confirm")
+        {
+            Description = "Confirm DML execution without interactive prompt"
+        };
+
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Show the execution plan without running the DML statement"
+        };
+
+        var noLimitOption = new Option<bool>("--no-limit")
+        {
+            Description = "Remove the 10,000 row safety cap for DML operations"
+        };
+
         var command = new Command("sql", "Execute a SQL query against Dataverse (transpiled to FetchXML)")
         {
             sqlArgument,
             fileOption,
             stdinOption,
             showFetchXmlOption,
+            explainOption,
+            tdsOption,
+            confirmOption,
+            dryRunOption,
+            noLimitOption,
             QueryCommandGroup.ProfileOption,
             QueryCommandGroup.EnvironmentOption,
             QueryCommandGroup.TopOption,
@@ -83,6 +114,11 @@ public static class SqlCommand
             var file = parseResult.GetValue(fileOption);
             var stdin = parseResult.GetValue(stdinOption);
             var showFetchXml = parseResult.GetValue(showFetchXmlOption);
+            var explain = parseResult.GetValue(explainOption);
+            var useTds = parseResult.GetValue(tdsOption);
+            var confirm = parseResult.GetValue(confirmOption);
+            var dryRun = parseResult.GetValue(dryRunOption);
+            var noLimit = parseResult.GetValue(noLimitOption);
             var profile = parseResult.GetValue(QueryCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(QueryCommandGroup.EnvironmentOption);
             var top = parseResult.GetValue(QueryCommandGroup.TopOption);
@@ -92,7 +128,8 @@ public static class SqlCommand
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteAsync(
-                sql, file, stdin, showFetchXml,
+                sql, file, stdin, showFetchXml, explain, useTds,
+                confirm, dryRun, noLimit,
                 profile, environment,
                 top, page, pagingCookie, count,
                 globalOptions, cancellationToken);
@@ -106,6 +143,11 @@ public static class SqlCommand
         FileInfo? file,
         bool stdin,
         bool showFetchXml,
+        bool explain,
+        bool useTds,
+        bool confirm,
+        bool dryRun,
+        bool noLimit,
         string? profile,
         string? environment,
         int? top,
@@ -132,6 +174,29 @@ public static class SqlCommand
                 cancellationToken: cancellationToken);
 
             var sqlQueryService = serviceProvider.GetRequiredService<ISqlQueryService>();
+
+            // If --explain, show execution plan without executing
+            if (explain)
+            {
+                if (globalOptions.OutputFormat == OutputFormat.Text)
+                {
+                    Console.Error.WriteLine("Building execution plan...");
+                }
+
+                var plan = await sqlQueryService.ExplainAsync(query, cancellationToken);
+                var formatted = PlanFormatter.Format(plan);
+
+                if (globalOptions.OutputFormat == OutputFormat.Json)
+                {
+                    writer.WriteSuccess(plan);
+                }
+                else
+                {
+                    Console.WriteLine(formatted);
+                }
+
+                return ExitCodes.Success;
+            }
 
             // If --show-fetchxml, transpile only (no execution)
             if (showFetchXml)
@@ -170,7 +235,14 @@ public static class SqlCommand
                 TopOverride = top,
                 PageNumber = page,
                 PagingCookie = pagingCookie,
-                IncludeCount = count
+                IncludeCount = count,
+                UseTdsEndpoint = useTds,
+                DmlSafety = new DmlSafetyOptions
+                {
+                    IsConfirmed = confirm,
+                    IsDryRun = dryRun,
+                    NoLimit = noLimit
+                }
             };
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);

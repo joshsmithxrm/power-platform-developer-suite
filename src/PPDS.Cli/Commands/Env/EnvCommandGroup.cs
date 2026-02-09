@@ -8,6 +8,7 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Commands.Env;
@@ -27,6 +28,8 @@ public static class EnvCommandGroup
         command.Subcommands.Add(CreateListCommand());
         command.Subcommands.Add(CreateSelectCommand());
         command.Subcommands.Add(CreateWhoCommand());
+        command.Subcommands.Add(CreateConfigCommand());
+        command.Subcommands.Add(CreateTypeCommand());
 
         return command;
     }
@@ -41,6 +44,8 @@ public static class EnvCommandGroup
         command.Subcommands.Add(CreateListCommand());
         command.Subcommands.Add(CreateSelectCommand());
         command.Subcommands.Add(CreateWhoCommand());
+        command.Subcommands.Add(CreateConfigCommand());
+        command.Subcommands.Add(CreateTypeCommand());
 
         return command;
     }
@@ -83,7 +88,8 @@ public static class EnvCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.ActiveProfile;
@@ -249,7 +255,8 @@ public static class EnvCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.ActiveProfile;
@@ -263,7 +270,7 @@ public static class EnvCommandGroup
             Console.Error.WriteLine($"Resolving environment '{environmentIdentifier}'...");
 
             // Use multi-layer resolution: direct connection first for URLs, Global Discovery for names
-            using var credentialStore = new NativeCredentialStore();
+            var credentialStore = localProvider.GetRequiredService<ISecureCredentialStore>();
             using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
             var result = await resolver.ResolveAsync(environmentIdentifier, cancellationToken);
 
@@ -348,7 +355,8 @@ public static class EnvCommandGroup
     {
         try
         {
-            using var store = new ProfileStore();
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var store = localProvider.GetRequiredService<ProfileStore>();
             var collection = await store.LoadAsync(cancellationToken);
 
             var profile = collection.ActiveProfile;
@@ -381,7 +389,7 @@ public static class EnvCommandGroup
                     Console.Error.WriteLine($"Resolving environment '{environmentOverride}'...");
                 }
 
-                using var credentialStore = new NativeCredentialStore();
+                var credentialStore = localProvider.GetRequiredService<ISecureCredentialStore>();
                 using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
                 var result = await resolver.ResolveAsync(environmentOverride, cancellationToken);
 
@@ -509,6 +517,255 @@ public static class EnvCommandGroup
             }
             return ExitCodes.Failure;
         }
+    }
+
+    #endregion
+
+    #region Config Command
+
+    private static Command CreateConfigCommand()
+    {
+        var urlArgument = new Argument<string?>("url")
+        {
+            Description = "Environment URL to configure"
+        };
+        urlArgument.Arity = ArgumentArity.ZeroOrOne;
+
+        var labelOption = new Option<string?>("--label", "-l")
+        {
+            Description = "Short display label for status bar and tabs"
+        };
+
+        var typeOption = new Option<string?>("--type", "-t")
+        {
+            Description = "Environment type (e.g., Production, Sandbox, Development, Test, Trial, or custom)"
+        };
+
+        var colorOption = new Option<EnvironmentColor?>("--color", "-c")
+        {
+            Description = "Status bar color. Valid values: Red, Green, Yellow, Cyan, Blue, Gray, Brown, BrightRed, BrightGreen, BrightYellow, BrightCyan, BrightBlue, White"
+        };
+
+        var showOption = new Option<bool>("--show", "-s")
+        {
+            Description = "Show current configuration for the environment"
+        };
+
+        var listOption = new Option<bool>("--list")
+        {
+            Description = "List all configured environments"
+        };
+
+        var removeOption = new Option<bool>("--remove")
+        {
+            Description = "Remove configuration for the environment"
+        };
+
+        var command = new Command("config", "Configure environment display settings (label, type, color)")
+        {
+            urlArgument, labelOption, typeOption, colorOption, showOption, listOption, removeOption
+        };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var url = parseResult.GetValue(urlArgument);
+            var label = parseResult.GetValue(labelOption);
+            var type = parseResult.GetValue(typeOption);
+            var color = parseResult.GetValue(colorOption);
+            var show = parseResult.GetValue(showOption);
+            var list = parseResult.GetValue(listOption);
+            var remove = parseResult.GetValue(removeOption);
+
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var service = localProvider.GetRequiredService<IEnvironmentConfigService>();
+
+            if (list)
+                return await ExecuteConfigListAsync(service, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                Console.Error.WriteLine("Error: Environment URL is required. Use --list to see all configs.");
+                return ExitCodes.Failure;
+            }
+
+            if (show)
+                return await ExecuteConfigShowAsync(service, url, cancellationToken);
+
+            if (remove)
+                return await ExecuteConfigRemoveAsync(service, url, cancellationToken);
+
+            if (label == null && type == null && color == null)
+                return await ExecuteConfigShowAsync(service, url, cancellationToken);
+
+            return await ExecuteConfigSetAsync(service, url, label, type, color, cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static async Task<int> ExecuteConfigSetAsync(
+        IEnvironmentConfigService service, string url,
+        string? label, string? type, EnvironmentColor? color,
+        CancellationToken ct)
+    {
+        var config = await service.SaveConfigAsync(url, label, type, color, ct: ct);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Error.WriteLine("Environment configuration saved.");
+        Console.ResetColor();
+
+        WriteConfigDetails(config);
+        return ExitCodes.Success;
+    }
+
+    private static async Task<int> ExecuteConfigShowAsync(
+        IEnvironmentConfigService service, string url, CancellationToken ct)
+    {
+        var config = await service.GetConfigAsync(url, ct);
+        if (config == null)
+        {
+            Console.Error.WriteLine($"No configuration found for: {url}");
+            Console.Error.WriteLine("Use 'ppds env config <url> --label <label> --type <type> --color <color>' to configure.");
+            return ExitCodes.Success;
+        }
+
+        WriteConfigDetails(config);
+        return ExitCodes.Success;
+    }
+
+    private static async Task<int> ExecuteConfigRemoveAsync(
+        IEnvironmentConfigService service, string url, CancellationToken ct)
+    {
+        var removed = await service.RemoveConfigAsync(url, ct);
+        if (removed)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Error.WriteLine($"Configuration removed for: {url}");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.Error.WriteLine($"No configuration found for: {url}");
+        }
+        return ExitCodes.Success;
+    }
+
+    private static async Task<int> ExecuteConfigListAsync(
+        IEnvironmentConfigService service, CancellationToken ct)
+    {
+        var configs = await service.GetAllConfigsAsync(ct);
+        if (configs.Count == 0)
+        {
+            Console.Error.WriteLine("No environments configured.");
+            Console.Error.WriteLine("Use 'ppds env config <url> --label <label> --type <type> --color <color>' to add one.");
+            return ExitCodes.Success;
+        }
+
+        Console.WriteLine("[Configured Environments]");
+        Console.WriteLine();
+        foreach (var config in configs)
+        {
+            WriteConfigDetails(config);
+            Console.WriteLine();
+        }
+        Console.WriteLine($"Total: {configs.Count} environment(s)");
+        return ExitCodes.Success;
+    }
+
+    private static void WriteConfigDetails(EnvironmentConfig config)
+    {
+        Console.WriteLine($"  URL:   {config.Url}");
+        if (config.Label != null)
+            Console.WriteLine($"  Label: {config.Label}");
+        if (config.Type != null)
+            Console.WriteLine($"  Type:  {config.Type}");
+        if (config.Color != null)
+            Console.WriteLine($"  Color: {config.Color}");
+    }
+
+    #endregion
+
+    #region Type Command
+
+    private static Command CreateTypeCommand()
+    {
+        var nameArgument = new Argument<string?>("name")
+        {
+            Description = "Type name (e.g., UAT, Gold, Train)"
+        };
+        nameArgument.Arity = ArgumentArity.ZeroOrOne;
+
+        var colorOption = new Option<EnvironmentColor?>("--color", "-c")
+        {
+            Description = "Default color for this type"
+        };
+
+        var removeOption = new Option<bool>("--remove")
+        {
+            Description = "Remove this custom type definition"
+        };
+
+        var listOption = new Option<bool>("--list")
+        {
+            Description = "List all type definitions (built-in + custom)"
+        };
+
+        var command = new Command("type", "Manage custom environment type definitions")
+        {
+            nameArgument, colorOption, removeOption, listOption
+        };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var name = parseResult.GetValue(nameArgument);
+            var color = parseResult.GetValue(colorOption);
+            var remove = parseResult.GetValue(removeOption);
+            var list = parseResult.GetValue(listOption);
+
+            await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+            var service = localProvider.GetRequiredService<IEnvironmentConfigService>();
+
+            if (list)
+            {
+                var defaults = await service.GetAllTypeDefaultsAsync(cancellationToken);
+                Console.WriteLine("[Environment Types]");
+                Console.WriteLine();
+                foreach (var (typeName, typeColor) in defaults.OrderBy(d => d.Key))
+                {
+                    Console.WriteLine($"  {typeName,-15} {typeColor}");
+                }
+                return ExitCodes.Success;
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                Console.Error.WriteLine("Error: Type name is required. Use --list to see all types.");
+                return ExitCodes.Failure;
+            }
+
+            if (remove)
+            {
+                var removed = await service.RemoveTypeDefaultAsync(name, cancellationToken);
+                Console.Error.WriteLine(removed
+                    ? $"Removed custom type '{name}'."
+                    : $"'{name}' is not a custom type (may be built-in).");
+                return ExitCodes.Success;
+            }
+
+            if (color == null)
+            {
+                Console.Error.WriteLine("Error: --color is required when defining a type.");
+                return ExitCodes.Failure;
+            }
+
+            await service.SaveTypeDefaultAsync(name, color.Value, cancellationToken);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Error.WriteLine($"Type '{name}' set to {color.Value}.");
+            Console.ResetColor();
+            return ExitCodes.Success;
+        });
+
+        return command;
     }
 
     #endregion

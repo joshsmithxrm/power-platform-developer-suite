@@ -23,6 +23,7 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
     private IPublicClientApplication? _msalClient;
     private MsalCacheHelper? _cacheHelper;
     private AuthenticationResult? _cachedResult;
+    private string? _cachedResultUrl;
     private bool _disposed;
 
     /// <inheritdoc />
@@ -104,10 +105,17 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
 
         try
         {
+            // ROPC flow is deprecated but still functional. PPDS intentionally supports
+            // username/password auth for environments where interactive auth isn't viable.
+            // Revisit if Microsoft announces removal: https://aka.ms/msal-ropc-migration
+#pragma warning disable CS0618 // AcquireTokenByUsernamePassword is obsolete
+            // CodeQL [cs/call-to-obsolete-method] ROPC is the only auth flow for non-interactive username/password scenarios
             _cachedResult = await _msalClient!
                 .AcquireTokenByUsernamePassword(scopes, _username, _password)
                 .ExecuteAsync(cancellationToken)
                 .ConfigureAwait(false);
+#pragma warning restore CS0618
+            _cachedResultUrl = environmentUrl;
         }
         catch (MsalUiRequiredException ex)
         {
@@ -146,8 +154,9 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
 
         await EnsureMsalClientInitializedAsync().ConfigureAwait(false);
 
-        // Check in-memory cache first
-        if (_cachedResult != null)
+        // Check in-memory cache first (must match target URL to avoid scope mismatch)
+        if (_cachedResult != null
+            && string.Equals(_cachedResultUrl, environmentUrl, StringComparison.OrdinalIgnoreCase))
         {
             AuthDebugLog.WriteLine($"  In-memory cache has token expiring at {_cachedResult.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(_cachedResult.ExpiresOn, _cachedResult.Account?.Username ?? _username);
@@ -175,6 +184,7 @@ public sealed class UsernamePasswordCredentialProvider : ICredentialProvider
                 .ConfigureAwait(false);
 
             _cachedResult = result;
+            _cachedResultUrl = environmentUrl;
 
             AuthDebugLog.WriteLine($"  Silent acquisition returned token expiring at {result.ExpiresOn:HH:mm:ss}");
             return CachedTokenInfo.Create(result.ExpiresOn, result.Account?.Username ?? _username);

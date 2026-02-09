@@ -9,9 +9,6 @@ namespace PPDS.Cli.Services.Environment;
 /// <summary>
 /// Application service for managing Dataverse environments.
 /// </summary>
-/// <remarks>
-/// See ADR-0015 for architectural context.
-/// </remarks>
 public sealed class EnvironmentService : IEnvironmentService
 {
     private readonly ProfileStore _store;

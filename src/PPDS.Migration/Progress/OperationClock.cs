@@ -13,9 +13,6 @@ namespace PPDS.Migration.Progress;
 /// Both progress reporters and log formatters should read from this clock
 /// to ensure consistent timestamps.
 /// </para>
-/// <para>
-/// See ADR-0027 for architectural context.
-/// </para>
 /// </remarks>
 public static class OperationClock
 {

@@ -249,7 +249,7 @@ public class DataverseConnectionPoolTests
         var poolOptions = new ConnectionPoolOptions { Enabled = false };
         var logger = NullLogger<DataverseConnectionPool>.Instance;
 
-        var pool = new DataverseConnectionPool(
+        using var pool = new DataverseConnectionPool(
             new[] { sourceMock.Object },
             throttleTracker,
             poolOptions,

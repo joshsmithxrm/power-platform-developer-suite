@@ -9,7 +9,6 @@ namespace PPDS.Cli.Services.Profile;
 /// </summary>
 /// <remarks>
 /// This service encapsulates profile management logic shared between CLI, TUI, and RPC interfaces.
-/// See ADR-0015 for architectural context.
 /// </remarks>
 public interface IProfileService
 {
@@ -41,6 +40,7 @@ public interface IProfileService
     /// </summary>
     /// <param name="request">Profile creation parameters.</param>
     /// <param name="deviceCodeCallback">Callback for device code display (required for device code auth).</param>
+    /// <param name="beforeInteractiveAuth">Callback shown before browser auth to let the user choose Browser/DeviceCode/Cancel.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created profile.</returns>
     /// <exception cref="PpdsException">If profile creation fails.</exception>
@@ -49,6 +49,7 @@ public interface IProfileService
     Task<ProfileSummary> CreateProfileAsync(
         ProfileCreateRequest request,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -210,6 +211,12 @@ public sealed record ProfileCreateRequest
     public bool UseDeviceCode { get; init; }
 
     /// <summary>
+    /// Explicit auth method selection. When set, takes priority over UseDeviceCode and field-based inference.
+    /// Used by TUI to pass the user's radio button selection directly.
+    /// </summary>
+    public AuthMethod? AuthMethod { get; init; }
+
+    /// <summary>
     /// Application ID for SPN auth.
     /// </summary>
     public string? ApplicationId { get; init; }
@@ -233,6 +240,16 @@ public sealed record ProfileCreateRequest
     /// Certificate thumbprint (Windows store).
     /// </summary>
     public string? CertificateThumbprint { get; init; }
+
+    /// <summary>
+    /// Username for ROPC authentication.
+    /// </summary>
+    public string? Username { get; init; }
+
+    /// <summary>
+    /// Password for ROPC authentication.
+    /// </summary>
+    public string? Password { get; init; }
 
     /// <summary>
     /// Use managed identity.

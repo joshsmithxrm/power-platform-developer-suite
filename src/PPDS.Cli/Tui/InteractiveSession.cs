@@ -12,6 +12,7 @@ using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Tui;
@@ -45,6 +46,8 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private string? _activeEnvironmentUrl;
     private string? _activeEnvironmentDisplayName;
     private bool _disposed;
+    private readonly EnvironmentConfigStore _envConfigStore;
+    private readonly EnvironmentConfigService _envConfigService;
     private readonly Lazy<ITuiErrorService> _errorService;
     private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
     private readonly Lazy<IProfileService> _profileService;
@@ -62,6 +65,11 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// Event raised when the active profile changes.
     /// </summary>
     public event Action<string?>? ProfileChanged;
+
+    /// <summary>
+    /// Event raised when environment configuration (label, type, color) is saved.
+    /// </summary>
+    public event Action? ConfigChanged;
 
     /// <summary>
     /// Gets the current environment URL, or null if no connection has been established.
@@ -84,10 +92,16 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public string? CurrentProfileIdentity { get; private set; }
 
     /// <summary>
+    /// Gets the environment configuration service for label, type, and color resolution.
+    /// </summary>
+    public IEnvironmentConfigService EnvironmentConfigService => _envConfigService;
+
+    /// <summary>
     /// Creates a new interactive session for the specified profile.
     /// </summary>
     /// <param name="profileName">The profile name (null for active profile).</param>
     /// <param name="profileStore">Shared profile store instance.</param>
+    /// <param name="envConfigStore">Shared environment config store instance.</param>
     /// <param name="serviceProviderFactory">Factory for creating service providers (null for default).</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
     /// <param name="beforeInteractiveAuth">Callback invoked before browser opens for interactive auth.
@@ -95,20 +109,23 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public InteractiveSession(
         string? profileName,
         ProfileStore profileStore,
+        EnvironmentConfigStore envConfigStore,
         IServiceProviderFactory? serviceProviderFactory = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
     {
         _profileName = profileName ?? string.Empty;
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
+        _envConfigStore = envConfigStore ?? throw new ArgumentNullException(nameof(envConfigStore));
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
         _beforeInteractiveAuth = beforeInteractiveAuth;
+        _envConfigService = new EnvironmentConfigService(_envConfigStore);
 
         // Initialize lazy service instances (thread-safe by default)
         _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance));
         _environmentService = new Lazy<IEnvironmentService>(() => new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance));
-        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService());
+        _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService(_envConfigService));
         _errorService = new Lazy<ITuiErrorService>(() => new TuiErrorService());
         _hotkeyRegistry = new Lazy<IHotkeyRegistry>(() => new HotkeyRegistry());
         _queryHistoryService = new Lazy<IQueryHistoryService>(() => new QueryHistoryService(NullLogger<QueryHistoryService>.Instance));
@@ -123,6 +140,9 @@ internal sealed class InteractiveSession : IAsyncDisposable
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         TuiDebugLog.Log($"Initializing session with profile filter: '{_profileName}'");
+
+        // Pre-load environment config so sync-over-async calls in UI thread are cache hits
+        await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
@@ -157,6 +177,27 @@ internal sealed class InteractiveSession : IAsyncDisposable
             TuiDebugLog.Log("No environment configured - user will select environment manually");
         }
     }
+
+    /// <summary>
+    /// Updates the displayed environment without persisting to profile or pre-warming providers.
+    /// Use this when switching tabs to sync the status bar with the active tab's environment.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL to display.</param>
+    /// <param name="displayName">The display name for the environment.</param>
+    public void UpdateDisplayedEnvironment(string? environmentUrl, string? displayName)
+    {
+        if (_activeEnvironmentUrl == environmentUrl && _activeEnvironmentDisplayName == displayName)
+            return;
+
+        _activeEnvironmentUrl = environmentUrl;
+        _activeEnvironmentDisplayName = displayName;
+        EnvironmentChanged?.Invoke(environmentUrl, displayName);
+    }
+
+    /// <summary>
+    /// Notifies listeners that environment configuration has changed.
+    /// </summary>
+    public void NotifyConfigChanged() => ConfigChanged?.Invoke();
 
     /// <summary>
     /// Switches to a new environment, updating the profile and warming the new connection.
@@ -232,6 +273,30 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
             _providers[environmentUrl] = provider;
             TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");
+
+            // Fire-and-forget metadata preload so IntelliSense has entity names ready
+            var cachedMetadata = provider.GetService<ICachedMetadataProvider>();
+            if (cachedMetadata != null)
+            {
+                TuiDebugLog.Log($"Starting metadata preload for {environmentUrl}");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await cachedMetadata.PreloadAsync(cancellationToken).ConfigureAwait(false);
+                        TuiDebugLog.Log($"Metadata preload completed for {environmentUrl}");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        TuiDebugLog.Log($"Metadata preload cancelled for {environmentUrl}");
+                    }
+                    catch (Exception ex)
+                    {
+                        TuiDebugLog.Log($"Metadata preload failed for {environmentUrl}: {ex.Message}");
+                    }
+                }, cancellationToken);
+            }
+
             return provider;
         }
         finally
@@ -267,6 +332,21 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
         return provider.GetRequiredService<IDataverseConnectionPool>();
+    }
+
+    /// <summary>
+    /// Gets the cached metadata provider for the specified environment.
+    /// The provider caches entity, attribute, and relationship metadata for IntelliSense.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL to connect to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The cached metadata provider.</returns>
+    public async Task<ICachedMetadataProvider> GetCachedMetadataProviderAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+        return provider.GetRequiredService<ICachedMetadataProvider>();
     }
 
     /// <summary>
@@ -577,6 +657,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
             _providers.Clear();
         }
 
+        _envConfigStore.Dispose();
         _lock.Dispose();
         TuiDebugLog.Log("InteractiveSession disposed");
     }

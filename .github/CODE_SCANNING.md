@@ -59,12 +59,12 @@ Compile-time enforcement of architectural patterns. Analyzers run during build a
 
 | ID | Name | Description | Source |
 |----|------|-------------|--------|
-| PPDS001 | NoDirectFileIoInUi | UI layer using File.Read/Write directly | ADR-0024 |
-| PPDS002 | NoConsoleInServices | Service using Console.WriteLine | ADR-0015 |
-| PPDS003 | NoUiFrameworkInServices | Service referencing Spectre/Terminal.Gui | ADR-0025 |
-| PPDS004 | UseStructuredExceptions | Service throwing raw Exception | ADR-0026 |
-| PPDS005 | NoSdkInPresentation | CLI command calling ServiceClient directly | ADR-0015 |
-| PPDS007 | PoolClientInParallel | Pool client acquired outside parallel loop | ADR-0002/0005 |
+| PPDS001 | NoDirectFileIoInUi | UI layer using File.Read/Write directly | Architecture |
+| PPDS002 | NoConsoleInServices | Service using Console.WriteLine | Architecture |
+| PPDS003 | NoUiFrameworkInServices | Service referencing Spectre/Terminal.Gui | Architecture |
+| PPDS004 | UseStructuredExceptions | Service throwing raw Exception | Architecture |
+| PPDS005 | NoSdkInPresentation | CLI command calling ServiceClient directly | Architecture |
+| PPDS007 | PoolClientInParallel | Pool client acquired outside parallel loop | Architecture |
 | PPDS008 | UseBulkOperations | Loop with single Delete/Update calls | Gemini PR#243 |
 | PPDS011 | PropagateCancellation | Async method not passing CancellationToken | Gemini PR#242 |
 
@@ -116,19 +116,8 @@ If a finding reveals a real bug:
 2. Reference the analyzer rule (e.g., "Found by PPDS012")
 3. Include the file and line number
 
-## Architecture (ADRs)
-
-Bot instructions reference these Architecture Decision Records:
-
-| ADR | Summary |
-|-----|---------|
-| [0015](../docs/adr/0015_APPLICATION_SERVICE_LAYER.md) | Application Services for CLI/TUI/Daemon |
-| [0024](../docs/adr/0024_SHARED_LOCAL_STATE.md) | Shared local state architecture |
-| [0025](../docs/adr/0025_UI_AGNOSTIC_PROGRESS.md) | UI-agnostic progress reporting |
-| [0026](../docs/adr/0026_STRUCTURED_ERROR_MODEL.md) | Structured error model |
-
 ## Related Issues
 
 - [#231](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/231) - Tune code scanning tools to reduce noise
-- [#232](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/232) - ADR-0024 (style) - Prefer foreach over LINQ
+- [#232](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/232) - Prefer foreach over LINQ
 - [#246](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/246) - Analyzer triage process and PPDS013 refinement

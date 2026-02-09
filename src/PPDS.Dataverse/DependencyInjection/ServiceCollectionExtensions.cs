@@ -250,6 +250,9 @@ namespace PPDS.Dataverse.DependencyInjection
             services.AddTransient<IMetadataService, DataverseMetadataService>();
             services.AddTransient<IQueryExecutor, QueryExecutor>();
 
+            // Cached metadata provider (singleton - per-session cache for IntelliSense)
+            services.AddSingleton<ICachedMetadataProvider, CachedMetadataProvider>();
+
             // Domain services (transient - CLI command support)
             services.AddTransient<ISolutionService, SolutionService>();
             services.AddTransient<IImportJobService, ImportJobService>();

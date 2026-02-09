@@ -36,9 +36,8 @@ public class SqlParserTests
         // Assert
         result.IsSelectAll().Should().BeTrue();
         result.Columns.Should().HaveCount(1);
-        var column = result.Columns[0] as SqlColumnRef;
-        column.Should().NotBeNull();
-        column!.IsWildcard.Should().BeTrue();
+        var column = (SqlColumnRef)result.Columns[0];
+        column.IsWildcard.Should().BeTrue();
     }
 
     [Fact]
@@ -64,9 +63,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var column = result.Columns[0] as SqlColumnRef;
-        column.Should().NotBeNull();
-        column!.Alias.Should().Be("accountname");
+        var column = (SqlColumnRef)result.Columns[0];
+        column.Alias.Should().Be("accountname");
     }
 
     [Fact]
@@ -92,9 +90,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var column = result.Columns[0] as SqlColumnRef;
-        column.Should().NotBeNull();
-        column!.TableName.Should().Be("a");
+        var column = (SqlColumnRef)result.Columns[0];
+        column.TableName.Should().Be("a");
         column.ColumnName.Should().Be("name");
     }
 
@@ -157,9 +154,8 @@ public class SqlParserTests
 
         // Assert
         result.Where.Should().NotBeNull();
-        var condition = result.Where as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Operator.Should().Be(SqlComparisonOperator.Equal);
+        var condition = (SqlComparisonCondition)result.Where!;
+        condition.Operator.Should().Be(SqlComparisonOperator.Equal);
     }
 
     [Fact]
@@ -172,9 +168,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Operator.Should().Be(SqlComparisonOperator.NotEqual);
+        var condition = (SqlComparisonCondition)result.Where!;
+        condition.Operator.Should().Be(SqlComparisonOperator.NotEqual);
     }
 
     [Theory]
@@ -191,9 +186,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Operator.Should().Be(expected);
+        var condition = (SqlComparisonCondition)result.Where!;
+        condition.Operator.Should().Be(expected);
     }
 
     [Fact]
@@ -206,9 +200,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlComparisonCondition;
-        condition.Should().NotBeNull();
-        condition!.Value.Value.Should().Be("Contoso");
+        var condition = (SqlComparisonCondition)result.Where!;
+        condition.Value.Value.Should().Be("Contoso");
     }
 
     [Fact]
@@ -221,9 +214,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlLogicalCondition;
-        condition.Should().NotBeNull();
-        condition!.Operator.Should().Be(SqlLogicalOperator.And);
+        var condition = (SqlLogicalCondition)result.Where!;
+        condition.Operator.Should().Be(SqlLogicalOperator.And);
         condition.Conditions.Should().HaveCount(2);
     }
 
@@ -237,9 +229,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlLogicalCondition;
-        condition.Should().NotBeNull();
-        condition!.Operator.Should().Be(SqlLogicalOperator.Or);
+        var condition = (SqlLogicalCondition)result.Where!;
+        condition.Operator.Should().Be(SqlLogicalOperator.Or);
     }
 
     [Fact]
@@ -252,9 +243,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlNullCondition;
-        condition.Should().NotBeNull();
-        condition!.IsNegated.Should().BeFalse();
+        var condition = (SqlNullCondition)result.Where!;
+        condition.IsNegated.Should().BeFalse();
     }
 
     [Fact]
@@ -267,9 +257,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlNullCondition;
-        condition.Should().NotBeNull();
-        condition!.IsNegated.Should().BeTrue();
+        var condition = (SqlNullCondition)result.Where!;
+        condition.IsNegated.Should().BeTrue();
     }
 
     [Fact]
@@ -282,9 +271,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlLikeCondition;
-        condition.Should().NotBeNull();
-        condition!.Pattern.Should().Be("%contoso%");
+        var condition = (SqlLikeCondition)result.Where!;
+        condition.Pattern.Should().Be("%contoso%");
     }
 
     [Fact]
@@ -297,9 +285,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var condition = result.Where as SqlInCondition;
-        condition.Should().NotBeNull();
-        condition!.Values.Should().HaveCount(3);
+        var condition = (SqlInCondition)result.Where!;
+        condition.Values.Should().HaveCount(3);
     }
 
     [Fact]
@@ -313,9 +300,8 @@ public class SqlParserTests
 
         // Assert
         result.Where.Should().NotBeNull();
-        var topCondition = result.Where as SqlLogicalCondition;
-        topCondition.Should().NotBeNull();
-        topCondition!.Operator.Should().Be(SqlLogicalOperator.And);
+        var topCondition = (SqlLogicalCondition)result.Where!;
+        topCondition.Operator.Should().Be(SqlLogicalOperator.And);
     }
 
     #endregion
@@ -457,9 +443,8 @@ public class SqlParserTests
 
         // Assert
         result.HasAggregates().Should().BeTrue();
-        var aggregate = result.Columns[0] as SqlAggregateColumn;
-        aggregate.Should().NotBeNull();
-        aggregate!.Function.Should().Be(SqlAggregateFunction.Count);
+        var aggregate = (SqlAggregateColumn)result.Columns[0];
+        aggregate.Function.Should().Be(SqlAggregateFunction.Count);
         aggregate.IsCountAll.Should().BeTrue();
     }
 
@@ -473,9 +458,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var aggregate = result.Columns[0] as SqlAggregateColumn;
-        aggregate.Should().NotBeNull();
-        aggregate!.Function.Should().Be(SqlAggregateFunction.Count);
+        var aggregate = (SqlAggregateColumn)result.Columns[0];
+        aggregate.Function.Should().Be(SqlAggregateFunction.Count);
         aggregate.IsCountAll.Should().BeFalse();
     }
 
@@ -489,9 +473,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var aggregate = result.Columns[0] as SqlAggregateColumn;
-        aggregate.Should().NotBeNull();
-        aggregate!.IsDistinct.Should().BeTrue();
+        var aggregate = (SqlAggregateColumn)result.Columns[0];
+        aggregate.IsDistinct.Should().BeTrue();
     }
 
     [Theory]
@@ -508,9 +491,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var agg = result.Columns[0] as SqlAggregateColumn;
-        agg.Should().NotBeNull();
-        agg!.Function.Should().Be(expected);
+        var agg = (SqlAggregateColumn)result.Columns[0];
+        agg.Function.Should().Be(expected);
     }
 
     [Fact]
@@ -523,9 +505,8 @@ public class SqlParserTests
         var result = parser.Parse();
 
         // Assert
-        var aggregate = result.Columns[0] as SqlAggregateColumn;
-        aggregate.Should().NotBeNull();
-        aggregate!.Alias.Should().Be("total");
+        var aggregate = (SqlAggregateColumn)result.Columns[0];
+        aggregate.Alias.Should().Be("total");
     }
 
     #endregion

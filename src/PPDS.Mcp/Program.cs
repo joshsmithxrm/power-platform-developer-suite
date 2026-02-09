@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
+using PPDS.Auth.DependencyInjection;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Mcp.Infrastructure;
 
@@ -28,6 +29,9 @@ builder.Services.AddMcpServer()
 // Register MCP infrastructure.
 builder.Services.AddSingleton<IMcpConnectionPoolManager, McpConnectionPoolManager>();
 builder.Services.AddSingleton<McpToolContext>();
+
+// Register auth services (ProfileStore, EnvironmentConfigStore, ISecureCredentialStore).
+builder.Services.AddAuthServices();
 
 // Register Dataverse services (IMetadataService, IPluginTraceService, IQueryExecutor, etc.).
 builder.Services.RegisterDataverseServices();

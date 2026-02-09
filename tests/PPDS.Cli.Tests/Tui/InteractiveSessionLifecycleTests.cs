@@ -41,6 +41,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         var session = new InteractiveSession(
             profileName: null, // Use active
             _tempStore.Store,
+            new EnvironmentConfigStore(),
             _mockFactory);
 
         string? eventUrl = null;
@@ -70,6 +71,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         var session = new InteractiveSession(
             profileName: null,
             _tempStore.Store,
+            new EnvironmentConfigStore(),
             _mockFactory);
 
         // Act
@@ -96,6 +98,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         var session = new InteractiveSession(
             profileName: "Profile2", // Explicit profile
             _tempStore.Store,
+            new EnvironmentConfigStore(),
             _mockFactory);
 
         string? eventUrl = null;
@@ -126,7 +129,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task GetServiceProviderAsync_CreatesProviderOnFirstCall()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         // Act
         await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
@@ -140,7 +143,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task GetServiceProviderAsync_ReusesSameUrlProvider()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         const string url = "https://test.crm.dynamics.com";
 
         // Act - Call twice with same URL
@@ -156,7 +159,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task GetServiceProviderAsync_RecreatesForDifferentUrl()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         // Act
         await session.GetServiceProviderAsync("https://env1.crm.dynamics.com");
@@ -184,7 +187,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             environmentUrl: "https://env2.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("Profile1", profile1, profile2);
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         await session.InitializeAsync();
         _mockFactory.Reset();
 
@@ -210,7 +213,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             environmentUrl: "https://test.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
         _mockFactory.Reset();
 
@@ -235,7 +238,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             environmentUrl: "https://test.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         string? receivedUrl = null;
         string? receivedName = null;
         session.EnvironmentChanged += (url, name) =>
@@ -260,6 +263,77 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
 
     #endregion
 
+    #region UpdateDisplayedEnvironment Tests
+
+    [Fact]
+    public void UpdateDisplayedEnvironment_FiresEventWithCorrectValues()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+        string? eventUrl = null;
+        string? eventName = null;
+        session.EnvironmentChanged += (url, name) =>
+        {
+            eventUrl = url;
+            eventName = name;
+        };
+
+        // Act
+        session.UpdateDisplayedEnvironment("https://dev.crm.dynamics.com", "Dev Env");
+
+        // Assert
+        Assert.Equal("https://dev.crm.dynamics.com", eventUrl);
+        Assert.Equal("Dev Env", eventName);
+    }
+
+    [Fact]
+    public void UpdateDisplayedEnvironment_UpdatesProperties()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+
+        // Act
+        session.UpdateDisplayedEnvironment("https://dev.crm.dynamics.com", "Dev Env");
+
+        // Assert
+        Assert.Equal("https://dev.crm.dynamics.com", session.CurrentEnvironmentUrl);
+        Assert.Equal("Dev Env", session.CurrentEnvironmentDisplayName);
+    }
+
+    [Fact]
+    public void UpdateDisplayedEnvironment_NoOpsWhenUnchanged()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+        session.UpdateDisplayedEnvironment("https://dev.crm.dynamics.com", "Dev Env");
+
+        var eventCount = 0;
+        session.EnvironmentChanged += (_, _) => eventCount++;
+
+        // Act - call again with same values
+        session.UpdateDisplayedEnvironment("https://dev.crm.dynamics.com", "Dev Env");
+
+        // Assert - event should NOT fire
+        Assert.Equal(0, eventCount);
+    }
+
+    [Fact]
+    public void UpdateDisplayedEnvironment_DoesNotPersistToProfile()
+    {
+        // Arrange - session with no seeded profiles (no real profile store backing)
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+
+        // Act - should not throw even without a real profile store
+        var exception = Record.Exception(() =>
+            session.UpdateDisplayedEnvironment("https://dev.crm.dynamics.com", "Dev Env"));
+
+        // Assert - no file I/O attempted (no exception from empty store)
+        Assert.Null(exception);
+        Assert.Empty(_mockFactory.CreationLog); // No providers created
+    }
+
+    #endregion
+
     #region Environment Switching Tests
 
     [Fact]
@@ -271,7 +345,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             environmentUrl: "https://old.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         // Act
         await session.SetEnvironmentAsync(
@@ -292,7 +366,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             environmentUrl: "https://old.crm.dynamics.com");
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         var oldProvider = await session.GetServiceProviderAsync("https://old.crm.dynamics.com");
         _mockFactory.Reset();
 
@@ -321,7 +395,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task DisposeAsync_CompletesWithinTimeout()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
 
         // Act & Assert - Should complete within 3 seconds
@@ -334,7 +408,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task DisposeAsync_IsIdempotent()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
 
         // Act - Dispose twice
@@ -343,6 +417,36 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
 
         // Assert - If we got here without exception, the test passed
         Assert.True(true);
+    }
+
+    #endregion
+
+    #region ConfigChanged Event Tests
+
+    [Fact]
+    public void NotifyConfigChanged_FiresConfigChangedEvent()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+        var fired = false;
+        session.ConfigChanged += () => fired = true;
+
+        // Act
+        session.NotifyConfigChanged();
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void NotifyConfigChanged_NoSubscribers_DoesNotThrow()
+    {
+        // Arrange
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
+
+        // Act & Assert - should not throw
+        var ex = Record.Exception(() => session.NotifyConfigChanged());
+        Assert.Null(ex);
     }
 
     #endregion
@@ -356,7 +460,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         var expectedException = new InvalidOperationException("Connection failed");
         _mockFactory.ExceptionToThrow = expectedException;
 
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -368,7 +472,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task InvalidateAsync_WhenNoProvider_DoesNotThrow()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
 
         // Act & Assert - Should not throw
         await session.InvalidateAsync();
@@ -379,7 +483,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     public async Task GetServiceProviderAsync_AfterDispose_ThrowsObjectDisposedException()
     {
         // Arrange
-        var session = new InteractiveSession(null, _tempStore.Store, _mockFactory);
+        var session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), _mockFactory);
         await session.DisposeAsync();
 
         // Act & Assert

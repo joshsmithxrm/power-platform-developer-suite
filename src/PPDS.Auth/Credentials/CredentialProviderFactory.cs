@@ -62,7 +62,7 @@ public static class CredentialProviderFactory
         return profile.AuthMethod switch
         {
             AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth),
-            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback, beforeInteractiveAuth),
+            AuthMethod.DeviceCode => DeviceCodeCredentialProvider.FromProfile(profile, deviceCodeCallback),
             AuthMethod.ClientSecret => await CreateClientSecretProviderAsync(
                 profile, credentialStore, envSecret, cancellationToken).ConfigureAwait(false),
             AuthMethod.CertificateFile => await CreateCertificateFileProviderAsync(
@@ -106,7 +106,7 @@ public static class CredentialProviderFactory
         return profile.AuthMethod switch
         {
             AuthMethod.InteractiveBrowser => InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth),
-            AuthMethod.DeviceCode => CreateInteractiveProvider(profile, deviceCodeCallback, beforeInteractiveAuth),
+            AuthMethod.DeviceCode => DeviceCodeCredentialProvider.FromProfile(profile, deviceCodeCallback),
             AuthMethod.ClientSecret => CreateClientSecretProviderSync(profile, envSecret),
             AuthMethod.CertificateFile => CertificateFileCredentialProvider.FromProfile(profile, null),
             AuthMethod.CertificateStore => CertificateStoreCredentialProvider.FromProfile(profile),
@@ -207,24 +207,6 @@ public static class CredentialProviderFactory
             password,
             profile.Cloud,
             profile.TenantId);
-    }
-
-    /// <summary>
-    /// Creates the appropriate interactive provider based on environment.
-    /// </summary>
-    private static ICredentialProvider CreateInteractiveProvider(
-        AuthProfile profile,
-        Action<DeviceCodeInfo>? deviceCodeCallback,
-        Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
-    {
-        if (InteractiveBrowserCredentialProvider.IsAvailable())
-        {
-            return InteractiveBrowserCredentialProvider.FromProfile(profile, deviceCodeCallback, beforeInteractiveAuth);
-        }
-        else
-        {
-            return DeviceCodeCredentialProvider.FromProfile(profile, deviceCodeCallback);
-        }
     }
 
     /// <summary>

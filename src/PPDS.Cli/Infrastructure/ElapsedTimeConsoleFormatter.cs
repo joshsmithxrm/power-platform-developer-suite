@@ -11,7 +11,7 @@ namespace PPDS.Cli.Infrastructure;
 /// </summary>
 /// <remarks>
 /// Uses <see cref="OperationClock"/> for elapsed time to stay synchronized with
-/// <see cref="ConsoleProgressReporter"/>. See ADR-0027.
+/// <see cref="ConsoleProgressReporter"/>.
 /// </remarks>
 public sealed class ElapsedTimeConsoleFormatter : ConsoleFormatter
 {

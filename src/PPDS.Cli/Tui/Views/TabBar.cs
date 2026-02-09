@@ -12,6 +12,7 @@ namespace PPDS.Cli.Tui.Views;
 internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 {
     private readonly TabManager _tabManager;
+    private readonly ITuiThemeService _themeService;
     private readonly List<Label> _tabLabels = new();
     private Label? _addButton;
     private bool _isVisible;
@@ -19,12 +20,13 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
     /// <summary>Raised when the [+] button is clicked to request a new tab.</summary>
     public event Action? NewTabClicked;
 
-    public TabBar(TabManager tabManager)
+    public TabBar(TabManager tabManager, ITuiThemeService themeService)
     {
         _tabManager = tabManager ?? throw new ArgumentNullException(nameof(tabManager));
+        _themeService = themeService ?? throw new ArgumentNullException(nameof(themeService));
 
         X = 0;
-        Y = 0;
+        Y = 1; // Below menu bar
         Width = Dim.Fill();
         Height = 1;
         ColorScheme = TuiColorPalette.MenuBar;
@@ -60,17 +62,21 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
             {
                 var tab = _tabManager.Tabs[i];
                 var index = i; // Capture for closure
-                var text = $" {i + 1}: {tab.Screen.Title} ";
+                var envLabel = _themeService.GetEnvironmentLabelForUrl(tab.EnvironmentUrl);
+                var text = string.IsNullOrEmpty(envLabel)
+                    ? $" {i + 1}: {tab.Screen.Title} "
+                    : $" {i + 1}: {tab.Screen.Title} [{envLabel}] ";
 
-                var label = new Label(text)
+                var isActive = i == _tabManager.ActiveIndex;
+                // Active tabs get bracket markers for clear visual distinction
+                var displayText = isActive ? $"[{text}]" : text;
+                var label = new Label(displayText)
                 {
                     X = xPos,
                     Y = 0,
-                    Width = text.Length,
+                    Width = displayText.Length,
                     Height = 1,
-                    ColorScheme = i == _tabManager.ActiveIndex
-                        ? TuiColorPalette.TabActive
-                        : TuiColorPalette.TabInactive
+                    ColorScheme = TuiColorPalette.GetTabScheme(tab.EnvironmentColor, isActive)
                 };
 
                 label.MouseClick += (_) =>
@@ -80,7 +86,7 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 
                 _tabLabels.Add(label);
                 Add(label);
-                xPos += text.Length;
+                xPos += displayText.Length;
             }
 
             // Add [+] button (separate from tab labels)
@@ -101,15 +107,8 @@ internal sealed class TabBar : View, ITuiStateCapture<TabBarState>
 
     private void UpdateHighlight()
     {
-        if (Application.Driver == null) return;
-
-        for (int i = 0; i < _tabManager.Tabs.Count && i < _tabLabels.Count; i++)
-        {
-            _tabLabels[i].ColorScheme = i == _tabManager.ActiveIndex
-                ? TuiColorPalette.TabActive
-                : TuiColorPalette.TabInactive;
-        }
-        SetNeedsDisplay();
+        // Rebuild fully to update both bracket markers and color schemes
+        Rebuild();
     }
 
     /// <inheritdoc />

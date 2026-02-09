@@ -1440,9 +1440,6 @@ namespace PPDS.Dataverse.BulkOperations
         /// Each consumer's tasks queue on the pool semaphore rather than each consumer
         /// assuming it can use the full pool capacity.
         /// </para>
-        /// <para>
-        /// See ADR-0019 for architectural rationale.
-        /// </para>
         /// </remarks>
         private async Task<BulkOperationResult> ExecuteBatchesParallelAsync<T>(
             List<List<T>> batches,

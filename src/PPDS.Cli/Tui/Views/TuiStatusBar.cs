@@ -43,6 +43,11 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     public event Action? EnvironmentClicked;
 
     /// <summary>
+    /// Event raised when the environment section is right-clicked (configure).
+    /// </summary>
+    public event Action? EnvironmentConfigureRequested;
+
+    /// <summary>
     /// Creates a new interactive status bar.
     /// </summary>
     /// <param name="session">The interactive session for state and events.</param>
@@ -80,13 +85,13 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     /// </summary>
     public override bool MouseEvent(MouseEvent mouseEvent)
     {
+        // Profile is on left, environment on right
+        // Boundary is where environment text starts (right-aligned)
+        var envStartX = Bounds.Width - _environmentText.Length;
+        if (envStartX < 0) envStartX = Bounds.Width / 2; // Fallback if text too long
+
         if (mouseEvent.Flags.HasFlag(MouseFlags.Button1Clicked))
         {
-            // Profile is on left, environment on right
-            // Boundary is where environment text starts (right-aligned)
-            var envStartX = Bounds.Width - _environmentText.Length;
-            if (envStartX < 0) envStartX = Bounds.Width / 2; // Fallback if text too long
-
             if (mouseEvent.X < envStartX)
             {
                 ProfileClicked?.Invoke();
@@ -95,6 +100,15 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
             else
             {
                 EnvironmentClicked?.Invoke();
+                return true;
+            }
+        }
+
+        if (mouseEvent.Flags.HasFlag(MouseFlags.Button3Clicked))
+        {
+            if (mouseEvent.X >= envStartX)
+            {
+                EnvironmentConfigureRequested?.Invoke();
                 return true;
             }
         }
@@ -108,8 +122,7 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     public override void Redraw(Rect bounds)
     {
         // Get environment-aware color scheme
-        var envType = _themeService.DetectEnvironmentType(_session.CurrentEnvironmentUrl);
-        var colorScheme = _themeService.GetStatusBarScheme(envType);
+        var colorScheme = _themeService.GetStatusBarSchemeForUrl(_session.CurrentEnvironmentUrl);
 
         // Apply the color scheme
         Driver.SetAttribute(colorScheme.Normal);
@@ -185,8 +198,7 @@ internal sealed class TuiStatusBar : View, ITuiStateCapture<TuiStatusBarState>
     private void UpdateDisplay()
     {
         // Get environment type label
-        var envType = _themeService.DetectEnvironmentType(_session.CurrentEnvironmentUrl);
-        var envLabel = _themeService.GetEnvironmentLabel(envType);
+        var envLabel = _themeService.GetEnvironmentLabelForUrl(_session.CurrentEnvironmentUrl);
         var labelSuffix = !string.IsNullOrEmpty(envLabel) ? $" [{envLabel}]" : "";
 
         // Profile section - show name and identity (e.g., "Josh (josh@contoso.com)")

@@ -235,12 +235,12 @@ public class MyView
 
 | ID | Name | Category | Description | Source |
 |----|------|----------|-------------|--------|
-| PPDS001 | NoDirectFileIoInUi | Architecture | UI layer using File.Read/Write directly | ADR-0024 |
-| PPDS002 | NoConsoleInServices | Architecture | Service using Console.WriteLine | ADR-0015 |
-| PPDS003 | NoUiFrameworkInServices | Architecture | Service referencing Spectre/Terminal.Gui | ADR-0025 |
-| PPDS004 | UseStructuredExceptions | Architecture | Service throwing raw Exception | ADR-0026 |
-| PPDS005 | NoSdkInPresentation | Architecture | CLI command calling ServiceClient directly | ADR-0015 |
-| PPDS007 | PoolClientInParallel | Architecture | Pool client acquired outside parallel loop | ADR-0002/0005 |
+| PPDS001 | NoDirectFileIoInUi | Architecture | UI layer using File.Read/Write directly | — |
+| PPDS002 | NoConsoleInServices | Architecture | Service using Console.WriteLine | — |
+| PPDS003 | NoUiFrameworkInServices | Architecture | Service referencing Spectre/Terminal.Gui | — |
+| PPDS004 | UseStructuredExceptions | Architecture | Service throwing raw Exception | — |
+| PPDS005 | NoSdkInPresentation | Architecture | CLI command calling ServiceClient directly | — |
+| PPDS007 | PoolClientInParallel | Architecture | Pool client acquired outside parallel loop | — |
 | PPDS008 | UseBulkOperations | Performance | Loop with single Create/Update/Delete calls | Gemini PR#243 |
 | PPDS009 | UseAggregateForCount | Performance | RetrieveMultiple used just for counting | — |
 | PPDS010 | ValidateTopCount | Performance | Unbounded TopCount in query | — |

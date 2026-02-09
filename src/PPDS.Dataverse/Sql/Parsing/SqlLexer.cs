@@ -87,6 +87,18 @@ public sealed class SqlLexer
             case ')':
                 Advance();
                 return new SqlToken(SqlTokenType.RightParen, ")", startPosition);
+            case ';':
+                Advance();
+                return new SqlToken(SqlTokenType.Semicolon, ";", startPosition);
+            case '+':
+                Advance();
+                return new SqlToken(SqlTokenType.Plus, "+", startPosition);
+            case '/':
+                Advance();
+                return new SqlToken(SqlTokenType.Slash, "/", startPosition);
+            case '%':
+                Advance();
+                return new SqlToken(SqlTokenType.Percent, "%", startPosition);
         }
 
         // Operators
@@ -130,6 +142,13 @@ public sealed class SqlLexer
             return new SqlToken(SqlTokenType.NotEquals, "!=", startPosition);
         }
 
+        // Minus: emit Minus token always; parser handles unary negation vs subtraction
+        if (ch == '-')
+        {
+            Advance();
+            return new SqlToken(SqlTokenType.Minus, "-", startPosition);
+        }
+
         // String literals
         if (ch == '\'')
         {
@@ -147,8 +166,14 @@ public sealed class SqlLexer
             return ReadQuotedIdentifier();
         }
 
+        // Variable references: @name
+        if (ch == '@')
+        {
+            return ReadVariable();
+        }
+
         // Numbers
-        if (IsDigit(ch) || (ch == '-' && IsDigit(PeekNext())))
+        if (IsDigit(ch))
         {
             return ReadNumber();
         }
@@ -248,19 +273,12 @@ public sealed class SqlLexer
     }
 
     /// <summary>
-    /// Reads a number (integer or decimal).
+    /// Reads a number (integer or decimal). Negative sign is handled by the parser as unary negation.
     /// </summary>
     private SqlToken ReadNumber()
     {
         var startPosition = _position;
         var value = new System.Text.StringBuilder();
-
-        // Handle negative sign
-        if (Peek() == '-')
-        {
-            value.Append('-');
-            Advance();
-        }
 
         // Integer part
         while (!IsAtEnd() && IsDigit(Peek()))
@@ -309,6 +327,32 @@ public sealed class SqlLexer
         }
 
         return new SqlToken(SqlTokenType.Identifier, valueStr, startPosition);
+    }
+
+    /// <summary>
+    /// Reads a variable reference: @name.
+    /// The @ prefix is included in the token value.
+    /// </summary>
+    private SqlToken ReadVariable()
+    {
+        var startPosition = _position;
+        Advance(); // consume @
+
+        var value = new System.Text.StringBuilder();
+        value.Append('@');
+
+        if (IsAtEnd() || !IsIdentifierStart(Peek()))
+        {
+            throw SqlParseException.AtPosition("Expected variable name after @", startPosition, _sql);
+        }
+
+        while (!IsAtEnd() && IsIdentifierChar(Peek()))
+        {
+            value.Append(Peek());
+            Advance();
+        }
+
+        return new SqlToken(SqlTokenType.Variable, value.ToString(), startPosition);
     }
 
     /// <summary>

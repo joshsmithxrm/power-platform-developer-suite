@@ -25,6 +25,7 @@ internal abstract class TuiDialog : Dialog
     /// <param name="session">Optional session for hotkey registry integration. Pass null for simple dialogs.</param>
     protected TuiDialog(string title, InteractiveSession? session = null) : base(title)
     {
+        // CodeQL [cs/virtual-call-in-constructor] Terminal.Gui requires ColorScheme to be set during construction
         ColorScheme = TuiColorPalette.Default;
         _hotkeyRegistry = session?.GetHotkeyRegistry();
         _hotkeyRegistry?.SetActiveDialog(this);

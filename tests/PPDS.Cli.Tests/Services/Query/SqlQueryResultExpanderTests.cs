@@ -679,4 +679,93 @@ public class SqlQueryResultExpanderTests
     }
 
     #endregion
+
+    #region Aggregate Query Tests
+
+    [Fact]
+    public void ExpandFormattedValueColumns_WithAggregateCount_DoesNotExpandNameColumn()
+    {
+        // Simulates non-partitioned COUNT(*) from msdyn_postalcode:
+        // Dataverse returns int 43711 with FormattedValue "43,711" which
+        // looks like an OptionSet to IsOptionSet (int + FormattedValue != null).
+        // The expander should skip expansion for aggregate results.
+        var result = new QueryResult
+        {
+            EntityLogicalName = "msdyn_postalcode",
+            Columns = new List<QueryColumn> { new() { LogicalName = "count_1" } },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>
+            {
+                new Dictionary<string, QueryValue>
+                {
+                    ["count_1"] = QueryValue.WithFormatting(43711, "43,711")
+                }
+            },
+            Count = 1
+        };
+
+        var expanded = SqlQueryResultExpander.ExpandFormattedValueColumns(
+            result, isAggregate: true);
+
+        // Should return original result with no count_1name column
+        Assert.Same(result, expanded);
+        Assert.Single(expanded.Columns);
+        Assert.Equal("count_1", expanded.Columns[0].LogicalName);
+    }
+
+    [Fact]
+    public void ExpandFormattedValueColumns_WithAggregateFlag_ReturnsResultUnchanged()
+    {
+        // Even lookups/optionsets in aggregate results should not be expanded
+        var result = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn>
+            {
+                new() { LogicalName = "statuscode" },
+                new() { LogicalName = "count_1" }
+            },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>
+            {
+                new Dictionary<string, QueryValue>
+                {
+                    ["statuscode"] = QueryValue.WithFormatting(1, "Active"),
+                    ["count_1"] = QueryValue.WithFormatting(500, "500")
+                }
+            },
+            Count = 1
+        };
+
+        var expanded = SqlQueryResultExpander.ExpandFormattedValueColumns(
+            result, isAggregate: true);
+
+        Assert.Same(result, expanded);
+        Assert.Equal(2, expanded.Columns.Count);
+    }
+
+    [Fact]
+    public void ExpandFormattedValueColumns_WithoutAggregateFlag_StillExpandsOptionSet()
+    {
+        // Confirm non-aggregate queries still expand as before
+        var result = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn> { new() { LogicalName = "statuscode" } },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>
+            {
+                new Dictionary<string, QueryValue>
+                {
+                    ["statuscode"] = QueryValue.WithFormatting(1, "Active")
+                }
+            },
+            Count = 1
+        };
+
+        var expanded = SqlQueryResultExpander.ExpandFormattedValueColumns(
+            result, isAggregate: false);
+
+        Assert.Equal(2, expanded.Columns.Count);
+        Assert.Equal("statuscodename", expanded.Columns[1].LogicalName);
+    }
+
+    #endregion
 }

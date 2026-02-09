@@ -1,6 +1,7 @@
 using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Dialogs;
@@ -9,6 +10,7 @@ using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
 using PPDS.Dataverse.Resilience;
+using PPDS.Dataverse.Sql.Intellisense;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;
@@ -19,15 +21,38 @@ namespace PPDS.Cli.Tui.Screens;
 /// </summary>
 internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryScreenState>
 {
+    /// <summary>
+    /// Number of rows per streaming chunk. Results appear incrementally in batches
+    /// of this size, providing visual feedback while loading continues in the background.
+    /// </summary>
+    private const int StreamingChunkSize = 100;
+
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
 
+    /// <summary>
+    /// Minimum editor height in rows (including frame border).
+    /// </summary>
+    private const int MinEditorHeight = 3;
+
+    /// <summary>
+    /// Default editor height in rows (including frame border).
+    /// </summary>
+    private const int DefaultEditorHeight = 6;
+
     private readonly FrameView _queryFrame;
-    private readonly TextView _queryInput;
+    private readonly SyntaxHighlightedTextView _queryInput;
     private readonly QueryResultsTableView _resultsTable;
     private readonly TextField _filterField;
     private readonly FrameView _filterFrame;
+    private readonly SplitterView _splitter;
     private readonly TuiSpinner _statusSpinner;
     private readonly Label _statusLabel;
+
+    /// <summary>
+    /// Current editor height in rows. Adjusted by keyboard (Ctrl+Shift+Up/Down)
+    /// or mouse drag on the splitter bar.
+    /// </summary>
+    private int _editorHeight = DefaultEditorHeight;
 
     private string? _lastSql;
     private string? _lastPagingCookie;
@@ -38,7 +63,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
-        ? $"SQL Query - {Session.CurrentEnvironmentDisplayName ?? EnvironmentUrl}"
+        ? $"SQL Query - {EnvironmentDisplayName ?? EnvironmentUrl}"
         : "SQL Query";
 
     // Note: Keep underscore on MenuBarItem (_Query) for Alt+Q to open menu.
@@ -59,22 +84,24 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// <inheritdoc />
     public override Action? ExportAction => _resultsTable.GetDataTable() != null ? ShowExportDialog : null;
 
-    public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session)
-        : base(session)
+    public SqlQueryScreen(Action<DeviceCodeInfo>? deviceCodeCallback, InteractiveSession session, string? environmentUrl = null, string? environmentDisplayName = null)
+        : base(session, environmentUrl)
     {
+        if (environmentDisplayName != null)
+            EnvironmentDisplayName = environmentDisplayName;
         _deviceCodeCallback = deviceCodeCallback;
 
         // Query input area
-        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, F6 to toggle focus)")
+        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
         {
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = 6,
+            Height = _editorHeight,
             ColorScheme = TuiColorPalette.Default
         };
 
-        _queryInput = new TextView
+        _queryInput = new SyntaxHighlightedTextView(new SqlSourceTokenizer(), TuiColorPalette.SqlSyntax)
         {
             X = 0,
             Y = 0,
@@ -125,7 +152,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.Backspace:
                     // Delete word before cursor (Alt variant)
                     DeleteWordBackward();
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -138,7 +164,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.DeleteChar:
                     // Delete word after cursor (Alt variant)
                     DeleteWordForward();
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -151,14 +176,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 case Key.AltMask | Key.CursorLeft:
                     // Word navigation backward (Alt variant) - forward to Ctrl+Left
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorLeft | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
                 case Key.AltMask | Key.CursorRight:
                     // Word navigation forward (Alt variant) - forward to Ctrl+Right
                     _queryInput.ProcessKey(new KeyEvent(Key.CursorRight | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
-                    Session.GetHotkeyRegistry().SuppressNextAltMenuFocus();
                     e.Handled = true;
                     break;
 
@@ -179,11 +202,19 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
         _queryFrame.Add(_queryInput);
 
+        // Splitter bar between query editor and results
+        _splitter = new SplitterView
+        {
+            X = 0,
+            Y = Pos.Bottom(_queryFrame)
+        };
+        _splitter.Dragged += OnSplitterDragged;
+
         // Filter field (hidden by default)
         _filterFrame = new FrameView("Filter (/)")
         {
             X = 0,
-            Y = Pos.Bottom(_queryFrame),
+            Y = Pos.Bottom(_splitter),
             Width = Dim.Fill(),
             Height = 3,
             Visible = false,
@@ -205,7 +236,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _resultsTable = new QueryResultsTableView
         {
             X = 0,
-            Y = Pos.Bottom(_queryFrame),
+            Y = Pos.Bottom(_splitter),
             Width = Dim.Fill(),
             Height = Dim.Fill() - 1
         };
@@ -229,17 +260,17 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             Height = 1
         };
 
-        Content.Add(_queryFrame, _filterFrame, _resultsTable, _statusSpinner, _statusLabel);
+        Content.Add(_queryFrame, _splitter, _filterFrame, _resultsTable, _statusSpinner, _statusLabel);
 
         // Visual focus indicators - only change title, not colors
         // The table's built-in selection highlighting is sufficient
         _queryFrame.Enter += (_) =>
         {
-            _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, F6 to toggle focus)";
+            _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
         };
         _queryFrame.Leave += (_) =>
         {
-            _queryFrame.Title = "Query (Ctrl+Enter to execute, F6 to toggle focus)";
+            _queryFrame.Title = "Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
         };
         _resultsTable.Enter += (_) =>
         {
@@ -255,6 +286,25 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             _resultsTable.SetEnvironmentUrl(EnvironmentUrl);
         }
+
+        // Eagerly resolve IntelliSense language service so completions work immediately
+        if (EnvironmentUrl != null)
+        {
+            ErrorService.FireAndForget(ResolveLanguageServiceAsync(), "ResolveLanguageService");
+        }
+
+        // Show status feedback when IntelliSense is requested before the service is ready
+        _queryInput.IntelliSenseUnavailable += () =>
+        {
+            if (EnvironmentUrl == null)
+            {
+                _statusLabel.Text = "IntelliSense unavailable — no environment selected";
+            }
+            else
+            {
+                _statusLabel.Text = "IntelliSense loading...";
+            }
+        };
 
         // Set up keyboard handling for context-dependent shortcuts
         SetupKeyboardHandling();
@@ -287,18 +337,15 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     if (_filterFrame.Visible)
                     {
                         HideFilter();
+                        e.Handled = true;
                     }
                     else if (!_queryInput.HasFocus)
                     {
                         // Return to query from results
                         _queryInput.SetFocus();
+                        e.Handled = true;
                     }
-                    else
-                    {
-                        // Request close when already in query
-                        RequestClose();
-                    }
-                    e.Handled = true;
+                    // Escape does nothing when already in query editor — use Ctrl+W to close tab
                     break;
 
                 case Key k when k == (Key)'/':
@@ -317,8 +364,87 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                         e.Handled = true;
                     }
                     break;
+
+                case Key.CursorUp | Key.AltMask:
+                case Key.CursorUp | Key.CtrlMask | Key.ShiftMask:
+                    // Shrink editor (Alt+Up primary, Ctrl+Shift+Up secondary)
+                    ResizeEditor(-1);
+                    e.Handled = true;
+                    break;
+
+                case Key.CursorDown | Key.AltMask:
+                case Key.CursorDown | Key.CtrlMask | Key.ShiftMask:
+                    // Grow editor (Alt+Down primary, Ctrl+Shift+Down secondary)
+                    ResizeEditor(1);
+                    e.Handled = true;
+                    break;
             }
         };
+    }
+
+    /// <summary>
+    /// Calculates the maximum allowed editor height (80% of available screen height).
+    /// </summary>
+    private int GetMaxEditorHeight()
+    {
+        // Content.Frame.Height may be 0 before layout; fall back to a sensible default
+        var available = Content.Frame.Height > 0 ? Content.Frame.Height : 25;
+        return Math.Max(MinEditorHeight, (int)(available * 0.8));
+    }
+
+    /// <summary>
+    /// Resizes the query editor by the specified delta (positive = grow, negative = shrink).
+    /// Clamps to <see cref="MinEditorHeight"/> and 80% of screen height.
+    /// </summary>
+    private void ResizeEditor(int delta)
+    {
+        var newHeight = Math.Clamp(_editorHeight + delta, MinEditorHeight, GetMaxEditorHeight());
+        if (newHeight == _editorHeight) return;
+
+        _editorHeight = newHeight;
+        _queryFrame.Height = _editorHeight;
+        Content.LayoutSubviews();
+        Content.SetNeedsDisplay();
+    }
+
+    /// <summary>
+    /// Handles mouse drag events from the splitter bar.
+    /// </summary>
+    private void OnSplitterDragged(int delta)
+    {
+        ResizeEditor(delta);
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="ISqlLanguageService"/> eagerly so IntelliSense works
+    /// as soon as the screen opens, without waiting for the first query execution.
+    /// </summary>
+    private async Task ResolveLanguageServiceAsync()
+    {
+        TuiDebugLog.Log($"ResolveLanguageServiceAsync starting for {EnvironmentUrl}");
+        try
+        {
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            TuiDebugLog.Log("Service provider obtained, resolving ISqlLanguageService...");
+            var langService = provider.GetService<ISqlLanguageService>();
+            if (langService != null)
+            {
+                _queryInput.LanguageService = langService;
+                TuiDebugLog.Log("ISqlLanguageService resolved and assigned — IntelliSense is now active");
+            }
+            else
+            {
+                TuiDebugLog.Log("ISqlLanguageService resolved to NULL — IntelliSense will not work");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            TuiDebugLog.Log("ResolveLanguageServiceAsync cancelled (screen closed)");
+        }
+        catch (Exception ex)
+        {
+            TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private async Task ExecuteQueryAsync()
@@ -338,7 +464,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             return;
         }
 
-        TuiDebugLog.Log($"Starting query execution for: {EnvironmentUrl}");
+        TuiDebugLog.Log($"Starting streaming query execution for: {EnvironmentUrl}");
 
         _isExecuting = true;
         _lastErrorMessage = null;
@@ -347,46 +473,112 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _statusLabel.Visible = false;
         _statusSpinner.Start("Executing query...");
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var streamingStarted = false;
+
+        // Tick elapsed time on the spinner every second until streaming starts
+        var elapsedTimer = Application.MainLoop?.AddTimeout(TimeSpan.FromSeconds(1), (_) =>
+        {
+            if (!_isExecuting) return false;
+            if (!streamingStarted)
+                _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s";
+            return true;
+        });
+
+        try
+        {
         try
         {
             TuiDebugLog.Log($"Getting SQL query service for URL: {EnvironmentUrl}");
 
             var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
-            TuiDebugLog.Log("Got service, executing query...");
+            TuiDebugLog.Log("Got service, executing streaming query...");
 
             var request = new SqlQueryRequest
             {
                 Sql = sql,
                 PageNumber = null,
-                PagingCookie = null
+                PagingCookie = null,
+                EnablePrefetch = true
             };
 
-            var result = await service.ExecuteAsync(request, ScreenCancellation);
-            TuiDebugLog.Log($"Query complete: {result.Result.Count} rows in {result.Result.ExecutionTimeMs}ms");
+            IReadOnlyList<Dataverse.Query.QueryColumn>? columns = null;
+            var totalRows = 0;
+            var isFirstChunk = true;
+
+            await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, ScreenCancellation))
+            {
+                // Capture column metadata from first chunk
+                if (isFirstChunk && chunk.Columns != null)
+                {
+                    columns = chunk.Columns;
+                }
+
+                totalRows = chunk.TotalRowsSoFar;
+
+                // Marshal UI updates to the main thread
+                var chunkCapture = chunk;
+                var columnsCapture = columns;
+                var isFirst = isFirstChunk;
+
+                Application.MainLoop?.Invoke(() =>
+                {
+                    try
+                    {
+                        if (isFirst && columnsCapture != null)
+                        {
+                            _resultsTable.InitializeStreamingColumns(
+                                columnsCapture,
+                                chunkCapture.EntityLogicalName ?? "unknown");
+                            NotifyMenuChanged();
+                        }
+
+                        if (chunkCapture.Rows.Count > 0 && columnsCapture != null)
+                        {
+                            _resultsTable.AppendStreamingRows(chunkCapture.Rows, columnsCapture);
+                        }
+
+                        // Update spinner with progress
+                        streamingStarted = true;
+                        if (!chunkCapture.IsComplete)
+                        {
+                            _statusSpinner.Message = $"Loading... {chunkCapture.TotalRowsSoFar:N0} rows ({stopwatch.Elapsed.TotalSeconds:F1}s)";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorService.ReportError("Failed to display streaming results", ex, "ExecuteQuery.StreamChunk");
+                        TuiDebugLog.Log($"Error in streaming chunk callback: {ex}");
+                    }
+                });
+
+                isFirstChunk = false;
+            }
+
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.ElapsedMilliseconds;
+
+            TuiDebugLog.Log($"Streaming query complete: {totalRows} rows in {elapsedMs}ms");
 
             Application.MainLoop?.Invoke(() =>
             {
                 try
                 {
-                    _resultsTable.LoadResults(result.Result);
-                    NotifyMenuChanged(); // Notify shell to enable File > Export menu
                     _lastSql = sql;
-                    _lastPagingCookie = result.Result.PagingCookie;
-                    _lastPageNumber = result.Result.PageNumber;
+                    _lastPageNumber = 1;
+                    _lastPagingCookie = null;
 
-                    var moreText = result.Result.MoreRecords ? " (more available)" : "";
-                    _statusText = $"Returned {result.Result.Count} rows in {result.Result.ExecutionTimeMs}ms{moreText}";
+                    _statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms";
                 }
                 catch (Exception ex)
                 {
-                    ErrorService.ReportError("Failed to display query results", ex, "ExecuteQuery.LoadResults");
+                    ErrorService.ReportError("Failed to finalize query results", ex, "ExecuteQuery.Finalize");
                     _lastErrorMessage = ex.Message;
-                    _statusText = $"Error displaying results: {ex.Message}";
-                    TuiDebugLog.Log($"Error in ExecuteQuery callback: {ex}");
+                    _statusText = $"Error finalizing results: {ex.Message}";
+                    TuiDebugLog.Log($"Error in ExecuteQuery finalize callback: {ex}");
                 }
                 finally
                 {
-                    // Always cleanup: stop spinner, show status, reset executing flag
                     _statusSpinner.Stop();
                     _statusLabel.Text = _statusText;
                     _statusLabel.Visible = true;
@@ -396,7 +588,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
             // Save to history (fire-and-forget)
             ErrorService.FireAndForget(
-                SaveToHistoryAsync(sql, result.Result.Count, result.Result.ExecutionTimeMs),
+                SaveToHistoryAsync(sql, totalRows, stopwatch.ElapsedMilliseconds),
                 "SaveHistory");
         }
         catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
@@ -456,6 +648,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             _statusLabel.Visible = true;
             _isExecuting = false;
         }
+        }
+        finally
+        {
+            if (elapsedTimer != null)
+                Application.MainLoop?.RemoveTimeout(elapsedTimer);
+        }
     }
 
     private async Task SaveToHistoryAsync(string sql, int rowCount, long executionTimeMs)
@@ -487,7 +685,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             {
                 Sql = _lastSql,
                 PageNumber = _lastPageNumber + 1,
-                PagingCookie = _lastPagingCookie
+                PagingCookie = _lastPagingCookie,
+                EnablePrefetch = true
             };
 
             var result = await service.ExecuteAsync(request, ScreenCancellation);
@@ -553,7 +752,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private void HideFilter()
     {
         _filterFrame.Visible = false;
-        _resultsTable.Y = Pos.Bottom(_queryFrame);
+        _resultsTable.Y = Pos.Bottom(_splitter);
         _filterField.Text = string.Empty;
         _resultsTable.ApplyFilter(null);
     }
@@ -575,7 +774,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
         var columnTypes = _resultsTable.GetColumnTypes();
         var exportService = Session.GetExportService();
-        var dialog = new ExportDialog(exportService, dataTable, columnTypes);
+        var dialog = new ExportDialog(exportService, dataTable, columnTypes, Session);
 
         Application.Run(dialog);
     }
@@ -752,7 +951,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             FilterText: _filterField.Text?.ToString() ?? string.Empty,
             FilterVisible: _filterFrame.Visible,
             CanExport: totalRows > 0,
-            ErrorMessage: _lastErrorMessage);
+            ErrorMessage: _lastErrorMessage,
+            EditorHeight: _editorHeight);
     }
 
     protected override void OnDispose()

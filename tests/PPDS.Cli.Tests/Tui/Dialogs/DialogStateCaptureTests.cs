@@ -1,5 +1,7 @@
 using PPDS.Cli.Tui.Dialogs;
+using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing.States;
+using Terminal.Gui;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Tui.Dialogs;
@@ -39,7 +41,7 @@ public class DialogStateCaptureTests
     #region KeyboardShortcutsDialog Tests
 
     [Fact]
-    public void KeyboardShortcutsDialog_CaptureState_ReturnsValidState()
+    public void KeyboardShortcutsDialog_CaptureState_WithoutRegistry_ContainsBuiltInShortcuts()
     {
         using var dialog = new KeyboardShortcutsDialog();
 
@@ -48,16 +50,22 @@ public class DialogStateCaptureTests
         Assert.Equal("Keyboard Shortcuts", state.Title);
         Assert.NotEmpty(state.Shortcuts);
         Assert.True(state.ShortcutCount > 0);
+        // Built-in table navigation shortcuts are always present
+        Assert.Contains(state.Shortcuts, s => s.Key == "Arrows" && s.Scope == "Table Navigation");
     }
 
     [Fact]
-    public void KeyboardShortcutsDialog_CaptureState_ContainsGlobalShortcuts()
+    public void KeyboardShortcutsDialog_CaptureState_ContainsRegisteredGlobalShortcuts()
     {
-        using var dialog = new KeyboardShortcutsDialog();
+        var registry = new HotkeyRegistry();
+        registry.Register(Key.AltMask | Key.P, HotkeyScope.Global, "Switch profile", () => { });
+        registry.Register(Key.AltMask | Key.E, HotkeyScope.Global, "Switch environment", () => { });
+        registry.Register(Key.F1, HotkeyScope.Global, "Keyboard shortcuts", () => { });
+        registry.Register(Key.F12, HotkeyScope.Global, "Error log", () => { });
 
+        using var dialog = new KeyboardShortcutsDialog(registry);
         var state = dialog.CaptureState();
 
-        // Verify expected global shortcuts are present
         Assert.Contains(state.Shortcuts, s => s.Key == "Alt+P" && s.Scope == "Global");
         Assert.Contains(state.Shortcuts, s => s.Key == "Alt+E" && s.Scope == "Global");
         Assert.Contains(state.Shortcuts, s => s.Key == "F1" && s.Scope == "Global");
@@ -65,15 +73,32 @@ public class DialogStateCaptureTests
     }
 
     [Fact]
-    public void KeyboardShortcutsDialog_CaptureState_ContainsSqlQueryShortcuts()
+    public void KeyboardShortcutsDialog_CaptureState_ContainsRegisteredScreenShortcuts()
     {
-        using var dialog = new KeyboardShortcutsDialog();
+        var registry = new HotkeyRegistry();
+        var owner = new object();
+        registry.Register(Key.CtrlMask | Key.Enter, HotkeyScope.Screen, "Execute query", () => { }, owner);
+        registry.Register(Key.CtrlMask | Key.E, HotkeyScope.Screen, "Export results", () => { }, owner);
 
+        using var dialog = new KeyboardShortcutsDialog(registry);
         var state = dialog.CaptureState();
 
-        // Verify SQL Query screen shortcuts
-        Assert.Contains(state.Shortcuts, s => s.Key == "Ctrl+Enter" && s.Scope == "SQL Query");
-        Assert.Contains(state.Shortcuts, s => s.Key == "Ctrl+E" && s.Scope == "SQL Query");
+        Assert.Contains(state.Shortcuts, s => s.Key == "Ctrl+Enter" && s.Scope == "Screen");
+        Assert.Contains(state.Shortcuts, s => s.Key == "Ctrl+E" && s.Scope == "Screen");
+    }
+
+    [Fact]
+    public void KeyboardShortcutsDialog_CaptureState_ShortcutCountMatchesRegistryPlusBuiltIn()
+    {
+        var registry = new HotkeyRegistry();
+        registry.Register(Key.F1, HotkeyScope.Global, "Help", () => { });
+        registry.Register(Key.F12, HotkeyScope.Global, "Error log", () => { });
+
+        using var dialog = new KeyboardShortcutsDialog(registry);
+        var state = dialog.CaptureState();
+
+        // 2 registered + 5 built-in table navigation
+        Assert.Equal(7, state.ShortcutCount);
     }
 
     #endregion

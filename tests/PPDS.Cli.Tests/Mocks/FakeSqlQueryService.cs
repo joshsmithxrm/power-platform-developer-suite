@@ -1,5 +1,7 @@
+using System.Runtime.CompilerServices;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Cli.Tests.Mocks;
 
@@ -30,6 +32,12 @@ public sealed class FakeSqlQueryService : ISqlQueryService
     /// </summary>
     public Exception? ExceptionToThrow { get; set; }
 
+    /// <summary>
+    /// Gets or sets the plan description to return from ExplainAsync.
+    /// When null, a default mock plan is returned.
+    /// </summary>
+    public QueryPlanDescription? NextExplainResult { get; set; }
+
     /// <inheritdoc />
     public string TranspileSql(string sql, int? topOverride = null)
     {
@@ -54,6 +62,50 @@ public sealed class FakeSqlQueryService : ISqlQueryService
         return Task.FromResult(NextResult);
     }
 
+    /// <inheritdoc />
+    public Task<QueryPlanDescription> ExplainAsync(string sql, CancellationToken cancellationToken = default)
+    {
+        if (ExceptionToThrow != null)
+        {
+            throw ExceptionToThrow;
+        }
+
+        var plan = NextExplainResult ?? new QueryPlanDescription
+        {
+            NodeType = "FetchXmlScanNode",
+            Description = "Mock plan"
+        };
+
+        return Task.FromResult(plan);
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<SqlQueryStreamChunk> ExecuteStreamingAsync(
+        SqlQueryRequest request,
+        int chunkSize = 100,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        _executedQueries.Add(request);
+
+        if (ExceptionToThrow != null)
+        {
+            throw ExceptionToThrow;
+        }
+
+        // Yield a single chunk with all rows from NextResult
+        yield return new SqlQueryStreamChunk
+        {
+            Rows = NextResult.Result.Records,
+            Columns = NextResult.Result.Columns,
+            EntityLogicalName = NextResult.Result.EntityLogicalName,
+            TotalRowsSoFar = NextResult.Result.Count,
+            IsComplete = true,
+            TranspiledFetchXml = NextResult.TranspiledFetchXml
+        };
+
+        await Task.CompletedTask;
+    }
+
     /// <summary>
     /// Resets the fake service state.
     /// </summary>
@@ -63,6 +115,7 @@ public sealed class FakeSqlQueryService : ISqlQueryService
         NextResult = CreateEmptyResult();
         NextFetchXml = "<fetch><entity name='account'/></fetch>";
         ExceptionToThrow = null;
+        NextExplainResult = null;
     }
 
     private static SqlQueryResult CreateEmptyResult()
