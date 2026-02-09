@@ -468,6 +468,12 @@ internal sealed class SyntaxHighlightedTextView : TextView
 
         var fullText = Text?.ToString() ?? string.Empty;
 
+        // Clear stale diagnostics immediately so old errors don't linger
+        // while the new async validation runs
+        _diagnostics = Array.Empty<SqlDiagnostic>();
+        _cachedColorMap = null;
+        Application.MainLoop?.Invoke(SetNeedsDisplay);
+
         try
         {
             var diags = await LanguageService.ValidateAsync(fullText, ct);
