@@ -47,6 +47,18 @@ public sealed class ResolvedConnectionInfo
 public static class ProfileServiceFactory
 {
     /// <summary>
+    /// Creates a lightweight service provider with auth and CLI application services (no Dataverse connection).
+    /// Use for commands that need ProfileStore, EnvironmentConfigStore, or NativeCredentialStore
+    /// but don't connect to a Dataverse environment.
+    /// </summary>
+    public static ServiceProvider CreateLocalProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddCliApplicationServices();
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
     /// Creates a service provider using a single profile.
     /// </summary>
     /// <param name="profileName">Profile name (null for active profile).</param>
