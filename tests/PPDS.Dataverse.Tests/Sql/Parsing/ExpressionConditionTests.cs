@@ -41,10 +41,10 @@ public class ExpressionConditionTests
 
         // Assert
         result.Where.Should().NotBeNull();
-        var comp = result.Where as SqlComparisonCondition;
-        comp.Should().NotBeNull("column op literal should produce SqlComparisonCondition for FetchXML pushdown");
+        var comp = result.Where.Should().BeOfType<SqlComparisonCondition>(
+            "column op literal should produce SqlComparisonCondition for FetchXML pushdown").Subject;
 
-        comp!.Column.ColumnName.Should().Be("revenue");
+        comp.Column.ColumnName.Should().Be("revenue");
         comp.Operator.Should().Be(SqlComparisonOperator.GreaterThan);
         comp.Value.Value.Should().Be("1000");
     }

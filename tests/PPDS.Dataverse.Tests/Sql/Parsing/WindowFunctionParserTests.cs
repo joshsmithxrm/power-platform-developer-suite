@@ -178,8 +178,7 @@ public class WindowFunctionParserTests
         result.Columns.Should().HaveCount(4);
 
         // name
-        var nameCol = result.Columns[0] as SqlColumnRef;
-        nameCol.Should().NotBeNull();
+        result.Columns[0].Should().BeOfType<SqlColumnRef>();
 
         // ROW_NUMBER
         var rn = (SqlWindowExpression)((SqlComputedColumn)result.Columns[1]).Expression;

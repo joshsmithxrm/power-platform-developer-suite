@@ -78,12 +78,11 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
 
         // Priority 1: per-environment explicit color
-        if (config?.Color != null)
+        if (config is not null && config.Color != null)
             return config.Color.Value;
 
         // Priority 2: type-based color (resolve type first)
-        // CodeQL [cs/constant-condition] config?.Type is nullable; both branches of ?? are reachable
-        var type = config?.Type ?? DetectTypeFromUrl(url);
+        var type = (config is not null ? config.Type : null) ?? DetectTypeFromUrl(url);
         if (type != null)
         {
             var allDefaults = await GetAllTypeDefaultsAsync(ct).ConfigureAwait(false);

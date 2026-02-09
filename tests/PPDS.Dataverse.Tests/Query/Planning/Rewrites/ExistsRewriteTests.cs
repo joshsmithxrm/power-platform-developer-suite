@@ -162,8 +162,7 @@ public class ExistsRewriteTests
 
         // Should not be rewritten (no correlation detected)
         result.Joins.Should().BeEmpty();
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull("EXISTS without correlation should pass through unchanged");
+        result.Where.Should().BeOfType<SqlExistsCondition>("EXISTS without correlation should pass through unchanged");
     }
 
     [Fact]
@@ -178,8 +177,7 @@ public class ExistsRewriteTests
 
         // Should not be rewritten
         result.Joins.Should().BeEmpty();
-        var exists = result.Where as SqlExistsCondition;
-        exists.Should().NotBeNull();
+        result.Where.Should().BeOfType<SqlExistsCondition>();
     }
 
     [Fact]
