@@ -477,6 +477,16 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _statusSpinner.Start("Executing query...");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var streamingStarted = false;
+
+        // Tick elapsed time on the spinner every second until streaming starts
+        var elapsedTimer = Application.MainLoop?.AddTimeout(TimeSpan.FromSeconds(1), (_) =>
+        {
+            if (!_isExecuting) return false;
+            if (!streamingStarted)
+                _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s";
+            return true;
+        });
 
         try
         {
@@ -530,9 +540,10 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                         }
 
                         // Update spinner with progress
+                        streamingStarted = true;
                         if (!chunkCapture.IsComplete)
                         {
-                            _statusSpinner.Message = $"Loading... {chunkCapture.TotalRowsSoFar:N0} rows";
+                            _statusSpinner.Message = $"Loading... {chunkCapture.TotalRowsSoFar:N0} rows ({stopwatch.Elapsed.TotalSeconds:F1}s)";
                         }
                     }
                     catch (Exception ex)

@@ -570,6 +570,9 @@ internal sealed class SyntaxHighlightedTextView : TextView
 
         // Selection color: inverted (black on cyan, matching TuiColorPalette.Selected)
         var selectionAttr = Driver.MakeAttribute(Color.Black, Color.Cyan);
+        var hasFocus = HasFocus;
+        var cursorScreenCol = cursorPos.X - leftCol;
+        var cursorScreenRow = cursorPos.Y - topRow;
 
         var screenRow = 0;
         var flatPos = 0; // track flat offset into fullText
@@ -596,18 +599,27 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 var absPos = lineStart + charIdx;
 
                 // Selection always wins over syntax colors
+                Terminal.Gui.Attribute attr;
                 if (isSelecting && absPos >= selStart && absPos < selEnd)
                 {
-                    Driver.SetAttribute(selectionAttr);
+                    attr = selectionAttr;
                 }
                 else if (absPos < charColors.Length)
                 {
-                    Driver.SetAttribute(charColors[absPos]);
+                    attr = charColors[absPos];
                 }
                 else
                 {
-                    Driver.SetAttribute(_defaultAttr);
+                    attr = _defaultAttr;
                 }
+
+                // Invert colors at cursor position for visibility
+                if (hasFocus && screenRow == cursorScreenRow && screenCol == cursorScreenCol)
+                {
+                    attr = Driver.MakeAttribute(attr.Background, attr.Foreground);
+                }
+
+                Driver.SetAttribute(attr);
 
                 // Handle tabs
                 if (ch == '\t')
@@ -630,9 +642,15 @@ internal sealed class SyntaxHighlightedTextView : TextView
             // Clear rest of line
             if (screenCol < bounds.Width)
             {
-                Driver.SetAttribute(_defaultAttr);
                 for (int c = screenCol; c < bounds.Width; c++)
+                {
+                    // Invert at cursor position on empty space
+                    if (hasFocus && screenRow == cursorScreenRow && c == cursorScreenCol)
+                        Driver.SetAttribute(Driver.MakeAttribute(_defaultAttr.Background, _defaultAttr.Foreground));
+                    else
+                        Driver.SetAttribute(_defaultAttr);
                     AddRune(c, screenRow, ' ');
+                }
             }
 
             flatPos += lines[lineIdx].Length + 1; // +1 for \n (use original line length before \r strip)
@@ -642,11 +660,16 @@ internal sealed class SyntaxHighlightedTextView : TextView
         // Clear remaining rows below text
         if (screenRow < bounds.Height)
         {
-            Driver.SetAttribute(_defaultAttr);
             for (int r = screenRow; r < bounds.Height; r++)
             {
                 for (int c = 0; c < bounds.Width; c++)
+                {
+                    if (hasFocus && r == cursorScreenRow && c == cursorScreenCol)
+                        Driver.SetAttribute(Driver.MakeAttribute(_defaultAttr.Background, _defaultAttr.Foreground));
+                    else
+                        Driver.SetAttribute(_defaultAttr);
                     AddRune(c, r, ' ');
+                }
             }
         }
 
