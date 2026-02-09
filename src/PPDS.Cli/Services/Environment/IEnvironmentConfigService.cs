@@ -22,7 +22,7 @@ public interface IEnvironmentConfigService
     /// Saves or merges configuration for a specific environment.
     /// Only non-null parameters are updated (existing values preserved).
     /// </summary>
-    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, string? type = null, EnvironmentColor? color = null, CancellationToken ct = default);
+    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, string? type = null, EnvironmentColor? color = null, bool clearColor = false, CancellationToken ct = default);
 
     /// <summary>
     /// Removes configuration for a specific environment.

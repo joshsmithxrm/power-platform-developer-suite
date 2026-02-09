@@ -605,7 +605,7 @@ public static class EnvCommandGroup
         string? label, string? type, EnvironmentColor? color,
         CancellationToken ct)
     {
-        var config = await service.SaveConfigAsync(url, label, type, color, ct);
+        var config = await service.SaveConfigAsync(url, label, type, color, ct: ct);
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.Error.WriteLine("Environment configuration saved.");

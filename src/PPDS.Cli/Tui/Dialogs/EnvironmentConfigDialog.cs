@@ -199,7 +199,8 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
                 _environmentUrl,
                 label: string.IsNullOrEmpty(label) ? null : label,
                 type: string.IsNullOrEmpty(type) ? null : type,
-                color: color).GetAwaiter().GetResult();
+                color: color,
+                clearColor: color == null && _colorList.SelectedItem == 0).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
 
             ConfigChanged = true;

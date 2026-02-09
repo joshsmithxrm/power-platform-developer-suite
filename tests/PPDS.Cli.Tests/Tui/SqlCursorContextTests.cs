@@ -298,6 +298,35 @@ public class SqlCursorContextTests
 
     #endregion
 
+    #region String Literal / Escaped Strings
+
+    [Fact]
+    public void Analyze_CursorInsideEscapedString_ReturnsNone()
+    {
+        // "SELECT * FROM t WHERE name = 'O''Brien'" -- cursor at position 33 is inside the string
+        var result = SqlCursorContext.Analyze("SELECT * FROM t WHERE name = 'O''Brien'", 33);
+        Assert.Equal(SqlCompletionContextKind.None, result.Kind);
+    }
+
+    [Fact]
+    public void Analyze_CursorInsideSimpleString_ReturnsNone()
+    {
+        // "SELECT * FROM t WHERE name = 'hello'" -- cursor at position 32 is inside the string
+        var result = SqlCursorContext.Analyze("SELECT * FROM t WHERE name = 'hello'", 32);
+        Assert.Equal(SqlCompletionContextKind.None, result.Kind);
+    }
+
+    [Fact]
+    public void Analyze_CursorAfterEscapedStringClosingQuote_DoesNotReturnNone()
+    {
+        // "SELECT * FROM t WHERE name = 'O''Brien' " -- cursor after closing quote + space
+        var sql = "SELECT * FROM t WHERE name = 'O''Brien' ";
+        var result = SqlCursorContext.Analyze(sql, sql.Length);
+        Assert.NotEqual(SqlCompletionContextKind.None, result.Kind);
+    }
+
+    #endregion
+
     #region Statement Start
 
     [Fact]

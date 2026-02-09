@@ -125,6 +125,31 @@ public class EnvironmentConfigStoreTests : IDisposable
         Assert.Null(result.Label);
     }
 
+    [Fact]
+    public async Task SaveConfigAsync_ClearColor_RemovesExistingColor()
+    {
+        await _store.SaveConfigAsync("https://org.crm.dynamics.com",
+            label: "Test", color: EnvironmentColor.Red);
+
+        var result = await _store.SaveConfigAsync("https://org.crm.dynamics.com",
+            clearColor: true);
+
+        Assert.Null(result.Color);
+        Assert.Equal("Test", result.Label); // other fields preserved
+    }
+
+    [Fact]
+    public async Task SaveConfigAsync_NullColorWithoutClearColor_PreservesExistingColor()
+    {
+        await _store.SaveConfigAsync("https://org.crm.dynamics.com",
+            color: EnvironmentColor.Green);
+
+        var result = await _store.SaveConfigAsync("https://org.crm.dynamics.com",
+            label: "Updated");
+
+        Assert.Equal(EnvironmentColor.Green, result.Color);
+    }
+
     public void Dispose()
     {
         _store.Dispose();

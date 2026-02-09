@@ -125,7 +125,7 @@ public static class SqlCursorContext
             };
         }
 
-        var region = DetermineRegion(tokens, tokenIndex, cursorOffset);
+        var region = DetermineRegion(tokens, tokenIndex, cursorOffset, sql);
         return BuildResultForRegion(region, aliasMap, prefix);
     }
 
@@ -195,7 +195,7 @@ public static class SqlCursorContext
         }
 
         var aliasMapFallback = BuildAliasMapFromTokens(tokens);
-        var region = DetermineRegion(tokens, tokenIndex, cursorOffset);
+        var region = DetermineRegion(tokens, tokenIndex, cursorOffset, sql);
         return BuildResultForRegion(region, aliasMapFallback, prefix);
     }
 
@@ -269,7 +269,7 @@ public static class SqlCursorContext
     /// Determines the cursor region by walking tokens backward from the cursor.
     /// </summary>
     private static CursorRegion DetermineRegion(
-        IReadOnlyList<SqlToken> tokens, int tokenIndex, int cursorOffset)
+        IReadOnlyList<SqlToken> tokens, int tokenIndex, int cursorOffset, string sql)
     {
         // Walk backward to find the most relevant keyword
         for (var i = tokenIndex; i >= 0; i--)
@@ -278,10 +278,11 @@ public static class SqlCursorContext
 
             // If cursor is inside a string literal, no completions
             if (token.Type == SqlTokenType.String &&
-                cursorOffset > token.Position &&
-                cursorOffset < token.Position + token.Value.Length + 2) // +2 for quotes
+                cursorOffset > token.Position)
             {
-                return CursorRegion.InString;
+                var sourceLen = GetStringSourceLength(sql, token.Position);
+                if (cursorOffset < token.Position + sourceLen)
+                    return CursorRegion.InString;
             }
 
             switch (token.Type)
@@ -707,6 +708,29 @@ public static class SqlCursorContext
     private static bool IsIdentifierChar(char ch)
     {
         return ch is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or '_' or (>= '0' and <= '9');
+    }
+
+    /// <summary>
+    /// Calculates the source length of a SQL string literal starting at the given position,
+    /// correctly handling escaped single quotes (e.g., 'O''Brien' is 10 chars in source).
+    /// </summary>
+    private static int GetStringSourceLength(string sql, int startPos)
+    {
+        if (startPos >= sql.Length || sql[startPos] != '\'') return 0;
+        var i = startPos + 1;
+        while (i < sql.Length)
+        {
+            if (sql[i] == '\'')
+            {
+                if (i + 1 < sql.Length && sql[i + 1] == '\'')
+                    i += 2; // escaped quote -- skip both
+                else
+                    return i - startPos + 1; // closing quote found
+            }
+            else
+                i++;
+        }
+        return sql.Length - startPos; // unterminated string -- extends to end
     }
 
     #endregion

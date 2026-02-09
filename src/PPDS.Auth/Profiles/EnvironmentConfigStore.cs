@@ -103,6 +103,7 @@ public sealed class EnvironmentConfigStore : IDisposable
     /// </summary>
     public async Task<EnvironmentConfig> SaveConfigAsync(
         string url, string? label = null, string? type = null, EnvironmentColor? color = null,
+        bool clearColor = false,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -117,6 +118,7 @@ public sealed class EnvironmentConfigStore : IDisposable
             if (label != null) existing.Label = label == "" ? null : label;
             if (type != null) existing.Type = type == "" ? null : type;
             if (color != null) existing.Color = color;
+            else if (clearColor) existing.Color = null;
         }
         else
         {

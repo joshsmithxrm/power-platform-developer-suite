@@ -37,8 +37,9 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
 
     public async Task<EnvironmentConfig> SaveConfigAsync(
         string url, string? label = null, string? type = null, EnvironmentColor? color = null,
+        bool clearColor = false,
         CancellationToken ct = default)
-        => await _store.SaveConfigAsync(url, label, type, color, ct).ConfigureAwait(false);
+        => await _store.SaveConfigAsync(url, label, type, color, clearColor, ct).ConfigureAwait(false);
 
     public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
         => await _store.RemoveConfigAsync(url, ct).ConfigureAwait(false);
