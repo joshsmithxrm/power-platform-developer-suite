@@ -754,8 +754,8 @@ public class QueryPlannerTests
         var columns = QueryPlanner.BuildMergeAggregateColumns(stmt);
 
         Assert.Single(columns);
-        // COUNT(*) with no alias defaults to "count"
-        Assert.Equal("count", columns[0].Alias);
+        // COUNT(*) with no explicit alias uses transpiler convention: "count_1"
+        Assert.Equal("count_1", columns[0].Alias);
     }
 
     #endregion

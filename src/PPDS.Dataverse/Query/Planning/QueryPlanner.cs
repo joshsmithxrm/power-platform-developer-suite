@@ -1083,9 +1083,16 @@ public sealed class QueryPlanner
     {
         var columns = new List<MergeAggregateColumn>();
 
+        // Alias counter must match SqlToFetchXmlTranspiler.GenerateAlias:
+        // when no explicit alias is provided, the transpiler generates
+        // "{function}_{counter}" (e.g., "count_1", "sum_2"). The merge
+        // node must use the same aliases to find values in the row.
+        var aliasCounter = 0;
+
         foreach (var agg in statement.GetAggregateColumns())
         {
-            var alias = agg.Alias ?? agg.GetColumnName() ?? "count";
+            aliasCounter++;
+            var alias = agg.Alias ?? $"{agg.Function.ToString().ToLowerInvariant()}_{aliasCounter}";
             var function = MapToMergeFunction(agg.Function);
 
             // For AVG, we need a companion COUNT column to compute weighted averages.
