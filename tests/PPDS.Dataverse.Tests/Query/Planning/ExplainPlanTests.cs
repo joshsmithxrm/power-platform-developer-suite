@@ -69,7 +69,7 @@ public class ExplainPlanTests
         var result = _planner.Plan(stmt);
         var description = QueryPlanDescription.FromNode(result.RootNode);
 
-        // Bare COUNT(*) now uses aggregate FetchXML instead of CountOptimizedNode
+        // Bare COUNT(*) uses aggregate FetchXML
         Assert.Equal("FetchXmlScanNode", description.NodeType);
         Assert.Contains("FetchXmlScan: account", description.Description);
     }

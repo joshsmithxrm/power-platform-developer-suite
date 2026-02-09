@@ -246,8 +246,7 @@ public class TdsRoutingTests
 
         var result = _planner.Plan(stmt, options);
 
-        // With CountOptimized short-circuit removed, bare COUNT(*) flows
-        // through normal path — TDS routing intercepts it when enabled
+        // Bare COUNT(*) flows through normal path — TDS routing intercepts it when enabled
         Assert.IsType<TdsScanNode>(result.RootNode);
     }
 

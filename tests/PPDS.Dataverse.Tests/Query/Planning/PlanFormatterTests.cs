@@ -195,36 +195,6 @@ public class PlanFormatterTests
     }
 
     [Fact]
-    public void Format_CountOptimizedNode_ShowsDescription()
-    {
-        var fallback = new QueryPlanDescription
-        {
-            NodeType = "FetchXmlScanNode",
-            Description = "FetchXmlScan: account (single page)",
-            EstimatedRows = -1,
-            Children = System.Array.Empty<QueryPlanDescription>()
-        };
-
-        var count = new QueryPlanDescription
-        {
-            NodeType = "CountOptimizedNode",
-            Description = "CountOptimized: account",
-            EstimatedRows = 1,
-            Children = new[] { fallback }
-        };
-
-        var result = PlanFormatter.Format(count);
-
-        Assert.Contains("Execution Plan:", result);
-        Assert.Contains("CountOptimized: account", result);
-        Assert.Contains("(est. 1 rows)", result);
-        Assert.Contains("FetchXmlScan: account", result);
-
-        var lines = result.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(3, lines.Length); // header + count node + fallback node
-    }
-
-    [Fact]
     public void Format_FromIQueryPlanNode_ConvertsAndFormats()
     {
         // Use a real FetchXmlScanNode to test the IQueryPlanNode overload
@@ -324,25 +294,6 @@ public class PlanFormatterTests
         var result = PlanFormatter.Format(plan);
 
         Assert.Contains("(est. 1,234,567 rows)", result);
-    }
-
-    [Fact]
-    public void Format_CountOptimizedNode_FromRealNode()
-    {
-        var fallbackScan = new FetchXmlScanNode(
-            "<fetch aggregate='true'><entity name='account'><attribute name='accountid' alias='count' aggregate='count'/></entity></fetch>",
-            "account",
-            autoPage: false);
-
-        var countNode = new CountOptimizedNode("account", "count", fallbackScan);
-
-        var result = PlanFormatter.Format((IQueryPlanNode)countNode);
-
-        Assert.Contains("Execution Plan:", result);
-        Assert.Contains("CountOptimized: account", result);
-        Assert.Contains("(est. 1 rows)", result);
-        // Fallback node should appear as child
-        Assert.Contains("FetchXmlScan: account", result);
     }
 
     [Fact]
@@ -499,22 +450,4 @@ public class PlanFormatterTests
         Assert.DoesNotContain("Effective parallelism", output);
     }
 
-    [Fact]
-    public void QueryPlanDescription_FromNode_CountOptimized_IncludesFallback()
-    {
-        var fallbackScan = new FetchXmlScanNode(
-            "<fetch aggregate='true'><entity name='account'></entity></fetch>",
-            "account",
-            autoPage: false);
-
-        var countNode = new CountOptimizedNode("account", "total", fallbackScan);
-
-        var description = QueryPlanDescription.FromNode(countNode);
-
-        Assert.Equal("CountOptimizedNode", description.NodeType);
-        Assert.Equal("CountOptimized: account", description.Description);
-        Assert.Equal(1, description.EstimatedRows);
-        Assert.Single(description.Children);
-        Assert.Equal("FetchXmlScanNode", description.Children[0].NodeType);
-    }
 }

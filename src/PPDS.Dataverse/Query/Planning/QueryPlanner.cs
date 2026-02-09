@@ -23,6 +23,8 @@ public sealed class QueryPlanner
 {
     private readonly SqlToFetchXmlTranspiler _transpiler;
 
+    /// <summary>Initializes a new instance of the <see cref="QueryPlanner"/> class.</summary>
+    /// <param name="transpiler">Optional SQL-to-FetchXML transpiler; creates a default instance if null.</param>
     public QueryPlanner(SqlToFetchXmlTranspiler? transpiler = null)
     {
         _transpiler = transpiler ?? new SqlToFetchXmlTranspiler();
@@ -105,15 +107,6 @@ public sealed class QueryPlanner
         {
             return PlanMetadataQuery(statement, fromEntityName);
         }
-
-        // Bare COUNT(*) now flows through the normal aggregate path so it benefits
-        // from partitioning for large tables. The CountOptimizedNode path is retained
-        // for future opt-in stale-count hint support.
-        //
-        // if (IsBareCountStar(statement))
-        // {
-        //     return PlanBareCountStar(statement);
-        // }
 
         // Phase 3.5: TDS Endpoint routing. When TDS is enabled and the query is
         // compatible, bypass FetchXML transpilation and send SQL directly to TDS.
@@ -542,54 +535,6 @@ public sealed class QueryPlanner
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
-    }
-
-    /// <summary>
-    /// Builds an optimized plan for bare COUNT(*) queries using
-    /// RetrieveTotalRecordCountRequest with FetchXML as fallback.
-    /// </summary>
-    private QueryPlanResult PlanBareCountStar(SqlSelectStatement statement)
-    {
-        var countAlias = GetCountAlias(statement);
-        var transpileResult = _transpiler.TranspileWithVirtualColumns(statement);
-        var fallbackNode = new FetchXmlScanNode(
-            transpileResult.FetchXml,
-            statement.GetEntityName(),
-            autoPage: false);
-        var countNode = new CountOptimizedNode(statement.GetEntityName(), countAlias, fallbackNode);
-
-        return new QueryPlanResult
-        {
-            RootNode = countNode,
-            FetchXml = transpileResult.FetchXml,
-            VirtualColumns = transpileResult.VirtualColumns,
-            EntityLogicalName = statement.GetEntityName()
-        };
-    }
-
-    /// <summary>
-    /// Detects whether a SELECT statement is a bare COUNT(*) query with no
-    /// WHERE, JOIN, GROUP BY, or HAVING clauses — eligible for the optimized
-    /// RetrieveTotalRecordCountRequest path.
-    /// </summary>
-    private static bool IsBareCountStar(SqlSelectStatement statement)
-    {
-        return statement.Columns.Count == 1
-            && statement.Columns[0] is SqlAggregateColumn agg
-            && agg.IsCountAll
-            && statement.Where == null
-            && statement.Joins.Count == 0
-            && statement.GroupBy.Count == 0
-            && statement.Having == null;
-    }
-
-    /// <summary>
-    /// Gets the alias for the COUNT(*) column, defaulting to "count" if unaliased.
-    /// </summary>
-    private static string GetCountAlias(SqlSelectStatement statement)
-    {
-        var agg = (SqlAggregateColumn)statement.Columns[0];
-        return agg.Alias ?? "count";
     }
 
     /// <summary>
