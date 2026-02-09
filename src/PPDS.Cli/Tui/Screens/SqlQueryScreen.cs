@@ -1,6 +1,7 @@
 using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Dialogs;
@@ -42,6 +43,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private bool _isExecuting;
     private string _statusText = "Ready";
     private string? _lastErrorMessage;
+    private bool _languageServiceResolved;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -74,7 +76,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _deviceCodeCallback = deviceCodeCallback;
 
         // Query input area
-        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, F6 to toggle focus)")
+        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, F6 to toggle focus)")
         {
             X = 0,
             Y = 0,
@@ -240,11 +242,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         // The table's built-in selection highlighting is sufficient
         _queryFrame.Enter += (_) =>
         {
-            _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, F6 to toggle focus)";
+            _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, F6 to toggle focus)";
         };
         _queryFrame.Leave += (_) =>
         {
-            _queryFrame.Title = "Query (Ctrl+Enter to execute, F6 to toggle focus)";
+            _queryFrame.Title = "Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, F6 to toggle focus)";
         };
         _resultsTable.Enter += (_) =>
         {
@@ -360,6 +362,26 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
             var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
             TuiDebugLog.Log("Got service, executing streaming query...");
+
+            // Lazily resolve the language service for IntelliSense on first query
+            if (!_languageServiceResolved)
+            {
+                _languageServiceResolved = true;
+                try
+                {
+                    var provider = await Session.GetServiceProviderAsync(EnvironmentUrl, ScreenCancellation);
+                    var langService = provider.GetService<ISqlLanguageService>();
+                    if (langService != null)
+                    {
+                        _queryInput.LanguageService = langService;
+                        TuiDebugLog.Log("ISqlLanguageService resolved for autocomplete");
+                    }
+                }
+                catch (Exception langEx)
+                {
+                    TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {langEx.Message}");
+                }
+            }
 
             var request = new SqlQueryRequest
             {

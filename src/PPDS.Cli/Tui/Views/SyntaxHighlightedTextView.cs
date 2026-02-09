@@ -1,5 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using PPDS.Cli.Services;
+using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Sql.Intellisense;
 using Terminal.Gui;
 
@@ -11,11 +16,37 @@ namespace PPDS.Cli.Tui.Views;
 /// Overrides <see cref="Redraw"/> to apply token-based coloring while preserving
 /// all standard <see cref="TextView"/> behavior (selection, cursor, scrolling, undo).
 /// </summary>
+/// <remarks>
+/// Also supports SQL IntelliSense autocomplete via an <see cref="AutocompletePopup"/>
+/// overlay when an <see cref="ISqlLanguageService"/> is set.
+/// </remarks>
 internal sealed class SyntaxHighlightedTextView : TextView
 {
     private readonly ISourceTokenizer _tokenizer;
     private readonly Dictionary<SourceTokenType, Terminal.Gui.Attribute> _colorMap;
     private readonly Terminal.Gui.Attribute _defaultAttr;
+    private readonly AutocompletePopup _autocompletePopup;
+
+    /// <summary>
+    /// Tracks the start offset of the word being completed so we can replace it on accept.
+    /// </summary>
+    private int _completionWordStart;
+
+    /// <summary>
+    /// Cancellation source for in-flight completion requests. Replaced on each new trigger.
+    /// </summary>
+    private CancellationTokenSource? _completionCts;
+
+    /// <summary>
+    /// Gets or sets the SQL language service used for IntelliSense completions.
+    /// Set this after construction when the environment connection is established.
+    /// </summary>
+    public ISqlLanguageService? LanguageService { get; set; }
+
+    /// <summary>
+    /// Gets the autocomplete popup (for testing / external access).
+    /// </summary>
+    internal AutocompletePopup AutocompletePopupView => _autocompletePopup;
 
     /// <summary>
     /// Initializes a new syntax-highlighted text view.
@@ -33,6 +64,280 @@ internal sealed class SyntaxHighlightedTextView : TextView
         _defaultAttr = colorMap.TryGetValue(SourceTokenType.Identifier, out var id)
             ? id
             : new Terminal.Gui.Attribute(Color.White, Color.Black);
+
+        // Create and add the autocomplete popup as a subview (initially hidden)
+        _autocompletePopup = new AutocompletePopup();
+        _autocompletePopup.CompletionAccepted += OnCompletionAccepted;
+        Add(_autocompletePopup);
+    }
+
+    /// <inheritdoc />
+    public override bool ProcessKey(KeyEvent keyEvent)
+    {
+        // If the autocomplete popup is showing, route keys to it first
+        if (_autocompletePopup.IsShowing)
+        {
+            if (_autocompletePopup.ProcessKeyEvent(keyEvent))
+            {
+                return true;
+            }
+        }
+
+        // Ctrl+Space: manual trigger for completions
+        if (keyEvent.Key == (Key.CtrlMask | Key.Space))
+        {
+            _ = TriggerCompletionsAsync();
+            return true;
+        }
+
+        // Let the base TextView handle the key
+        var handled = base.ProcessKey(keyEvent);
+
+        // After the key is processed, check for autocomplete triggers
+        if (handled)
+        {
+            CheckAutocompleteTrigger(keyEvent);
+        }
+
+        return handled;
+    }
+
+    /// <summary>
+    /// Checks whether the just-processed key should trigger or update autocomplete.
+    /// </summary>
+    private void CheckAutocompleteTrigger(KeyEvent keyEvent)
+    {
+        // If popup is showing, update filter on printable character, backspace, or delete
+        if (_autocompletePopup.IsShowing)
+        {
+            if (IsPrintableChar(keyEvent) || keyEvent.Key == Key.Backspace || keyEvent.Key == Key.DeleteChar)
+            {
+                UpdatePopupFilter();
+                return;
+            }
+
+            // Non-navigation, non-printable key: dismiss the popup
+            if (!IsNavigationKey(keyEvent))
+            {
+                _autocompletePopup.Hide();
+            }
+            return;
+        }
+
+        // Dot trigger: after typing '.'
+        if (keyEvent.Key == (Key)46) // '.' character
+        {
+            _ = TriggerCompletionsAsync();
+            return;
+        }
+
+        // Space after FROM or JOIN: trigger completions
+        if (keyEvent.Key == Key.Space)
+        {
+            CheckFromJoinTrigger();
+        }
+    }
+
+    /// <summary>
+    /// Checks if the cursor is positioned right after a FROM or JOIN keyword
+    /// followed by the space that was just typed, and triggers completions if so.
+    /// </summary>
+    private void CheckFromJoinTrigger()
+    {
+        var fullText = Text?.ToString() ?? string.Empty;
+        var offset = GetCursorFlatOffset();
+
+        // We need at least 5 characters before cursor for "FROM " or "JOIN "
+        if (offset < 5) return;
+
+        // Look at the text before the cursor (the space was already inserted)
+        var textBefore = fullText.Substring(0, offset).TrimEnd();
+        var upper = textBefore.ToUpperInvariant();
+
+        if (upper.EndsWith("FROM") || upper.EndsWith("JOIN") ||
+            upper.EndsWith("INNER JOIN") || upper.EndsWith("LEFT JOIN") ||
+            upper.EndsWith("RIGHT JOIN") || upper.EndsWith("CROSS JOIN") ||
+            upper.EndsWith("FULL JOIN") || upper.EndsWith("LEFT OUTER JOIN") ||
+            upper.EndsWith("RIGHT OUTER JOIN") || upper.EndsWith("FULL OUTER JOIN"))
+        {
+            _ = TriggerCompletionsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Triggers an asynchronous completion request and shows the popup with results.
+    /// </summary>
+    internal async Task TriggerCompletionsAsync()
+    {
+        if (LanguageService == null) return;
+
+        // Cancel any in-flight request
+        _completionCts?.Cancel();
+        _completionCts = new CancellationTokenSource();
+        var ct = _completionCts.Token;
+
+        var fullText = Text?.ToString() ?? string.Empty;
+        var cursorOffset = GetCursorFlatOffset();
+
+        // Determine the word start (for replacement on accept)
+        _completionWordStart = FindWordStart(fullText, cursorOffset);
+
+        try
+        {
+            var completions = await LanguageService.GetCompletionsAsync(fullText, cursorOffset, ct);
+
+            if (ct.IsCancellationRequested || completions.Count == 0)
+            {
+                return;
+            }
+
+            // Position the popup relative to the cursor in the text view
+            var cursorPos = CursorPosition;
+            var popupX = cursorPos.X - LeftColumn;
+            var popupY = cursorPos.Y - TopRow + 1; // below the cursor line
+
+            // If near the bottom of the view, position above
+            var viewHeight = Bounds.Height;
+            var popupHeight = Math.Min(completions.Count, AutocompletePopup.MaxVisibleItems);
+            if (popupY + popupHeight > viewHeight)
+            {
+                popupY = cursorPos.Y - TopRow - popupHeight;
+                if (popupY < 0) popupY = 0;
+            }
+
+            // Show on the main thread (we may already be on it, but invoke to be safe)
+            Application.MainLoop?.Invoke(() =>
+            {
+                if (ct.IsCancellationRequested) return;
+                _autocompletePopup.Show(completions, popupX, popupY);
+                SetNeedsDisplay();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when a new trigger replaces the previous one
+        }
+        catch (Exception ex)
+        {
+            TuiDebugLog.Log($"Autocomplete error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Updates the popup filter based on text typed since the completion word start.
+    /// </summary>
+    private void UpdatePopupFilter()
+    {
+        var fullText = Text?.ToString() ?? string.Empty;
+        var cursorOffset = GetCursorFlatOffset();
+
+        if (cursorOffset < _completionWordStart)
+        {
+            _autocompletePopup.Hide();
+            return;
+        }
+
+        var currentWord = fullText.Substring(_completionWordStart, cursorOffset - _completionWordStart);
+        _autocompletePopup.UpdateFilter(currentWord);
+    }
+
+    /// <summary>
+    /// Handles a completion being accepted: inserts the completion text at the cursor.
+    /// </summary>
+    private void OnCompletionAccepted(SqlCompletion completion)
+    {
+        var fullText = Text?.ToString() ?? string.Empty;
+        var cursorOffset = GetCursorFlatOffset();
+
+        // Replace the partial word (from _completionWordStart to cursorOffset) with InsertText
+        var wordEnd = cursorOffset;
+        var before = fullText.Substring(0, _completionWordStart);
+        var after = fullText.Substring(wordEnd);
+
+        var newText = before + completion.InsertText + after;
+        Text = newText;
+
+        // Position cursor after inserted text
+        var newCursorOffset = _completionWordStart + completion.InsertText.Length;
+        SetCursorFromFlatOffset(newCursorOffset);
+
+        SetNeedsDisplay();
+    }
+
+    /// <summary>
+    /// Gets the flat character offset of the current cursor position.
+    /// </summary>
+    internal int GetCursorFlatOffset()
+    {
+        var fullText = Text?.ToString() ?? string.Empty;
+        var lines = fullText.Split('\n');
+        var pos = CursorPosition;
+        return FlatOffset(lines, pos.Y, pos.X);
+    }
+
+    /// <summary>
+    /// Sets the cursor position from a flat character offset.
+    /// </summary>
+    private void SetCursorFromFlatOffset(int offset)
+    {
+        var fullText = Text?.ToString() ?? string.Empty;
+        var lines = fullText.Split('\n');
+        var remaining = offset;
+        var row = 0;
+        foreach (var line in lines)
+        {
+            if (remaining <= line.Length)
+            {
+                CursorPosition = new Point(remaining, row);
+                return;
+            }
+            remaining -= line.Length + 1; // +1 for newline
+            row++;
+        }
+        // If past end, set to end of last line
+        if (lines.Length > 0)
+        {
+            CursorPosition = new Point(lines[lines.Length - 1].Length, lines.Length - 1);
+        }
+    }
+
+    /// <summary>
+    /// Finds the start of the word at/before the given offset.
+    /// A "word" is a contiguous run of identifier characters (letters, digits, underscore, dot).
+    /// </summary>
+    private static int FindWordStart(string text, int offset)
+    {
+        var pos = offset - 1;
+        while (pos >= 0 && IsWordChar(text[pos]))
+        {
+            pos--;
+        }
+        return pos + 1;
+    }
+
+    private static bool IsWordChar(char c)
+    {
+        return char.IsLetterOrDigit(c) || c == '_';
+    }
+
+    private static bool IsPrintableChar(KeyEvent keyEvent)
+    {
+        // A printable character is one without Ctrl or Alt modifiers (other than shift)
+        // and the key value maps to a visible ASCII character
+        var key = keyEvent.Key;
+        if ((key & Key.CtrlMask) != 0 || (key & Key.AltMask) != 0)
+            return false;
+
+        var rawKey = (int)(key & ~Key.ShiftMask);
+        return rawKey >= 32 && rawKey < 127;
+    }
+
+    private static bool IsNavigationKey(KeyEvent keyEvent)
+    {
+        return keyEvent.Key == Key.CursorUp || keyEvent.Key == Key.CursorDown ||
+               keyEvent.Key == Key.CursorLeft || keyEvent.Key == Key.CursorRight ||
+               keyEvent.Key == Key.Home || keyEvent.Key == Key.End ||
+               keyEvent.Key == Key.PageUp || keyEvent.Key == Key.PageDown;
     }
 
     /// <inheritdoc />
