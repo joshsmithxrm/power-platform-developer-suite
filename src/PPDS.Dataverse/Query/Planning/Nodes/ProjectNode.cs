@@ -37,6 +37,7 @@ public sealed class ProjectNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
+    /// <summary>Initializes a new instance of the <see cref="ProjectNode"/> class.</summary>
     public ProjectNode(IQueryPlanNode input, IReadOnlyList<ProjectColumn> outputColumns)
     {
         Input = input ?? throw new ArgumentNullException(nameof(input));

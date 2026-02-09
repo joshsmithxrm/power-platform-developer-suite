@@ -14,19 +14,29 @@ namespace PPDS.Dataverse.Query.Planning.Nodes;
 /// </summary>
 public sealed class ParallelPartitionNode : IQueryPlanNode
 {
+    /// <summary>The child plan nodes representing each partition.</summary>
     public IReadOnlyList<IQueryPlanNode> Partitions { get; }
+
+    /// <summary>The maximum number of partitions to execute concurrently.</summary>
     public int MaxParallelism { get; }
 
+    /// <inheritdoc />
     public string Description => $"ParallelPartition: {Partitions.Count} partitions, max parallelism {MaxParallelism}";
+
+    /// <inheritdoc />
     public long EstimatedRows => -1; // Unknown until merged
+
+    /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Partitions;
 
+    /// <summary>Initializes a new instance of the <see cref="ParallelPartitionNode"/> class.</summary>
     public ParallelPartitionNode(IReadOnlyList<IQueryPlanNode> partitions, int maxParallelism)
     {
         Partitions = partitions ?? throw new ArgumentNullException(nameof(partitions));
         MaxParallelism = maxParallelism > 0 ? maxParallelism : throw new ArgumentOutOfRangeException(nameof(maxParallelism));
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<QueryRow> ExecuteAsync(
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

@@ -14,6 +14,7 @@ public sealed class QueryRow
     /// <summary>The entity logical name this row originated from.</summary>
     public string EntityLogicalName { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="QueryRow"/> class.</summary>
     public QueryRow(IReadOnlyDictionary<string, QueryValue> values, string entityLogicalName)
     {
         Values = values ?? throw new ArgumentNullException(nameof(values));

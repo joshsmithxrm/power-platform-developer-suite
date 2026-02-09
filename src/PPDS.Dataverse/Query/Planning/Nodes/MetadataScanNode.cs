@@ -37,6 +37,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
+    /// <summary>Initializes a new instance of the <see cref="MetadataScanNode"/> class.</summary>
     public MetadataScanNode(
         string metadataTable,
         IMetadataQueryExecutor? metadataExecutor,

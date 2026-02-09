@@ -28,6 +28,7 @@ public sealed class SqlUnionStatement : ISqlStatement
     /// <inheritdoc />
     public int SourcePosition { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlUnionStatement"/> class.</summary>
     public SqlUnionStatement(
         IReadOnlyList<SqlSelectStatement> queries,
         IReadOnlyList<bool> isUnionAll,

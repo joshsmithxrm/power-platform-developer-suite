@@ -19,10 +19,16 @@ namespace PPDS.Dataverse.Query.Planning.Nodes;
 /// </summary>
 public sealed class MergeAggregateNode : IQueryPlanNode
 {
+    /// <summary>The child node providing partial aggregate rows from partitions.</summary>
     public IQueryPlanNode Input { get; }
+
+    /// <summary>The aggregate columns to merge across partitions.</summary>
     public IReadOnlyList<MergeAggregateColumn> AggregateColumns { get; }
+
+    /// <summary>The column names used for grouping aggregated results.</summary>
     public IReadOnlyList<string> GroupByColumns { get; }
 
+    /// <inheritdoc />
     public string Description
     {
         get
@@ -33,9 +39,13 @@ public sealed class MergeAggregateNode : IQueryPlanNode
         }
     }
 
+    /// <inheritdoc />
     public long EstimatedRows => -1;
+
+    /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
+    /// <summary>Initializes a new instance of the <see cref="MergeAggregateNode"/> class.</summary>
     public MergeAggregateNode(
         IQueryPlanNode input,
         IReadOnlyList<MergeAggregateColumn> aggregateColumns,
@@ -46,6 +56,7 @@ public sealed class MergeAggregateNode : IQueryPlanNode
         GroupByColumns = groupByColumns ?? Array.Empty<string>();
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<QueryRow> ExecuteAsync(
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -220,11 +231,15 @@ public sealed class MergeAggregateNode : IQueryPlanNode
 /// </summary>
 public sealed class MergeAggregateColumn
 {
+    /// <summary>The output alias for this aggregate column.</summary>
     public string Alias { get; }
+
+    /// <summary>The aggregate function to apply when merging partitions.</summary>
     public AggregateFunction Function { get; }
     /// <summary>For AVG merging, the alias of the companion COUNT column. Null if not tracking.</summary>
     public string? CountAlias { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="MergeAggregateColumn"/> class.</summary>
     public MergeAggregateColumn(string alias, AggregateFunction function, string? countAlias = null)
     {
         Alias = alias ?? throw new ArgumentNullException(nameof(alias));
@@ -241,9 +256,18 @@ public sealed class MergeAggregateColumn
 /// </summary>
 public enum AggregateFunction
 {
+    /// <summary>Counts the number of rows.</summary>
     Count,
+
+    /// <summary>Computes the sum of values.</summary>
     Sum,
+
+    /// <summary>Computes the average of values.</summary>
     Avg,
+
+    /// <summary>Finds the minimum value.</summary>
     Min,
+
+    /// <summary>Finds the maximum value.</summary>
     Max
 }

@@ -16,6 +16,7 @@ public sealed class SqlLiteralExpression : ISqlExpression
     /// <summary>The literal value.</summary>
     public SqlLiteral Value { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlLiteralExpression"/> class.</summary>
     public SqlLiteralExpression(SqlLiteral value)
     {
         Value = value ?? throw new ArgumentNullException(nameof(value));
@@ -30,6 +31,7 @@ public sealed class SqlColumnExpression : ISqlExpression
     /// <summary>The column reference.</summary>
     public SqlColumnRef Column { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlColumnExpression"/> class.</summary>
     public SqlColumnExpression(SqlColumnRef column)
     {
         Column = column ?? throw new ArgumentNullException(nameof(column));
@@ -50,6 +52,7 @@ public sealed class SqlBinaryExpression : ISqlExpression
     /// <summary>Right operand.</summary>
     public ISqlExpression Right { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlBinaryExpression"/> class.</summary>
     public SqlBinaryExpression(ISqlExpression left, SqlBinaryOperator op, ISqlExpression right)
     {
         Left = left ?? throw new ArgumentNullException(nameof(left));
@@ -69,6 +72,7 @@ public sealed class SqlUnaryExpression : ISqlExpression
     /// <summary>The operand.</summary>
     public ISqlExpression Operand { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlUnaryExpression"/> class.</summary>
     public SqlUnaryExpression(SqlUnaryOperator op, ISqlExpression operand)
     {
         Operator = op;
@@ -87,6 +91,7 @@ public sealed class SqlFunctionExpression : ISqlExpression
     /// <summary>The function arguments.</summary>
     public IReadOnlyList<ISqlExpression> Arguments { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlFunctionExpression"/> class.</summary>
     public SqlFunctionExpression(string functionName, IReadOnlyList<ISqlExpression> arguments)
     {
         FunctionName = functionName ?? throw new ArgumentNullException(nameof(functionName));
@@ -105,6 +110,7 @@ public sealed class SqlCaseExpression : ISqlExpression
     /// <summary>The ELSE expression, or null if omitted.</summary>
     public ISqlExpression? ElseExpression { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlCaseExpression"/> class.</summary>
     public SqlCaseExpression(IReadOnlyList<SqlWhenClause> whenClauses, ISqlExpression? elseExpression = null)
     {
         WhenClauses = whenClauses ?? throw new ArgumentNullException(nameof(whenClauses));
@@ -123,6 +129,7 @@ public sealed class SqlWhenClause
     /// <summary>The THEN result expression.</summary>
     public ISqlExpression Result { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlWhenClause"/> class.</summary>
     public SqlWhenClause(ISqlCondition condition, ISqlExpression result)
     {
         Condition = condition ?? throw new ArgumentNullException(nameof(condition));
@@ -144,6 +151,7 @@ public sealed class SqlIifExpression : ISqlExpression
     /// <summary>Value when condition is false.</summary>
     public ISqlExpression FalseValue { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlIifExpression"/> class.</summary>
     public SqlIifExpression(ISqlCondition condition, ISqlExpression trueValue, ISqlExpression falseValue)
     {
         Condition = condition ?? throw new ArgumentNullException(nameof(condition));
@@ -166,6 +174,7 @@ public sealed class SqlCastExpression : ISqlExpression
     /// <summary>Optional CONVERT style code (e.g., 120 for ODBC canonical datetime). Null for CAST.</summary>
     public int? Style { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlCastExpression"/> class.</summary>
     public SqlCastExpression(ISqlExpression expression, string targetType, int? style = null)
     {
         Expression = expression ?? throw new ArgumentNullException(nameof(expression));
@@ -188,6 +197,7 @@ public sealed class SqlAggregateExpression : ISqlExpression
     /// <summary>Whether DISTINCT is applied.</summary>
     public bool IsDistinct { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlAggregateExpression"/> class.</summary>
     public SqlAggregateExpression(SqlAggregateFunction function, ISqlExpression? operand = null, bool isDistinct = false)
     {
         Function = function;
@@ -204,6 +214,7 @@ public sealed class SqlSubqueryExpression : ISqlExpression
     /// <summary>The subquery statement.</summary>
     public SqlSelectStatement Subquery { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlSubqueryExpression"/> class.</summary>
     public SqlSubqueryExpression(SqlSelectStatement subquery)
     {
         Subquery = subquery ?? throw new ArgumentNullException(nameof(subquery));

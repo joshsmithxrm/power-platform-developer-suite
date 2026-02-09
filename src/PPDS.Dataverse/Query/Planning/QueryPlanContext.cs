@@ -38,6 +38,7 @@ public sealed class QueryPlanContext
     /// <summary>Optional variable scope for resolving @variable references in expressions.</summary>
     public VariableScope? VariableScope { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="QueryPlanContext"/> class.</summary>
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
         IExpressionEvaluator expressionEvaluator,

@@ -35,6 +35,7 @@ public sealed class ConcatenateNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Inputs;
 
+    /// <summary>Initializes a new instance of the <see cref="ConcatenateNode"/> class.</summary>
     public ConcatenateNode(IReadOnlyList<IQueryPlanNode> inputs)
     {
         if (inputs == null) throw new ArgumentNullException(nameof(inputs));

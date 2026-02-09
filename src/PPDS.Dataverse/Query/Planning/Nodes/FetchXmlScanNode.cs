@@ -54,6 +54,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
+    /// <summary>Initializes a new instance of the <see cref="FetchXmlScanNode"/> class.</summary>
     public FetchXmlScanNode(
         string fetchXml,
         string entityLogicalName,

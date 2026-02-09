@@ -11,6 +11,7 @@ public sealed class SqlVariableExpression : ISqlExpression
     /// <summary>The variable name including the @ prefix.</summary>
     public string VariableName { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlVariableExpression"/> class.</summary>
     public SqlVariableExpression(string variableName)
     {
         VariableName = variableName ?? throw new ArgumentNullException(nameof(variableName));

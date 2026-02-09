@@ -18,6 +18,7 @@ public sealed class SqlDeclareStatement : ISqlStatement
     /// <inheritdoc />
     public int SourcePosition { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlDeclareStatement"/> class.</summary>
     public SqlDeclareStatement(string variableName, string typeName, ISqlExpression? initialValue, int sourcePosition)
     {
         VariableName = variableName;

@@ -41,6 +41,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
+    /// <summary>Initializes a new instance of the <see cref="ClientWindowNode"/> class.</summary>
     public ClientWindowNode(IQueryPlanNode input, IReadOnlyList<WindowDefinition> windows, int maxMaterializationRows = 500_000)
     {
         Input = input ?? throw new ArgumentNullException(nameof(input));
@@ -579,6 +580,7 @@ public sealed class WindowDefinition
     /// <summary>The window function expression from the AST.</summary>
     public SqlWindowExpression Expression { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="WindowDefinition"/> class.</summary>
     public WindowDefinition(string outputColumnName, SqlWindowExpression expression)
     {
         OutputColumnName = outputColumnName ?? throw new ArgumentNullException(nameof(outputColumnName));

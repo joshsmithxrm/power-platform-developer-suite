@@ -16,6 +16,7 @@ public sealed class SqlComputedColumn : ISqlSelectColumn
     /// <summary>Optional trailing comment.</summary>
     public string? TrailingComment { get; set; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlComputedColumn"/> class.</summary>
     public SqlComputedColumn(ISqlExpression expression, string? alias = null)
     {
         Expression = expression ?? throw new ArgumentNullException(nameof(expression));

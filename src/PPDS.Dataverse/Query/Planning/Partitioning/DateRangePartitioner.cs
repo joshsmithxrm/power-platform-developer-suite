@@ -63,6 +63,7 @@ public sealed class DateRangePartition
     /// <summary>Zero-based index of this partition.</summary>
     public int Index { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="DateRangePartition"/> class.</summary>
     public DateRangePartition(DateTime start, DateTime end, int index)
     {
         Start = start;

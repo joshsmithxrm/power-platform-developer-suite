@@ -34,6 +34,7 @@ public sealed class TdsScanNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
+    /// <summary>Initializes a new instance of the <see cref="TdsScanNode"/> class.</summary>
     public TdsScanNode(
         string sql,
         string entityLogicalName,

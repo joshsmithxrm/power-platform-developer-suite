@@ -23,6 +23,7 @@ public sealed class SqlWindowExpression : ISqlExpression
     /// <summary>ORDER BY items within the window. Null or empty if not specified.</summary>
     public IReadOnlyList<SqlOrderByItem>? OrderBy { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlWindowExpression"/> class.</summary>
     public SqlWindowExpression(
         string functionName,
         ISqlExpression? operand,

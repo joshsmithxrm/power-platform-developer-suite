@@ -25,6 +25,7 @@ public sealed class DistinctNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
+    /// <summary>Initializes a new instance of the <see cref="DistinctNode"/> class.</summary>
     public DistinctNode(IQueryPlanNode input)
     {
         Input = input ?? throw new ArgumentNullException(nameof(input));

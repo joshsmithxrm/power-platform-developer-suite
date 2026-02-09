@@ -17,6 +17,7 @@ public sealed class SqlSetVariableStatement : ISqlStatement
     /// <inheritdoc />
     public int SourcePosition { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlSetVariableStatement"/> class.</summary>
     public SqlSetVariableStatement(string variableName, ISqlExpression value, int sourcePosition)
     {
         VariableName = variableName ?? throw new ArgumentNullException(nameof(variableName));

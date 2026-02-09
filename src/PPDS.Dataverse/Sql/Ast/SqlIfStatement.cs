@@ -20,6 +20,7 @@ public sealed class SqlIfStatement : ISqlStatement
     /// <inheritdoc />
     public int SourcePosition { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlIfStatement"/> class.</summary>
     public SqlIfStatement(ISqlCondition condition, SqlBlockStatement thenBlock, SqlBlockStatement? elseBlock, int sourcePosition)
     {
         Condition = condition ?? throw new ArgumentNullException(nameof(condition));

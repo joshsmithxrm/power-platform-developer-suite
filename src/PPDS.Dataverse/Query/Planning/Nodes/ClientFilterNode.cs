@@ -27,6 +27,7 @@ public sealed class ClientFilterNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
+    /// <summary>Initializes a new instance of the <see cref="ClientFilterNode"/> class.</summary>
     public ClientFilterNode(IQueryPlanNode input, ISqlCondition condition)
     {
         Input = input ?? throw new ArgumentNullException(nameof(input));

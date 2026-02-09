@@ -14,6 +14,7 @@ public sealed class SqlBlockStatement : ISqlStatement
     /// <inheritdoc />
     public int SourcePosition { get; }
 
+    /// <summary>Initializes a new instance of the <see cref="SqlBlockStatement"/> class.</summary>
     public SqlBlockStatement(IReadOnlyList<ISqlStatement> statements, int sourcePosition)
     {
         Statements = statements ?? throw new ArgumentNullException(nameof(statements));
