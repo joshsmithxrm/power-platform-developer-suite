@@ -251,9 +251,10 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 return;
             }
 
-            // Position the popup relative to the cursor in the text view
+            // Position the popup at the word start, not the cursor
             var cursorPos = CursorPosition;
-            var popupX = cursorPos.X - LeftColumn;
+            var wordLength = cursorOffset - _completionWordStart;
+            var popupX = cursorPos.X - wordLength - LeftColumn;
             var popupY = cursorPos.Y - TopRow + 1; // below the cursor line
 
             // If near the bottom of the view, position above

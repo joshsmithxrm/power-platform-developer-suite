@@ -14,8 +14,6 @@ namespace PPDS.Cli.Tui.Views;
 /// <remarks>
 /// <para>
 /// The popup contains a <see cref="ListView"/> sized to show at most <see cref="MaxVisibleItems"/> items.
-/// Each item is rendered with an icon prefix indicating its kind:
-/// K = Keyword, T = Table/Entity, C = Column/Attribute, F = Function, O = OptionSetValue, J = JoinClause.
 /// </para>
 /// <para>
 /// Supports filter-as-you-type: as the user types, the list filters to items whose labels
@@ -192,7 +190,7 @@ internal sealed class AutocompletePopup : View
     /// </summary>
     internal static string FormatItem(SqlCompletion item)
     {
-        return $"{GetKindIcon(item.Kind)} {item.Label}";
+        return item.Label;
     }
 
     private void AcceptSelected()
