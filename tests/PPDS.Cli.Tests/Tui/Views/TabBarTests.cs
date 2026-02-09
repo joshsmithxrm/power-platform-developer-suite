@@ -4,7 +4,6 @@ using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Screens;
 using PPDS.Cli.Tui.Views;
-using Terminal.Gui;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Tui.Views;
@@ -20,7 +19,7 @@ public sealed class TabBarTests : IDisposable
     public TabBarTests()
     {
         _tempStore = new TempProfileStore();
-        _session = new InteractiveSession(null, _tempStore.Store, new MockServiceProviderFactory());
+        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new MockServiceProviderFactory());
         _tabManager = new TabManager(new TuiThemeService());
         _tabBar = new TabBar(_tabManager, new TuiThemeService());
     }

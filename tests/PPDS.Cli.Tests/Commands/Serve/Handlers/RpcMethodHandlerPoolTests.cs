@@ -1,7 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using PPDS.Auth.Credentials;
+using PPDS.Auth.DependencyInjection;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
@@ -20,6 +22,9 @@ public class RpcMethodHandlerPoolTests
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private static IServiceProvider CreateAuthServices() =>
+        new ServiceCollection().AddAuthServices().BuildServiceProvider();
+
     #region ProfilesInvalidate Tests
 
     [Fact]
@@ -27,7 +32,7 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var handler = new RpcMethodHandler(mockPoolManager.Object, CreateAuthServices());
 
         // Act
         var result = handler.ProfilesInvalidate("dev");
@@ -46,7 +51,7 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var handler = new RpcMethodHandler(mockPoolManager.Object, CreateAuthServices());
 
         // Act
         var act = () => handler.ProfilesInvalidate(profileName!);
@@ -61,7 +66,7 @@ public class RpcMethodHandlerPoolTests
     {
         // Arrange
         var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
-        var handler = new RpcMethodHandler(mockPoolManager.Object);
+        var handler = new RpcMethodHandler(mockPoolManager.Object, CreateAuthServices());
 
         // Act
         try
@@ -161,7 +166,7 @@ public class RpcMethodHandlerPoolTests
     public void Constructor_ThrowsArgumentNullException_WhenPoolManagerIsNull()
     {
         // Act
-        var act = () => new RpcMethodHandler(null!);
+        var act = () => new RpcMethodHandler(null!, CreateAuthServices());
 
         // Assert
         act.Should().Throw<ArgumentNullException>()

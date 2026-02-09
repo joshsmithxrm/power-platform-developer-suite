@@ -18,7 +18,7 @@ public sealed class TabManagerTests : IDisposable
     public TabManagerTests()
     {
         _tempStore = new TempProfileStore();
-        _session = new InteractiveSession(null, _tempStore.Store, new MockServiceProviderFactory());
+        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new MockServiceProviderFactory());
         _manager = new TabManager(new TuiThemeService());
     }
 

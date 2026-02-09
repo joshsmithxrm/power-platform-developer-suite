@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
+using PPDS.Auth.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
@@ -72,6 +73,9 @@ public sealed class MockServiceProviderFactory : IServiceProviderFactory
         }
 
         var services = new ServiceCollection();
+
+        // Register auth services
+        services.AddAuthServices();
 
         // Register fake services
         services.AddSingleton<ISqlQueryService, FakeSqlQueryService>();

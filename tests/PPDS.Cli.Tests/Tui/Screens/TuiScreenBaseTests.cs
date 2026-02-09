@@ -17,7 +17,7 @@ public sealed class TuiScreenBaseTests : IDisposable
     public TuiScreenBaseTests()
     {
         _tempStore = new TempProfileStore();
-        _session = new InteractiveSession(null, _tempStore.Store, new MockServiceProviderFactory());
+        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new MockServiceProviderFactory());
     }
 
     public void Dispose()
