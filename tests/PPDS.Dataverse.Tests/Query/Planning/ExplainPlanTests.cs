@@ -59,43 +59,40 @@ public class ExplainPlanTests
 
     #endregion
 
-    #region COUNT(*) Optimized Plans
+    #region COUNT(*) Aggregate Plans
 
     [Fact]
-    public void Explain_BareCountStar_ShowsCountOptimizedNode()
+    public void Explain_BareCountStar_ShowsFetchXmlScanNode()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account");
 
         var result = _planner.Plan(stmt);
         var description = QueryPlanDescription.FromNode(result.RootNode);
 
-        Assert.Equal("CountOptimizedNode", description.NodeType);
-        Assert.Contains("CountOptimized: account", description.Description);
-        Assert.Equal(1, description.EstimatedRows);
+        // Bare COUNT(*) now uses aggregate FetchXML instead of CountOptimizedNode
+        Assert.Equal("FetchXmlScanNode", description.NodeType);
+        Assert.Contains("FetchXmlScan: account", description.Description);
     }
 
     [Fact]
-    public void Explain_BareCountStar_FormattedShowsFallbackChild()
+    public void Explain_BareCountStar_FormattedShowsAggregateScan()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) AS total FROM account");
 
         var result = _planner.Plan(stmt);
         var formatted = PlanFormatter.Format(result.RootNode);
 
-        Assert.Contains("CountOptimized: account", formatted);
         Assert.Contains("FetchXmlScan: account", formatted);
-        Assert.Contains("(est. 1 rows)", formatted);
     }
 
     [Fact]
-    public void Explain_CountStarWithWhere_DoesNotShowCountOptimized()
+    public void Explain_CountStarWithWhere_ShowsFetchXmlScan()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account WHERE statecode = 0");
 
         var result = _planner.Plan(stmt);
         var description = QueryPlanDescription.FromNode(result.RootNode);
 
-        Assert.NotEqual("CountOptimizedNode", description.NodeType);
         Assert.Equal("FetchXmlScanNode", description.NodeType);
     }
 

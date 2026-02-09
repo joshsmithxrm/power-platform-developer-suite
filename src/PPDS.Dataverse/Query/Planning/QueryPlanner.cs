@@ -106,13 +106,14 @@ public sealed class QueryPlanner
             return PlanMetadataQuery(statement, fromEntityName);
         }
 
-        // COUNT(*) optimization: bare SELECT COUNT(*) FROM entity (no WHERE, JOIN, GROUP BY,
-        // HAVING) uses RetrieveTotalRecordCountRequest for near-instant metadata read instead
-        // of aggregate FetchXML scan. Short-circuits the entire normal plan path.
-        if (IsBareCountStar(statement))
-        {
-            return PlanBareCountStar(statement);
-        }
+        // Bare COUNT(*) now flows through the normal aggregate path so it benefits
+        // from partitioning for large tables. The CountOptimizedNode path is retained
+        // for future opt-in stale-count hint support.
+        //
+        // if (IsBareCountStar(statement))
+        // {
+        //     return PlanBareCountStar(statement);
+        // }
 
         // Phase 3.5: TDS Endpoint routing. When TDS is enabled and the query is
         // compatible, bypass FetchXML transpilation and send SQL directly to TDS.

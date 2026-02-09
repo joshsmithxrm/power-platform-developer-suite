@@ -230,10 +230,10 @@ public class TdsRoutingTests
         Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
-    // ── COUNT(*) always uses CountOptimizedNode ─────────────────────
+    // ── COUNT(*) with TDS enabled routes through TDS ──────────────
 
     [Fact]
-    public void Plan_TdsEnabled_BareCountStar_UsesCountOptimizedNodeNotTds()
+    public void Plan_TdsEnabled_BareCountStar_UsesTdsWhenCompatible()
     {
         var sql = "SELECT COUNT(*) FROM account";
         var stmt = SqlParser.Parse(sql);
@@ -246,8 +246,9 @@ public class TdsRoutingTests
 
         var result = _planner.Plan(stmt, options);
 
-        // COUNT(*) optimization takes priority over TDS routing
-        Assert.IsType<CountOptimizedNode>(result.RootNode);
+        // With CountOptimized short-circuit removed, bare COUNT(*) flows
+        // through normal path — TDS routing intercepts it when enabled
+        Assert.IsType<TdsScanNode>(result.RootNode);
     }
 
     // ── TdsScanNode properties ──────────────────────────────────────

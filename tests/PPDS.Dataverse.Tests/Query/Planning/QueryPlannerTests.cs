@@ -82,40 +82,65 @@ public class QueryPlannerTests
     }
 
     [Fact]
-    public void Plan_BareCountStar_ProducesCountOptimizedNode()
+    public void Plan_BareCountStar_WithoutPartitioningOptions_ProducesFetchXmlScan()
     {
+        // Without EstimatedRecordCount, bare COUNT(*) uses single aggregate FetchXML
         var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account");
 
         var result = _planner.Plan(stmt);
 
-        var countNode = Assert.IsType<CountOptimizedNode>(result.RootNode);
-        Assert.Equal("account", countNode.EntityLogicalName);
-        Assert.Equal("count", countNode.CountAlias);
-        Assert.NotNull(countNode.FallbackNode);
-        Assert.Equal("account", result.EntityLogicalName);
-        Assert.NotEmpty(result.FetchXml);
+        // Should be a standard FetchXmlScanNode with aggregate FetchXML
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
+        Assert.Contains("aggregate", result.FetchXml);
     }
 
     [Fact]
-    public void Plan_BareCountStarWithAlias_UsesAlias()
+    public void Plan_BareCountStarWithAlias_PreservesAlias()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) AS total FROM account");
-
         var result = _planner.Plan(stmt);
 
-        var countNode = Assert.IsType<CountOptimizedNode>(result.RootNode);
-        Assert.Equal("total", countNode.CountAlias);
+        // Alias should appear in the FetchXML
+        Assert.Contains("alias=\"total\"", result.FetchXml);
+    }
+
+    [Fact]
+    public void Plan_BareCountStar_WithPartitioningOptions_ProducesPartitionedPlan()
+    {
+        // With EstimatedRecordCount > limit, bare COUNT(*) gets partitioned
+        var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account");
+        var options = MakePartitioningOptions(200_000);
+
+        var result = _planner.Plan(stmt, options);
+
+        var mergeNode = Assert.IsType<MergeAggregateNode>(result.RootNode);
+        var parallelNode = Assert.IsType<ParallelPartitionNode>(mergeNode.Input);
+        Assert.True(parallelNode.Partitions.Count > 1);
+    }
+
+    [Fact]
+    public void Plan_BareCountStar_BelowLimit_ProducesSingleAggregateScan()
+    {
+        var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account");
+        var options = new QueryPlanOptions
+        {
+            EstimatedRecordCount = 30_000, // Below 50K limit
+            MinDate = new DateTime(2020, 1, 1),
+            MaxDate = new DateTime(2026, 1, 1),
+            PoolCapacity = 4
+        };
+
+        var result = _planner.Plan(stmt, options);
+
+        // Below limit: single scan, no partitioning
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
     [Fact]
     public void Plan_CountStarWithWhere_ProducesNormalScan()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account WHERE statecode = 0");
-
         var result = _planner.Plan(stmt);
-
-        // Should NOT use CountOptimizedNode because WHERE clause is present
-        Assert.IsNotType<CountOptimizedNode>(result.RootNode);
         Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
@@ -123,33 +148,26 @@ public class QueryPlannerTests
     public void Plan_CountStarWithGroupBy_ProducesNormalScan()
     {
         var stmt = SqlParser.Parse("SELECT COUNT(*) FROM account GROUP BY statecode");
-
         var result = _planner.Plan(stmt);
-
-        // Should NOT use CountOptimizedNode because GROUP BY is present
-        Assert.IsNotType<CountOptimizedNode>(result.RootNode);
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
     [Fact]
     public void Plan_CountColumn_ProducesNormalScan()
     {
-        // COUNT(name) is not COUNT(*) — not eligible for optimization
+        // COUNT(name) is not COUNT(*) — uses aggregate FetchXML
         var stmt = SqlParser.Parse("SELECT COUNT(name) FROM account");
-
         var result = _planner.Plan(stmt);
-
-        Assert.IsNotType<CountOptimizedNode>(result.RootNode);
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
     [Fact]
     public void Plan_SumAggregate_ProducesNormalScan()
     {
-        // SUM is not COUNT(*) — not eligible for optimization
+        // SUM uses aggregate FetchXML
         var stmt = SqlParser.Parse("SELECT SUM(revenue) FROM account");
-
         var result = _planner.Plan(stmt);
-
-        Assert.IsNotType<CountOptimizedNode>(result.RootNode);
+        Assert.IsType<FetchXmlScanNode>(result.RootNode);
     }
 
     [Fact]
