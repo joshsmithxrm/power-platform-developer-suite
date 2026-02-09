@@ -358,14 +358,13 @@ public sealed class ProfileService : IProfileService
                 throw new PpdsAuthException(ErrorCodes.Auth.InvalidCredentials, $"Authentication failed: {ex.Message}", ex);
             }
 
-            // Add to collection
-            collection.Add(profile);
+            // Add to collection and set as active
+            collection.Add(profile, setAsActive: true);
             await _store.SaveAsync(collection, cancellationToken);
 
-            _logger.LogInformation("Created profile {ProfileIdentifier}", profile.DisplayIdentifier);
+            _logger.LogInformation("Created and activated profile {ProfileIdentifier}", profile.DisplayIdentifier);
 
-            var isActive = collection.ActiveProfile?.Index == profile.Index;
-            return ProfileSummary.FromAuthProfile(profile, isActive);
+            return ProfileSummary.FromAuthProfile(profile, isActive: true);
         }
         finally
         {

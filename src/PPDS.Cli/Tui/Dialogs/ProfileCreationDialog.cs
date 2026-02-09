@@ -516,37 +516,27 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         {
             beforeAuth = (dcCallback) =>
             {
-                TuiDebugLog.Log("[ProfileCreate] beforeAuth callback invoked");
-
                 // Terminal.Gui not initialized — default to opening browser directly
                 if (Application.MainLoop == null)
-                {
-                    TuiDebugLog.Log("[ProfileCreate] MainLoop is NULL — returning OpenBrowser");
                     return PreAuthDialogResult.OpenBrowser;
-                }
 
-                TuiDebugLog.Log("[ProfileCreate] MainLoop is valid, queuing PreAuthenticationDialog via Invoke");
                 var result = PreAuthDialogResult.Cancel;
                 using var waitHandle = new ManualResetEventSlim(false);
                 Application.MainLoop.Invoke(() =>
                 {
-                    TuiDebugLog.Log("[ProfileCreate] MainLoop.Invoke fired — showing PreAuthenticationDialog");
                     try
                     {
                         Application.Refresh();
                         var dialog = new PreAuthenticationDialog(dcCallback);
                         Application.Run(dialog);
                         result = dialog.Result;
-                        TuiDebugLog.Log($"[ProfileCreate] PreAuthenticationDialog result: {result}");
                     }
                     finally
                     {
                         waitHandle.Set();
                     }
                 });
-                TuiDebugLog.Log("[ProfileCreate] Waiting on ManualResetEventSlim...");
                 waitHandle.Wait();
-                TuiDebugLog.Log($"[ProfileCreate] Wait completed, returning {result}");
                 return result;
             };
         }
@@ -554,15 +544,11 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         _statusLabel.Text = "Authenticating...";
         Application.Refresh();
 
-        TuiDebugLog.Log($"[ProfileCreate] Launching auth task. _errorService={(_errorService != null ? "SET" : "NULL")}, beforeAuth={( beforeAuth != null ? "SET" : "NULL")}, method={method}");
         var authTask = CreateProfileAndHandleResultAsync(request, deviceCallback, beforeAuth);
         if (_errorService != null)
             _errorService.FireAndForget(authTask, "CreateProfile");
         else
-            _ = authTask.ContinueWith(t =>
-            {
-                TuiDebugLog.Log($"[ProfileCreate] Unobserved task faulted: {t.Exception?.GetBaseException().Message}");
-            }, TaskContinuationOptions.OnlyOnFaulted);
+            _ = authTask.ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     private async Task CreateProfileAndHandleResultAsync(
@@ -570,12 +556,9 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         Action<DeviceCodeInfo>? deviceCodeCallback,
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth)
     {
-        TuiDebugLog.Log($"[ProfileCreate] CreateProfileAndHandleResultAsync ENTERED. AuthMethod={request.AuthMethod}, beforeInteractiveAuth={( beforeInteractiveAuth != null ? "SET" : "NULL")}");
         try
         {
-            TuiDebugLog.Log("[ProfileCreate] Calling ProfileService.CreateProfileAsync via Task.Run...");
             var profile = await Task.Run(() => _profileService.CreateProfileAsync(request, deviceCodeCallback, beforeInteractiveAuth, _cts.Token));
-            TuiDebugLog.Log($"[ProfileCreate] CreateProfileAsync returned. Profile={profile.DisplayIdentifier}");
             Application.MainLoop?.Invoke(() =>
             {
                 _createdProfile = profile;
@@ -599,9 +582,8 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
                 Application.RequestStop();
             });
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException)
         {
-            TuiDebugLog.Log($"[ProfileCreate] OperationCanceledException: {ex.Message}");
             Application.MainLoop?.Invoke(() =>
             {
                 _statusLabel.Text = "Authentication was cancelled";
@@ -610,7 +592,6 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         }
         catch (Exception ex)
         {
-            TuiDebugLog.Log($"[ProfileCreate] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
             Application.MainLoop?.Invoke(() =>
             {
                 var message = ex is PpdsException ppdsEx ? ppdsEx.UserMessage : ex.Message ?? "Unknown error";
