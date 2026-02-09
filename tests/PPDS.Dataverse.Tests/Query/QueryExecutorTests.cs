@@ -172,6 +172,8 @@ public class QueryExecutorGetMinMaxCreatedOnTests
     /// <summary>
     /// Creates a mock pool whose client returns the given EntityCollection
     /// from RetrieveMultipleAsync (used by ExecuteFetchXmlAsync).
+    /// The implementation now makes two sorted top-1 calls, so the mock
+    /// returns the same collection for both.
     /// </summary>
     private static (Mock<IDataverseConnectionPool> pool, Mock<IPooledClient> client) CreateMockPoolForFetchXml(
         EntityCollection entityCollection)
@@ -190,25 +192,22 @@ public class QueryExecutorGetMinMaxCreatedOnTests
     }
 
     /// <summary>
-    /// Builds an EntityCollection that simulates a MIN/MAX aggregate response.
-    /// Dataverse returns AliasedValue objects for aggregate results.
+    /// Builds an EntityCollection that simulates a sorted top-1 response
+    /// containing a single record with a createdon attribute.
     /// </summary>
-    private static EntityCollection BuildMinMaxAggregateResponse(
+    private static EntityCollection BuildSortedEntityResponse(
         string entityLogicalName,
-        DateTime? minDate,
-        DateTime? maxDate)
+        DateTime? createdon)
     {
+        if (!createdon.HasValue)
+        {
+            var empty = new EntityCollection();
+            empty.EntityName = entityLogicalName;
+            return empty;
+        }
+
         var entity = new Entity(entityLogicalName);
-
-        if (minDate.HasValue)
-        {
-            entity["mindate"] = new AliasedValue(entityLogicalName, "createdon", minDate.Value);
-        }
-
-        if (maxDate.HasValue)
-        {
-            entity["maxdate"] = new AliasedValue(entityLogicalName, "createdon", maxDate.Value);
-        }
+        entity["createdon"] = createdon.Value;
 
         var collection = new EntityCollection(new[] { entity });
         collection.EntityName = entityLogicalName;
@@ -218,11 +217,29 @@ public class QueryExecutorGetMinMaxCreatedOnTests
     [Fact]
     public async Task GetMinMaxCreatedOnAsync_ReturnsCorrectDates_WhenRecordsExist()
     {
-        // Arrange
+        // Arrange: mock returns a record with createdon for both sorted queries
         var minDate = new DateTime(2020, 1, 15, 8, 30, 0, DateTimeKind.Utc);
         var maxDate = new DateTime(2025, 12, 31, 23, 59, 59, DateTimeKind.Utc);
-        var entityCollection = BuildMinMaxAggregateResponse("account", minDate, maxDate);
-        var (mockPool, _) = CreateMockPoolForFetchXml(entityCollection);
+
+        var capturedQueries = new System.Collections.Generic.List<string>();
+        var mockClient = new Mock<IPooledClient>();
+        mockClient
+            .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryBase, CancellationToken>((q, _) =>
+            {
+                var fetch = (FetchExpression)q;
+                capturedQueries.Add(fetch.Query);
+                // Ascending sort = min query, descending = max query
+                if (fetch.Query.Contains("descending=\"false\"") || fetch.Query.Contains("descending='false'"))
+                    return Task.FromResult(BuildSortedEntityResponse("account", minDate));
+                return Task.FromResult(BuildSortedEntityResponse("account", maxDate));
+            });
+
+        var mockPool = new Mock<IDataverseConnectionPool>();
+        mockPool
+            .Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockClient.Object);
+
         var executor = new QueryExecutor(mockPool.Object);
 
         // Act
@@ -287,18 +304,20 @@ public class QueryExecutorGetMinMaxCreatedOnTests
     }
 
     [Fact]
-    public async Task GetMinMaxCreatedOnAsync_ExecutesFetchXmlWithCorrectAggregate()
+    public async Task GetMinMaxCreatedOnAsync_ExecutesSortedTopOneQueries()
     {
         // Arrange
-        var minDate = new DateTime(2023, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        var maxDate = new DateTime(2023, 12, 31, 0, 0, 0, DateTimeKind.Utc);
-        var entityCollection = BuildMinMaxAggregateResponse("contact", minDate, maxDate);
+        var date = new DateTime(2023, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var entityCollection = BuildSortedEntityResponse("contact", date);
 
-        FetchExpression? capturedFetch = null;
+        var capturedQueries = new System.Collections.Generic.List<string>();
         var mockClient = new Mock<IPooledClient>();
         mockClient
             .Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .Callback<QueryBase, CancellationToken>((q, _) => capturedFetch = q as FetchExpression)
+            .Callback<QueryBase, CancellationToken>((q, _) =>
+            {
+                if (q is FetchExpression fe) capturedQueries.Add(fe.Query);
+            })
             .ReturnsAsync(entityCollection);
 
         var mockPool = new Mock<IDataverseConnectionPool>();
@@ -311,33 +330,37 @@ public class QueryExecutorGetMinMaxCreatedOnTests
         // Act
         await executor.GetMinMaxCreatedOnAsync("contact");
 
-        // Assert: verify FetchXML was passed with aggregate, min, and max
-        // Note: XDocument.ToString normalizes single quotes to double quotes
-        Assert.NotNull(capturedFetch);
-        var query = capturedFetch!.Query;
-        Assert.Contains("aggregate=\"true\"", query);
-        Assert.Contains("name=\"contact\"", query);
-        Assert.Contains("aggregate=\"min\"", query);
-        Assert.Contains("aggregate=\"max\"", query);
-        Assert.Contains("alias=\"mindate\"", query);
-        Assert.Contains("alias=\"maxdate\"", query);
+        // Assert: two sorted top-1 queries, no aggregate
+        Assert.Equal(2, capturedQueries.Count);
+
+        // Both queries should use top="1", sorted by createdon, no aggregate
+        foreach (var query in capturedQueries)
+        {
+            Assert.Contains("top=\"1\"", query);
+            Assert.Contains("name=\"contact\"", query);
+            Assert.Contains("name=\"createdon\"", query);
+            Assert.DoesNotContain("aggregate", query);
+        }
+
+        // One ascending, one descending
+        Assert.Contains(capturedQueries, q => q.Contains("descending=\"false\""));
+        Assert.Contains(capturedQueries, q => q.Contains("descending=\"true\""));
     }
 
     [Fact]
-    public async Task GetMinMaxCreatedOnAsync_DisposesPooledClient()
+    public async Task GetMinMaxCreatedOnAsync_DisposesPooledClients()
     {
         // Arrange
-        var entityCollection = BuildMinMaxAggregateResponse(
+        var entityCollection = BuildSortedEntityResponse(
             "account",
-            new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            new DateTime(2023, 12, 31, 0, 0, 0, DateTimeKind.Utc));
+            new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var (mockPool, mockClient) = CreateMockPoolForFetchXml(entityCollection);
         var executor = new QueryExecutor(mockPool.Object);
 
         // Act
         await executor.GetMinMaxCreatedOnAsync("account");
 
-        // Assert: client was disposed (returned to pool)
-        mockClient.Verify(c => c.DisposeAsync(), Times.Once);
+        // Assert: client was disposed twice (once per sorted query via ExecuteFetchXmlAsync)
+        mockClient.Verify(c => c.DisposeAsync(), Times.Exactly(2));
     }
 }

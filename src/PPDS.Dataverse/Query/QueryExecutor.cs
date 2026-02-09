@@ -230,21 +230,39 @@ public class QueryExecutor : IQueryExecutor
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
 
-        var fetchXml = $"<fetch aggregate='true'><entity name='{entityLogicalName}'>" +
-            "<attribute name='createdon' alias='mindate' aggregate='min' />" +
-            "<attribute name='createdon' alias='maxdate' aggregate='max' />" +
+        // Use sorted top-1 queries instead of aggregate MIN/MAX to avoid the
+        // Dataverse 50K AggregateQueryRecordLimit. Two simple queries with
+        // ascending/descending sort on the indexed createdon column are fast
+        // and never hit the aggregate limit.
+        var minFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+            "<attribute name='createdon' />" +
+            "<order attribute='createdon' descending='false' />" +
             "</entity></fetch>";
 
-        var result = await ExecuteFetchXmlAsync(fetchXml, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        var maxFetchXml = $"<fetch top='1'><entity name='{entityLogicalName}'>" +
+            "<attribute name='createdon' />" +
+            "<order attribute='createdon' descending='true' />" +
+            "</entity></fetch>";
+
+        var minTask = ExecuteFetchXmlAsync(minFetchXml, cancellationToken: cancellationToken);
+        var maxTask = ExecuteFetchXmlAsync(maxFetchXml, cancellationToken: cancellationToken);
+        await Task.WhenAll(minTask, maxTask).ConfigureAwait(false);
+
+        var minResult = await minTask.ConfigureAwait(false);
+        var maxResult = await maxTask.ConfigureAwait(false);
 
         DateTime? min = null, max = null;
-        if (result.Records.Count > 0)
+        if (minResult.Records.Count > 0)
         {
-            var row = result.Records[0];
-            if (row.TryGetValue("mindate", out var minVal) && minVal.Value is DateTime minDt)
+            var row = minResult.Records[0];
+            if (row.TryGetValue("createdon", out var minVal) && minVal.Value is DateTime minDt)
                 min = minDt;
-            if (row.TryGetValue("maxdate", out var maxVal) && maxVal.Value is DateTime maxDt)
+        }
+
+        if (maxResult.Records.Count > 0)
+        {
+            var row = maxResult.Records[0];
+            if (row.TryGetValue("createdon", out var maxVal) && maxVal.Value is DateTime maxDt)
                 max = maxDt;
         }
 
