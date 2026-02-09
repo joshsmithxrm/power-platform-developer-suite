@@ -12,6 +12,7 @@ using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Tui;
@@ -266,6 +267,26 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
             _providers[environmentUrl] = provider;
             TuiDebugLog.Log($"Provider created successfully for {environmentUrl}");
+
+            // Fire-and-forget metadata preload so IntelliSense has entity names ready
+            var cachedMetadata = provider.GetService<ICachedMetadataProvider>();
+            if (cachedMetadata != null)
+            {
+                TuiDebugLog.Log($"Starting metadata preload for {environmentUrl}");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await cachedMetadata.PreloadAsync().ConfigureAwait(false);
+                        TuiDebugLog.Log($"Metadata preload completed for {environmentUrl}");
+                    }
+                    catch (Exception ex)
+                    {
+                        TuiDebugLog.Log($"Metadata preload failed for {environmentUrl}: {ex.Message}");
+                    }
+                });
+            }
+
             return provider;
         }
         finally
@@ -301,6 +322,21 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
         return provider.GetRequiredService<IDataverseConnectionPool>();
+    }
+
+    /// <summary>
+    /// Gets the cached metadata provider for the specified environment.
+    /// The provider caches entity, attribute, and relationship metadata for IntelliSense.
+    /// </summary>
+    /// <param name="environmentUrl">The environment URL to connect to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The cached metadata provider.</returns>
+    public async Task<ICachedMetadataProvider> GetCachedMetadataProviderAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
+        return provider.GetRequiredService<ICachedMetadataProvider>();
     }
 
     /// <summary>
