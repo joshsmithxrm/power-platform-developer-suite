@@ -53,6 +53,7 @@ internal sealed class SplitterView : View
         {
             // Start drag - capture absolute screen Y
             _isDragging = true;
+            Application.GrabMouse(this);
             _dragStartScreenY = ev.Y;
             SetNeedsDisplay();
             return true;
@@ -63,6 +64,7 @@ internal sealed class SplitterView : View
             if (_isDragging)
             {
                 _isDragging = false;
+                Application.UngrabMouse();
                 SetNeedsDisplay();
             }
             return true;

@@ -490,6 +490,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
         try
         {
+        try
+        {
             TuiDebugLog.Log($"Getting SQL query service for URL: {EnvironmentUrl}");
 
             var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
@@ -648,6 +650,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             _statusLabel.Text = _statusText;
             _statusLabel.Visible = true;
             _isExecuting = false;
+        }
+        }
+        finally
+        {
+            if (elapsedTimer != null)
+                Application.MainLoop?.RemoveTimeout(elapsedTimer);
         }
     }
 

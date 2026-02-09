@@ -802,6 +802,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _tabManager.Dispose();
             _tabBar.Dispose();
 
+            _statusBar.ProfileClicked -= OnStatusBarProfileClicked;
+            _statusBar.EnvironmentClicked -= OnStatusBarEnvironmentClicked;
+            _statusBar.EnvironmentConfigureRequested -= OnStatusBarEnvironmentConfigureRequested;
             _errorService.ErrorOccurred -= OnErrorOccurred;
             _session.ConfigChanged -= OnConfigChanged;
         }
