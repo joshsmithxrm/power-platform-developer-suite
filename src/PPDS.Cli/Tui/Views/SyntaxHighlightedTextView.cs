@@ -113,6 +113,17 @@ internal sealed class SyntaxHighlightedTextView : TextView
     /// <inheritdoc />
     public override bool ProcessKey(KeyEvent keyEvent)
     {
+        // Debug: log all Ctrl/Alt key combinations to diagnose IntelliSense trigger issues
+        var rawKey = keyEvent.Key;
+        if ((rawKey & Key.CtrlMask) != 0 || (rawKey & Key.AltMask) != 0 || rawKey == Key.Space || (int)rawKey == 0)
+        {
+            TuiDebugLog.Log($"ProcessKey: key=0x{(int)rawKey:X8} ({rawKey}), " +
+                            $"IsCtrl={(rawKey & Key.CtrlMask) != 0}, " +
+                            $"expected Ctrl+Space=0x{(int)(Key.CtrlMask | Key.Space):X8}, " +
+                            $"LanguageService={(LanguageService != null ? "set" : "NULL")}, " +
+                            $"PopupShowing={_autocompletePopup.IsShowing}");
+        }
+
         // If the autocomplete popup is showing, route keys to it first
         if (_autocompletePopup.IsShowing)
         {
@@ -123,8 +134,10 @@ internal sealed class SyntaxHighlightedTextView : TextView
         }
 
         // Ctrl+Space: manual trigger for completions
-        if (keyEvent.Key == (Key.CtrlMask | Key.Space))
+        // Note: Some terminals send NUL (0x00) for Ctrl+Space instead of CtrlMask|Space
+        if (keyEvent.Key == (Key.CtrlMask | Key.Space) || (int)keyEvent.Key == 0)
         {
+            TuiDebugLog.Log($"Ctrl+Space detected (key=0x{(int)rawKey:X8}), triggering completions");
             _ = TriggerCompletionsAsync();
             return true;
         }
@@ -172,6 +185,7 @@ internal sealed class SyntaxHighlightedTextView : TextView
         // Dot trigger: after typing '.'
         if (keyEvent.Key == (Key)'.')
         {
+            TuiDebugLog.Log("Dot trigger: triggering completions");
             _ = TriggerCompletionsAsync();
             return;
         }
@@ -214,8 +228,11 @@ internal sealed class SyntaxHighlightedTextView : TextView
     /// </summary>
     internal async Task TriggerCompletionsAsync()
     {
+        TuiDebugLog.Log($"TriggerCompletionsAsync called, LanguageService={(LanguageService != null ? "set" : "NULL")}");
+
         if (LanguageService == null)
         {
+            TuiDebugLog.Log("IntelliSense unavailable — LanguageService is null, firing event");
             IntelliSenseUnavailable?.Invoke();
             return;
         }
@@ -232,9 +249,13 @@ internal sealed class SyntaxHighlightedTextView : TextView
         // Determine the word start (for replacement on accept)
         _completionWordStart = FindWordStart(fullText, cursorOffset);
 
+        TuiDebugLog.Log($"Requesting completions: offset={cursorOffset}, wordStart={_completionWordStart}, textLen={fullText.Length}");
+
         try
         {
             var completions = await LanguageService.GetCompletionsAsync(fullText, cursorOffset, ct);
+
+            TuiDebugLog.Log($"Completions returned: count={completions.Count}, cancelled={ct.IsCancellationRequested}");
 
             if (ct.IsCancellationRequested || completions.Count == 0)
             {
@@ -255,21 +276,25 @@ internal sealed class SyntaxHighlightedTextView : TextView
                 if (popupY < 0) popupY = 0;
             }
 
+            TuiDebugLog.Log($"Showing popup: x={popupX}, y={popupY}, items={completions.Count}, viewHeight={viewHeight}");
+
             // Show on the main thread (we may already be on it, but invoke to be safe)
             Application.MainLoop?.Invoke(() =>
             {
                 if (ct.IsCancellationRequested) return;
                 _autocompletePopup.Show(completions, popupX, popupY);
                 SetNeedsDisplay();
+                TuiDebugLog.Log($"Popup shown, IsShowing={_autocompletePopup.IsShowing}");
             });
         }
         catch (OperationCanceledException)
         {
             // Expected when a new trigger replaces the previous one
+            TuiDebugLog.Log("Completion request cancelled");
         }
         catch (Exception ex)
         {
-            TuiDebugLog.Log($"Autocomplete error: {ex.Message}");
+            TuiDebugLog.Log($"Autocomplete error: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

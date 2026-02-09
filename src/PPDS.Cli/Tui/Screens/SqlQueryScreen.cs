@@ -424,23 +424,29 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// </summary>
     private async Task ResolveLanguageServiceAsync()
     {
+        TuiDebugLog.Log($"ResolveLanguageServiceAsync starting for {EnvironmentUrl}");
         try
         {
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            TuiDebugLog.Log("Service provider obtained, resolving ISqlLanguageService...");
             var langService = provider.GetService<ISqlLanguageService>();
             if (langService != null)
             {
                 _queryInput.LanguageService = langService;
-                TuiDebugLog.Log("ISqlLanguageService resolved for autocomplete");
+                TuiDebugLog.Log("ISqlLanguageService resolved and assigned — IntelliSense is now active");
+            }
+            else
+            {
+                TuiDebugLog.Log("ISqlLanguageService resolved to NULL — IntelliSense will not work");
             }
         }
         catch (OperationCanceledException)
         {
-            // Screen closed before resolution completed
+            TuiDebugLog.Log("ResolveLanguageServiceAsync cancelled (screen closed)");
         }
         catch (Exception ex)
         {
-            TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {ex.Message}");
+            TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
