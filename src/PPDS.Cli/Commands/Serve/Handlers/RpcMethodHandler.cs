@@ -27,15 +27,18 @@ namespace PPDS.Cli.Commands.Serve.Handlers;
 public class RpcMethodHandler
 {
     private readonly IDaemonConnectionPoolManager _poolManager;
+    private readonly IServiceProvider _authServices;
     private JsonRpc? _rpc;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RpcMethodHandler"/> class.
     /// </summary>
     /// <param name="poolManager">The connection pool manager for caching Dataverse pools.</param>
-    public RpcMethodHandler(IDaemonConnectionPoolManager poolManager)
+    /// <param name="authServices">Service provider for auth services (ProfileStore, ISecureCredentialStore).</param>
+    public RpcMethodHandler(IDaemonConnectionPoolManager poolManager, IServiceProvider authServices)
     {
         _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
+        _authServices = authServices ?? throw new ArgumentNullException(nameof(authServices));
     }
 
     /// <summary>
@@ -62,7 +65,7 @@ public class RpcMethodHandler
     [JsonRpcMethod("auth/list")]
     public async Task<AuthListResponse> AuthListAsync(CancellationToken cancellationToken)
     {
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profiles = collection.All.Select(p => new ProfileInfo
@@ -97,7 +100,7 @@ public class RpcMethodHandler
     [JsonRpcMethod("auth/who")]
     public async Task<AuthWhoResponse> AuthWhoAsync(CancellationToken cancellationToken)
     {
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profile = collection.ActiveProfile;
@@ -174,7 +177,7 @@ public class RpcMethodHandler
                 "Provide either 'index' or 'name', not both");
         }
 
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         AuthProfile? profile;
@@ -224,7 +227,7 @@ public class RpcMethodHandler
         string? filter = null,
         CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profile = collection.ActiveProfile;
@@ -287,7 +290,7 @@ public class RpcMethodHandler
                 "The 'environment' parameter is required");
         }
 
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profile = collection.ActiveProfile;
@@ -297,7 +300,7 @@ public class RpcMethodHandler
         }
 
         // Use multi-layer resolution
-        using var credentialStore = new NativeCredentialStore();
+        var credentialStore = _authServices.GetRequiredService<ISecureCredentialStore>();
         using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
         var result = await resolver.ResolveAsync(environment, cancellationToken);
 
@@ -336,7 +339,7 @@ public class RpcMethodHandler
         string? package = null,
         CancellationToken cancellationToken = default)
     {
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profile = collection.ActiveProfile;
@@ -724,7 +727,7 @@ public class RpcMethodHandler
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var store = new ProfileStore();
+        var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
         var profile = collection.ActiveProfile
