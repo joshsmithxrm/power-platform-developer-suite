@@ -22,7 +22,7 @@ namespace PPDS.Dataverse.Sql.Intellisense;
 /// </list>
 /// Never throws — all issues are returned as <see cref="SqlDiagnostic"/> items.
 /// </remarks>
-public class SqlValidator
+public sealed class SqlValidator
 {
     private readonly ICachedMetadataProvider? _metadataProvider;
 
@@ -187,7 +187,7 @@ public class SqlValidator
         // Validate WHERE clause column references
         if (select.Where != null)
         {
-            ValidateConditionColumns(select.Where, tableMap, select.From.TableName, sql, diagnostics, ct);
+            await ValidateConditionColumnsAsync(select.Where, tableMap, select.From.TableName, sql, diagnostics, ct);
         }
 
         // Validate GROUP BY column references
@@ -393,7 +393,7 @@ public class SqlValidator
     /// Extracts column references from conditions for validation.
     /// Walks the condition tree and validates any column references found.
     /// </summary>
-    private void ValidateConditionColumns(
+    private async Task ValidateConditionColumnsAsync(
         ISqlCondition condition, Dictionary<string, string> tableMap,
         string defaultEntity, string sql, List<SqlDiagnostic> diagnostics,
         CancellationToken ct)
@@ -401,25 +401,25 @@ public class SqlValidator
         switch (condition)
         {
             case SqlComparisonCondition comp:
-                _ = ValidateColumnRefAsync(comp.Column, tableMap, defaultEntity, sql, diagnostics, ct);
+                await ValidateColumnRefAsync(comp.Column, tableMap, defaultEntity, sql, diagnostics, ct);
                 break;
 
             case SqlLikeCondition like:
-                _ = ValidateColumnRefAsync(like.Column, tableMap, defaultEntity, sql, diagnostics, ct);
+                await ValidateColumnRefAsync(like.Column, tableMap, defaultEntity, sql, diagnostics, ct);
                 break;
 
             case SqlNullCondition nullCond:
-                _ = ValidateColumnRefAsync(nullCond.Column, tableMap, defaultEntity, sql, diagnostics, ct);
+                await ValidateColumnRefAsync(nullCond.Column, tableMap, defaultEntity, sql, diagnostics, ct);
                 break;
 
             case SqlInCondition inCond:
-                _ = ValidateColumnRefAsync(inCond.Column, tableMap, defaultEntity, sql, diagnostics, ct);
+                await ValidateColumnRefAsync(inCond.Column, tableMap, defaultEntity, sql, diagnostics, ct);
                 break;
 
             case SqlLogicalCondition logical:
                 foreach (var child in logical.Conditions)
                 {
-                    ValidateConditionColumns(child, tableMap, defaultEntity, sql, diagnostics, ct);
+                    await ValidateConditionColumnsAsync(child, tableMap, defaultEntity, sql, diagnostics, ct);
                 }
                 break;
         }
@@ -429,10 +429,10 @@ public class SqlValidator
     /// Finds the position of an identifier in the SQL text.
     /// Falls back to position 0 if not found.
     /// </summary>
-    private static int FindIdentifierPosition(string sql, string identifier)
+    private static int FindIdentifierPosition(string sql, string identifier, int searchFrom = 0)
     {
-        // Case-insensitive search for the identifier
-        var idx = sql.IndexOf(identifier, StringComparison.OrdinalIgnoreCase);
+        // Case-insensitive search for the identifier, starting from a hint position
+        var idx = sql.IndexOf(identifier, searchFrom, StringComparison.OrdinalIgnoreCase);
         return idx >= 0 ? idx : 0;
     }
 }

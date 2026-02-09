@@ -336,6 +336,32 @@ public class SqlValidatorTests
 
     #endregion
 
+    #region WHERE Condition Column Validation
+
+    [Fact]
+    public async Task ValidateAsync_WhereWithUnknownColumn_ReturnsDiagnostic()
+    {
+        var validator = new SqlValidator(new StubMetadataProvider());
+        var sql = "SELECT name FROM account WHERE unknowncol = 'x'";
+
+        var diags = await validator.ValidateAsync(sql);
+
+        Assert.Contains(diags, d => d.Message.Contains("unknowncol", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_MultipleWhereConditions_AllValidated()
+    {
+        var validator = new SqlValidator(new StubMetadataProvider());
+        var sql = "SELECT name FROM account WHERE badcol1 = 'x' AND badcol2 = 'y'";
+
+        var diags = await validator.ValidateAsync(sql);
+
+        Assert.True(diags.Count >= 2, $"Expected at least 2 diagnostics for unknown columns, got {diags.Count}");
+    }
+
+    #endregion
+
     #region Stub Metadata Provider
 
     /// <summary>
