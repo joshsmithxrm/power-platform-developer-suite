@@ -169,9 +169,13 @@ public sealed class SqlQueryService : ISqlQueryService
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
         // SDK-specific FormattedValues metadata from the Entity objects.
+        // Aggregate results are excluded — their FormattedValues are locale-formatted
+        // numbers, not meaningful attribute labels.
+        var isAggregate = statement is SqlSelectStatement sel && sel.HasAggregates();
         var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
             result,
-            planResult.VirtualColumns);
+            planResult.VirtualColumns,
+            isAggregate);
 
         return new SqlQueryResult
         {
@@ -280,6 +284,7 @@ public sealed class SqlQueryService : ISqlQueryService
         IReadOnlyList<QueryColumn>? columns = null;
         var totalRows = 0;
         var isFirstChunk = true;
+        var streamIsAggregate = statement is SqlSelectStatement streamSel && streamSel.HasAggregates();
 
         await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
         {
@@ -296,7 +301,7 @@ public sealed class SqlQueryService : ISqlQueryService
             {
                 // Expand virtual columns (owneridname, statuscodename, etc.)
                 var expandedChunk = ExpandStreamingChunk(
-                    chunkRows, columns!, planResult.VirtualColumns);
+                    chunkRows, columns!, planResult.VirtualColumns, streamIsAggregate);
 
                 yield return new SqlQueryStreamChunk
                 {
@@ -315,7 +320,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
         // Yield final chunk with any remaining rows
         var finalExpanded = ExpandStreamingChunk(
-            chunkRows, columns ?? Array.Empty<QueryColumn>(), planResult.VirtualColumns);
+            chunkRows, columns ?? Array.Empty<QueryColumn>(), planResult.VirtualColumns, streamIsAggregate);
 
         yield return new SqlQueryStreamChunk
         {
@@ -375,7 +380,8 @@ public sealed class SqlQueryService : ISqlQueryService
     private static (List<IReadOnlyDictionary<string, QueryValue>> rows, IReadOnlyList<QueryColumn> columns) ExpandStreamingChunk(
         List<IReadOnlyDictionary<string, QueryValue>> chunkRows,
         IReadOnlyList<QueryColumn> columns,
-        IReadOnlyDictionary<string, VirtualColumnInfo> virtualColumns)
+        IReadOnlyDictionary<string, VirtualColumnInfo> virtualColumns,
+        bool isAggregate = false)
     {
         // Build a mini QueryResult for the chunk so we can reuse the expander
         var chunkResult = new QueryResult
@@ -389,7 +395,7 @@ public sealed class SqlQueryService : ISqlQueryService
         };
 
         var expanded = SqlQueryResultExpander.ExpandFormattedValueColumns(
-            chunkResult, virtualColumns);
+            chunkResult, virtualColumns, isAggregate);
 
         return (expanded.Records.ToList(), expanded.Columns);
     }
