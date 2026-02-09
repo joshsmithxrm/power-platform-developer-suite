@@ -56,14 +56,22 @@ public class TuiThemeServiceTests
     [InlineData("https://contoso-dev.crm.dynamics.com")]
     [InlineData("https://dev-contoso.crm9.dynamics.com")]
     [InlineData("https://contoso-development.crm.dynamics.com")]
-    [InlineData("https://contoso-test.crm.dynamics.com")]
-    [InlineData("https://contoso-qa.crm.dynamics.com")]
-    [InlineData("https://contoso-uat.crm.dynamics.com")]
     public void DetectEnvironmentType_DevKeywords_ReturnsDevelopment(string url)
     {
         var result = _service.DetectEnvironmentType(url);
 
         Assert.Equal(EnvironmentType.Development, result);
+    }
+
+    [Theory]
+    [InlineData("https://contoso-test.crm.dynamics.com")]
+    [InlineData("https://contoso-qa.crm.dynamics.com")]
+    [InlineData("https://contoso-uat.crm.dynamics.com")]
+    public void DetectEnvironmentType_TestKeywords_ReturnsTest(string url)
+    {
+        var result = _service.DetectEnvironmentType(url);
+
+        Assert.Equal(EnvironmentType.Test, result);
     }
 
     [Theory]
@@ -114,6 +122,7 @@ public class TuiThemeServiceTests
     [InlineData(EnvironmentType.Production, "PROD")]
     [InlineData(EnvironmentType.Sandbox, "SANDBOX")]
     [InlineData(EnvironmentType.Development, "DEV")]
+    [InlineData(EnvironmentType.Test, "TEST")]
     [InlineData(EnvironmentType.Trial, "TRIAL")]
     [InlineData(EnvironmentType.Unknown, "")]
     public void GetEnvironmentLabel_ReturnsExpectedLabel(EnvironmentType envType, string expected)
