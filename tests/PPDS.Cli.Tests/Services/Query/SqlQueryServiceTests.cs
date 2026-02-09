@@ -457,8 +457,8 @@ public class SqlQueryServiceTests
 
         // Verify the expanded record contains the display name
         var record = expanded.Records[0];
-        Assert.True(record.ContainsKey("owneridname"), "Record should contain owneridname key");
-        Assert.Equal("John Smith", record["owneridname"].Value);
+        Assert.True(record.TryGetValue("owneridname", out var owneridnameVal), "Record should contain owneridname key");
+        Assert.Equal("John Smith", owneridnameVal.Value);
     }
 
     [Fact]
@@ -492,8 +492,8 @@ public class SqlQueryServiceTests
         Assert.Contains("statuscodename", columnNames);
 
         var record = expanded.Records[0];
-        Assert.True(record.ContainsKey("statuscodename"), "Record should contain statuscodename key");
-        Assert.Equal("Active", record["statuscodename"].Value);
+        Assert.True(record.TryGetValue("statuscodename", out var statuscodenameVal), "Record should contain statuscodename key");
+        Assert.Equal("Active", statuscodenameVal.Value);
     }
 
     [Fact]
@@ -527,8 +527,8 @@ public class SqlQueryServiceTests
         Assert.Contains("ismanagedname", columnNames);
 
         var record = expanded.Records[0];
-        Assert.True(record.ContainsKey("ismanagedname"), "Record should contain ismanagedname key");
-        Assert.Equal("Yes", record["ismanagedname"].Value);
+        Assert.True(record.TryGetValue("ismanagedname", out var ismanagedVal), "Record should contain ismanagedname key");
+        Assert.Equal("Yes", ismanagedVal.Value);
     }
 
     [Fact]
@@ -617,9 +617,9 @@ public class SqlQueryServiceTests
         Assert.Contains("owneridname", columnNames);
 
         var record = expanded.Records[0];
-        Assert.True(record.ContainsKey("ownerid"), "Base column should be present when explicitly queried");
-        Assert.True(record.ContainsKey("owneridname"), "Virtual column should be present");
-        Assert.Equal("John Smith", record["owneridname"].Value);
+        Assert.True(record.TryGetValue("ownerid", out _), "Base column should be present when explicitly queried");
+        Assert.True(record.TryGetValue("owneridname", out var owneridnameVal2), "Virtual column should be present");
+        Assert.Equal("John Smith", owneridnameVal2.Value);
     }
 
     [Fact]

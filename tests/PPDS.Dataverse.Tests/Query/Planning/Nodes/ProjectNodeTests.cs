@@ -106,8 +106,8 @@ public class ProjectNodeTests
         }
 
         Assert.Single(rows);
-        Assert.True(rows[0].Values.ContainsKey("contact_name"));
-        Assert.Equal("John Doe", rows[0].Values["contact_name"].Value);
+        Assert.True(rows[0].Values.TryGetValue("contact_name", out var contactNameVal));
+        Assert.Equal("John Doe", contactNameVal.Value);
     }
 
     [Fact]

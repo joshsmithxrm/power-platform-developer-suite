@@ -32,11 +32,11 @@ public sealed class VariableScope
     /// <param name="value">The new value.</param>
     public void Set(string name, object? value)
     {
-        if (!_variables.ContainsKey(name))
+        if (!_variables.TryGetValue(name, out var existing))
             throw new QueryExecutionException(
                 QueryErrorCode.ExecutionFailed,
                 $"Variable {name} has not been declared. Use DECLARE {name} <type> before SET.");
-        _variables[name] = _variables[name] with { Value = value };
+        _variables[name] = existing with { Value = value };
     }
 
     /// <summary>

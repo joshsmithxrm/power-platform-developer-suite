@@ -95,10 +95,10 @@ public class EnvironmentConfigServiceTests : IDisposable
     {
         await _service.SaveTypeDefaultAsync("Gold", EnvironmentColor.BrightYellow);
         var defaults = await _service.GetAllTypeDefaultsAsync();
-        Assert.True(defaults.ContainsKey("Production"), "Should have built-in Production");
-        Assert.True(defaults.ContainsKey("Gold"), "Should have custom Gold");
-        Assert.Equal(EnvironmentColor.Red, defaults["Production"]);
-        Assert.Equal(EnvironmentColor.BrightYellow, defaults["Gold"]);
+        Assert.True(defaults.TryGetValue("Production", out var productionColor), "Should have built-in Production");
+        Assert.True(defaults.TryGetValue("Gold", out var goldColor), "Should have custom Gold");
+        Assert.Equal(EnvironmentColor.Red, productionColor);
+        Assert.Equal(EnvironmentColor.BrightYellow, goldColor);
     }
 
     [Fact]

@@ -255,10 +255,10 @@ public class SqlCursorContextTests
         var sql = "SELECT a.name FROM account a JOIN contact c ON a.accountid = c.parentcustomerid WHERE ";
         var result = SqlCursorContext.Analyze(sql, sql.Length);
 
-        Assert.True(result.AliasMap.ContainsKey("a"), "Alias map should contain 'a'");
-        Assert.True(result.AliasMap.ContainsKey("c"), "Alias map should contain 'c'");
-        Assert.Equal("account", result.AliasMap["a"]);
-        Assert.Equal("contact", result.AliasMap["c"]);
+        Assert.True(result.AliasMap.TryGetValue("a", out var aliasA), "Alias map should contain 'a'");
+        Assert.True(result.AliasMap.TryGetValue("c", out var aliasC), "Alias map should contain 'c'");
+        Assert.Equal("account", aliasA);
+        Assert.Equal("contact", aliasC);
     }
 
     [Fact]
@@ -268,8 +268,8 @@ public class SqlCursorContextTests
         var sql = "SELECT FROM account a JOIN contact c ON ";
         var result = SqlCursorContext.Analyze(sql, sql.Length);
 
-        Assert.True(result.AliasMap.ContainsKey("a"), "Alias map should contain 'a'");
-        Assert.True(result.AliasMap.ContainsKey("c"), "Alias map should contain 'c'");
+        Assert.True(result.AliasMap.TryGetValue("a", out _), "Alias map should contain 'a'");
+        Assert.True(result.AliasMap.TryGetValue("c", out _), "Alias map should contain 'c'");
     }
 
     #endregion
