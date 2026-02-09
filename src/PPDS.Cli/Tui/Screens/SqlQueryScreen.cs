@@ -60,7 +60,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private bool _isExecuting;
     private string _statusText = "Ready";
     private string? _lastErrorMessage;
-    private bool _languageServiceResolved;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -288,6 +287,25 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             _resultsTable.SetEnvironmentUrl(EnvironmentUrl);
         }
 
+        // Eagerly resolve IntelliSense language service so completions work immediately
+        if (EnvironmentUrl != null)
+        {
+            ErrorService.FireAndForget(ResolveLanguageServiceAsync(), "ResolveLanguageService");
+        }
+
+        // Show status feedback when IntelliSense is requested before the service is ready
+        _queryInput.IntelliSenseUnavailable += () =>
+        {
+            if (EnvironmentUrl == null)
+            {
+                _statusLabel.Text = "IntelliSense unavailable — no environment selected";
+            }
+            else
+            {
+                _statusLabel.Text = "IntelliSense loading...";
+            }
+        };
+
         // Set up keyboard handling for context-dependent shortcuts
         SetupKeyboardHandling();
     }
@@ -398,6 +416,32 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         ResizeEditor(delta);
     }
 
+    /// <summary>
+    /// Resolves the <see cref="ISqlLanguageService"/> eagerly so IntelliSense works
+    /// as soon as the screen opens, without waiting for the first query execution.
+    /// </summary>
+    private async Task ResolveLanguageServiceAsync()
+    {
+        try
+        {
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var langService = provider.GetService<ISqlLanguageService>();
+            if (langService != null)
+            {
+                _queryInput.LanguageService = langService;
+                TuiDebugLog.Log("ISqlLanguageService resolved for autocomplete");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Screen closed before resolution completed
+        }
+        catch (Exception ex)
+        {
+            TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {ex.Message}");
+        }
+    }
+
     private async Task ExecuteQueryAsync()
     {
         var sql = _queryInput.Text.ToString() ?? string.Empty;
@@ -432,26 +476,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
             var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
             TuiDebugLog.Log("Got service, executing streaming query...");
-
-            // Lazily resolve the language service for IntelliSense on first query
-            if (!_languageServiceResolved)
-            {
-                _languageServiceResolved = true;
-                try
-                {
-                    var provider = await Session.GetServiceProviderAsync(EnvironmentUrl, ScreenCancellation);
-                    var langService = provider.GetService<ISqlLanguageService>();
-                    if (langService != null)
-                    {
-                        _queryInput.LanguageService = langService;
-                        TuiDebugLog.Log("ISqlLanguageService resolved for autocomplete");
-                    }
-                }
-                catch (Exception langEx)
-                {
-                    TuiDebugLog.Log($"Failed to resolve ISqlLanguageService: {langEx.Message}");
-                }
-            }
 
             var request = new SqlQueryRequest
             {

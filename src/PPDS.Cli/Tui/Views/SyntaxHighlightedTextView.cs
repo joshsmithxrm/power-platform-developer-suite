@@ -73,6 +73,11 @@ internal sealed class SyntaxHighlightedTextView : TextView
     public ISqlLanguageService? LanguageService { get; set; }
 
     /// <summary>
+    /// Raised when IntelliSense completions are requested but <see cref="LanguageService"/> is not yet available.
+    /// </summary>
+    internal event Action? IntelliSenseUnavailable;
+
+    /// <summary>
     /// Gets the autocomplete popup (for testing / external access).
     /// </summary>
     internal AutocompletePopup AutocompletePopupView => _autocompletePopup;
@@ -209,7 +214,11 @@ internal sealed class SyntaxHighlightedTextView : TextView
     /// </summary>
     internal async Task TriggerCompletionsAsync()
     {
-        if (LanguageService == null) return;
+        if (LanguageService == null)
+        {
+            IntelliSenseUnavailable?.Invoke();
+            return;
+        }
 
         // Cancel and dispose any in-flight request
         _completionCts?.Cancel();
