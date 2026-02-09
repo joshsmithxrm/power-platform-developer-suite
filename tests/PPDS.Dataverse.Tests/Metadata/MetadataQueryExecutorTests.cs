@@ -508,7 +508,7 @@ public class MetadataQueryExecutorTests
     [Fact]
     public async Task QueryMetadataAsync_RespectssCancellation()
     {
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var mockService = new Mock<IMetadataService>();

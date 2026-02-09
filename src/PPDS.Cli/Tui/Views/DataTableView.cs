@@ -456,7 +456,7 @@ internal class DataTableView : FrameView
 
     private void ShowContextMenu(int x, int y)
     {
-        var menu = new ContextMenu(x, y,
+        using var menu = new ContextMenu(x, y,
             new MenuBarItem(null, new MenuItem[]
             {
                 new MenuItem("Copy", "Ctrl+C", () => HandleCopy(invertHeaders: false)),

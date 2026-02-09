@@ -206,7 +206,7 @@ public class MetadataScanNodeTests
             .ReturnsAsync(mockRecords);
 
         var node = new MetadataScanNode("entity", mockExecutor.Object);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         var ctx = CreateContext(mockExecutor.Object);
 
         // Act & Assert

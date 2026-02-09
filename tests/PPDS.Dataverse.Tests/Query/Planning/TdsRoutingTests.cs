@@ -444,7 +444,7 @@ public class TdsRoutingTests
     {
         var executor = new StubTdsQueryExecutor();
         var node = new TdsScanNode("SELECT name FROM account", "account", executor);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var context = CreateContext();

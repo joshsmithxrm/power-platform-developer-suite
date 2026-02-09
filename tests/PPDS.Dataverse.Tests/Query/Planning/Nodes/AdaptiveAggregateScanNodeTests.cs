@@ -305,7 +305,7 @@ public class AdaptiveAggregateScanNodeTests
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 
         // Pre-cancelled token
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>

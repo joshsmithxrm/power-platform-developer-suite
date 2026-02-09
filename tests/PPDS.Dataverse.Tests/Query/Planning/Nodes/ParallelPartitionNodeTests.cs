@@ -280,7 +280,7 @@ public class ParallelPartitionNodeTests
     [Fact]
     public async Task Cancellation_StopsExecution()
     {
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
 
         // Create partitions with rows
         var slowRows = Enumerable.Range(1, 100).Select(i => MakeRow(("id", i))).ToArray();

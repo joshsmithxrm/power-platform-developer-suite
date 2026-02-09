@@ -135,7 +135,7 @@ public class FetchXmlScanNodeTests
     [Fact]
     public async Task Cancellation_StopsIteration()
     {
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         var result = MakeResult("account", 5, moreRecords: true, pagingCookie: "cookie");
 
         var mockExecutor = new Mock<IQueryExecutor>();
