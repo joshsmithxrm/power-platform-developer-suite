@@ -516,6 +516,7 @@ internal class DataTableView : FrameView
         return value
             .Replace("'", "''")
             .Replace("[", "[[]")
+            .Replace("]", "[]]")
             .Replace("%", "[%]")
             .Replace("*", "[*]");
     }

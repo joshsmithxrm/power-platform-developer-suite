@@ -77,6 +77,7 @@ internal sealed class SplitterView : View
                 Dragged?.Invoke(delta);
                 // Reset baseline so further movement is incremental
                 // (the view moves, so ev.Y base shifts)
+                _dragStartScreenY = ev.Y;
             }
             return true;
         }

@@ -681,4 +681,26 @@ internal sealed class SyntaxHighlightedTextView : TextView
             offset += Math.Min(col, lines[row].Length);
         return offset;
     }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _completionCts?.Cancel();
+            _completionCts?.Dispose();
+            _completionCts = null;
+
+            _validationCts?.Cancel();
+            _validationCts?.Dispose();
+            _validationCts = null;
+
+            if (_validationTimerToken != null)
+            {
+                Application.MainLoop?.RemoveTimeout(_validationTimerToken);
+                _validationTimerToken = null;
+            }
+        }
+        base.Dispose(disposing);
+    }
 }
