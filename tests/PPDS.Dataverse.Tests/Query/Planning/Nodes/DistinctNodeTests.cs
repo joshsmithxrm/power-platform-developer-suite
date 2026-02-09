@@ -129,8 +129,8 @@ public class DistinctNodeTests
     {
         var input = new MockPlanNode(new[]
         {
-            MakeRow(("name", (object?)null)),
-            MakeRow(("name", (object?)null)),  // duplicate null
+            MakeRow(("name", null)),
+            MakeRow(("name", null)),  // duplicate null
             MakeRow(("name", "Alpha"))
         });
 

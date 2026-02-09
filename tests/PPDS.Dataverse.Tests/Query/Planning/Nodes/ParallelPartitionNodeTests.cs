@@ -683,8 +683,8 @@ public class MergeAggregateNodeTests
     {
         var input = new MockPlanNode(new[]
         {
-            MakeRow("entity", ("min_val", (object?)null)),
-            MakeRow("entity", ("min_val", (object?)null))
+            MakeRow("entity", ("min_val", null)),
+            MakeRow("entity", ("min_val", null))
         });
 
         var cols = new List<MergeAggregateColumn> { new("min_val", AggregateFunction.Min) };
@@ -734,8 +734,8 @@ public class MergeAggregateNodeTests
     {
         var input = new MockPlanNode(new[]
         {
-            MakeRow("entity", ("max_val", (object?)null)),
-            MakeRow("entity", ("max_val", (object?)null))
+            MakeRow("entity", ("max_val", null)),
+            MakeRow("entity", ("max_val", null))
         });
 
         var cols = new List<MergeAggregateColumn> { new("max_val", AggregateFunction.Max) };
@@ -823,8 +823,8 @@ public class MergeAggregateNodeTests
     {
         var input = new MockPlanNode(new[]
         {
-            MakeRow("entity", ("region", (object?)null), ("cnt", 100L)),
-            MakeRow("entity", ("region", (object?)null), ("cnt", 200L)),
+            MakeRow("entity", ("region", null), ("cnt", 100L)),
+            MakeRow("entity", ("region", null), ("cnt", 200L)),
             MakeRow("entity", ("region", "US"), ("cnt", 50L))
         });
 

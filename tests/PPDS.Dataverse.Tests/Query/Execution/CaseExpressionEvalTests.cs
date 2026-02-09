@@ -196,7 +196,7 @@ public class CaseExpressionEvalTests
             new SqlLiteralExpression(SqlLiteral.String("High")),
             new SqlLiteralExpression(SqlLiteral.String("Low")));
 
-        var row = Row(("revenue", (object?)null));
+        var row = Row(("revenue", null));
         var result = _eval.Evaluate(iif, row);
 
         Assert.Equal("Low", result);

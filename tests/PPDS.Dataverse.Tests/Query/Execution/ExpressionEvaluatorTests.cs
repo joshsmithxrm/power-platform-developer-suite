@@ -330,7 +330,7 @@ public class ExpressionEvaluatorTests
             SqlColumnRef.Simple("x"),
             SqlComparisonOperator.Equal,
             SqlLiteral.Null());
-        Assert.False(_eval.EvaluateCondition(cond, Row(("x", (object?)null))));
+        Assert.False(_eval.EvaluateCondition(cond, Row(("x", null))));
     }
 
     [Fact]
@@ -359,7 +359,7 @@ public class ExpressionEvaluatorTests
     public void IsNull_True()
     {
         var cond = new SqlNullCondition(SqlColumnRef.Simple("email"), isNegated: false);
-        Assert.True(_eval.EvaluateCondition(cond, Row(("email", (object?)null))));
+        Assert.True(_eval.EvaluateCondition(cond, Row(("email", null))));
     }
 
     [Fact]

@@ -562,7 +562,7 @@ public class CastConvertTests
             new SqlColumnExpression(SqlColumnRef.Simple("amount")),
             "int");
 
-        var row = Row(("amount", (object?)null));
+        var row = Row(("amount", null));
         var result = _eval.Evaluate(cast, row);
         Assert.Null(result);
     }
