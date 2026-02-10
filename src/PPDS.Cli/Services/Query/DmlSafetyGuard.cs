@@ -1,5 +1,5 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -15,37 +15,41 @@ public sealed class DmlSafetyGuard
     /// <summary>
     /// Checks a DML statement for safety violations.
     /// </summary>
-    /// <param name="statement">The parsed SQL statement.</param>
+    /// <param name="statement">The parsed SQL statement (ScriptDom AST).</param>
     /// <param name="options">Safety check options.</param>
     /// <returns>The safety check result.</returns>
-    public DmlSafetyResult Check(ISqlStatement statement, DmlSafetyOptions options)
+    public DmlSafetyResult Check(TSqlStatement statement, DmlSafetyOptions options)
     {
         return statement switch
         {
-            SqlDeleteStatement delete => CheckDelete(delete, options),
-            SqlUpdateStatement update => CheckUpdate(update, options),
-            SqlInsertStatement => new DmlSafetyResult
+            DeleteStatement delete => CheckDelete(delete, options),
+            UpdateStatement update => CheckUpdate(update, options),
+            InsertStatement => new DmlSafetyResult
             {
                 IsBlocked = false,
                 RequiresConfirmation = !options.IsConfirmed,
                 EstimatedAffectedRows = -1
             },
-            SqlSelectStatement => new DmlSafetyResult { IsBlocked = false },
-            SqlBlockStatement block => CheckBlock(block, options),
-            SqlIfStatement ifStmt => CheckIf(ifStmt, options),
+            SelectStatement => new DmlSafetyResult { IsBlocked = false },
+            BeginEndBlockStatement block => CheckBlock(block, options),
+            IfStatement ifStmt => CheckIf(ifStmt, options),
             _ => new DmlSafetyResult { IsBlocked = false }
         };
     }
 
-    private static DmlSafetyResult CheckDelete(SqlDeleteStatement delete, DmlSafetyOptions options)
+    private static DmlSafetyResult CheckDelete(DeleteStatement delete, DmlSafetyOptions options)
     {
         // DELETE without WHERE is ALWAYS blocked
-        if (delete.Where == null)
+        if (delete.DeleteSpecification.WhereClause == null)
         {
+            var targetName = delete.DeleteSpecification.Target is NamedTableReference namedTable
+                ? namedTable.SchemaObject.BaseIdentifier.Value
+                : "table";
+
             return new DmlSafetyResult
             {
                 IsBlocked = true,
-                BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds truncate {delete.TargetTable.TableName}' for bulk deletion.",
+                BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds truncate {targetName}' for bulk deletion.",
                 ErrorCode = ErrorCodes.Query.DmlBlocked
             };
         }
@@ -53,10 +57,10 @@ public sealed class DmlSafetyGuard
         return CheckRowCap(options);
     }
 
-    private static DmlSafetyResult CheckUpdate(SqlUpdateStatement update, DmlSafetyOptions options)
+    private static DmlSafetyResult CheckUpdate(UpdateStatement update, DmlSafetyOptions options)
     {
         // UPDATE without WHERE is ALWAYS blocked
-        if (update.Where == null)
+        if (update.UpdateSpecification.WhereClause == null)
         {
             return new DmlSafetyResult
             {
@@ -69,11 +73,11 @@ public sealed class DmlSafetyGuard
         return CheckRowCap(options);
     }
 
-    private DmlSafetyResult CheckBlock(SqlBlockStatement block, DmlSafetyOptions options)
+    private DmlSafetyResult CheckBlock(BeginEndBlockStatement block, DmlSafetyOptions options)
     {
         // Return the most restrictive result from any contained statement
         DmlSafetyResult worst = new() { IsBlocked = false };
-        foreach (var stmt in block.Statements)
+        foreach (var stmt in block.StatementList.Statements)
         {
             var result = Check(stmt, options);
             if (result.IsBlocked) return result;
@@ -82,14 +86,14 @@ public sealed class DmlSafetyGuard
         return worst;
     }
 
-    private DmlSafetyResult CheckIf(SqlIfStatement ifStmt, DmlSafetyOptions options)
+    private DmlSafetyResult CheckIf(IfStatement ifStmt, DmlSafetyOptions options)
     {
-        var thenResult = Check(ifStmt.ThenBlock, options);
+        var thenResult = Check(ifStmt.ThenStatement, options);
         if (thenResult.IsBlocked) return thenResult;
 
-        if (ifStmt.ElseBlock != null)
+        if (ifStmt.ElseStatement != null)
         {
-            var elseResult = Check(ifStmt.ElseBlock, options);
+            var elseResult = Check(ifStmt.ElseStatement, options);
             if (elseResult.IsBlocked) return elseResult;
             if (elseResult.RequiresConfirmation) return elseResult;
         }
