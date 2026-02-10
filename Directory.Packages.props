@@ -37,7 +37,7 @@
     <PackageVersion Include="CsvHelper" Version="33.1.0" />
     <PackageVersion Include="RadLine" Version="0.9.0" />
     <PackageVersion Include="Terminal.Gui" Version="1.19.0" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.1" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.2" />
     <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="9.0.1" />
   </ItemGroup>
 
