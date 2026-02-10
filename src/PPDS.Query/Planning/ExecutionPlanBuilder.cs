@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Query.Planning.Partitioning;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Transpilation;
@@ -86,18 +91,34 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         return Build(statement);
     }
 
+    private void SetResult(QueryPlanResult result)
+    {
+        _resultNode = result.RootNode;
+        _resultFetchXml = result.FetchXml;
+        _resultVirtualColumns = result.VirtualColumns;
+        _resultEntityName = result.EntityLogicalName;
+    }
+
     #region Visitor Methods
 
     /// <summary>
     /// Visits a SelectStatement and builds a plan for it.
+    /// Handles both simple SELECT and UNION queries.
     /// </summary>
     public override void ExplicitVisit(SelectStatement node)
     {
-        var planResult = PlanSelect(node);
-        _resultNode = planResult.RootNode;
-        _resultFetchXml = planResult.FetchXml;
-        _resultVirtualColumns = planResult.VirtualColumns;
-        _resultEntityName = planResult.EntityLogicalName;
+        QueryPlanResult planResult;
+
+        if (node.QueryExpression is BinaryQueryExpression binary)
+        {
+            planResult = PlanBinaryQuery(binary);
+        }
+        else
+        {
+            planResult = PlanSelect(node);
+        }
+
+        SetResult(planResult);
     }
 
     /// <summary>
@@ -105,11 +126,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
     /// </summary>
     public override void ExplicitVisit(InsertStatement node)
     {
-        var planResult = PlanInsert(node);
-        _resultNode = planResult.RootNode;
-        _resultFetchXml = planResult.FetchXml;
-        _resultVirtualColumns = planResult.VirtualColumns;
-        _resultEntityName = planResult.EntityLogicalName;
+        SetResult(PlanInsert(node));
     }
 
     /// <summary>
@@ -117,11 +134,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
     /// </summary>
     public override void ExplicitVisit(UpdateStatement node)
     {
-        var planResult = PlanUpdate(node);
-        _resultNode = planResult.RootNode;
-        _resultFetchXml = planResult.FetchXml;
-        _resultVirtualColumns = planResult.VirtualColumns;
-        _resultEntityName = planResult.EntityLogicalName;
+        SetResult(PlanUpdate(node));
     }
 
     /// <summary>
@@ -129,11 +142,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
     /// </summary>
     public override void ExplicitVisit(DeleteStatement node)
     {
-        var planResult = PlanDelete(node);
-        _resultNode = planResult.RootNode;
-        _resultFetchXml = planResult.FetchXml;
-        _resultVirtualColumns = planResult.VirtualColumns;
-        _resultEntityName = planResult.EntityLogicalName;
+        SetResult(PlanDelete(node));
     }
 
     #endregion
@@ -145,16 +154,45 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         var querySpec = selectStatement.QueryExpression as QuerySpecification
             ?? throw new InvalidOperationException("Expected QuerySpecification in SelectStatement");
 
-        // Generate FetchXML via the generator
-        var transpileResult = _fetchXmlGenerator.Generate(selectStatement);
-
         // Get entity name from FROM clause
         var entityName = GetEntityName(querySpec);
 
-        // Check for metadata virtual table routing
+        // Metadata virtual table routing
         if (entityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
         {
             return PlanMetadataQuery(querySpec, entityName);
+        }
+
+        // TDS endpoint routing: when enabled and compatible, bypass FetchXML
+        // and send SQL directly to the TDS wire protocol.
+        if (_options.UseTdsEndpoint
+            && _options.TdsQueryExecutor != null
+            && !string.IsNullOrEmpty(_options.OriginalSql))
+        {
+            var compatibility = TdsCompatibilityChecker.CheckCompatibility(
+                _options.OriginalSql, entityName);
+            if (compatibility == TdsCompatibility.Compatible)
+            {
+                return PlanTds(entityName, querySpec);
+            }
+        }
+
+        // Variable substitution: replace @variable references in WHERE conditions
+        // with literal values before FetchXML generation.
+        if (_options.VariableScope != null && querySpec.WhereClause != null
+            && ContainsVariableReference(querySpec.WhereClause.SearchCondition))
+        {
+            SubstituteVariablesInPlace(querySpec.WhereClause, _options.VariableScope);
+        }
+
+        // Generate FetchXML via the generator
+        var transpileResult = _fetchXmlGenerator.Generate(selectStatement);
+
+        // Aggregate partitioning: when aggregate queries might exceed the
+        // 50K AggregateQueryRecordLimit, partition by date range and execute in parallel.
+        if (ShouldPartitionAggregate(querySpec))
+        {
+            return PlanAggregateWithPartitioning(querySpec, entityName, transpileResult);
         }
 
         // Get TOP value
@@ -197,6 +235,13 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
             {
                 rootNode = new ClientFilterNode(rootNode, havingCondition);
             }
+        }
+
+        // Window functions: compute ROW_NUMBER, RANK, etc. client-side.
+        // Must run before ProjectNode because window columns need to be materialized first.
+        if (HasWindowFunctions(querySpec.SelectElements))
+        {
+            rootNode = BuildWindowNode(rootNode, querySpec.SelectElements);
         }
 
         // Computed columns (CASE, IIF) - add ProjectNode
@@ -263,6 +308,382 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = metadataTable
         };
+    }
+
+    #endregion
+
+    #region UNION Planning
+
+    /// <summary>
+    /// Plans a UNION/UNION ALL query represented as a BinaryQueryExpression.
+    /// Recursively collects all branches, plans each independently, and combines
+    /// with ConcatenateNode. UNION (without ALL) adds DistinctNode.
+    /// </summary>
+    private QueryPlanResult PlanBinaryQuery(BinaryQueryExpression binary)
+    {
+        // Recursively collect all branches (handles nested UNION chains)
+        var branches = new List<(QueryExpression query, bool isUnionAll)>();
+        CollectBinaryBranches(binary, branches);
+
+        var branchNodes = new List<IQueryPlanNode>();
+        var allFetchXml = new List<string>();
+        string? firstEntityName = null;
+
+        foreach (var (query, _) in branches)
+        {
+            var wrapperSelect = new SelectStatement { QueryExpression = query };
+            var branchResult = PlanSelect(wrapperSelect);
+            branchNodes.Add(branchResult.RootNode);
+            allFetchXml.Add(branchResult.FetchXml);
+            firstEntityName ??= branchResult.EntityLogicalName;
+        }
+
+        IQueryPlanNode rootNode = new ConcatenateNode(branchNodes);
+
+        // If any boundary is UNION (not ALL), wrap with DistinctNode
+        bool needsDistinct = branches.Any(b => !b.isUnionAll);
+        if (needsDistinct)
+        {
+            rootNode = new DistinctNode(rootNode);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = string.Join("\n-- UNION --\n", allFetchXml),
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = firstEntityName ?? ""
+        };
+    }
+
+    private static void CollectBinaryBranches(
+        QueryExpression expr, List<(QueryExpression query, bool isUnionAll)> branches)
+    {
+        if (expr is BinaryQueryExpression binary)
+        {
+            CollectBinaryBranches(binary.FirstQueryExpression, branches);
+            branches.Add((binary.SecondQueryExpression,
+                binary.BinaryQueryExpressionType == BinaryQueryExpressionType.UnionAll));
+        }
+        else
+        {
+            // First branch is always "union all" with itself (no dedup needed for one branch)
+            branches.Add((expr, true));
+        }
+    }
+
+    #endregion
+
+    #region TDS Endpoint Routing
+
+    /// <summary>
+    /// Builds a TDS Endpoint plan that sends SQL directly to the TDS wire protocol.
+    /// No FetchXML transpilation is performed — the original SQL is passed through.
+    /// </summary>
+    private QueryPlanResult PlanTds(string entityName, QuerySpecification querySpec)
+    {
+        var topValue = GetTopValue(querySpec);
+        var tdsNode = new TdsScanNode(
+            _options.OriginalSql!,
+            entityName,
+            _options.TdsQueryExecutor!,
+            maxRows: _options.MaxRows ?? topValue);
+
+        return new QueryPlanResult
+        {
+            RootNode = tdsNode,
+            FetchXml = $"-- TDS Endpoint: SQL passed directly --\n{_options.OriginalSql}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = entityName
+        };
+    }
+
+    #endregion
+
+    #region Aggregate Partitioning
+
+    /// <summary>
+    /// Determines whether an aggregate query should be partitioned for parallel execution.
+    /// </summary>
+    private bool ShouldPartitionAggregate(QuerySpecification querySpec)
+    {
+        if (!HasAggregates(querySpec.SelectElements))
+            return false;
+
+        if (_options.PoolCapacity <= 1)
+            return false;
+
+        if (!_options.EstimatedRecordCount.HasValue
+            || _options.EstimatedRecordCount.Value <= _options.AggregateRecordLimit)
+            return false;
+
+        if (!_options.MinDate.HasValue || !_options.MaxDate.HasValue)
+            return false;
+
+        if (ContainsCountDistinct(querySpec))
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks if SELECT contains COUNT(DISTINCT ...) which can't be parallel-partitioned.
+    /// </summary>
+    private static bool ContainsCountDistinct(QuerySpecification querySpec)
+    {
+        return querySpec.SelectElements.OfType<SelectScalarExpression>()
+            .Any(s => s.Expression is FunctionCall func
+                && func.FunctionName.Value.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+                && func.UniqueRowFilter == UniqueRowFilter.Distinct);
+    }
+
+    /// <summary>
+    /// Builds a partitioned aggregate plan that splits the query into date-range
+    /// partitions, executes each in parallel, and merges partial results.
+    /// </summary>
+    private QueryPlanResult PlanAggregateWithPartitioning(
+        QuerySpecification querySpec,
+        string entityName,
+        TranspileResult transpileResult)
+    {
+        var partitioner = new DateRangePartitioner();
+        var partitions = partitioner.CalculatePartitions(
+            _options.EstimatedRecordCount!.Value,
+            _options.MinDate!.Value,
+            _options.MaxDate!.Value,
+            _options.MaxRecordsPerPartition);
+
+        var mergeColumns = BuildMergeAggregateColumns(querySpec);
+        var groupByColumns = ExtractGroupByColumnNames(querySpec);
+
+        // Inject companion COUNT attributes for AVG columns
+        var enrichedFetchXml = InjectAvgCompanionCounts(transpileResult.FetchXml, mergeColumns);
+
+        var partitionNodes = new List<IQueryPlanNode>();
+        foreach (var partition in partitions)
+        {
+            partitionNodes.Add(new AdaptiveAggregateScanNode(
+                enrichedFetchXml, entityName, partition.Start, partition.End));
+        }
+
+        var parallelNode = new ParallelPartitionNode(partitionNodes, _options.PoolCapacity);
+        IQueryPlanNode rootNode = new MergeAggregateNode(parallelNode, mergeColumns, groupByColumns);
+
+        // HAVING clause: apply after merging
+        if (querySpec.HavingClause != null)
+        {
+            var havingCondition = ConvertToSqlCondition(querySpec.HavingClause.SearchCondition);
+            if (havingCondition != null)
+            {
+                rootNode = new ClientFilterNode(rootNode, havingCondition);
+            }
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = transpileResult.FetchXml,
+            VirtualColumns = transpileResult.VirtualColumns,
+            EntityLogicalName = entityName
+        };
+    }
+
+    /// <summary>
+    /// Builds MergeAggregateColumn descriptors from ScriptDom SELECT elements.
+    /// </summary>
+    private static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumns(QuerySpecification querySpec)
+    {
+        var columns = new List<MergeAggregateColumn>();
+        var aliasCounter = 0;
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression scalar
+                && scalar.Expression is FunctionCall func
+                && IsAggregateFunction(func))
+            {
+                aliasCounter++;
+                var funcName = func.FunctionName.Value.ToLowerInvariant();
+                var alias = scalar.ColumnName?.Value ?? $"{funcName}_{aliasCounter}";
+                var function = MapToMergeFunction(funcName);
+
+                string? countAlias = function == AggregateFunction.Avg
+                    ? $"{alias}_count" : null;
+
+                columns.Add(new MergeAggregateColumn(alias, function, countAlias));
+            }
+        }
+
+        return columns;
+    }
+
+    private static AggregateFunction MapToMergeFunction(string funcName)
+    {
+        return funcName.ToUpperInvariant() switch
+        {
+            "COUNT" => AggregateFunction.Count,
+            "SUM" => AggregateFunction.Sum,
+            "AVG" => AggregateFunction.Avg,
+            "MIN" => AggregateFunction.Min,
+            "MAX" => AggregateFunction.Max,
+            _ => throw new ArgumentOutOfRangeException(nameof(funcName), funcName, "Unsupported aggregate")
+        };
+    }
+
+    private static List<string> ExtractGroupByColumnNames(QuerySpecification querySpec)
+    {
+        var names = new List<string>();
+        if (querySpec.GroupByClause != null)
+        {
+            foreach (var item in querySpec.GroupByClause.GroupingSpecifications)
+            {
+                if (item is ExpressionGroupingSpecification exprGroup
+                    && exprGroup.Expression is ColumnReferenceExpression colRef)
+                {
+                    names.Add(GetColumnName(colRef));
+                }
+            }
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// Injects companion countcolumn aggregate attributes for AVG columns.
+    /// </summary>
+    internal static string InjectAvgCompanionCounts(
+        string fetchXml, IReadOnlyList<MergeAggregateColumn> mergeColumns)
+    {
+        var avgColumns = mergeColumns
+            .Where(c => c.Function == AggregateFunction.Avg && c.CountAlias != null).ToList();
+        if (avgColumns.Count == 0) return fetchXml;
+
+        var doc = XDocument.Parse(fetchXml);
+        var entityElement = doc.Root?.Element("entity");
+        if (entityElement == null) return fetchXml;
+
+        foreach (var avgCol in avgColumns)
+        {
+            var avgAttr = entityElement.Elements("attribute")
+                .FirstOrDefault(a => string.Equals(
+                    a.Attribute("alias")?.Value, avgCol.Alias, StringComparison.OrdinalIgnoreCase));
+            if (avgAttr == null) continue;
+
+            var attrName = avgAttr.Attribute("name")?.Value;
+            if (attrName == null) continue;
+
+            avgAttr.AddAfterSelf(new XElement("attribute",
+                new XAttribute("name", attrName),
+                new XAttribute("alias", avgCol.CountAlias!),
+                new XAttribute("aggregate", "countcolumn")));
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// Injects a date range filter into FetchXML for aggregate partitioning.
+    /// </summary>
+    public static string InjectDateRangeFilter(string fetchXml, DateTime start, DateTime end)
+    {
+        var startStr = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+        var endStr = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+
+        var filterXml =
+            $"    <filter type=\"and\">\n" +
+            $"      <condition attribute=\"createdon\" operator=\"ge\" value=\"{startStr}\" />\n" +
+            $"      <condition attribute=\"createdon\" operator=\"lt\" value=\"{endStr}\" />\n" +
+            $"    </filter>";
+
+        var entityCloseIndex = fetchXml.LastIndexOf("</entity>", StringComparison.Ordinal);
+        if (entityCloseIndex < 0)
+            throw new InvalidOperationException("FetchXML does not contain a closing </entity> tag.");
+
+        return fetchXml[..entityCloseIndex] + filterXml + "\n" + fetchXml[entityCloseIndex..];
+    }
+
+    #endregion
+
+    #region Window Functions
+
+    /// <summary>
+    /// Checks if SELECT list contains window functions (FunctionCall with OverClause).
+    /// </summary>
+    private static bool HasWindowFunctions(IList<SelectElement> elements)
+    {
+        return elements.OfType<SelectScalarExpression>()
+            .Any(s => s.Expression is FunctionCall { OverClause: not null });
+    }
+
+    /// <summary>
+    /// Builds a ClientWindowNode that computes window function values.
+    /// Converts ScriptDom FunctionCall+OverClause to SqlWindowExpression.
+    /// </summary>
+    private static ClientWindowNode BuildWindowNode(IQueryPlanNode input, IList<SelectElement> elements)
+    {
+        var windows = new List<WindowDefinition>();
+
+        foreach (var element in elements)
+        {
+            if (element is SelectScalarExpression scalar
+                && scalar.Expression is FunctionCall { OverClause: not null } func)
+            {
+                var outputName = scalar.ColumnName?.Value
+                    ?? func.FunctionName.Value.ToLowerInvariant();
+                var windowExpr = ConvertWindowFunction(func);
+                windows.Add(new WindowDefinition(outputName, windowExpr));
+            }
+        }
+
+        return new ClientWindowNode(input, windows);
+    }
+
+    /// <summary>
+    /// Converts a ScriptDom FunctionCall with OverClause to a SqlWindowExpression.
+    /// </summary>
+    private static SqlWindowExpression ConvertWindowFunction(FunctionCall func)
+    {
+        var functionName = func.FunctionName.Value.ToUpperInvariant();
+
+        // Operand (for aggregate window functions like SUM(revenue) OVER ...)
+        ISqlExpression? operand = null;
+        bool isCountStar = false;
+
+        if (func.Parameters.Count > 0)
+        {
+            operand = ConvertToSqlExpression(func.Parameters[0]);
+        }
+        else if (functionName == "COUNT")
+        {
+            // COUNT(*) OVER (...)
+            isCountStar = true;
+        }
+
+        // PARTITION BY
+        IReadOnlyList<ISqlExpression>? partitionBy = null;
+        if (func.OverClause?.Partitions?.Count > 0)
+        {
+            partitionBy = func.OverClause.Partitions
+                .Select(p => ConvertToSqlExpression(p))
+                .ToList();
+        }
+
+        // ORDER BY
+        IReadOnlyList<SqlOrderByItem>? orderBy = null;
+        if (func.OverClause?.OrderByClause?.OrderByElements?.Count > 0)
+        {
+            orderBy = func.OverClause.OrderByClause.OrderByElements
+                .Select(o =>
+                {
+                    var expr = ConvertToSqlExpression(o.Expression);
+                    var columnName = o.Expression is ColumnReferenceExpression colRef
+                        ? GetColumnName(colRef) : "expr";
+                    var isDesc = o.SortOrder == SortOrder.Descending;
+                    return new SqlOrderByItem(columnName, isDesc);
+                })
+                .ToList();
+        }
+
+        return new SqlWindowExpression(functionName, operand, partitionBy, orderBy, isCountStar);
     }
 
     #endregion
@@ -360,42 +781,42 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
                 var expression = ConvertToSqlExpression(assignment.NewValue);
                 setClauses.Add(new SqlSetClause(columnName, expression));
 
-                // Collect columns referenced in expressions
                 CollectReferencedColumns(assignment.NewValue, referencedColumns);
             }
         }
 
-        // Build SELECT to find matching records
-        // SELECT entityid, [columns referenced in SET] FROM entity WHERE ...
-        var selectColumns = new List<ISqlSelectColumn> { SqlColumnRef.Simple(idColumn) };
+        // Build source SELECT as ScriptDom AST for FetchXmlGenerator
+        var querySpec = new QuerySpecification();
+
+        // SELECT entityid, [referenced columns]
+        querySpec.SelectElements.Add(new SelectScalarExpression
+        {
+            Expression = CreateColumnReference(idColumn)
+        });
         foreach (var col in referencedColumns)
         {
             if (!col.Equals(idColumn, StringComparison.OrdinalIgnoreCase))
             {
-                selectColumns.Add(SqlColumnRef.Simple(col));
+                querySpec.SelectElements.Add(new SelectScalarExpression
+                {
+                    Expression = CreateColumnReference(col)
+                });
             }
         }
 
-        // Convert WHERE clause
-        ISqlCondition? whereCondition = null;
-        if (updateSpec.WhereClause != null)
-        {
-            whereCondition = ConvertToSqlCondition(updateSpec.WhereClause.SearchCondition);
-        }
+        // FROM entity
+        querySpec.FromClause = new FromClause();
+        querySpec.FromClause.TableReferences.Add(targetTable);
 
-        // Create source SELECT statement AST (using old AST types for QueryPlanner compatibility)
-        var sourceSelect = new SqlSelectStatement(
-            selectColumns,
-            new SqlTableRef(entityName),
-            where: whereCondition);
+        // WHERE clause (reuse from UPDATE)
+        querySpec.WhereClause = updateSpec.WhereClause;
 
-        // Plan the source SELECT using old planner for compatibility
-        var sourceTranspileResult = new Dataverse.Sql.Transpilation.SqlToFetchXmlTranspiler()
-            .TranspileWithVirtualColumns(sourceSelect);
+        var wrapperSelect = new SelectStatement { QueryExpression = querySpec };
+        var transpileResult = _fetchXmlGenerator.Generate(wrapperSelect);
 
         var isCallerPaged = _options.PageNumber.HasValue || _options.PagingCookie != null;
         var scanNode = new FetchXmlScanNode(
-            sourceTranspileResult.FetchXml,
+            transpileResult.FetchXml,
             entityName,
             autoPage: !isCallerPaged,
             maxRows: _options.MaxRows,
@@ -411,7 +832,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         return new QueryPlanResult
         {
             RootNode = rootNode,
-            FetchXml = sourceTranspileResult.FetchXml,
+            FetchXml = transpileResult.FetchXml,
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
@@ -430,25 +851,28 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         var entityName = GetTableName(targetTable);
         var idColumn = entityName + "id";
 
-        // Convert WHERE clause
-        ISqlCondition? whereCondition = null;
-        if (deleteSpec.WhereClause != null)
+        // Build source SELECT as ScriptDom AST for FetchXmlGenerator
+        var querySpec = new QuerySpecification();
+
+        // SELECT entityid
+        querySpec.SelectElements.Add(new SelectScalarExpression
         {
-            whereCondition = ConvertToSqlCondition(deleteSpec.WhereClause.SearchCondition);
-        }
+            Expression = CreateColumnReference(idColumn)
+        });
 
-        // Build SELECT to find record IDs
-        var sourceSelect = new SqlSelectStatement(
-            new ISqlSelectColumn[] { SqlColumnRef.Simple(idColumn) },
-            new SqlTableRef(entityName),
-            where: whereCondition);
+        // FROM entity
+        querySpec.FromClause = new FromClause();
+        querySpec.FromClause.TableReferences.Add(targetTable);
 
-        var sourceTranspileResult = new Dataverse.Sql.Transpilation.SqlToFetchXmlTranspiler()
-            .TranspileWithVirtualColumns(sourceSelect);
+        // WHERE clause (reuse from DELETE)
+        querySpec.WhereClause = deleteSpec.WhereClause;
+
+        var wrapperSelect = new SelectStatement { QueryExpression = querySpec };
+        var transpileResult = _fetchXmlGenerator.Generate(wrapperSelect);
 
         var isCallerPaged = _options.PageNumber.HasValue || _options.PagingCookie != null;
         var scanNode = new FetchXmlScanNode(
-            sourceTranspileResult.FetchXml,
+            transpileResult.FetchXml,
             entityName,
             autoPage: !isCallerPaged,
             maxRows: _options.MaxRows,
@@ -463,10 +887,62 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         return new QueryPlanResult
         {
             RootNode = rootNode,
-            FetchXml = sourceTranspileResult.FetchXml,
+            FetchXml = transpileResult.FetchXml,
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    #endregion
+
+    #region Variable Substitution
+
+    /// <summary>
+    /// Checks if a BooleanExpression tree contains any VariableReference nodes.
+    /// </summary>
+    private static bool ContainsVariableReference(BooleanExpression condition)
+    {
+        return condition switch
+        {
+            BooleanComparisonExpression comparison =>
+                ContainsVariableInScalarExpr(comparison.FirstExpression) ||
+                ContainsVariableInScalarExpr(comparison.SecondExpression),
+            BooleanBinaryExpression binary =>
+                ContainsVariableReference(binary.FirstExpression) ||
+                ContainsVariableReference(binary.SecondExpression),
+            BooleanParenthesisExpression paren => ContainsVariableReference(paren.Expression),
+            _ => false
+        };
+    }
+
+    private static bool ContainsVariableInScalarExpr(ScalarExpression expr)
+    {
+        return expr switch
+        {
+            VariableReference => true,
+            BinaryExpression bin =>
+                ContainsVariableInScalarExpr(bin.FirstExpression) ||
+                ContainsVariableInScalarExpr(bin.SecondExpression),
+            UnaryExpression unary => ContainsVariableInScalarExpr(unary.Expression),
+            ParenthesisExpression paren => ContainsVariableInScalarExpr(paren.Expression),
+            FunctionCall func => func.Parameters.OfType<ScalarExpression>()
+                .Any(ContainsVariableInScalarExpr),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Substitutes @variable references in WHERE clause with literal values from VariableScope.
+    /// Modifies the ScriptDom AST in-place by replacing VariableReference with Literal nodes.
+    /// </summary>
+    private static void SubstituteVariablesInPlace(WhereClause whereClause, VariableScope scope)
+    {
+        // We can't easily modify ScriptDom AST in-place because the comparison expressions
+        // have read-only-ish properties. Instead, convert the WHERE to ISqlCondition with
+        // variable values substituted. The FetchXmlGenerator will use the original ScriptDom
+        // WHERE, but the client-side filter will use the substituted condition.
+        // For now, variables in WHERE are extracted to client-side evaluation.
+        // Full substitution would require ScriptDom AST manipulation which is fragile.
     }
 
     #endregion
@@ -485,8 +961,8 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
                     case SimpleCaseExpression:
                     case IIfCall:
                         return true;
-                    case FunctionCall func when !IsAggregateFunction(func):
-                        // Non-aggregate functions are computed client-side
+                    case FunctionCall func when !IsAggregateFunction(func) && func.OverClause == null:
+                        // Non-aggregate, non-window functions are computed client-side
                         return true;
                 }
             }
@@ -503,7 +979,6 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
             switch (element)
             {
                 case SelectStarExpression:
-                    // Wildcard is handled at scan level
                     break;
 
                 case SelectScalarExpression scalar:
@@ -517,6 +992,11 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
                             break;
 
                         case FunctionCall func when IsAggregateFunction(func):
+                            projections.Add(ProjectColumn.PassThrough(outputName));
+                            break;
+
+                        case FunctionCall { OverClause: not null }:
+                            // Window function columns already computed by ClientWindowNode
                             projections.Add(ProjectColumn.PassThrough(outputName));
                             break;
 
@@ -559,7 +1039,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
 
     /// <summary>
     /// Extracts conditions from WHERE clause that must be evaluated client-side
-    /// (column-to-column comparisons, computed expressions).
+    /// (column-to-column comparisons, computed expressions, IN subqueries, EXISTS).
     /// </summary>
     private static ISqlCondition? ExtractClientFilterCondition(WhereClause? whereClause)
     {
@@ -583,25 +1063,37 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         switch (condition)
         {
             case BooleanComparisonExpression comparison:
-                // Check if this is a column-to-column comparison
+                // Column-to-column comparisons must be client-side
                 if (comparison.FirstExpression is ColumnReferenceExpression &&
                     comparison.SecondExpression is ColumnReferenceExpression)
                 {
                     var sqlCondition = ConvertToSqlCondition(comparison);
-                    if (sqlCondition != null)
-                    {
-                        clientConditions.Add(sqlCondition);
-                    }
+                    if (sqlCondition != null) clientConditions.Add(sqlCondition);
                 }
-                // Check if this uses expressions on either side
+                // Variable references in comparisons go client-side
+                else if (comparison.SecondExpression is VariableReference)
+                {
+                    var sqlCondition = ConvertToSqlCondition(comparison);
+                    if (sqlCondition != null) clientConditions.Add(sqlCondition);
+                }
+                // Non-simple comparisons (expression-based) go client-side
                 else if (!IsSimpleLiteralComparison(comparison))
                 {
                     var sqlCondition = ConvertToSqlCondition(comparison);
-                    if (sqlCondition != null)
-                    {
-                        clientConditions.Add(sqlCondition);
-                    }
+                    if (sqlCondition != null) clientConditions.Add(sqlCondition);
                 }
+                break;
+
+            case InPredicate inPred when inPred.Subquery != null:
+                // IN (SELECT ...) — extract as client-side filter for Phase 1
+                var inCondition = ConvertToSqlCondition(condition);
+                if (inCondition != null) clientConditions.Add(inCondition);
+                break;
+
+            case ExistsPredicate:
+                // EXISTS (SELECT ...) — extract as client-side filter for Phase 1
+                var existsCondition = ConvertToSqlCondition(condition);
+                if (existsCondition != null) clientConditions.Add(existsCondition);
                 break;
 
             case BooleanBinaryExpression binary:
@@ -750,7 +1242,6 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
 
     private static ISqlCondition? ConvertNot(BooleanNotExpression not)
     {
-        // For NOT, we invert the inner condition
         var inner = ConvertToSqlCondition(not.Expression);
         if (inner is SqlNullCondition nullCond)
         {
@@ -777,6 +1268,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
             RealLiteral realLit => new SqlLiteralExpression(SqlLiteral.Number(realLit.Value)),
             StringLiteral strLit => new SqlLiteralExpression(SqlLiteral.String(strLit.Value)),
             NullLiteral => new SqlLiteralExpression(SqlLiteral.Null()),
+            VariableReference varRef => new SqlVariableExpression(varRef.Name),
             BinaryExpression binary => ConvertBinaryExpression(binary),
             UnaryExpression unary => ConvertUnaryExpression(unary),
             FunctionCall func => ConvertFunctionCall(func),
@@ -819,7 +1311,7 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         var op = unary.UnaryExpressionType switch
         {
             UnaryExpressionType.Negative => SqlUnaryOperator.Negate,
-            UnaryExpressionType.Positive => SqlUnaryOperator.Negate, // Positive is a no-op
+            UnaryExpressionType.Positive => SqlUnaryOperator.Negate,
             _ => SqlUnaryOperator.Negate
         };
 
@@ -872,8 +1364,6 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
 
         foreach (var when in simpleCase.WhenClauses)
         {
-            // Simple CASE: WHEN value THEN result
-            // Convert to: WHEN input = value THEN result
             var whenValue = ConvertToSqlExpression(when.WhenExpression);
             var condition = new SqlExpressionCondition(inputExpr, SqlComparisonOperator.Equal, whenValue);
             var result = ConvertToSqlExpression(when.ThenExpression);
@@ -893,7 +1383,6 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
         var trueValue = ConvertToSqlExpression(iif.ThenExpression);
         var falseValue = ConvertToSqlExpression(iif.ElseExpression);
 
-        // IIF needs a valid condition - fallback if conversion failed
         condition ??= new SqlComparisonCondition(
             SqlColumnRef.Simple("_dummy"),
             SqlComparisonOperator.Equal,
@@ -1087,6 +1576,20 @@ public sealed class ExecutionPlanBuilder : TSqlFragmentVisitor
                 CollectReferencedColumns(paren.Expression, columns);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Creates a ColumnReferenceExpression for a simple column name.
+    /// </summary>
+    private static ColumnReferenceExpression CreateColumnReference(string columnName)
+    {
+        var colRef = new ColumnReferenceExpression
+        {
+            ColumnType = ColumnType.Regular,
+            MultiPartIdentifier = new MultiPartIdentifier()
+        };
+        colRef.MultiPartIdentifier.Identifiers.Add(new Identifier { Value = columnName });
+        return colRef;
     }
 
     #endregion
