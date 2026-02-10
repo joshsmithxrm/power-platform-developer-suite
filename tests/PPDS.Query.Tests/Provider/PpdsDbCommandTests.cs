@@ -1,4 +1,5 @@
 using System.Data;
+using System.Reflection;
 using FluentAssertions;
 using PPDS.Query.Provider;
 using Xunit;
@@ -199,6 +200,42 @@ public class PpdsDbCommandTests
         act.Should().NotThrow();
     }
 
+    [Fact]
+    public void ApplyParameters_DoesNotReplaceInsideStringLiterals()
+    {
+        var cmd = new PpdsDbCommand();
+        cmd.Parameters.AddWithValue("@p1", "value");
+
+        var sql = "SELECT '@p1' AS literal_value, @p1 AS parameter_value";
+        var result = InvokeApplyParameters(cmd, sql);
+
+        result.Should().Be("SELECT '@p1' AS literal_value, 'value' AS parameter_value");
+    }
+
+    [Fact]
+    public void ApplyParameters_DoesNotReplaceInsideComments()
+    {
+        var cmd = new PpdsDbCommand();
+        cmd.Parameters.AddWithValue("@p1", 42);
+
+        var sql = "-- @p1 in line comment\r\nSELECT @p1 /* @p1 in block comment */";
+        var result = InvokeApplyParameters(cmd, sql);
+
+        result.Should().Be("-- @p1 in line comment\r\nSELECT 42 /* @p1 in block comment */");
+    }
+
+    [Fact]
+    public void ApplyParameters_DoesNotReplaceInsideQuotedIdentifiers()
+    {
+        var cmd = new PpdsDbCommand();
+        cmd.Parameters.AddWithValue("@p1", 7);
+
+        var sql = "SELECT [@p1] AS b, \"@p1\" AS q, @p1 AS v";
+        var result = InvokeApplyParameters(cmd, sql);
+
+        result.Should().Be("SELECT [@p1] AS b, \"@p1\" AS q, 7 AS v");
+    }
+
     // ────────────────────────────────────────────
     //  Connection type validation
     // ────────────────────────────────────────────
@@ -213,5 +250,18 @@ public class PpdsDbCommandTests
         var act = () => ((System.Data.Common.DbCommand)cmd).Connection = null;
 
         act.Should().NotThrow(); // null is acceptable
+    }
+
+    private static string InvokeApplyParameters(PpdsDbCommand command, string sql)
+    {
+        var method = typeof(PpdsDbCommand).GetMethod(
+            "ApplyParameters", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        method.Should().NotBeNull();
+
+        var result = method!.Invoke(command, new object[] { sql });
+        result.Should().BeOfType<string>();
+
+        return (string)result!;
     }
 }

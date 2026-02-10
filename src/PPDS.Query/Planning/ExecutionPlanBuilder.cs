@@ -168,6 +168,9 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
+        // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
+        ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
+
         // Generate FetchXML using the injected service
         var transpileResult = _fetchXmlGenerator.Generate(selectStmt);
 
@@ -1685,15 +1688,15 @@ public sealed class ExecutionPlanBuilder
     /// <summary>
     /// Extracts the portion of a ScriptDom WHERE clause that requires client-side evaluation.
     /// Returns the BooleanExpression that needs client-side filtering, or null if everything
-    /// can be pushed to FetchXML. Expression-to-expression comparisons (e.g., WHERE col1 > col2,
-    /// WHERE revenue * 0.1 > cost) cannot be represented in FetchXML and must be evaluated
-    /// on the client.
+    /// can be pushed to FetchXML. Any comparison that is not column-vs-literal/variable
+    /// (including computed-vs-literal, column-vs-column, and expression-vs-expression)
+    /// must be evaluated on the client.
     /// </summary>
     private static BooleanExpression? ExtractClientSideWhereFilter(BooleanExpression? where)
     {
         if (where is null) return null;
 
-        // A comparison where both sides are non-literal expressions needs client evaluation
+        // Any non-pushdown comparison needs client evaluation
         if (IsExpressionComparison(where)) return where;
 
         // For AND: extract only the parts that need client-side evaluation
@@ -1738,16 +1741,15 @@ public sealed class ExecutionPlanBuilder
     }
 
     /// <summary>
-    /// Returns true if the BooleanExpression is a comparison where both sides are
-    /// non-literal expressions (e.g., column vs column, expression vs expression).
-    /// These can't be pushed to FetchXML.
+    /// Returns true if the BooleanExpression is a comparison that cannot be pushed
+    /// to FetchXML. Pushdown-safe comparisons are strictly column-vs-literal/variable
+    /// (in either order).
     /// </summary>
     private static bool IsExpressionComparison(BooleanExpression expr)
     {
         if (expr is not BooleanComparisonExpression comp) return false;
 
-        // If both sides are non-literal, it's an expression condition
-        return !IsSimpleLiteral(comp.FirstExpression) && !IsSimpleLiteral(comp.SecondExpression);
+        return !IsPushdownSafeComparison(comp);
     }
 
     /// <summary>
@@ -1756,14 +1758,28 @@ public sealed class ExecutionPlanBuilder
     /// </summary>
     private static bool IsSimpleLiteral(ScalarExpression expr)
     {
-        return expr is IntegerLiteral
-            or StringLiteral
-            or NullLiteral
-            or NumericLiteral
-            or RealLiteral
-            or MoneyLiteral
-            or VariableReference
-            or GlobalVariableExpression;
+        if (expr is Literal or VariableReference or GlobalVariableExpression)
+        {
+            return true;
+        }
+
+        return expr is UnaryExpression
+        {
+            UnaryExpressionType: UnaryExpressionType.Negative,
+            Expression: Literal
+        };
+    }
+
+    /// <summary>
+    /// Returns true when a comparison can be represented in FetchXML: column compared
+    /// to literal/variable value, in either order.
+    /// </summary>
+    private static bool IsPushdownSafeComparison(BooleanComparisonExpression comparison)
+    {
+        return (comparison.FirstExpression is ColumnReferenceExpression
+                && IsSimpleLiteral(comparison.SecondExpression))
+            || (comparison.SecondExpression is ColumnReferenceExpression
+                && IsSimpleLiteral(comparison.FirstExpression));
     }
 
     /// <summary>
@@ -1778,6 +1794,59 @@ public sealed class ExecutionPlanBuilder
                                           || ContainsExpressionComparison(bin.SecondExpression),
             BooleanParenthesisExpression paren => ContainsExpressionComparison(paren.Expression),
             BooleanNotExpression not => ContainsExpressionComparison(not.Expression),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Throws when WHERE contains subquery predicate forms that this execution path cannot
+    /// evaluate safely and would otherwise risk predicate loss during transpilation.
+    /// </summary>
+    private static void ThrowIfUnsupportedWhereSubqueryPredicate(BooleanExpression? where)
+    {
+        if (where is null) return;
+
+        if (ContainsExistsPredicate(where))
+        {
+            throw new QueryParseException(
+                "Unsupported WHERE predicate: EXISTS subqueries are not supported in this execution path.");
+        }
+
+        if (ContainsInSubqueryPredicate(where))
+        {
+            throw new QueryParseException(
+                "Unsupported WHERE predicate: IN (SELECT ...) subqueries are not supported in this execution path.");
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the boolean expression tree contains an EXISTS predicate.
+    /// </summary>
+    private static bool ContainsExistsPredicate(BooleanExpression expr)
+    {
+        return expr switch
+        {
+            ExistsPredicate => true,
+            BooleanBinaryExpression bin => ContainsExistsPredicate(bin.FirstExpression)
+                                           || ContainsExistsPredicate(bin.SecondExpression),
+            BooleanParenthesisExpression paren => ContainsExistsPredicate(paren.Expression),
+            BooleanNotExpression not => ContainsExistsPredicate(not.Expression),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Returns true if the boolean expression tree contains an IN predicate with a subquery.
+    /// </summary>
+    private static bool ContainsInSubqueryPredicate(BooleanExpression expr)
+    {
+        return expr switch
+        {
+            InPredicate inPred => inPred.Subquery != null,
+            BooleanBinaryExpression bin => ContainsInSubqueryPredicate(bin.FirstExpression)
+                                           || ContainsInSubqueryPredicate(bin.SecondExpression),
+            BooleanParenthesisExpression paren => ContainsInSubqueryPredicate(paren.Expression),
+            BooleanNotExpression not => ContainsInSubqueryPredicate(not.Expression),
             _ => false
         };
     }

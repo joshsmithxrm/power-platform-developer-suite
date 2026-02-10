@@ -205,6 +205,36 @@ public class FetchXmlGeneratorTests
         fetchXml.Should().Contain("<value>5000</value>");
     }
 
+    [Fact]
+    public void Generate_WhereExists_ThrowsNotSupportedException()
+    {
+        var act = () => GenerateFetchXml(
+            "SELECT name FROM account WHERE EXISTS (SELECT 1 FROM contact)");
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*EXISTS*");
+    }
+
+    [Fact]
+    public void Generate_WhereInSubquery_ThrowsNotSupportedException()
+    {
+        var act = () => GenerateFetchXml(
+            "SELECT name FROM account WHERE accountid IN (SELECT parentcustomerid FROM contact)");
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*IN (SELECT*");
+    }
+
+    [Fact]
+    public void Generate_WhereNotInSubquery_ThrowsNotSupportedException()
+    {
+        var act = () => GenerateFetchXml(
+            "SELECT name FROM account WHERE accountid NOT IN (SELECT parentcustomerid FROM contact)");
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*IN (SELECT*");
+    }
+
     // ────────────────────────────────────────────
     //  JOIN generates link-entity
     // ────────────────────────────────────────────

@@ -52,11 +52,15 @@ public sealed class ExecuteMessageNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            yield break;
+        }
+
         await Task.CompletedTask;
         throw new NotSupportedException(
             $"EXECUTE '{MessageName}' is not yet supported. " +
             "Dataverse message execution will be available in a future release.");
-        yield break; // Required for async iterator signature
     }
 }
 

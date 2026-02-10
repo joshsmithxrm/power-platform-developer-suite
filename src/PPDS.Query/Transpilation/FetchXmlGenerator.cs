@@ -1162,6 +1162,10 @@ public sealed class FetchXmlGenerator
                 EmitInFilter(inPred, lines, indent);
                 break;
 
+            case ExistsPredicate:
+                throw new NotSupportedException(
+                    "EXISTS predicates are not supported for FetchXML transpilation.");
+
             case BooleanBinaryExpression binaryBool:
                 EmitLogicalFilter(binaryBool, lines, indent);
                 break;
@@ -1177,6 +1181,10 @@ public sealed class FetchXmlGenerator
             case BooleanTernaryExpression ternary:
                 EmitBetweenFilter(ternary, lines, indent);
                 break;
+
+            default:
+                throw new NotSupportedException(
+                    $"WHERE predicate type {condition.GetType().Name} is not supported for FetchXML transpilation.");
         }
     }
 
@@ -1266,6 +1274,11 @@ public sealed class FetchXmlGenerator
     private void EmitInFilter(InPredicate inPred, List<string> lines, string indent)
     {
         if (inPred.Expression is not ColumnReferenceExpression colRef) return;
+        if (inPred.Subquery != null)
+        {
+            throw new NotSupportedException(
+                "IN (SELECT ...) predicates are not supported for FetchXML transpilation.");
+        }
 
         var attr = NormalizeName(GetColumnName(colRef));
         var op = inPred.NotDefined ? "not-in" : "in";
@@ -1324,7 +1337,8 @@ public sealed class FetchXmlGenerator
                 var syntheticIn = new InPredicate
                 {
                     Expression = inPred.Expression,
-                    NotDefined = !inPred.NotDefined
+                    NotDefined = !inPred.NotDefined,
+                    Subquery = inPred.Subquery
                 };
                 foreach (var v in inPred.Values) syntheticIn.Values.Add(v);
                 EmitInFilter(syntheticIn, lines, indent);
@@ -1428,6 +1442,11 @@ public sealed class FetchXmlGenerator
             case InPredicate inPred:
             {
                 if (inPred.Expression is not ColumnReferenceExpression colRef) break;
+                if (inPred.Subquery != null)
+                {
+                    throw new NotSupportedException(
+                        "IN (SELECT ...) predicates are not supported for FetchXML transpilation.");
+                }
 
                 var attr = NormalizeName(GetColumnName(colRef));
                 var op = inPred.NotDefined ? "not-in" : "in";
@@ -1477,6 +1496,14 @@ public sealed class FetchXmlGenerator
             case BooleanNotExpression notExpr:
                 EmitNotFilter(notExpr, lines, indent);
                 break;
+
+            case ExistsPredicate:
+                throw new NotSupportedException(
+                    "EXISTS predicates are not supported for FetchXML transpilation.");
+
+            default:
+                throw new NotSupportedException(
+                    $"WHERE predicate type {condition.GetType().Name} is not supported for FetchXML transpilation.");
         }
     }
 

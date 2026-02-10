@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using System.Data.Common;
+using System.Text;
 using System.Threading;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
@@ -241,21 +241,215 @@ public sealed class PpdsDbCommand : DbCommand
         if (_parameters.Count == 0)
             return sql;
 
-        var result = sql;
-        // Sort by name length descending to prevent @p1 matching inside @p10
-        var sorted = _parameters.InternalList
-            .OrderByDescending(p => p.ParameterName.Length)
-            .ToList();
-
-        foreach (var param in sorted)
+        var parameterLiterals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var param in _parameters.InternalList)
         {
-            var paramName = param.ParameterName;
-            if (!paramName.StartsWith("@"))
-                paramName = "@" + paramName;
+            var normalizedName = NormalizeParameterName(param.ParameterName);
+            if (normalizedName.Length == 0)
+                continue;
 
-            result = result.Replace(paramName, param.ToSqlLiteral());
+            parameterLiterals[normalizedName] = param.ToSqlLiteral();
         }
-        return result;
+
+        if (parameterLiterals.Count == 0)
+        {
+            return sql;
+        }
+
+        var result = new StringBuilder(sql.Length);
+        var i = 0;
+
+        while (i < sql.Length)
+        {
+            var ch = sql[i];
+
+            // Single-quoted string literal
+            if (ch == '\'')
+            {
+                result.Append(ch);
+                i++;
+                while (i < sql.Length)
+                {
+                    var c = sql[i];
+                    result.Append(c);
+                    i++;
+
+                    if (c == '\'')
+                    {
+                        // Escaped quote ''
+                        if (i < sql.Length && sql[i] == '\'')
+                        {
+                            result.Append(sql[i]);
+                            i++;
+                            continue;
+                        }
+
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // Bracketed identifier
+            if (ch == '[')
+            {
+                result.Append(ch);
+                i++;
+                while (i < sql.Length)
+                {
+                    var c = sql[i];
+                    result.Append(c);
+                    i++;
+
+                    if (c == ']')
+                    {
+                        // Escaped bracket ]]
+                        if (i < sql.Length && sql[i] == ']')
+                        {
+                            result.Append(sql[i]);
+                            i++;
+                            continue;
+                        }
+
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // Double-quoted identifier/literal
+            if (ch == '"')
+            {
+                result.Append(ch);
+                i++;
+                while (i < sql.Length)
+                {
+                    var c = sql[i];
+                    result.Append(c);
+                    i++;
+
+                    if (c == '"')
+                    {
+                        // Escaped quote ""
+                        if (i < sql.Length && sql[i] == '"')
+                        {
+                            result.Append(sql[i]);
+                            i++;
+                            continue;
+                        }
+
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // Line comment
+            if (ch == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                result.Append("--");
+                i += 2;
+                while (i < sql.Length)
+                {
+                    var c = sql[i];
+                    result.Append(c);
+                    i++;
+                    if (c == '\r' || c == '\n')
+                    {
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // Block comment
+            if (ch == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                result.Append("/*");
+                i += 2;
+                while (i < sql.Length)
+                {
+                    var c = sql[i];
+                    result.Append(c);
+                    i++;
+
+                    if (c == '*' && i < sql.Length && sql[i] == '/')
+                    {
+                        result.Append('/');
+                        i++;
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // Parameter token
+            if (ch == '@')
+            {
+                // Keep system variables (e.g. @@ROWCOUNT) untouched.
+                if (i + 1 < sql.Length && sql[i + 1] == '@')
+                {
+                    result.Append("@@");
+                    i += 2;
+                    continue;
+                }
+
+                var tokenStart = i;
+                var scan = i + 1;
+
+                if (scan < sql.Length && IsParameterNameStart(sql[scan]))
+                {
+                    scan++;
+                    while (scan < sql.Length && IsParameterNamePart(sql[scan]))
+                    {
+                        scan++;
+                    }
+
+                    var token = sql[tokenStart..scan];
+                    if (parameterLiterals.TryGetValue(token, out var literal))
+                    {
+                        result.Append(literal);
+                    }
+                    else
+                    {
+                        result.Append(token);
+                    }
+
+                    i = scan;
+                    continue;
+                }
+            }
+
+            result.Append(ch);
+            i++;
+        }
+
+        return result.ToString();
+    }
+
+    private static string NormalizeParameterName(string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(parameterName))
+            return string.Empty;
+
+        return parameterName.StartsWith("@", StringComparison.Ordinal)
+            ? parameterName
+            : "@" + parameterName;
+    }
+
+    private static bool IsParameterNameStart(char ch)
+    {
+        return char.IsLetter(ch) || ch == '_' || ch == '#';
+    }
+
+    private static bool IsParameterNamePart(char ch)
+    {
+        return char.IsLetterOrDigit(ch) || ch is '_' or '#' or '$';
     }
 
     private QueryPlanOptions BuildPlanOptions(string originalSql)

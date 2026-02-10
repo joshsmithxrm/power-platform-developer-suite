@@ -211,6 +211,52 @@ public class ExecutionPlanBuilderTests
         hasOpenJson.Should().BeTrue("the plan should contain an OpenJsonNode");
     }
 
+    [Fact]
+    public void Plan_WhereComputedVsLiteral_ProducesClientFilterNode()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name FROM account WHERE revenue * 0.1 > 100");
+
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<ClientFilterNode>();
+    }
+
+    [Fact]
+    public void Plan_WhereAndWithComputedVsLiteral_ProducesClientFilterNode()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name FROM account WHERE statecode = 0 AND revenue * 0.1 > 100");
+
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<ClientFilterNode>();
+    }
+
+    [Fact]
+    public void Plan_WhereExists_ThrowsQueryParseException()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name FROM account WHERE EXISTS (SELECT 1 FROM contact)");
+
+        var act = () => _builder.Plan(fragment);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*EXISTS*");
+    }
+
+    [Fact]
+    public void Plan_WhereInSubquery_ThrowsQueryParseException()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name FROM account WHERE accountid IN (SELECT parentcustomerid FROM contact)");
+
+        var act = () => _builder.Plan(fragment);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*IN (SELECT*");
+    }
+
     // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
