@@ -21,7 +21,6 @@ public class MetadataScanNodeTests
         var mockQueryExecutor = new Mock<IQueryExecutor>();
         return new QueryPlanContext(
             mockQueryExecutor.Object,
-            new ExpressionEvaluator(),
             metadataQueryExecutor: metadataExecutor);
     }
 

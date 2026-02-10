@@ -198,10 +198,8 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Execute the plan
-        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);
@@ -341,10 +339,8 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Execute the plan with streaming
-        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);

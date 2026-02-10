@@ -71,14 +71,8 @@ public class ScriptExecutionNodeTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(singleRowResult);
 
-        var evaluator = new ExpressionEvaluator();
-        if (scope != null)
-        {
-            evaluator.VariableScope = scope;
-        }
         return new QueryPlanContext(
             mockExecutor.Object,
-            evaluator,
             variableScope: scope);
     }
 

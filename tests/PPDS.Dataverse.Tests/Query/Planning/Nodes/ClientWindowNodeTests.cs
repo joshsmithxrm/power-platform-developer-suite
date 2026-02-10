@@ -19,7 +19,7 @@ public class ClientWindowNodeTests
     private static QueryPlanContext CreateContext()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        return new QueryPlanContext(mockExecutor.Object);
     }
 
     private sealed class MockPlanNode : IQueryPlanNode

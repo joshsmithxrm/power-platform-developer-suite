@@ -10,7 +10,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
@@ -23,39 +22,6 @@ namespace PPDS.Query.Tests.Planning;
 [Trait("Category", "Unit")]
 public class TryCatchTests
 {
-    // ────────────────────────────────────────────
-    //  AST: SqlTryCatchStatement construction
-    // ────────────────────────────────────────────
-
-    [Fact]
-    public void SqlTryCatchStatement_Constructor_SetsProperties()
-    {
-        var tryBlock = new SqlBlockStatement(new List<ISqlStatement>(), 0);
-        var catchBlock = new SqlBlockStatement(new List<ISqlStatement>(), 0);
-
-        var stmt = new SqlTryCatchStatement(tryBlock, catchBlock, 42);
-
-        stmt.TryBlock.Should().BeSameAs(tryBlock);
-        stmt.CatchBlock.Should().BeSameAs(catchBlock);
-        stmt.SourcePosition.Should().Be(42);
-    }
-
-    [Fact]
-    public void SqlTryCatchStatement_Constructor_NullTryBlock_Throws()
-    {
-        var catchBlock = new SqlBlockStatement(new List<ISqlStatement>(), 0);
-        var act = () => new SqlTryCatchStatement(null!, catchBlock, 0);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Fact]
-    public void SqlTryCatchStatement_Constructor_NullCatchBlock_Throws()
-    {
-        var tryBlock = new SqlBlockStatement(new List<ISqlStatement>(), 0);
-        var act = () => new SqlTryCatchStatement(tryBlock, null!, 0);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
     // ────────────────────────────────────────────
     //  ScriptExecutionNode: TRY/CATCH without error
     // ────────────────────────────────────────────
@@ -94,8 +60,7 @@ public class TryCatchTests
         var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
-        var evaluator = new ExpressionEvaluator();
-        var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
 
         var rows = new List<QueryRow>();
         await foreach (var row in node.ExecuteAsync(context))
@@ -152,8 +117,7 @@ public class TryCatchTests
         var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
-        var evaluator = new ExpressionEvaluator();
-        var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
 
         var rows = new List<QueryRow>();
         await foreach (var row in node.ExecuteAsync(context))
@@ -212,8 +176,7 @@ public class TryCatchTests
         var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
-        var evaluator = new ExpressionEvaluator();
-        var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
 
         var rows = new List<QueryRow>();
         await foreach (var row in node.ExecuteAsync(context))

@@ -150,7 +150,6 @@ public class CursorNodeTests
 
         var contextWithScope = new QueryPlanContext(
             context.QueryExecutor,
-            context.ExpressionEvaluator,
             variableScope: scope);
 
         var fetchNode = new FetchCursorNode("myCursor", new[] { "@name", "@revenue" }, session);

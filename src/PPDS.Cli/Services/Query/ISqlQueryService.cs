@@ -18,7 +18,7 @@ public interface ISqlQueryService
     /// <param name="sql">The SQL query to transpile.</param>
     /// <param name="topOverride">Optional TOP value to override in the query.</param>
     /// <returns>The transpiled FetchXML.</returns>
-    /// <exception cref="PPDS.Dataverse.Sql.Parsing.SqlParseException">If SQL parsing fails.</exception>
+    /// <exception cref="PPDS.Query.Parsing.QueryParseException">If SQL parsing fails.</exception>
     string TranspileSql(string sql, int? topOverride = null);
 
     /// <summary>
@@ -27,7 +27,7 @@ public interface ISqlQueryService
     /// <param name="request">The query request parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The query result including the transpiled FetchXML.</returns>
-    /// <exception cref="PPDS.Dataverse.Sql.Parsing.SqlParseException">If SQL parsing fails.</exception>
+    /// <exception cref="PPDS.Query.Parsing.QueryParseException">If SQL parsing fails.</exception>
     Task<SqlQueryResult> ExecuteAsync(
         SqlQueryRequest request,
         CancellationToken cancellationToken = default);
@@ -38,7 +38,7 @@ public interface ISqlQueryService
     /// <param name="sql">The SQL query to explain.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Description of the execution plan.</returns>
-    /// <exception cref="PPDS.Dataverse.Sql.Parsing.SqlParseException">If SQL parsing fails.</exception>
+    /// <exception cref="PPDS.Query.Parsing.QueryParseException">If SQL parsing fails.</exception>
     Task<QueryPlanDescription> ExplainAsync(string sql, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -49,7 +49,7 @@ public interface ISqlQueryService
     /// <param name="chunkSize">Number of rows per chunk (default 100).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async stream of result chunks.</returns>
-    /// <exception cref="PPDS.Dataverse.Sql.Parsing.SqlParseException">If SQL parsing fails.</exception>
+    /// <exception cref="PPDS.Query.Parsing.QueryParseException">If SQL parsing fails.</exception>
     IAsyncEnumerable<SqlQueryStreamChunk> ExecuteStreamingAsync(
         SqlQueryRequest request,
         int chunkSize = 100,

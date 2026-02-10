@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Moq;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using Xunit;
@@ -93,7 +92,7 @@ public class AdaptiveAggregateScanNodeTests
                 capturedFetchXml = xml)
             .ReturnsAsync(MakeCountResult(1L));
 
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
         var node = new AdaptiveAggregateScanNode(
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 
@@ -126,7 +125,7 @@ public class AdaptiveAggregateScanNodeTests
         // InvalidOperationException during ExecuteAsync.
         var badFetchXml = "<fetch><no-entity-here /></fetch>";
         var mockExecutor = new Mock<IQueryExecutor>();
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
 
         var node = new AdaptiveAggregateScanNode(
             badFetchXml, "contact", RangeStart, RangeEnd);
@@ -156,7 +155,7 @@ public class AdaptiveAggregateScanNodeTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeCountResult(12345L));
 
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
         var node = new AdaptiveAggregateScanNode(
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 
@@ -227,7 +226,7 @@ public class AdaptiveAggregateScanNodeTests
                 return Task.FromResult(MakeCountResult(5000L));
             });
 
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
         var node = new AdaptiveAggregateScanNode(
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 
@@ -270,7 +269,7 @@ public class AdaptiveAggregateScanNodeTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Network error: connection timed out"));
 
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
         var node = new AdaptiveAggregateScanNode(
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 
@@ -300,7 +299,7 @@ public class AdaptiveAggregateScanNodeTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeCountResult(100L));
 
-        var context = new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        var context = new QueryPlanContext(mockExecutor.Object);
         var node = new AdaptiveAggregateScanNode(
             TemplateFetchXml, "contact", RangeStart, RangeEnd);
 

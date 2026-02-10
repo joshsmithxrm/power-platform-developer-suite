@@ -3,7 +3,8 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Moq;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Query.Execution;
+using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
@@ -154,9 +155,9 @@ public class MergeNodeTests
     [Fact]
     public void MergeWhenMatched_Update_SetsAction()
     {
-        var setClauses = new List<SqlSetClause>
+        var setClauses = new List<CompiledSetClause>
         {
-            new("name", new SqlLiteralExpression(SqlLiteral.String("Updated")))
+            new("name", _ => "Updated")
         };
 
         var wm = MergeWhenMatched.Update(setClauses);
@@ -181,7 +182,7 @@ public class MergeNodeTests
     {
         var wnm = MergeWhenNotMatched.Insert(
             new List<string> { "name" },
-            new List<ISqlExpression> { new SqlLiteralExpression(SqlLiteral.String("test")) });
+            new List<CompiledScalarExpression> { _ => "test" });
 
         wnm.Action.Should().Be(PPDS.Query.Planning.Nodes.MergeAction.Insert);
         wnm.Columns.Should().HaveCount(1);

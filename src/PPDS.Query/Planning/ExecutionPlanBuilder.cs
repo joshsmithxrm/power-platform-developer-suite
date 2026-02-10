@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
-using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Execution;
 using PPDS.Query.Parsing;
@@ -19,10 +19,8 @@ namespace PPDS.Query.Planning;
 
 /// <summary>
 /// Builds an execution plan from a ScriptDom <see cref="TSqlFragment"/> AST.
-/// This is the v3 replacement for the legacy <see cref="QueryPlanner"/> that worked with
-/// the custom PPDS SQL AST. It walks the ScriptDom AST directly and bridges to legacy AST
-/// types where plan nodes still require them, producing the same
-/// <see cref="IQueryPlanNode"/> tree that the existing executor expects.
+/// Walks the ScriptDom AST directly and constructs an <see cref="IQueryPlanNode"/> tree
+/// that the existing plan executor expects.
 /// </summary>
 public sealed class ExecutionPlanBuilder
 {
@@ -174,13 +172,12 @@ public sealed class ExecutionPlanBuilder
         // Generate FetchXML using the injected service
         var transpileResult = _fetchXmlGenerator.Generate(selectStmt);
 
-        // Phase 4: Aggregate partitioning (still requires legacy AST)
+        // Phase 4: Aggregate partitioning (now fully ScriptDom-based)
         if (HasAggregatesInQuerySpec(querySpec) && options.EstimatedRecordCount.HasValue)
         {
-            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
-            if (ShouldPartitionAggregate(legacySelect, options))
+            if (ShouldPartitionAggregate(querySpec, options))
             {
-                return PlanAggregateWithPartitioning(legacySelect, options, transpileResult);
+                return PlanAggregateWithPartitioning(querySpec, options, transpileResult, entityName);
             }
         }
 
@@ -269,11 +266,12 @@ public sealed class ExecutionPlanBuilder
         var selectSource = GetInsertSelectSource(insert);
         if (selectSource != null)
         {
-            // INSERT SELECT: plan the source SELECT, wrap with DmlExecuteNode
-            var sourceSelectStmt = ConvertSelectStatement(selectSource);
-            var sourceResult = PlanSelectFromLegacy(sourceSelectStmt, options);
+            // INSERT SELECT: render the source SELECT as SQL, parse, and plan via ScriptDom path
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(selectSource, out var selectSql);
+            var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
 
-            var sourceColumns = ExtractSelectColumnNames(sourceSelectStmt);
+            var sourceColumns = ExtractSelectColumnNamesFromQuerySpec(selectSource);
             rootNode = DmlExecuteNode.InsertSelect(
                 targetEntity,
                 columns,
@@ -320,12 +318,15 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Plans an UPDATE statement. Creates a SELECT to find matching records, wraps with DmlExecuteNode.
+    /// Builds a synthetic SQL SELECT string from the UPDATE's target, FROM/JOIN, and WHERE clauses,
+    /// parses it via QueryParser, and plans through the normal ScriptDom SELECT path.
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
-        var targetTable = GetUpdateTargetTable(update);
-        var entityName = targetTable.TableName;
-        var where = GetUpdateWhere(update);
+        // Extract entity name directly from ScriptDom
+        if (update.UpdateSpecification.Target is not NamedTableReference targetNamed)
+            throw new QueryParseException("UPDATE target must be a named table.");
+        var entityName = GetMultiPartName(targetNamed.SchemaObject);
 
         // Compile SET clauses directly from ScriptDom AST to delegates
         var compiledClauses = new List<CompiledSetClause>();
@@ -348,33 +349,41 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
-        // Build a SELECT to find records matching the WHERE clause.
-        // SELECT entityid FROM entity WHERE ...
-        var idColumn = SqlColumnRef.Simple(entityName + "id");
-        var selectColumns = new List<ISqlSelectColumn> { idColumn };
-
-        // Also include any columns referenced in SET clause expressions
-        foreach (var colName in referencedColumnNames)
+        // Build a synthetic SELECT SQL string to find matching records.
+        // SELECT entityid, [referenced columns] FROM entity [JOINs] [WHERE ...]
+        var selectCols = new List<string> { entityName + "id" };
+        foreach (var colName in referencedColumnNames.Distinct())
         {
-            if (!selectColumns.Exists(c => c is SqlColumnRef cr && cr.ColumnName == colName))
-            {
-                selectColumns.Add(SqlColumnRef.Simple(colName));
-            }
+            if (!selectCols.Contains(colName, StringComparer.OrdinalIgnoreCase))
+                selectCols.Add(colName);
         }
 
-        // Extract JOINs from the UPDATE's FROM clause
-        var fromClause = update.UpdateSpecification.FromClause;
-        var joins = fromClause != null
-            ? ConvertJoins(fromClause)
-            : new List<SqlJoin>();
+        var sb = new StringBuilder();
+        sb.Append("SELECT ").Append(string.Join(", ", selectCols));
 
-        var selectStatement = new SqlSelectStatement(
-            selectColumns,
-            targetTable,
-            joins,
-            where);
+        // Render FROM clause — use the UPDATE's FROM clause if present (it may contain JOINs),
+        // otherwise use the target table directly.
+        if (update.UpdateSpecification.FromClause != null)
+        {
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(update.UpdateSpecification.FromClause, out var fromSql);
+            sb.Append(' ').Append(fromSql);
+        }
+        else
+        {
+            sb.Append(" FROM ").Append(entityName);
+        }
 
-        var selectResult = PlanSelectFromLegacy(selectStatement, options);
+        // Render WHERE clause from ScriptDom
+        if (update.UpdateSpecification.WhereClause != null)
+        {
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(update.UpdateSpecification.WhereClause, out var whereSql);
+            sb.Append(' ').Append(whereSql);
+        }
+
+        // Parse and plan through normal ScriptDom path
+        var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
 
         var rootNode = DmlExecuteNode.Update(
             entityName,
@@ -397,29 +406,43 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Plans a DELETE statement. Creates a SELECT to find matching record IDs, wraps with DmlExecuteNode.
+    /// Builds a synthetic SQL SELECT string from the DELETE's target, FROM/JOIN, and WHERE clauses,
+    /// parses it via QueryParser, and plans through the normal ScriptDom SELECT path.
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
-        var targetTable = GetDeleteTargetTable(delete);
-        var entityName = targetTable.TableName;
-        var where = GetDeleteWhere(delete);
+        // Extract entity name directly from ScriptDom
+        if (delete.DeleteSpecification.Target is not NamedTableReference targetNamed)
+            throw new QueryParseException("DELETE target must be a named table.");
+        var entityName = GetMultiPartName(targetNamed.SchemaObject);
 
-        // Build a SELECT to find record IDs matching the WHERE clause.
-        var idColumn = SqlColumnRef.Simple(entityName + "id");
+        // Build a synthetic SELECT SQL string: SELECT entityid FROM entity [JOINs] [WHERE ...]
+        var sb = new StringBuilder();
+        sb.Append("SELECT ").Append(entityName).Append("id");
 
-        // Extract JOINs from the DELETE's FROM clause
-        var deleteFromClause = delete.DeleteSpecification.FromClause;
-        var joins = deleteFromClause != null
-            ? ConvertJoins(deleteFromClause)
-            : new List<SqlJoin>();
+        // Render FROM clause — use the DELETE's FROM clause if present (it may contain JOINs),
+        // otherwise use the target table directly.
+        if (delete.DeleteSpecification.FromClause != null)
+        {
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(delete.DeleteSpecification.FromClause, out var fromSql);
+            sb.Append(' ').Append(fromSql);
+        }
+        else
+        {
+            sb.Append(" FROM ").Append(entityName);
+        }
 
-        var selectStatement = new SqlSelectStatement(
-            new ISqlSelectColumn[] { idColumn },
-            targetTable,
-            joins,
-            where);
+        // Render WHERE clause from ScriptDom
+        if (delete.DeleteSpecification.WhereClause != null)
+        {
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(delete.DeleteSpecification.WhereClause, out var whereSql);
+            sb.Append(' ').Append(whereSql);
+        }
 
-        var selectResult = PlanSelectFromLegacy(selectStatement, options);
+        // Parse and plan through normal ScriptDom path
+        var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
 
         var rootNode = DmlExecuteNode.Delete(
             entityName,
@@ -501,8 +524,9 @@ public sealed class ExecutionPlanBuilder
     {
         if (queryExpr is QuerySpecification querySpec)
         {
-            var legacySelect = ConvertSelectStatement(querySpec);
-            return PlanSelectFromLegacy(legacySelect, options);
+            // Route directly through PlanSelect with a synthetic SelectStatement
+            var syntheticSelect = new SelectStatement { QueryExpression = querySpec };
+            return PlanSelect(syntheticSelect, querySpec, options);
         }
 
         if (queryExpr is BinaryQueryExpression nestedBinary)
@@ -569,8 +593,9 @@ public sealed class ExecutionPlanBuilder
 
         foreach (var querySpec in querySpecs)
         {
-            var legacySelect = ConvertSelectStatement(querySpec);
-            var branchResult = PlanSelectFromLegacy(legacySelect, options);
+            // Route directly through PlanSelect with a synthetic SelectStatement
+            var syntheticSelect = new SelectStatement { QueryExpression = querySpec };
+            var branchResult = PlanSelect(syntheticSelect, querySpec, options);
             branchNodes.Add(branchResult.RootNode);
             allFetchXml.Add(branchResult.FetchXml);
             firstEntityName ??= branchResult.EntityLogicalName;
@@ -782,52 +807,6 @@ public sealed class ExecutionPlanBuilder
         };
     }
 
-    /// <summary>
-    /// Legacy overload of <see cref="PlanMetadataQuery(QuerySpecification, string)"/> for
-    /// internal synthetic SELECTs built by DML planning (which still use <see cref="SqlSelectStatement"/>).
-    /// </summary>
-    private static QueryPlanResult PlanMetadataQueryLegacy(
-        SqlSelectStatement statement, string entityName)
-    {
-        var metadataTable = entityName;
-        if (metadataTable.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
-            metadataTable = metadataTable["metadata.".Length..];
-
-        List<string>? requestedColumns = null;
-        if (statement.Columns.Count > 0 &&
-            !(statement.Columns.Count == 1 && statement.Columns[0] is SqlColumnRef { IsWildcard: true }))
-        {
-            requestedColumns = new List<string>();
-            foreach (var col in statement.Columns)
-            {
-                if (col is SqlColumnRef colRef)
-                {
-                    requestedColumns.Add(colRef.Alias ?? colRef.ColumnName);
-                }
-            }
-        }
-
-        CompiledPredicate? filter = null;
-        if (statement.Where != null)
-        {
-            filter = CompileLegacyCondition(statement.Where);
-        }
-
-        var scanNode = new MetadataScanNode(
-            metadataTable,
-            metadataExecutor: null,
-            requestedColumns,
-            filter);
-
-        return new QueryPlanResult
-        {
-            RootNode = scanNode,
-            FetchXml = $"-- Metadata query: {metadataTable}",
-            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
-            EntityLogicalName = metadataTable
-        };
-    }
-
     // ═══════════════════════════════════════════════════════════════════
     //  TDS Endpoint planning
     // ═══════════════════════════════════════════════════════════════════
@@ -851,17 +830,6 @@ public sealed class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
-    }
-
-    /// <summary>
-    /// Legacy overload of <see cref="PlanTds(string, int?, QueryPlanOptions)"/> for
-    /// internal synthetic SELECTs built by DML planning (which still use <see cref="SqlSelectStatement"/>).
-    /// </summary>
-    private static QueryPlanResult PlanTdsLegacy(
-        SqlSelectStatement statement, QueryPlanOptions options)
-    {
-        var entityName = statement.GetEntityName();
-        return PlanTds(entityName, statement.Top, options);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1233,26 +1201,23 @@ public sealed class ExecutionPlanBuilder
             throw new QueryParseException("MERGE target must be a named table.");
         }
 
-        // Source query: plan the USING clause
+        // Source query: plan the USING clause via ScriptDom path
         IQueryPlanNode sourceNode;
         if (spec.TableReference is NamedTableReference sourceTable)
         {
-            // USING sourceTable - create a scan of the source table
+            // USING sourceTable - build synthetic SELECT * FROM sourceTable and plan it
             var sourceEntity = sourceTable.SchemaObject?.BaseIdentifier?.Value ?? "unknown";
-            var sourceSelect = new SqlSelectStatement(
-                new ISqlSelectColumn[] { SqlColumnRef.Wildcard() },
-                new SqlTableRef(sourceEntity, sourceTable.Alias?.Value),
-                new List<SqlJoin>(),
-                null);
-            var sourceResult = PlanSelectFromLegacy(sourceSelect, options);
+            var sql = $"SELECT * FROM {sourceEntity}";
+            var sourceResult = ParseAndPlanSyntheticSelect(sql, options);
             sourceNode = sourceResult.RootNode;
         }
         else if (spec.TableReference is QueryDerivedTable derivedTable
             && derivedTable.QueryExpression is QuerySpecification querySpec)
         {
-            // USING (SELECT ...) AS alias
-            var legacySelect = ConvertSelectStatement(querySpec);
-            var sourceResult = PlanSelectFromLegacy(legacySelect, options);
+            // USING (SELECT ...) AS alias — render to SQL, parse, and plan via ScriptDom
+            var generator = new Sql160ScriptGenerator();
+            generator.GenerateScript(querySpec, out var selectSql);
+            var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
             sourceNode = sourceResult.RootNode;
         }
         else
@@ -1274,7 +1239,7 @@ public sealed class ExecutionPlanBuilder
             {
                 if (clause.Condition == MergeCondition.Matched && clause.Action is UpdateMergeAction updateAction)
                 {
-                    var setClauses = new List<SqlSetClause>();
+                    var setClauses = new List<CompiledSetClause>();
                     foreach (var setClause in updateAction.SetClauses)
                     {
                         if (setClause is AssignmentSetClause assignment)
@@ -1283,8 +1248,8 @@ public sealed class ExecutionPlanBuilder
                                 ? assignment.Column.MultiPartIdentifier.Identifiers[
                                     assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
                                 : "unknown";
-                            var value = ConvertExpression(assignment.NewValue);
-                            setClauses.Add(new SqlSetClause(colName, value));
+                            var compiled = _expressionCompiler.CompileScalar(assignment.NewValue);
+                            setClauses.Add(new CompiledSetClause(colName, compiled));
                         }
                     }
                     whenMatched = MergeWhenMatched.Update(setClauses);
@@ -1308,13 +1273,13 @@ public sealed class ExecutionPlanBuilder
                         }
                     }
 
-                    var values = new List<ISqlExpression>();
+                    var values = new List<CompiledScalarExpression>();
                     if (insertAction.Source is ValuesInsertSource valSource
                         && valSource.RowValues?.Count > 0)
                     {
                         foreach (var val in valSource.RowValues[0].ColumnValues)
                         {
-                            values.Add(ConvertExpression(val));
+                            values.Add(_expressionCompiler.CompileScalar(val));
                         }
                     }
 
@@ -1384,23 +1349,70 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Determines whether an aggregate query should be partitioned for parallel execution.
-    /// Delegates to the existing <see cref="QueryPlanner.ShouldPartitionAggregate"/> logic.
+    /// Ported from <see cref="QueryPlanner.ShouldPartitionAggregate"/> to work with ScriptDom types.
+    /// Requirements:
+    /// - Query must use aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+    /// - Pool capacity must be > 1 (partitioning needs parallelism)
+    /// - Estimated record count must exceed the aggregate record limit
+    /// - Date range bounds (MinDate, MaxDate) must be provided
+    /// - Query must NOT contain COUNT(DISTINCT) (can't be partitioned correctly)
     /// </summary>
     private static bool ShouldPartitionAggregate(
-        SqlSelectStatement statement, QueryPlanOptions options)
+        QuerySpecification querySpec, QueryPlanOptions options)
     {
-        return QueryPlanner.ShouldPartitionAggregate(statement, options);
+        // Must have aggregate functions
+        if (!HasAggregatesInQuerySpec(querySpec))
+            return false;
+
+        // Need pool capacity > 1 for parallelism to be worthwhile
+        if (options.PoolCapacity <= 1)
+            return false;
+
+        // Need estimated record count that exceeds the limit
+        if (!options.EstimatedRecordCount.HasValue
+            || options.EstimatedRecordCount.Value <= options.AggregateRecordLimit)
+            return false;
+
+        // Need date range bounds for partitioning
+        if (!options.MinDate.HasValue || !options.MaxDate.HasValue)
+            return false;
+
+        // COUNT(DISTINCT) cannot be parallel-partitioned because summing partial
+        // distinct counts would double-count values appearing in multiple partitions.
+        if (ContainsCountDistinctInQuerySpec(querySpec))
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks if the SELECT list contains any COUNT(DISTINCT ...) aggregate.
+    /// </summary>
+    private static bool ContainsCountDistinctInQuerySpec(QuerySpecification querySpec)
+    {
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression { Expression: FunctionCall func }
+                && func.OverClause == null
+                && string.Equals(func.FunctionName?.Value, "COUNT", StringComparison.OrdinalIgnoreCase)
+                && func.UniqueRowFilter == UniqueRowFilter.Distinct)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
     /// Builds a partitioned aggregate plan (ParallelPartitionNode + MergeAggregateNode).
+    /// Works entirely with ScriptDom types, no legacy AST dependency.
     /// </summary>
-    private static QueryPlanResult PlanAggregateWithPartitioning(
-        SqlSelectStatement statement,
+    private QueryPlanResult PlanAggregateWithPartitioning(
+        QuerySpecification querySpec,
         QueryPlanOptions options,
-        TranspileResult transpileResult)
+        TranspileResult transpileResult,
+        string entityName)
     {
-        var entityName = statement.GetEntityName();
         var partitioner = new DateRangePartitioner();
         var partitions = partitioner.CalculatePartitions(
             options.EstimatedRecordCount!.Value,
@@ -1408,8 +1420,8 @@ public sealed class ExecutionPlanBuilder
             options.MaxDate!.Value,
             options.MaxRecordsPerPartition);
 
-        var mergeColumns = QueryPlanner.BuildMergeAggregateColumns(statement);
-        var groupByColumns = statement.GroupBy.Select(g => g.Alias ?? g.ColumnName).ToList();
+        var mergeColumns = BuildMergeAggregateColumnsFromQuerySpec(querySpec);
+        var groupByColumns = ExtractGroupByColumnNames(querySpec);
 
         var enrichedFetchXml = InjectAvgCompanionCounts(
             transpileResult.FetchXml, mergeColumns);
@@ -1429,11 +1441,11 @@ public sealed class ExecutionPlanBuilder
         var parallelNode = new ParallelPartitionNode(partitionNodes, options.PoolCapacity);
         IQueryPlanNode rootNode = new MergeAggregateNode(parallelNode, mergeColumns, groupByColumns);
 
-        // HAVING clause: apply after merging
-        if (statement.Having != null)
+        // HAVING clause: compile directly from ScriptDom
+        if (querySpec.HavingClause?.SearchCondition != null)
         {
-            var predicate = CompileLegacyCondition(statement.Having);
-            var description = DescribeLegacyCondition(statement.Having);
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
+            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
@@ -1446,86 +1458,129 @@ public sealed class ExecutionPlanBuilder
         };
     }
 
+    /// <summary>
+    /// Builds <see cref="MergeAggregateColumn"/> descriptors from a ScriptDom <see cref="QuerySpecification"/>.
+    /// Ported from <see cref="QueryPlanner.BuildMergeAggregateColumns"/> to work with ScriptDom types.
+    /// </summary>
+    private static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumnsFromQuerySpec(
+        QuerySpecification querySpec)
+    {
+        var columns = new List<MergeAggregateColumn>();
+        var aliasCounter = 0;
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is not SelectScalarExpression { Expression: FunctionCall func } scalar
+                || func.OverClause != null)
+                continue;
+
+            var funcName = func.FunctionName?.Value;
+            if (!IsAggregateFunctionName(funcName))
+                continue;
+
+            aliasCounter++;
+            var alias = scalar.ColumnName?.Value
+                ?? $"{funcName!.ToLowerInvariant()}_{aliasCounter}";
+
+            var function = MapToMergeFunctionFromName(funcName!);
+
+            // For AVG, we need a companion COUNT column to compute weighted averages.
+            string? countAlias = function == AggregateFunction.Avg
+                ? $"{alias}_count"
+                : null;
+
+            columns.Add(new MergeAggregateColumn(alias, function, countAlias));
+        }
+
+        return columns;
+    }
+
+    /// <summary>
+    /// Extracts GROUP BY column names from a ScriptDom <see cref="QuerySpecification"/>.
+    /// </summary>
+    private static List<string> ExtractGroupByColumnNames(QuerySpecification querySpec)
+    {
+        var names = new List<string>();
+        if (querySpec.GroupByClause?.GroupingSpecifications == null)
+            return names;
+
+        foreach (var groupSpec in querySpec.GroupByClause.GroupingSpecifications)
+        {
+            if (groupSpec is ExpressionGroupingSpecification exprGroup
+                && exprGroup.Expression is ColumnReferenceExpression colRef)
+            {
+                names.Add(GetScriptDomColumnName(colRef));
+            }
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// Maps an aggregate function name to the <see cref="AggregateFunction"/> enum.
+    /// </summary>
+    private static AggregateFunction MapToMergeFunctionFromName(string funcName)
+    {
+        return funcName.ToUpperInvariant() switch
+        {
+            "COUNT" or "COUNT_BIG" => AggregateFunction.Count,
+            "SUM" => AggregateFunction.Sum,
+            "AVG" => AggregateFunction.Avg,
+            "MIN" => AggregateFunction.Min,
+            "MAX" => AggregateFunction.Max,
+            "STDEV" or "STDEVP" => AggregateFunction.Stdev,
+            "VAR" or "VARP" => AggregateFunction.Var,
+            _ => throw new QueryParseException($"Unsupported aggregate function for partitioning: {funcName}")
+        };
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  Internal helpers for plan construction
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Plans a SELECT from a legacy <see cref="SqlSelectStatement"/> AST.
-    /// Used when DML statements need an internal SELECT (e.g., UPDATE needs SELECT to find records).
+    /// Parses a synthetic SQL SELECT string via <see cref="QueryParser"/> and plans it through
+    /// the normal ScriptDom SELECT path. Used by DML planning (UPDATE/DELETE/INSERT SELECT/MERGE)
+    /// to build the internal SELECT that finds matching records.
     /// </summary>
-    private QueryPlanResult PlanSelectFromLegacy(
-        SqlSelectStatement statement, QueryPlanOptions options)
+    private QueryPlanResult ParseAndPlanSyntheticSelect(string sql, QueryPlanOptions options)
     {
-        var entityName = statement.GetEntityName();
-
-        // Phase 6: Metadata virtual table routing
-        if (entityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
-        {
-            return PlanMetadataQueryLegacy(statement, entityName);
-        }
-
-        // Phase 3.5: TDS Endpoint routing
-        if (options.UseTdsEndpoint
-            && options.TdsQueryExecutor != null
-            && !string.IsNullOrEmpty(options.OriginalSql))
-        {
-            var compatibility = TdsCompatibilityChecker.CheckCompatibility(
-                options.OriginalSql, entityName);
-
-            if (compatibility == TdsCompatibility.Compatible)
-            {
-                return PlanTdsLegacy(statement, options);
-            }
-        }
-
-        // Variable substitution
-        if (options.VariableScope != null && statement.Where != null
-            && ContainsVariableExpression(statement.Where))
-        {
-            var newWhere = SubstituteVariables(statement.Where, options.VariableScope);
-            statement = ReplaceWhere(statement, newWhere);
-        }
-
-        // Use the legacy planner's transpiler for internal SELECTs
-        // (these are synthetic SELECTs built by DML planning, not from user SQL)
-        var legacyPlanner = new QueryPlanner();
-        return legacyPlanner.Plan(statement, options);
+        var parser = new QueryParser();
+        var fragment = parser.Parse(sql);
+        var script = (TSqlScript)fragment;
+        var selectStmt = (SelectStatement)script.Batches[0].Statements[0];
+        var querySpec = (QuerySpecification)selectStmt.QueryExpression;
+        return PlanSelect(selectStmt, querySpec, options);
     }
 
     /// <summary>
-    /// Converts a ScriptDom SelectStatement + QuerySpecification to a legacy SqlSelectStatement.
+    /// Extracts output column names from a ScriptDom <see cref="QuerySpecification"/>.
+    /// Used for ordinal mapping in INSERT ... SELECT.
     /// </summary>
-    private static SqlSelectStatement ConvertToLegacySelect(
-        SelectStatement selectStmt, QuerySpecification querySpec)
+    private static List<string> ExtractSelectColumnNamesFromQuerySpec(QuerySpecification querySpec)
     {
-        var baseSelect = ConvertSelectStatement(querySpec);
-
-        // Apply ORDER BY from the SelectStatement level (ScriptDom sometimes has it here)
-        var orderBy = new List<SqlOrderByItem>();
-        if (selectStmt.QueryExpression is QuerySpecification qs && qs.OrderByClause != null)
+        var names = new List<string>();
+        foreach (var element in querySpec.SelectElements)
         {
-            foreach (var orderElem in qs.OrderByClause.OrderByElements)
+            switch (element)
             {
-                if (orderElem.Expression is ColumnReferenceExpression orderCol)
-                {
-                    var direction = orderElem.SortOrder == SortOrder.Descending
-                        ? SqlSortDirection.Descending
-                        : SqlSortDirection.Ascending;
-                    orderBy.Add(new SqlOrderByItem(ConvertColumnRef(orderCol), direction));
-                }
+                case SelectStarExpression:
+                    names.Add("*");
+                    break;
+                case SelectScalarExpression { Expression: ColumnReferenceExpression colRef } scalar:
+                    names.Add(scalar.ColumnName?.Value ?? GetScriptDomColumnName(colRef));
+                    break;
+                case SelectScalarExpression { Expression: FunctionCall func } scalar:
+                    names.Add(scalar.ColumnName?.Value ?? func.FunctionName?.Value ?? "aggregate");
+                    break;
+                case SelectScalarExpression scalar:
+                    names.Add(scalar.ColumnName?.Value ?? "computed");
+                    break;
+                default:
+                    names.Add("unknown");
+                    break;
             }
         }
-
-        if (orderBy.Count > 0)
-        {
-            return new SqlSelectStatement(
-                baseSelect.Columns, baseSelect.From, baseSelect.Joins, baseSelect.Where,
-                orderBy, baseSelect.Top, baseSelect.Distinct, baseSelect.GroupBy,
-                baseSelect.Having, baseSelect.SourcePosition, baseSelect.GroupByExpressions);
-        }
-
-        return baseSelect;
+        return names;
     }
 
     /// <summary>
@@ -1576,56 +1631,6 @@ public sealed class ExecutionPlanBuilder
             return name;
         }
         return "NVARCHAR";
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  Condition analysis helpers (ported from QueryPlanner)
-    // ═══════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Extracts expression conditions from a WHERE clause that must be evaluated client-side.
-    /// </summary>
-    private static ISqlCondition? ExtractExpressionConditions(ISqlCondition? where)
-    {
-        if (where is null) return null;
-
-        if (where is SqlExpressionCondition) return where;
-
-        if (where is SqlLogicalCondition { Operator: SqlLogicalOperator.And } logical)
-        {
-            var exprConditions = new List<ISqlCondition>();
-            foreach (var child in logical.Conditions)
-            {
-                if (child is SqlExpressionCondition)
-                {
-                    exprConditions.Add(child);
-                }
-                else if (child is SqlLogicalCondition nested && ContainsExpressionCondition(nested))
-                {
-                    exprConditions.Add(child);
-                }
-            }
-
-            if (exprConditions.Count == 0) return null;
-
-            return exprConditions.Count == 1
-                ? exprConditions[0]
-                : new SqlLogicalCondition(SqlLogicalOperator.And, exprConditions);
-        }
-
-        if (ContainsExpressionCondition(where)) return where;
-
-        return null;
-    }
-
-    private static bool ContainsExpressionCondition(ISqlCondition condition)
-    {
-        return condition switch
-        {
-            SqlExpressionCondition => true,
-            SqlLogicalCondition logical => logical.Conditions.Any(ContainsExpressionCondition),
-            _ => false
-        };
     }
 
     /// <summary>
@@ -1726,25 +1731,6 @@ public sealed class ExecutionPlanBuilder
             BooleanNotExpression not => ContainsExpressionComparison(not.Expression),
             _ => false
         };
-    }
-
-    /// <summary>
-    /// Checks whether the SELECT list contains any computed columns (CASE/IIF expressions),
-    /// excluding window function expressions.
-    /// </summary>
-    private static bool HasComputedColumns(SqlSelectStatement statement)
-    {
-        return statement.Columns.Any(col =>
-            col is SqlComputedColumn computed && computed.Expression is not SqlWindowExpression);
-    }
-
-    /// <summary>
-    /// Checks whether the SELECT list contains any window function expressions.
-    /// </summary>
-    private static bool HasWindowFunctions(SqlSelectStatement statement)
-    {
-        return statement.Columns.Any(col =>
-            col is SqlComputedColumn computed && computed.Expression is SqlWindowExpression);
     }
 
     // ── ScriptDom QuerySpecification analysis helpers ──────────────
@@ -2065,72 +2051,6 @@ public sealed class ExecutionPlanBuilder
     }
 
     /// <summary>
-    /// Extracts the output column names from a SELECT statement for ordinal mapping.
-    /// </summary>
-    private static List<string> ExtractSelectColumnNames(SqlSelectStatement select)
-    {
-        var names = new List<string>();
-        foreach (var col in select.Columns)
-        {
-            switch (col)
-            {
-                case SqlColumnRef colRef:
-                    names.Add(colRef.Alias ?? colRef.ColumnName);
-                    break;
-                case SqlAggregateColumn agg:
-                    names.Add(agg.Alias ?? agg.GetColumnName() ?? "count");
-                    break;
-                case SqlComputedColumn computed:
-                    names.Add(computed.Alias ?? "computed");
-                    break;
-                default:
-                    names.Add(col.ToString() ?? "unknown");
-                    break;
-            }
-        }
-        return names;
-    }
-
-    /// <summary>
-    /// Extracts column names referenced in an expression (for UPDATE SET clause dependency detection).
-    /// </summary>
-    private static List<string> ExtractColumnNames(ISqlExpression expression)
-    {
-        var columns = new List<string>();
-        ExtractColumnNamesRecursive(expression, columns);
-        return columns;
-    }
-
-    private static void ExtractColumnNamesRecursive(ISqlExpression expression, List<string> columns)
-    {
-        switch (expression)
-        {
-            case SqlColumnExpression col:
-                if (col.Column.ColumnName != null)
-                {
-                    columns.Add(col.Column.ColumnName);
-                }
-                break;
-            case SqlBinaryExpression bin:
-                ExtractColumnNamesRecursive(bin.Left, columns);
-                ExtractColumnNamesRecursive(bin.Right, columns);
-                break;
-            case SqlUnaryExpression unary:
-                ExtractColumnNamesRecursive(unary.Operand, columns);
-                break;
-            case SqlFunctionExpression func:
-                foreach (var arg in func.Arguments)
-                {
-                    ExtractColumnNamesRecursive(arg, columns);
-                }
-                break;
-            case SqlCastExpression cast:
-                ExtractColumnNamesRecursive(cast.Expression, columns);
-                break;
-        }
-    }
-
-    /// <summary>
     /// Extracts column names referenced in a ScriptDom <see cref="ScalarExpression"/>.
     /// Used for UPDATE SET clause dependency detection without converting to legacy AST.
     /// </summary>
@@ -2173,121 +2093,6 @@ public sealed class ExecutionPlanBuilder
                     ExtractColumnNamesFromScriptDomRecursive(caseExpr.ElseExpression, columns);
                 break;
         }
-    }
-
-    /// <summary>
-    /// Recursively checks if a condition tree contains any SqlVariableExpression nodes.
-    /// </summary>
-    private static bool ContainsVariableExpression(ISqlCondition? condition)
-    {
-        return condition switch
-        {
-            null => false,
-            SqlComparisonCondition => false,
-            SqlExpressionCondition exprCond =>
-                ContainsVariableInExpression(exprCond.Left) || ContainsVariableInExpression(exprCond.Right),
-            SqlLogicalCondition logical => logical.Conditions.Any(ContainsVariableExpression),
-            _ => false
-        };
-    }
-
-    private static bool ContainsVariableInExpression(ISqlExpression expression)
-    {
-        return expression switch
-        {
-            SqlVariableExpression => true,
-            SqlBinaryExpression bin =>
-                ContainsVariableInExpression(bin.Left) || ContainsVariableInExpression(bin.Right),
-            SqlUnaryExpression unary => ContainsVariableInExpression(unary.Operand),
-            SqlFunctionExpression func => func.Arguments.Any(ContainsVariableInExpression),
-            _ => false
-        };
-    }
-
-    /// <summary>
-    /// Substitutes @variable references in a condition tree with their literal values.
-    /// </summary>
-    private static ISqlCondition SubstituteVariables(ISqlCondition condition, VariableScope scope)
-    {
-        return condition switch
-        {
-            SqlExpressionCondition exprCond => SubstituteExpressionConditionVariables(exprCond, scope),
-            SqlLogicalCondition logical => new SqlLogicalCondition(
-                logical.Operator,
-                logical.Conditions.Select(c => SubstituteVariables(c, scope)).ToList()),
-            _ => condition
-        };
-    }
-
-    private static ISqlCondition SubstituteExpressionConditionVariables(
-        SqlExpressionCondition exprCond, VariableScope scope)
-    {
-        var newLeft = SubstituteExpressionVariables(exprCond.Left, scope);
-        var newRight = SubstituteExpressionVariables(exprCond.Right, scope);
-
-        if (newLeft is SqlColumnExpression colExpr && newRight is SqlLiteralExpression litExpr)
-        {
-            return new SqlComparisonCondition(colExpr.Column, exprCond.Operator, litExpr.Value);
-        }
-
-        return new SqlExpressionCondition(newLeft, exprCond.Operator, newRight);
-    }
-
-    private static ISqlExpression SubstituteExpressionVariables(ISqlExpression expression, VariableScope scope)
-    {
-        return expression switch
-        {
-            SqlVariableExpression varExpr => VariableValueToLiteral(scope.Get(varExpr.VariableName)),
-            SqlBinaryExpression bin => new SqlBinaryExpression(
-                SubstituteExpressionVariables(bin.Left, scope),
-                bin.Operator,
-                SubstituteExpressionVariables(bin.Right, scope)),
-            SqlUnaryExpression unary => new SqlUnaryExpression(
-                unary.Operator,
-                SubstituteExpressionVariables(unary.Operand, scope)),
-            _ => expression
-        };
-    }
-
-    private static SqlLiteralExpression VariableValueToLiteral(object? value)
-    {
-        if (value is null)
-        {
-            return new SqlLiteralExpression(SqlLiteral.Null());
-        }
-
-        return value switch
-        {
-            string s => new SqlLiteralExpression(SqlLiteral.String(s)),
-            int i => new SqlLiteralExpression(SqlLiteral.Number(i.ToString(CultureInfo.InvariantCulture))),
-            long l => new SqlLiteralExpression(SqlLiteral.Number(l.ToString(CultureInfo.InvariantCulture))),
-            decimal d => new SqlLiteralExpression(SqlLiteral.Number(d.ToString(CultureInfo.InvariantCulture))),
-            double d => new SqlLiteralExpression(SqlLiteral.Number(d.ToString(CultureInfo.InvariantCulture))),
-            float f => new SqlLiteralExpression(SqlLiteral.Number(f.ToString(CultureInfo.InvariantCulture))),
-            _ => new SqlLiteralExpression(SqlLiteral.String(
-                Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""))
-        };
-    }
-
-    /// <summary>
-    /// Creates a new SELECT statement with a replaced WHERE clause.
-    /// </summary>
-    private static SqlSelectStatement ReplaceWhere(SqlSelectStatement statement, ISqlCondition? newWhere)
-    {
-        var newStatement = new SqlSelectStatement(
-            statement.Columns,
-            statement.From,
-            statement.Joins,
-            newWhere,
-            statement.OrderBy,
-            statement.Top,
-            statement.Distinct,
-            statement.GroupBy,
-            statement.Having,
-            statement.SourcePosition,
-            statement.GroupByExpressions);
-        newStatement.LeadingComments.AddRange(statement.LeadingComments);
-        return newStatement;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2335,54 +2140,8 @@ public sealed class ExecutionPlanBuilder
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  Legacy AST → Compiled Delegate Helpers
-    //  Bridge methods that wrap legacy ISqlCondition/ISqlExpression in
-    //  CompiledPredicate/CompiledScalarExpression delegates via the
-    //  ExpressionEvaluator. These will be removed when the legacy AST
-    //  types are deleted and all callers use ScriptDom compilation.
+    //  DML property extraction helpers
     // ═══════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Compiles a legacy <see cref="ISqlCondition"/> into a <see cref="CompiledPredicate"/>
-    /// by wrapping the <see cref="Dataverse.Query.Execution.ExpressionEvaluator"/>.
-    /// </summary>
-    private static CompiledPredicate CompileLegacyCondition(ISqlCondition condition)
-    {
-        var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
-        return row => evaluator.EvaluateCondition(condition, row);
-    }
-
-    /// <summary>
-    /// Compiles a legacy <see cref="ISqlExpression"/> into a <see cref="CompiledScalarExpression"/>
-    /// by wrapping the <see cref="Dataverse.Query.Execution.ExpressionEvaluator"/>.
-    /// </summary>
-    private static CompiledScalarExpression CompileLegacyExpression(ISqlExpression expression)
-    {
-        var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
-        return row => evaluator.Evaluate(expression, row);
-    }
-
-    /// <summary>
-    /// Produces a human-readable description of a legacy <see cref="ISqlCondition"/>.
-    /// </summary>
-    private static string DescribeLegacyCondition(ISqlCondition condition)
-    {
-        return condition switch
-        {
-            SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
-            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
-            SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
-            _ => condition.GetType().Name
-        };
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  ScriptDom → Legacy AST bridge methods
-    //  (formerly in ScriptDomAdapter; kept as private methods until
-    //  legacy AST types are fully removed)
-    // ═══════════════════════════════════════════════════════════════════
-
-    // ── DML property extraction ──────────────────────────────────────
 
     private static string GetInsertTargetEntity(InsertStatement insert)
     {
@@ -2416,796 +2175,9 @@ public sealed class ExecutionPlanBuilder
         return null;
     }
 
-    private static SqlTableRef GetUpdateTargetTable(UpdateStatement update)
-    {
-        if (update.UpdateSpecification.Target is NamedTableReference named)
-        {
-            return ConvertNamedTable(named);
-        }
-        throw new QueryParseException("UPDATE target must be a named table.");
-    }
-
-    private static ISqlCondition? GetUpdateWhere(UpdateStatement update)
-    {
-        return update.UpdateSpecification.WhereClause?.SearchCondition != null
-            ? ConvertBooleanExpression(update.UpdateSpecification.WhereClause.SearchCondition)
-            : null;
-    }
-
-    private static SqlTableRef GetDeleteTargetTable(DeleteStatement delete)
-    {
-        if (delete.DeleteSpecification.Target is NamedTableReference named)
-        {
-            return ConvertNamedTable(named);
-        }
-        throw new QueryParseException("DELETE target must be a named table.");
-    }
-
-    private static ISqlCondition? GetDeleteWhere(DeleteStatement delete)
-    {
-        return delete.DeleteSpecification.WhereClause?.SearchCondition != null
-            ? ConvertBooleanExpression(delete.DeleteSpecification.WhereClause.SearchCondition)
-            : null;
-    }
-
-    // ── Expression conversion ────────────────────────────────────────
-
-    private static ISqlExpression ConvertExpression(ScalarExpression expr)
-    {
-        if (expr is null)
-            throw new ArgumentNullException(nameof(expr));
-
-        return expr switch
-        {
-            IntegerLiteral intLit =>
-                new SqlLiteralExpression(SqlLiteral.Number(intLit.Value)),
-
-            NumericLiteral numLit =>
-                new SqlLiteralExpression(SqlLiteral.Number(numLit.Value)),
-
-            RealLiteral realLit =>
-                new SqlLiteralExpression(SqlLiteral.Number(realLit.Value)),
-
-            MoneyLiteral moneyLit =>
-                new SqlLiteralExpression(SqlLiteral.Number(moneyLit.Value)),
-
-            StringLiteral strLit =>
-                new SqlLiteralExpression(SqlLiteral.String(strLit.Value)),
-
-            NullLiteral =>
-                new SqlLiteralExpression(SqlLiteral.Null()),
-
-            ColumnReferenceExpression colRef =>
-                new SqlColumnExpression(ConvertColumnRef(colRef)),
-
-            BinaryExpression binExpr =>
-                new SqlBinaryExpression(
-                    ConvertExpression(binExpr.FirstExpression),
-                    ConvertBinaryOperator(binExpr.BinaryExpressionType),
-                    ConvertExpression(binExpr.SecondExpression)),
-
-            UnaryExpression unaryExpr =>
-                new SqlUnaryExpression(
-                    ConvertUnaryOperator(unaryExpr.UnaryExpressionType),
-                    ConvertExpression(unaryExpr.Expression)),
-
-            ParenthesisExpression parenExpr =>
-                ConvertExpression(parenExpr.Expression),
-
-            FunctionCall funcCall =>
-                ConvertFunctionCall(funcCall),
-
-            SearchedCaseExpression caseExpr =>
-                ConvertSearchedCase(caseExpr),
-
-            IIfCall iifCall =>
-                new SqlIifExpression(
-                    ConvertBooleanExpression(iifCall.Predicate),
-                    ConvertExpression(iifCall.ThenExpression),
-                    ConvertExpression(iifCall.ElseExpression)),
-
-            CastCall castCall =>
-                new SqlCastExpression(
-                    ConvertExpression(castCall.Parameter),
-                    FormatDataType(castCall.DataType)),
-
-            ConvertCall convertCall =>
-                ConvertConvertCall(convertCall),
-
-            VariableReference varRef =>
-                new SqlVariableExpression(varRef.Name.StartsWith("@") ? varRef.Name : "@" + varRef.Name),
-
-            GlobalVariableExpression globalVar =>
-                new SqlVariableExpression(globalVar.Name),
-
-            ScalarSubquery subquery =>
-                ConvertScalarSubquery(subquery),
-
-            _ => throw new QueryParseException(
-                $"Unsupported ScriptDom expression type: {expr.GetType().Name}")
-        };
-    }
-
-    private static ISqlExpression ConvertFunctionCall(FunctionCall funcCall)
-    {
-        if (funcCall.OverClause != null)
-        {
-            return ConvertWindowFunction(funcCall);
-        }
-
-        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-        if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "STDEV" or "STDEVP" or "VAR" or "VARP")
-        {
-            return ConvertAggregateExpression(funcCall);
-        }
-
-        var args = new List<ISqlExpression>();
-        if (funcCall.Parameters != null)
-        {
-            foreach (var param in funcCall.Parameters)
-            {
-                args.Add(ConvertExpression(param));
-            }
-        }
-
-        return new SqlFunctionExpression(funcCall.FunctionName.Value, args);
-    }
-
-    private static SqlAggregateExpression ConvertAggregateExpression(FunctionCall funcCall)
-    {
-        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-        var aggFunc = funcName switch
-        {
-            "COUNT" => SqlAggregateFunction.Count,
-            "SUM" => SqlAggregateFunction.Sum,
-            "AVG" => SqlAggregateFunction.Avg,
-            "MIN" => SqlAggregateFunction.Min,
-            "MAX" => SqlAggregateFunction.Max,
-            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
-            "VAR" or "VARP" => SqlAggregateFunction.Var,
-            _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
-        };
-
-        var isDistinct = funcCall.UniqueRowFilter == UniqueRowFilter.Distinct;
-        ISqlExpression? operand = null;
-
-        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
-        {
-            var firstParam = funcCall.Parameters[0];
-            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
-            {
-                operand = null; // COUNT(*)
-            }
-            else
-            {
-                operand = ConvertExpression(firstParam);
-            }
-        }
-
-        return new SqlAggregateExpression(aggFunc, operand, isDistinct);
-    }
-
-    private static SqlWindowExpression ConvertWindowFunction(FunctionCall funcCall)
-    {
-        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-        ISqlExpression? operand = null;
-        var isCountStar = false;
-
-        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
-        {
-            var firstParam = funcCall.Parameters[0];
-            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
-            {
-                isCountStar = true;
-            }
-            else
-            {
-                operand = ConvertExpression(firstParam);
-            }
-        }
-
-        List<ISqlExpression>? partitionBy = null;
-        if (funcCall.OverClause.Partitions != null && funcCall.OverClause.Partitions.Count > 0)
-        {
-            partitionBy = new List<ISqlExpression>();
-            foreach (var partition in funcCall.OverClause.Partitions)
-            {
-                partitionBy.Add(ConvertExpression(partition));
-            }
-        }
-
-        List<SqlOrderByItem>? orderByItems = null;
-        if (funcCall.OverClause.OrderByClause?.OrderByElements != null)
-        {
-            orderByItems = new List<SqlOrderByItem>();
-            foreach (var orderElem in funcCall.OverClause.OrderByClause.OrderByElements)
-            {
-                if (orderElem.Expression is ColumnReferenceExpression orderCol)
-                {
-                    var direction = orderElem.SortOrder == SortOrder.Descending
-                        ? SqlSortDirection.Descending
-                        : SqlSortDirection.Ascending;
-                    orderByItems.Add(new SqlOrderByItem(ConvertColumnRef(orderCol), direction));
-                }
-            }
-        }
-
-        return new SqlWindowExpression(funcName, operand, partitionBy, orderByItems, isCountStar);
-    }
-
-    private static SqlCaseExpression ConvertSearchedCase(SearchedCaseExpression caseExpr)
-    {
-        var whenClauses = new List<SqlWhenClause>();
-        foreach (var when in caseExpr.WhenClauses)
-        {
-            if (when is SearchedWhenClause searched)
-            {
-                whenClauses.Add(new SqlWhenClause(
-                    ConvertBooleanExpression(searched.WhenExpression),
-                    ConvertExpression(searched.ThenExpression)));
-            }
-        }
-
-        ISqlExpression? elseExpr = null;
-        if (caseExpr.ElseExpression != null)
-        {
-            elseExpr = ConvertExpression(caseExpr.ElseExpression);
-        }
-
-        return new SqlCaseExpression(whenClauses, elseExpr);
-    }
-
-    private static SqlCastExpression ConvertConvertCall(ConvertCall convertCall)
-    {
-        int? style = null;
-        if (convertCall.Style != null)
-        {
-            if (convertCall.Style is IntegerLiteral intStyle &&
-                int.TryParse(intStyle.Value, out var styleVal))
-            {
-                style = styleVal;
-            }
-        }
-
-        return new SqlCastExpression(
-            ConvertExpression(convertCall.Parameter),
-            FormatDataType(convertCall.DataType),
-            style);
-    }
-
-    private static SqlSubqueryExpression ConvertScalarSubquery(ScalarSubquery subquery)
-    {
-        if (subquery.QueryExpression is QuerySpecification querySpec)
-        {
-            return new SqlSubqueryExpression(ConvertSelectStatement(querySpec));
-        }
-        throw new QueryParseException("Unsupported scalar subquery type.");
-    }
-
-    // ── Boolean expression conversion ────────────────────────────────
-
-    private static ISqlCondition ConvertBooleanExpression(BooleanExpression boolExpr)
-    {
-        if (boolExpr is null)
-            throw new ArgumentNullException(nameof(boolExpr));
-
-        return boolExpr switch
-        {
-            BooleanComparisonExpression compExpr =>
-                ConvertComparison(compExpr),
-
-            BooleanBinaryExpression binBool =>
-                ConvertLogicalCondition(binBool),
-
-            BooleanParenthesisExpression parenBool =>
-                ConvertBooleanExpression(parenBool.Expression),
-
-            BooleanNotExpression notExpr =>
-                ConvertNotExpression(notExpr),
-
-            BooleanIsNullExpression isNullExpr =>
-                ConvertIsNullExpression(isNullExpr),
-
-            LikePredicate likePred =>
-                ConvertLikePredicate(likePred),
-
-            InPredicate inPred =>
-                ConvertInPredicate(inPred),
-
-            ExistsPredicate existsPred =>
-                ConvertExistsPredicate(existsPred),
-
-            BooleanTernaryExpression ternary =>
-                ConvertBetweenExpression(ternary),
-
-            _ => throw new QueryParseException(
-                $"Unsupported ScriptDom boolean expression type: {boolExpr.GetType().Name}")
-        };
-    }
-
-    private static ISqlCondition ConvertComparison(BooleanComparisonExpression compExpr)
-    {
-        var op = ConvertComparisonOperator(compExpr.ComparisonType);
-
-        if (compExpr.FirstExpression is ColumnReferenceExpression leftCol
-            && IsLiteralExpression(compExpr.SecondExpression))
-        {
-            return new SqlComparisonCondition(
-                ConvertColumnRef(leftCol),
-                op,
-                ExtractLiteral(compExpr.SecondExpression));
-        }
-
-        if (IsLiteralExpression(compExpr.FirstExpression)
-            && compExpr.SecondExpression is ColumnReferenceExpression rightCol)
-        {
-            return new SqlComparisonCondition(
-                ConvertColumnRef(rightCol),
-                ReverseOperator(op),
-                ExtractLiteral(compExpr.FirstExpression));
-        }
-
-        return new SqlExpressionCondition(
-            ConvertExpression(compExpr.FirstExpression),
-            op,
-            ConvertExpression(compExpr.SecondExpression));
-    }
-
-    private static SqlLogicalCondition ConvertLogicalCondition(BooleanBinaryExpression binBool)
-    {
-        var op = binBool.BinaryExpressionType == BooleanBinaryExpressionType.And
-            ? SqlLogicalOperator.And
-            : SqlLogicalOperator.Or;
-
-        var conditions = new List<ISqlCondition>();
-        FlattenLogical(binBool, op, conditions);
-
-        return new SqlLogicalCondition(op, conditions);
-    }
-
-    private static void FlattenLogical(
-        BooleanExpression expr, SqlLogicalOperator targetOp, List<ISqlCondition> conditions)
-    {
-        if (expr is BooleanBinaryExpression binBool)
-        {
-            var exprOp = binBool.BinaryExpressionType == BooleanBinaryExpressionType.And
-                ? SqlLogicalOperator.And
-                : SqlLogicalOperator.Or;
-
-            if (exprOp == targetOp)
-            {
-                FlattenLogical(binBool.FirstExpression, targetOp, conditions);
-                FlattenLogical(binBool.SecondExpression, targetOp, conditions);
-                return;
-            }
-        }
-
-        conditions.Add(ConvertBooleanExpression(expr));
-    }
-
-    private static ISqlCondition ConvertNotExpression(BooleanNotExpression notExpr)
-    {
-        var inner = notExpr.Expression;
-
-        if (inner is BooleanIsNullExpression isNull)
-        {
-            return new SqlNullCondition(
-                ConvertColumnRef((ColumnReferenceExpression)isNull.Expression),
-                isNegated: true);
-        }
-
-        if (inner is LikePredicate like)
-        {
-            return ConvertLikePredicate(like, forceNegate: true);
-        }
-
-        if (inner is InPredicate inPred)
-        {
-            return ConvertInPredicate(inPred, forceNegate: true);
-        }
-
-        if (inner is ExistsPredicate existsPred)
-        {
-            return ConvertExistsPredicate(existsPred, forceNegate: true);
-        }
-
-        var innerCondition = ConvertBooleanExpression(inner);
-        return innerCondition;
-    }
-
-    private static SqlNullCondition ConvertIsNullExpression(BooleanIsNullExpression isNullExpr)
-    {
-        if (isNullExpr.Expression is ColumnReferenceExpression colRef)
-        {
-            return new SqlNullCondition(ConvertColumnRef(colRef), isNullExpr.IsNot);
-        }
-
-        throw new QueryParseException(
-            "IS NULL on complex expressions is not yet supported. Use a column reference.");
-    }
-
-    private static SqlLikeCondition ConvertLikePredicate(LikePredicate likePred, bool forceNegate = false)
-    {
-        if (likePred.FirstExpression is not ColumnReferenceExpression colRef)
-        {
-            throw new QueryParseException(
-                "LIKE predicate must have a column reference on the left side.");
-        }
-
-        var pattern = ExtractStringValue(likePred.SecondExpression);
-        var isNegated = likePred.NotDefined || forceNegate;
-
-        return new SqlLikeCondition(ConvertColumnRef(colRef), pattern, isNegated);
-    }
-
-    private static ISqlCondition ConvertInPredicate(InPredicate inPred, bool forceNegate = false)
-    {
-        if (inPred.Expression is not ColumnReferenceExpression colRef)
-        {
-            throw new QueryParseException(
-                "IN predicate must have a column reference on the left side.");
-        }
-
-        var isNegated = inPred.NotDefined || forceNegate;
-
-        if (inPred.Subquery != null)
-        {
-            if (inPred.Subquery.QueryExpression is QuerySpecification querySpec)
-            {
-                var subSelect = ConvertSelectStatement(querySpec);
-                return new SqlInSubqueryCondition(
-                    ConvertColumnRef(colRef), subSelect, isNegated);
-            }
-            throw new QueryParseException("Unsupported IN subquery type.");
-        }
-
-        var values = new List<SqlLiteral>();
-        foreach (var val in inPred.Values)
-        {
-            values.Add(ExtractLiteral(val));
-        }
-
-        return new SqlInCondition(ConvertColumnRef(colRef), values, isNegated);
-    }
-
-    private static SqlExistsCondition ConvertExistsPredicate(
-        ExistsPredicate existsPred, bool forceNegate = false)
-    {
-        if (existsPred.Subquery?.QueryExpression is QuerySpecification querySpec)
-        {
-            var subSelect = ConvertSelectStatement(querySpec);
-            return new SqlExistsCondition(subSelect, forceNegate);
-        }
-
-        throw new QueryParseException("EXISTS predicate must contain a SELECT subquery.");
-    }
-
-    private static ISqlCondition ConvertBetweenExpression(BooleanTernaryExpression ternary)
-    {
-        if (ternary.TernaryExpressionType == BooleanTernaryExpressionType.Between)
-        {
-            var col = ConvertExpression(ternary.FirstExpression);
-            var low = ConvertExpression(ternary.SecondExpression);
-            var high = ConvertExpression(ternary.ThirdExpression);
-
-            var geCond = new SqlExpressionCondition(col, SqlComparisonOperator.GreaterThanOrEqual, low);
-            var leCond = new SqlExpressionCondition(col, SqlComparisonOperator.LessThanOrEqual, high);
-
-            return SqlLogicalCondition.And(geCond, leCond);
-        }
-
-        if (ternary.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween)
-        {
-            var col = ConvertExpression(ternary.FirstExpression);
-            var low = ConvertExpression(ternary.SecondExpression);
-            var high = ConvertExpression(ternary.ThirdExpression);
-
-            var ltCond = new SqlExpressionCondition(col, SqlComparisonOperator.LessThan, low);
-            var gtCond = new SqlExpressionCondition(col, SqlComparisonOperator.GreaterThan, high);
-
-            return SqlLogicalCondition.Or(ltCond, gtCond);
-        }
-
-        throw new QueryParseException(
-            $"Unsupported ternary expression type: {ternary.TernaryExpressionType}");
-    }
-
-    // ── SELECT element conversion ────────────────────────────────────
-
-    private static ISqlSelectColumn ConvertSelectElement(SelectElement element)
-    {
-        return element switch
-        {
-            SelectStarExpression star =>
-                ConvertSelectStar(star),
-
-            SelectScalarExpression scalar =>
-                ConvertSelectScalar(scalar),
-
-            _ => throw new QueryParseException(
-                $"Unsupported SELECT element type: {element.GetType().Name}")
-        };
-    }
-
-    private static SqlColumnRef ConvertSelectStar(SelectStarExpression star)
-    {
-        string? tableName = null;
-        if (star.Qualifier != null && star.Qualifier.Identifiers.Count > 0)
-        {
-            tableName = star.Qualifier.Identifiers[star.Qualifier.Identifiers.Count - 1].Value;
-        }
-        return SqlColumnRef.Wildcard(tableName);
-    }
-
-    private static ISqlSelectColumn ConvertSelectScalar(SelectScalarExpression scalar)
-    {
-        var alias = scalar.ColumnName?.Value;
-
-        if (scalar.Expression is ColumnReferenceExpression colRef
-            && colRef.ColumnType != ColumnType.Wildcard)
-        {
-            var converted = ConvertColumnRef(colRef);
-            return new SqlColumnRef(converted.TableName, converted.ColumnName, alias, false);
-        }
-
-        if (scalar.Expression is FunctionCall funcCall && funcCall.OverClause == null)
-        {
-            var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-            if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
-            {
-                return ConvertAggregateColumn(funcCall, alias);
-            }
-        }
-
-        var expression = ConvertExpression(scalar.Expression);
-        return new SqlComputedColumn(expression, alias);
-    }
-
-    private static SqlAggregateColumn ConvertAggregateColumn(FunctionCall funcCall, string? alias)
-    {
-        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-        var aggFunc = funcName switch
-        {
-            "COUNT" => SqlAggregateFunction.Count,
-            "SUM" => SqlAggregateFunction.Sum,
-            "AVG" => SqlAggregateFunction.Avg,
-            "MIN" => SqlAggregateFunction.Min,
-            "MAX" => SqlAggregateFunction.Max,
-            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
-            "VAR" or "VARP" => SqlAggregateFunction.Var,
-            _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
-        };
-
-        var isDistinct = funcCall.UniqueRowFilter == UniqueRowFilter.Distinct;
-        SqlColumnRef? column = null;
-
-        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
-        {
-            var firstParam = funcCall.Parameters[0];
-            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
-            {
-                column = null; // COUNT(*)
-            }
-            else if (firstParam is ColumnReferenceExpression paramCol)
-            {
-                column = ConvertColumnRef(paramCol);
-            }
-            else
-            {
-                column = null;
-            }
-        }
-
-        return new SqlAggregateColumn(aggFunc, column, isDistinct, alias);
-    }
-
-    // ── Statement conversion ─────────────────────────────────────────
-
-    private static SqlSelectStatement ConvertSelectStatement(QuerySpecification querySpec)
-    {
-        var columns = new List<ISqlSelectColumn>();
-        foreach (var elem in querySpec.SelectElements)
-        {
-            columns.Add(ConvertSelectElement(elem));
-        }
-
-        var from = ConvertFromClause(querySpec.FromClause);
-        var joins = ConvertJoins(querySpec.FromClause);
-
-        ISqlCondition? where = null;
-        if (querySpec.WhereClause?.SearchCondition != null)
-        {
-            where = ConvertBooleanExpression(querySpec.WhereClause.SearchCondition);
-        }
-
-        var selectOrderBy = new List<SqlOrderByItem>();
-
-        int? top = null;
-        if (querySpec.TopRowFilter != null && querySpec.TopRowFilter.Expression is IntegerLiteral topLit)
-        {
-            if (int.TryParse(topLit.Value, out var topVal))
-            {
-                top = topVal;
-            }
-        }
-
-        var distinct = querySpec.UniqueRowFilter == UniqueRowFilter.Distinct;
-
-        var groupBy = new List<SqlColumnRef>();
-        var groupByExpressions = new List<ISqlExpression>();
-        if (querySpec.GroupByClause?.GroupingSpecifications != null)
-        {
-            foreach (var groupSpec in querySpec.GroupByClause.GroupingSpecifications)
-            {
-                if (groupSpec is ExpressionGroupingSpecification exprGroup)
-                {
-                    if (exprGroup.Expression is ColumnReferenceExpression groupCol)
-                    {
-                        groupBy.Add(ConvertColumnRef(groupCol));
-                    }
-                    else
-                    {
-                        groupByExpressions.Add(ConvertExpression(exprGroup.Expression));
-                    }
-                }
-            }
-        }
-
-        ISqlCondition? having = null;
-        if (querySpec.HavingClause?.SearchCondition != null)
-        {
-            having = ConvertBooleanExpression(querySpec.HavingClause.SearchCondition);
-        }
-
-        return new SqlSelectStatement(
-            columns, from, joins, where, selectOrderBy, top, distinct, groupBy, having,
-            sourcePosition: 0, groupByExpressions: groupByExpressions);
-    }
-
-    // ── FROM / JOIN conversion ───────────────────────────────────────
-
-    private static SqlTableRef ConvertFromClause(FromClause? fromClause)
-    {
-        if (fromClause == null || fromClause.TableReferences.Count == 0)
-        {
-            throw new QueryParseException("FROM clause is required.");
-        }
-
-        return ExtractPrimaryTable(fromClause.TableReferences[0]);
-    }
-
-    private static SqlTableRef ExtractPrimaryTable(TableReference tableRef)
-    {
-        return tableRef switch
-        {
-            NamedTableReference named => ConvertNamedTable(named),
-            QualifiedJoin join => ExtractPrimaryTable(join.FirstTableReference),
-            _ => throw new QueryParseException(
-                $"Unsupported table reference type: {tableRef.GetType().Name}")
-        };
-    }
-
-    private static SqlTableRef ConvertNamedTable(NamedTableReference named)
-    {
-        var tableName = GetMultiPartName(named.SchemaObject);
-        var alias = named.Alias?.Value;
-        return new SqlTableRef(tableName, alias);
-    }
-
-    private static List<SqlJoin> ConvertJoins(FromClause? fromClause)
-    {
-        var joins = new List<SqlJoin>();
-        if (fromClause == null) return joins;
-
-        foreach (var tableRef in fromClause.TableReferences)
-        {
-            CollectJoins(tableRef, joins);
-        }
-
-        return joins;
-    }
-
-    private static void CollectJoins(TableReference tableRef, List<SqlJoin> joins)
-    {
-        if (tableRef is QualifiedJoin qualifiedJoin)
-        {
-            CollectJoins(qualifiedJoin.FirstTableReference, joins);
-
-            var joinType = qualifiedJoin.QualifiedJoinType switch
-            {
-                QualifiedJoinType.Inner => SqlJoinType.Inner,
-                QualifiedJoinType.LeftOuter => SqlJoinType.Left,
-                QualifiedJoinType.RightOuter => SqlJoinType.Right,
-                QualifiedJoinType.FullOuter => SqlJoinType.Left,
-                _ => SqlJoinType.Inner
-            };
-
-            SqlTableRef joinedTable;
-            if (qualifiedJoin.SecondTableReference is NamedTableReference joinNamed)
-            {
-                joinedTable = ConvertNamedTable(joinNamed);
-            }
-            else
-            {
-                CollectJoins(qualifiedJoin.SecondTableReference, joins);
-                return;
-            }
-
-            if (qualifiedJoin.SearchCondition is BooleanComparisonExpression onCondition
-                && onCondition.FirstExpression is ColumnReferenceExpression leftOnCol
-                && onCondition.SecondExpression is ColumnReferenceExpression rightOnCol)
-            {
-                joins.Add(new SqlJoin(
-                    joinType,
-                    joinedTable,
-                    ConvertColumnRef(leftOnCol),
-                    ConvertColumnRef(rightOnCol)));
-            }
-            else
-            {
-                var colRefs = new List<ColumnReferenceExpression>();
-                ExtractColumnRefsFromBoolExpr(qualifiedJoin.SearchCondition, colRefs);
-
-                if (colRefs.Count >= 2)
-                {
-                    joins.Add(new SqlJoin(
-                        joinType,
-                        joinedTable,
-                        ConvertColumnRef(colRefs[0]),
-                        ConvertColumnRef(colRefs[1])));
-                }
-                else
-                {
-                    throw new QueryParseException(
-                        "JOIN ON clause must reference at least two columns.");
-                }
-            }
-        }
-    }
-
-    private static void ExtractColumnRefsFromBoolExpr(
-        BooleanExpression boolExpr, List<ColumnReferenceExpression> refs)
-    {
-        switch (boolExpr)
-        {
-            case BooleanComparisonExpression comp:
-                if (comp.FirstExpression is ColumnReferenceExpression left) refs.Add(left);
-                if (comp.SecondExpression is ColumnReferenceExpression right) refs.Add(right);
-                break;
-            case BooleanBinaryExpression bin:
-                ExtractColumnRefsFromBoolExpr(bin.FirstExpression, refs);
-                ExtractColumnRefsFromBoolExpr(bin.SecondExpression, refs);
-                break;
-            case BooleanParenthesisExpression paren:
-                ExtractColumnRefsFromBoolExpr(paren.Expression, refs);
-                break;
-        }
-    }
-
-    // ── Column reference conversion ──────────────────────────────────
-
-    private static SqlColumnRef ConvertColumnRef(ColumnReferenceExpression colRef)
-    {
-        if (colRef.ColumnType == ColumnType.Wildcard)
-        {
-            return SqlColumnRef.Wildcard();
-        }
-
-        var identifiers = colRef.MultiPartIdentifier?.Identifiers;
-        if (identifiers == null || identifiers.Count == 0)
-        {
-            return SqlColumnRef.Simple("*");
-        }
-
-        if (identifiers.Count == 1)
-        {
-            return SqlColumnRef.Simple(identifiers[0].Value);
-        }
-
-        var tableName = identifiers[identifiers.Count - 2].Value;
-        var columnName = identifiers[identifiers.Count - 1].Value;
-        return SqlColumnRef.Qualified(tableName, columnName);
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    //  ScriptDom utility helpers
+    // ═══════════════════════════════════════════════════════════════════
 
     private static string GetScriptDomColumnName(ColumnReferenceExpression colRef)
     {
@@ -3215,7 +2187,20 @@ public sealed class ExecutionPlanBuilder
         return ids[ids.Count - 1].Value;
     }
 
-    // ── UNION flattening ─────────────────────────────────────────────
+    private static string GetMultiPartName(SchemaObjectName schemaObject)
+    {
+        var parts = new List<string>();
+        if (schemaObject.SchemaIdentifier != null)
+        {
+            parts.Add(schemaObject.SchemaIdentifier.Value);
+        }
+        if (schemaObject.BaseIdentifier != null)
+        {
+            parts.Add(schemaObject.BaseIdentifier.Value);
+        }
+
+        return parts.Count > 0 ? string.Join(".", parts) : "unknown";
+    }
 
     private static void FlattenUnion(
         BinaryQueryExpression binaryQuery,
@@ -3241,128 +2226,5 @@ public sealed class ExecutionPlanBuilder
         {
             queries.Add(rightSpec);
         }
-    }
-
-    // ── Literal & type utilities ─────────────────────────────────────
-
-    private static bool IsLiteralExpression(ScalarExpression expr)
-    {
-        return expr is IntegerLiteral or NumericLiteral or RealLiteral or MoneyLiteral
-            or StringLiteral or NullLiteral;
-    }
-
-    private static SqlLiteral ExtractLiteral(ScalarExpression expr)
-    {
-        return expr switch
-        {
-            IntegerLiteral intLit => SqlLiteral.Number(intLit.Value),
-            NumericLiteral numLit => SqlLiteral.Number(numLit.Value),
-            RealLiteral realLit => SqlLiteral.Number(realLit.Value),
-            MoneyLiteral moneyLit => SqlLiteral.Number(moneyLit.Value),
-            StringLiteral strLit => SqlLiteral.String(strLit.Value),
-            NullLiteral => SqlLiteral.Null(),
-            _ => SqlLiteral.String(expr.ToString() ?? "")
-        };
-    }
-
-    private static string ExtractStringValue(ScalarExpression expr)
-    {
-        return expr switch
-        {
-            StringLiteral strLit => strLit.Value,
-            IntegerLiteral intLit => intLit.Value,
-            _ => expr.ToString() ?? ""
-        };
-    }
-
-    private static string FormatDataType(DataTypeReference dataType)
-    {
-        if (dataType is SqlDataTypeReference sqlType)
-        {
-            var name = sqlType.SqlDataTypeOption.ToString().ToLowerInvariant();
-            if (sqlType.Parameters.Count > 0)
-            {
-                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
-                return $"{name}({parms})";
-            }
-            return name;
-        }
-
-        if (dataType is XmlDataTypeReference)
-            return "xml";
-
-        if (dataType.Name?.Identifiers != null && dataType.Name.Identifiers.Count > 0)
-        {
-            return string.Join(".", dataType.Name.Identifiers.Select(i => i.Value));
-        }
-
-        return "varchar";
-    }
-
-    private static string GetMultiPartName(SchemaObjectName schemaObject)
-    {
-        var parts = new List<string>();
-        if (schemaObject.SchemaIdentifier != null)
-        {
-            parts.Add(schemaObject.SchemaIdentifier.Value);
-        }
-        if (schemaObject.BaseIdentifier != null)
-        {
-            parts.Add(schemaObject.BaseIdentifier.Value);
-        }
-
-        return parts.Count > 0 ? string.Join(".", parts) : "unknown";
-    }
-
-    // ── Operator conversion ──────────────────────────────────────────
-
-    private static SqlComparisonOperator ConvertComparisonOperator(BooleanComparisonType type)
-    {
-        return type switch
-        {
-            BooleanComparisonType.Equals => SqlComparisonOperator.Equal,
-            BooleanComparisonType.NotEqualToBrackets => SqlComparisonOperator.NotEqual,
-            BooleanComparisonType.NotEqualToExclamation => SqlComparisonOperator.NotEqual,
-            BooleanComparisonType.LessThan => SqlComparisonOperator.LessThan,
-            BooleanComparisonType.GreaterThan => SqlComparisonOperator.GreaterThan,
-            BooleanComparisonType.LessThanOrEqualTo => SqlComparisonOperator.LessThanOrEqual,
-            BooleanComparisonType.GreaterThanOrEqualTo => SqlComparisonOperator.GreaterThanOrEqual,
-            _ => SqlComparisonOperator.Equal
-        };
-    }
-
-    private static SqlComparisonOperator ReverseOperator(SqlComparisonOperator op)
-    {
-        return op switch
-        {
-            SqlComparisonOperator.LessThan => SqlComparisonOperator.GreaterThan,
-            SqlComparisonOperator.GreaterThan => SqlComparisonOperator.LessThan,
-            SqlComparisonOperator.LessThanOrEqual => SqlComparisonOperator.GreaterThanOrEqual,
-            SqlComparisonOperator.GreaterThanOrEqual => SqlComparisonOperator.LessThanOrEqual,
-            _ => op
-        };
-    }
-
-    private static SqlBinaryOperator ConvertBinaryOperator(BinaryExpressionType type)
-    {
-        return type switch
-        {
-            BinaryExpressionType.Add => SqlBinaryOperator.Add,
-            BinaryExpressionType.Subtract => SqlBinaryOperator.Subtract,
-            BinaryExpressionType.Multiply => SqlBinaryOperator.Multiply,
-            BinaryExpressionType.Divide => SqlBinaryOperator.Divide,
-            BinaryExpressionType.Modulo => SqlBinaryOperator.Modulo,
-            _ => SqlBinaryOperator.Add
-        };
-    }
-
-    private static SqlUnaryOperator ConvertUnaryOperator(UnaryExpressionType type)
-    {
-        return type switch
-        {
-            UnaryExpressionType.Negative => SqlUnaryOperator.Negate,
-            UnaryExpressionType.Positive => SqlUnaryOperator.Negate,
-            _ => SqlUnaryOperator.Negate
-        };
     }
 }

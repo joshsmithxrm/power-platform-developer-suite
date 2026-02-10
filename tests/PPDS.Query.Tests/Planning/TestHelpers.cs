@@ -2,9 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using Moq;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Query.Tests.Planning;
 
@@ -19,23 +17,8 @@ internal static class TestHelpers
     public static QueryPlanContext CreateTestContext()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
-        var mockEvaluator = new Mock<IExpressionEvaluator>();
 
-        // Set up the evaluator to handle column expressions
-        mockEvaluator
-            .Setup(e => e.Evaluate(It.IsAny<ISqlExpression>(), It.IsAny<IReadOnlyDictionary<string, QueryValue>>()))
-            .Returns((ISqlExpression expr, IReadOnlyDictionary<string, QueryValue> row) =>
-            {
-                if (expr is SqlColumnExpression colExpr)
-                {
-                    var colName = colExpr.Column.GetFullName();
-                    if (row.TryGetValue(colName, out var qv))
-                        return qv.Value;
-                }
-                return null;
-            });
-
-        return new QueryPlanContext(mockExecutor.Object, mockEvaluator.Object);
+        return new QueryPlanContext(mockExecutor.Object);
     }
 
     /// <summary>

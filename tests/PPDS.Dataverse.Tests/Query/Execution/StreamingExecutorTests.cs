@@ -19,7 +19,7 @@ public class StreamingExecutorTests
     private static QueryPlanContext CreateContext(CancellationToken cancellationToken = default)
     {
         var mockQueryExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockQueryExecutor.Object, new ExpressionEvaluator(), cancellationToken);
+        return new QueryPlanContext(mockQueryExecutor.Object, cancellationToken);
     }
 
     /// <summary>

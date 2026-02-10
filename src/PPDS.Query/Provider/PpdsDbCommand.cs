@@ -7,7 +7,6 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
@@ -132,7 +131,6 @@ public sealed class PpdsDbCommand : DbCommand
         {
             var context = new QueryPlanContext(
                 executor,
-                new NullExpressionEvaluator(),
                 CancellationToken.None);
 
             var planExecutor = new PlanExecutor();
@@ -166,7 +164,6 @@ public sealed class PpdsDbCommand : DbCommand
         {
             var context = new QueryPlanContext(
                 executor,
-                new NullExpressionEvaluator(),
                 CancellationToken.None);
 
             var planExecutor = new PlanExecutor();
@@ -282,25 +279,4 @@ public sealed class PpdsDbCommand : DbCommand
         }
     }
 
-    /// <summary>
-    /// A no-op expression evaluator for plan execution context.
-    /// </summary>
-    private sealed class NullExpressionEvaluator : IExpressionEvaluator
-    {
-        public VariableScope? VariableScope { get; set; }
-
-        public object? Evaluate(
-            ISqlExpression expression,
-            IReadOnlyDictionary<string, QueryValue> row)
-        {
-            return null;
-        }
-
-        public bool EvaluateCondition(
-            ISqlCondition condition,
-            IReadOnlyDictionary<string, QueryValue> row)
-        {
-            return true;
-        }
-    }
 }

@@ -17,9 +17,8 @@ public class WindowFrameTests
     public WindowFrameTests()
     {
         var mockExecutor = new Moq.Mock<IQueryExecutor>();
-        var mockEvaluator = new Moq.Mock<IExpressionEvaluator>();
 
-        _context = new QueryPlanContext(mockExecutor.Object, mockEvaluator.Object);
+        _context = new QueryPlanContext(mockExecutor.Object);
     }
 
     // ────────────────────────────────────────────

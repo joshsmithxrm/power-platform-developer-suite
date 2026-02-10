@@ -7,15 +7,12 @@ using PPDS.Dataverse.Query.Execution;
 namespace PPDS.Dataverse.Query.Planning;
 
 /// <summary>
-/// Shared context for plan execution: pool, evaluator, cancellation, statistics.
+/// Shared context for plan execution: pool, cancellation, statistics.
 /// </summary>
 public sealed class QueryPlanContext
 {
     /// <summary>Connection pool for executing FetchXML queries.</summary>
     public IQueryExecutor QueryExecutor { get; }
-
-    /// <summary>Expression evaluator for client-side computation.</summary>
-    public IExpressionEvaluator ExpressionEvaluator { get; }
 
     /// <summary>Cancellation token for the entire plan execution.</summary>
     public CancellationToken CancellationToken { get; }
@@ -41,7 +38,6 @@ public sealed class QueryPlanContext
     /// <summary>Initializes a new instance of the <see cref="QueryPlanContext"/> class.</summary>
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
-        IExpressionEvaluator expressionEvaluator,
         CancellationToken cancellationToken = default,
         QueryPlanStatistics? statistics = null,
         IQueryProgressReporter? progressReporter = null,
@@ -51,7 +47,6 @@ public sealed class QueryPlanContext
         VariableScope? variableScope = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
-        ExpressionEvaluator = expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
         CancellationToken = cancellationToken;
         Statistics = statistics ?? new QueryPlanStatistics();
         ProgressReporter = progressReporter;

@@ -6,7 +6,7 @@ using System.Threading;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Query.Planning.Nodes;
 
 namespace PPDS.Query.Planning.Nodes;
 
@@ -164,17 +164,17 @@ public sealed class MergeWhenMatched
     public MergeAction Action { get; }
 
     /// <summary>For UPDATE: the SET clauses to apply.</summary>
-    public IReadOnlyList<SqlSetClause>? SetClauses { get; }
+    public IReadOnlyList<CompiledSetClause>? SetClauses { get; }
 
     /// <summary>Initializes a WHEN MATCHED THEN UPDATE.</summary>
-    public static MergeWhenMatched Update(IReadOnlyList<SqlSetClause> setClauses)
+    public static MergeWhenMatched Update(IReadOnlyList<CompiledSetClause> setClauses)
         => new(MergeAction.Update, setClauses);
 
     /// <summary>Initializes a WHEN MATCHED THEN DELETE.</summary>
     public static MergeWhenMatched Delete()
         => new(MergeAction.Delete, null);
 
-    private MergeWhenMatched(MergeAction action, IReadOnlyList<SqlSetClause>? setClauses)
+    private MergeWhenMatched(MergeAction action, IReadOnlyList<CompiledSetClause>? setClauses)
     {
         Action = action;
         SetClauses = setClauses;
@@ -193,15 +193,15 @@ public sealed class MergeWhenNotMatched
     public IReadOnlyList<string>? Columns { get; }
 
     /// <summary>For INSERT: the value expressions.</summary>
-    public IReadOnlyList<ISqlExpression>? Values { get; }
+    public IReadOnlyList<CompiledScalarExpression>? Values { get; }
 
     /// <summary>Initializes a WHEN NOT MATCHED THEN INSERT.</summary>
     public static MergeWhenNotMatched Insert(
         IReadOnlyList<string>? columns = null,
-        IReadOnlyList<ISqlExpression>? values = null)
+        IReadOnlyList<CompiledScalarExpression>? values = null)
         => new(columns, values);
 
-    private MergeWhenNotMatched(IReadOnlyList<string>? columns, IReadOnlyList<ISqlExpression>? values)
+    private MergeWhenNotMatched(IReadOnlyList<string>? columns, IReadOnlyList<CompiledScalarExpression>? values)
     {
         Action = MergeAction.Insert;
         Columns = columns;
