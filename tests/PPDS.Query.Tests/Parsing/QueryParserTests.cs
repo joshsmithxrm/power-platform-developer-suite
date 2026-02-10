@@ -347,4 +347,48 @@ public class QueryParserTests
 
         type.Should().Be(typeof(InsertStatement));
     }
+
+    // ────────────────────────────────────────────
+    //  Missing whitespace hints in error messages
+    // ────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(
+        "SELECT name FROM accountWHERE name IS NOT NULL",
+        "accountWHERE", "account WHERE")]
+    [InlineData(
+        "SELECT name, COUNT(*) AS cnt FROM account GROUP BY nameHAVING COUNT(*) > 1",
+        "nameHAVING", "name HAVING")]
+    [InlineData(
+        "SELECT name FROM accountORDER BY name",
+        "accountORDER", "account ORDER")]
+    public void Parse_MissingWhitespace_ErrorMessageContainsHint(
+        string sql, string concatenated, string suggested)
+    {
+        var act = () => _parser.Parse(sql);
+
+        var ex = act.Should().Throw<QueryParseException>().Which;
+        ex.Message.Should().Contain(concatenated);
+        ex.Message.Should().Contain(suggested);
+    }
+
+    [Fact]
+    public void Parse_ValidSql_NoHintInMessage()
+    {
+        // Valid SQL should not throw at all — no hint needed
+        var fragment = _parser.Parse(
+            "SELECT name FROM account WHERE name IS NOT NULL");
+
+        fragment.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Parse_InvalidSqlWithoutConcatenation_NoWhitespaceHint()
+    {
+        // Typo, but no keyword concatenated with identifier
+        var act = () => _parser.Parse("SELECTT name FROM account");
+
+        var ex = act.Should().Throw<QueryParseException>().Which;
+        ex.Message.Should().NotContain("Hint:");
+    }
 }

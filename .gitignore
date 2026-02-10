@@ -82,3 +82,4 @@ states.json
 # Git worktrees
 .worktrees/
 .muse/
+.dotnet
