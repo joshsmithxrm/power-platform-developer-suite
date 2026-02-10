@@ -6,7 +6,7 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Query.Parsing;
 
 namespace PPDS.Cli.Commands.Query;
 
@@ -265,11 +265,14 @@ public static class SqlCommand
 
             return ExitCodes.Success;
         }
-        catch (SqlParseException ex)
+        catch (QueryParseException ex)
         {
-            var details = globalOptions.Debug
-                ? $"Line {ex.Line}, Column {ex.Column}, Position {ex.Position}\nContext: {ex.ContextSnippet}"
-                : null;
+            string? details = null;
+            if (globalOptions.Debug && ex.Errors.Count > 0)
+            {
+                var first = ex.Errors[0];
+                details = $"Line {first.Line}, Column {first.Column}: {first.Message}";
+            }
 
             var error = StructuredError.Create(
                 "SQL_PARSE_ERROR",
