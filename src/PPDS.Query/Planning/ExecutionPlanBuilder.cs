@@ -205,14 +205,13 @@ public sealed class ExecutionPlanBuilder
             rootNode = new PrefetchScanNode(rootNode, options.PrefetchBufferSize);
         }
 
-        // Expression conditions in WHERE (still requires legacy AST for client-side filter)
+        // Expression conditions in WHERE — compiled directly from ScriptDom
         {
-            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
-            var clientWhereCondition = ExtractExpressionConditions(legacySelect.Where);
-            if (clientWhereCondition != null)
+            var clientFilter = ExtractClientSideWhereFilter(querySpec.WhereClause?.SearchCondition);
+            if (clientFilter != null)
             {
-                var predicate = CompileLegacyCondition(clientWhereCondition);
-                var description = DescribeLegacyCondition(clientWhereCondition);
+                var predicate = _expressionCompiler.CompilePredicate(clientFilter);
+                var description = clientFilter.ToString() ?? "WHERE (client)";
                 rootNode = new ClientFilterNode(rootNode, predicate, description);
             }
         }
@@ -225,18 +224,16 @@ public sealed class ExecutionPlanBuilder
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
-        // Window functions (still requires legacy AST for BuildWindowNode)
+        // Window functions (compiled directly from ScriptDom)
         if (HasWindowFunctionsInQuerySpec(querySpec))
         {
-            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
-            rootNode = BuildWindowNode(rootNode, legacySelect.Columns);
+            rootNode = BuildWindowNodeFromScriptDom(rootNode, querySpec);
         }
 
-        // Computed columns (CASE/IIF expressions) (still requires legacy AST for BuildProjectNode)
+        // Computed columns (CASE/IIF expressions) — compiled directly from ScriptDom
         if (HasComputedColumnsInQuerySpec(querySpec))
         {
-            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
-            rootNode = BuildProjectNode(rootNode, legacySelect.Columns);
+            rootNode = BuildProjectNodeFromScriptDom(rootNode, querySpec);
         }
 
         // OFFSET/FETCH paging
@@ -1632,6 +1629,106 @@ public sealed class ExecutionPlanBuilder
     }
 
     /// <summary>
+    /// Extracts the portion of a ScriptDom WHERE clause that requires client-side evaluation.
+    /// Returns the BooleanExpression that needs client-side filtering, or null if everything
+    /// can be pushed to FetchXML. Expression-to-expression comparisons (e.g., WHERE col1 > col2,
+    /// WHERE revenue * 0.1 > cost) cannot be represented in FetchXML and must be evaluated
+    /// on the client.
+    /// </summary>
+    private static BooleanExpression? ExtractClientSideWhereFilter(BooleanExpression? where)
+    {
+        if (where is null) return null;
+
+        // A comparison where both sides are non-literal expressions needs client evaluation
+        if (IsExpressionComparison(where)) return where;
+
+        // For AND: extract only the parts that need client-side evaluation
+        if (where is BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } andExpr)
+        {
+            var leftClient = ExtractClientSideWhereFilter(andExpr.FirstExpression);
+            var rightClient = ExtractClientSideWhereFilter(andExpr.SecondExpression);
+
+            if (leftClient != null && rightClient != null)
+            {
+                // Both sides have client conditions — keep the AND
+                return where;
+            }
+            return leftClient ?? rightClient;
+        }
+
+        // For OR: if any part needs client-side, the whole OR needs client-side
+        if (where is BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.Or } orExpr)
+        {
+            if (ContainsExpressionComparison(orExpr.FirstExpression)
+                || ContainsExpressionComparison(orExpr.SecondExpression))
+            {
+                return where;
+            }
+            return null;
+        }
+
+        // Parenthesized expression — recurse
+        if (where is BooleanParenthesisExpression parenExpr)
+        {
+            return ExtractClientSideWhereFilter(parenExpr.Expression);
+        }
+
+        // NOT containing an expression comparison
+        if (where is BooleanNotExpression notExpr
+            && ContainsExpressionComparison(notExpr.Expression))
+        {
+            return where;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true if the BooleanExpression is a comparison where both sides are
+    /// non-literal expressions (e.g., column vs column, expression vs expression).
+    /// These can't be pushed to FetchXML.
+    /// </summary>
+    private static bool IsExpressionComparison(BooleanExpression expr)
+    {
+        if (expr is not BooleanComparisonExpression comp) return false;
+
+        // If both sides are non-literal, it's an expression condition
+        return !IsSimpleLiteral(comp.FirstExpression) && !IsSimpleLiteral(comp.SecondExpression);
+    }
+
+    /// <summary>
+    /// Returns true if the scalar expression is a simple literal value (string, number, null)
+    /// or a variable reference — values that FetchXML can handle in condition comparisons.
+    /// </summary>
+    private static bool IsSimpleLiteral(ScalarExpression expr)
+    {
+        return expr is IntegerLiteral
+            or StringLiteral
+            or NullLiteral
+            or NumericLiteral
+            or RealLiteral
+            or MoneyLiteral
+            or VariableReference
+            or GlobalVariableExpression;
+    }
+
+    /// <summary>
+    /// Recursively checks whether a BooleanExpression contains any expression-to-expression comparisons.
+    /// </summary>
+    private static bool ContainsExpressionComparison(BooleanExpression expr)
+    {
+        return expr switch
+        {
+            BooleanComparisonExpression => IsExpressionComparison(expr),
+            BooleanBinaryExpression bin => ContainsExpressionComparison(bin.FirstExpression)
+                                          || ContainsExpressionComparison(bin.SecondExpression),
+            BooleanParenthesisExpression paren => ContainsExpressionComparison(paren.Expression),
+            BooleanNotExpression not => ContainsExpressionComparison(not.Expression),
+            _ => false
+        };
+    }
+
+    /// <summary>
     /// Checks whether the SELECT list contains any computed columns (CASE/IIF expressions),
     /// excluding window function expressions.
     /// </summary>
@@ -1754,98 +1851,170 @@ public sealed class ExecutionPlanBuilder
     }
 
     /// <summary>
-    /// Builds a ClientWindowNode that computes window function values.
+    /// Builds a ClientWindowNode from ScriptDom <see cref="QuerySpecification"/> select elements.
+    /// Iterates SelectElements looking for FunctionCall expressions with an OverClause,
+    /// compiling operand, partition-by, and order-by into executable delegates.
     /// </summary>
-    private static ClientWindowNode BuildWindowNode(
-        IQueryPlanNode input, IReadOnlyList<ISqlSelectColumn> columns)
+    private IQueryPlanNode BuildWindowNodeFromScriptDom(IQueryPlanNode input, QuerySpecification querySpec)
     {
         var windows = new List<Dataverse.Query.Planning.Nodes.WindowDefinition>();
 
-        foreach (var column in columns)
+        foreach (var element in querySpec.SelectElements)
         {
-            if (column is SqlComputedColumn { Expression: SqlWindowExpression windowExpr } computed)
+            if (element is not SelectScalarExpression { Expression: FunctionCall funcCall } scalar
+                || funcCall.OverClause == null)
             {
-                var outputName = computed.Alias ?? "window_" + windows.Count;
-
-                // Compile operand
-                CompiledScalarExpression? compiledOperand = null;
-                if (windowExpr.Operand != null)
-                {
-                    compiledOperand = CompileLegacyExpression(windowExpr.Operand);
-                }
-
-                // Compile partition-by expressions
-                IReadOnlyList<CompiledScalarExpression>? compiledPartitionBy = null;
-                if (windowExpr.PartitionBy != null && windowExpr.PartitionBy.Count > 0)
-                {
-                    var partList = new List<CompiledScalarExpression>(windowExpr.PartitionBy.Count);
-                    foreach (var partExpr in windowExpr.PartitionBy)
-                    {
-                        partList.Add(CompileLegacyExpression(partExpr));
-                    }
-                    compiledPartitionBy = partList;
-                }
-
-                // Compile order-by items
-                IReadOnlyList<Dataverse.Query.Planning.Nodes.CompiledOrderByItem>? compiledOrderBy = null;
-                if (windowExpr.OrderBy != null && windowExpr.OrderBy.Count > 0)
-                {
-                    var orderList = new List<Dataverse.Query.Planning.Nodes.CompiledOrderByItem>(windowExpr.OrderBy.Count);
-                    foreach (var orderItem in windowExpr.OrderBy)
-                    {
-                        var colName = orderItem.Column.GetFullName();
-                        var compiledVal = CompileLegacyExpression(
-                            new SqlColumnExpression(orderItem.Column));
-                        orderList.Add(new Dataverse.Query.Planning.Nodes.CompiledOrderByItem(
-                            colName, compiledVal, orderItem.Direction == SqlSortDirection.Descending));
-                    }
-                    compiledOrderBy = orderList;
-                }
-
-                windows.Add(new Dataverse.Query.Planning.Nodes.WindowDefinition(
-                    outputName,
-                    windowExpr.FunctionName,
-                    compiledOperand,
-                    compiledPartitionBy,
-                    compiledOrderBy,
-                    windowExpr.IsCountStar));
+                continue;
             }
+
+            var functionName = funcCall.FunctionName.Value;
+
+            // Detect COUNT(*): parameter is a ColumnReferenceExpression with Wildcard type
+            var isCountStar = false;
+            CompiledScalarExpression? compiledOperand = null;
+
+            if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
+            {
+                var firstParam = funcCall.Parameters[0];
+                if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
+                {
+                    isCountStar = true;
+                }
+                else
+                {
+                    compiledOperand = _expressionCompiler.CompileScalar(firstParam);
+                }
+            }
+            else if (functionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase))
+            {
+                // COUNT with no parameters treated as COUNT(*)
+                isCountStar = true;
+            }
+
+            // Compile partition-by expressions
+            IReadOnlyList<CompiledScalarExpression>? compiledPartitionBy = null;
+            if (funcCall.OverClause.Partitions != null && funcCall.OverClause.Partitions.Count > 0)
+            {
+                var partList = new List<CompiledScalarExpression>(funcCall.OverClause.Partitions.Count);
+                foreach (var partExpr in funcCall.OverClause.Partitions)
+                {
+                    partList.Add(_expressionCompiler.CompileScalar(partExpr));
+                }
+                compiledPartitionBy = partList;
+            }
+
+            // Compile order-by items
+            IReadOnlyList<CompiledOrderByItem>? compiledOrderBy = null;
+            if (funcCall.OverClause.OrderByClause?.OrderByElements != null
+                && funcCall.OverClause.OrderByClause.OrderByElements.Count > 0)
+            {
+                var orderList = new List<CompiledOrderByItem>(
+                    funcCall.OverClause.OrderByClause.OrderByElements.Count);
+                foreach (var orderElem in funcCall.OverClause.OrderByClause.OrderByElements)
+                {
+                    // Extract column name for value lookup in ClientWindowNode
+                    string colName;
+                    if (orderElem.Expression is ColumnReferenceExpression orderCol)
+                    {
+                        colName = GetScriptDomColumnName(orderCol);
+                    }
+                    else
+                    {
+                        colName = orderElem.Expression.ToString() ?? "expr";
+                    }
+
+                    var compiledVal = _expressionCompiler.CompileScalar(orderElem.Expression);
+                    var descending = orderElem.SortOrder == SortOrder.Descending;
+                    orderList.Add(new CompiledOrderByItem(colName, compiledVal, descending));
+                }
+                compiledOrderBy = orderList;
+            }
+
+            // Get output column name from alias or function name
+            var outputName = scalar.ColumnName?.Value ?? functionName;
+
+            windows.Add(new Dataverse.Query.Planning.Nodes.WindowDefinition(
+                outputName,
+                functionName,
+                compiledOperand,
+                compiledPartitionBy,
+                compiledOrderBy,
+                isCountStar));
+        }
+
+        if (windows.Count == 0)
+        {
+            return input;
         }
 
         return new ClientWindowNode(input, windows);
     }
 
     /// <summary>
-    /// Builds a ProjectNode that passes through regular columns and evaluates computed columns.
+    /// Builds a ProjectNode from ScriptDom <see cref="QuerySpecification"/> select elements.
+    /// Handles pass-through columns, renames, computed expressions (CASE/IIF/arithmetic),
+    /// and skips window functions (handled by BuildWindowNodeFromScriptDom) and star expressions.
     /// </summary>
-    private static ProjectNode BuildProjectNode(
-        IQueryPlanNode input, IReadOnlyList<ISqlSelectColumn> columns)
+    private IQueryPlanNode BuildProjectNodeFromScriptDom(IQueryPlanNode input, QuerySpecification querySpec)
     {
         var projections = new List<ProjectColumn>();
 
-        foreach (var column in columns)
+        foreach (var element in querySpec.SelectElements)
         {
-            switch (column)
+            switch (element)
             {
-                case SqlColumnRef { IsWildcard: true }:
+                case SelectStarExpression:
+                    // SELECT * — pass-through, no projection needed
                     break;
-                case SqlColumnRef colRef:
-                    var outputName = colRef.Alias ?? colRef.ColumnName;
-                    projections.Add(ProjectColumn.PassThrough(outputName));
+
+                case SelectScalarExpression { Expression: ColumnReferenceExpression colRef } scalar:
+                {
+                    // Simple column reference — pass through or rename
+                    var sourceName = GetScriptDomColumnName(colRef);
+                    var alias = scalar.ColumnName?.Value;
+                    if (alias != null && !string.Equals(alias, sourceName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        projections.Add(ProjectColumn.Rename(sourceName, alias));
+                    }
+                    else
+                    {
+                        projections.Add(ProjectColumn.PassThrough(alias ?? sourceName));
+                    }
                     break;
-                case SqlAggregateColumn agg:
-                    var aggOutput = agg.Alias ?? agg.GetColumnName() ?? "count";
-                    projections.Add(ProjectColumn.PassThrough(aggOutput));
+                }
+
+                case SelectScalarExpression { Expression: FunctionCall func } scalar
+                    when func.OverClause != null:
+                {
+                    // Window function — handled by BuildWindowNodeFromScriptDom, pass through result
+                    var alias = scalar.ColumnName?.Value ?? func.FunctionName.Value;
+                    projections.Add(ProjectColumn.PassThrough(alias));
                     break;
-                case SqlComputedColumn computed when computed.Expression is SqlWindowExpression:
-                    var windowAlias = computed.Alias ?? "window";
-                    projections.Add(ProjectColumn.PassThrough(windowAlias));
+                }
+
+                case SelectScalarExpression { Expression: FunctionCall func } scalar
+                    when IsAggregateFunctionName(func.FunctionName?.Value):
+                {
+                    // Aggregate function (without OVER) — FetchXML handles computation, pass through
+                    var alias = scalar.ColumnName?.Value ?? func.FunctionName?.Value ?? "aggregate";
+                    projections.Add(ProjectColumn.PassThrough(alias));
                     break;
-                case SqlComputedColumn computed:
-                    var compAlias = computed.Alias ?? "computed";
-                    projections.Add(ProjectColumn.Computed(compAlias, CompileLegacyExpression(computed.Expression)));
+                }
+
+                case SelectScalarExpression scalar:
+                {
+                    // Computed expression (CASE, IIF, arithmetic, function without OVER)
+                    var alias = scalar.ColumnName?.Value ?? "computed";
+                    projections.Add(ProjectColumn.Computed(
+                        alias, _expressionCompiler.CompileScalar(scalar.Expression)));
                     break;
+                }
             }
+        }
+
+        if (projections.Count == 0)
+        {
+            return input;
         }
 
         return new ProjectNode(input, projections);
