@@ -7,8 +7,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
-using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
@@ -536,21 +534,6 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             Expression = new IntegerLiteral { Value = topValue.ToString() }
         };
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  Legacy bridge (transitional - removed when DmlSafetyGuard is updated)
-    // ═══════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Parses SQL using the legacy <see cref="SqlParser"/> to get an <see cref="ISqlStatement"/>
-    /// for the <see cref="DmlSafetyGuard"/>. This is a transitional bridge until the guard
-    /// is updated to accept ScriptDom types directly.
-    /// </summary>
-    private static ISqlStatement ParseLegacyStatement(string sql)
-    {
-        var parser = new SqlParser(sql);
-        return parser.ParseStatement();
     }
 
     // ═══════════════════════════════════════════════════════════════════
