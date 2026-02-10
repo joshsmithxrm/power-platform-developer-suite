@@ -54,6 +54,7 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <!-- Override vulnerable transitive dependency from Dataverse.Client (GHSA-555c-2p6r-68mm) -->
+  <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" />
   </ItemGroup>
 
