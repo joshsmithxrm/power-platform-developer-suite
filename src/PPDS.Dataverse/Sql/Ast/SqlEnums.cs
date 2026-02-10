@@ -70,7 +70,13 @@ public enum SqlAggregateFunction
     /// <summary>MIN aggregate.</summary>
     Min,
     /// <summary>MAX aggregate.</summary>
-    Max
+    Max,
+    /// <summary>STDEV (standard deviation) aggregate - client-side only.</summary>
+    Stdev,
+    /// <summary>VAR (variance) aggregate - client-side only.</summary>
+    Var,
+    /// <summary>STRING_AGG aggregate - client-side only.</summary>
+    StringAgg
 }
 
 /// <summary>

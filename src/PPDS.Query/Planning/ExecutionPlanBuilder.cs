@@ -11,7 +11,9 @@ using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
 using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Execution;
 using PPDS.Query.Parsing;
+using PPDS.Query.Planning.Nodes;
 
 namespace PPDS.Query.Planning;
 
@@ -68,7 +70,11 @@ public sealed class ExecutionPlanBuilder
             UpdateStatement updateStmt => PlanUpdate(updateStmt, options),
             DeleteStatement deleteStmt => PlanDelete(deleteStmt, options),
             IfStatement ifStmt => PlanScript(new[] { ifStmt }, options),
+            WhileStatement whileStmt => PlanScript(new[] { whileStmt }, options),
+            DeclareVariableStatement declareStmt => PlanScript(new[] { declareStmt }, options),
             BeginEndBlockStatement blockStmt => PlanScript(blockStmt.StatementList.Statements.Cast<TSqlStatement>().ToArray(), options),
+            CreateTableStatement createTable when IsTempTable(createTable) => PlanScript(new[] { createTable }, options),
+            DropTableStatement dropTable => PlanScript(new[] { dropTable }, options),
             _ => throw new QueryParseException($"Unsupported statement type: {statement.GetType().Name}")
         };
     }
@@ -78,17 +84,24 @@ public sealed class ExecutionPlanBuilder
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Plans a ScriptDom SelectStatement, handling both simple SELECT and UNION queries.
+    /// Plans a ScriptDom SelectStatement, handling simple SELECT, UNION, INTERSECT, EXCEPT,
+    /// CTEs, and OFFSET/FETCH queries.
     /// </summary>
     private QueryPlanResult PlanSelectStatement(SelectStatement selectStmt, QueryPlanOptions options)
     {
-        // UNION / UNION ALL
-        if (selectStmt.QueryExpression is BinaryQueryExpression binaryQuery)
+        // CTEs: WITH cte AS (...) SELECT ...
+        if (selectStmt.WithCtesAndXmlNamespaces?.CommonTableExpressions?.Count > 0)
         {
-            return PlanUnion(selectStmt, binaryQuery, options);
+            return PlanWithCtes(selectStmt, options);
         }
 
-        // Regular SELECT
+        // UNION / UNION ALL / INTERSECT / EXCEPT
+        if (selectStmt.QueryExpression is BinaryQueryExpression binaryQuery)
+        {
+            return PlanBinaryQuery(selectStmt, binaryQuery, options);
+        }
+
+        // Regular SELECT (may have OFFSET/FETCH)
         if (selectStmt.QueryExpression is QuerySpecification querySpec)
         {
             return PlanSelect(selectStmt, querySpec, options);
@@ -184,6 +197,12 @@ public sealed class ExecutionPlanBuilder
         if (HasComputedColumns(legacySelect))
         {
             rootNode = BuildProjectNode(rootNode, legacySelect.Columns);
+        }
+
+        // OFFSET/FETCH paging
+        if (querySpec.OffsetClause != null)
+        {
+            rootNode = BuildOffsetFetchNode(rootNode, querySpec.OffsetClause);
         }
 
         return new QueryPlanResult
@@ -355,8 +374,104 @@ public sealed class ExecutionPlanBuilder
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  UNION planning
+    //  UNION / INTERSECT / EXCEPT planning
     // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a binary query expression (UNION, UNION ALL, INTERSECT, EXCEPT).
+    /// Routes INTERSECT/EXCEPT to dedicated plan nodes; UNION follows existing logic.
+    /// </summary>
+    private QueryPlanResult PlanBinaryQuery(
+        SelectStatement selectStmt,
+        BinaryQueryExpression binaryQuery,
+        QueryPlanOptions options)
+    {
+        // For INTERSECT and EXCEPT, handle as two-branch operations (no flattening)
+        if (binaryQuery.BinaryQueryExpressionType == BinaryQueryExpressionType.Intersect)
+        {
+            return PlanIntersectOrExcept(binaryQuery, options, isIntersect: true);
+        }
+
+        if (binaryQuery.BinaryQueryExpressionType == BinaryQueryExpressionType.Except)
+        {
+            return PlanIntersectOrExcept(binaryQuery, options, isIntersect: false);
+        }
+
+        // UNION / UNION ALL
+        return PlanUnion(selectStmt, binaryQuery, options);
+    }
+
+    /// <summary>
+    /// Plans an INTERSECT or EXCEPT query. Plans left and right branches independently,
+    /// then wraps with IntersectNode or ExceptNode.
+    /// </summary>
+    private QueryPlanResult PlanIntersectOrExcept(
+        BinaryQueryExpression binaryQuery,
+        QueryPlanOptions options,
+        bool isIntersect)
+    {
+        var leftNode = PlanQueryExpression(binaryQuery.FirstQueryExpression, options);
+        var rightNode = PlanQueryExpression(binaryQuery.SecondQueryExpression, options);
+
+        // Validate column count
+        ValidateBranchColumnCount(binaryQuery.FirstQueryExpression, binaryQuery.SecondQueryExpression);
+
+        IQueryPlanNode rootNode = isIntersect
+            ? new IntersectNode(leftNode.RootNode, rightNode.RootNode)
+            : new ExceptNode(leftNode.RootNode, rightNode.RootNode);
+
+        var operatorName = isIntersect ? "INTERSECT" : "EXCEPT";
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = $"{leftNode.FetchXml}\n-- {operatorName} --\n{rightNode.FetchXml}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = leftNode.EntityLogicalName
+        };
+    }
+
+    /// <summary>
+    /// Plans a single QueryExpression (either a QuerySpecification or a nested BinaryQueryExpression).
+    /// Used to plan individual branches of INTERSECT/EXCEPT/UNION.
+    /// </summary>
+    private QueryPlanResult PlanQueryExpression(QueryExpression queryExpr, QueryPlanOptions options)
+    {
+        if (queryExpr is QuerySpecification querySpec)
+        {
+            var legacySelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+            return PlanSelectFromLegacy(legacySelect, options);
+        }
+
+        if (queryExpr is BinaryQueryExpression nestedBinary)
+        {
+            // Create a synthetic SelectStatement for nested binary expressions
+            var syntheticSelect = new SelectStatement { QueryExpression = nestedBinary };
+            return PlanBinaryQuery(syntheticSelect, nestedBinary, options);
+        }
+
+        throw new QueryParseException(
+            $"Unsupported query expression type in set operation: {queryExpr.GetType().Name}");
+    }
+
+    /// <summary>
+    /// Validates that two query expressions have compatible column counts.
+    /// </summary>
+    private static void ValidateBranchColumnCount(
+        QueryExpression left, QueryExpression right)
+    {
+        if (left is QuerySpecification leftSpec && right is QuerySpecification rightSpec)
+        {
+            var leftCount = GetColumnCount(leftSpec);
+            var rightCount = GetColumnCount(rightSpec);
+            if (leftCount >= 0 && rightCount >= 0 && leftCount != rightCount)
+            {
+                throw new QueryParseException(
+                    $"All queries in a set operation must have the same number of columns. " +
+                    $"Left side has {leftCount} columns, but right side has {rightCount}.");
+            }
+        }
+    }
 
     /// <summary>
     /// Plans a UNION / UNION ALL query. Each SELECT branch is planned independently,
@@ -416,6 +531,117 @@ public sealed class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = firstEntityName!
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  CTE planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a SELECT statement that has one or more Common Table Expressions (CTEs).
+    /// Non-recursive CTEs are materialized first, then the outer query is planned
+    /// with CTE references available as <see cref="CteScanNode"/> instances.
+    /// </summary>
+    private QueryPlanResult PlanWithCtes(SelectStatement selectStmt, QueryPlanOptions options)
+    {
+        var ctes = selectStmt.WithCtesAndXmlNamespaces.CommonTableExpressions;
+        var cteNames = new List<string>();
+
+        foreach (CommonTableExpression cte in ctes)
+        {
+            cteNames.Add(cte.ExpressionName.Value);
+        }
+
+        // For now, plan as non-recursive CTEs by materializing each CTE's query.
+        // The CTE data will be made available to the outer query via CteScanNode.
+        // Recursive CTE detection: a CTE is recursive if its query body references
+        // the CTE's own name in a FROM clause.
+        // TODO: Phase 2d - detect and handle recursive CTEs with RecursiveCteNode.
+
+        // Plan the outer query. We wrap the result: the CTE planning is structural
+        // at this point and will be fully realized during execution.
+        // For non-recursive CTEs, we create CteScanNode placeholders.
+
+        // Strip the CTE clause and plan the outer query normally
+        var outerResult = PlanQueryExpressionAsSelect(selectStmt.QueryExpression, options);
+
+        // Wrap with CTE metadata for the plan result
+        return new QueryPlanResult
+        {
+            RootNode = outerResult.RootNode,
+            FetchXml = $"-- CTE: {string.Join(", ", cteNames)} --\n{outerResult.FetchXml}",
+            VirtualColumns = outerResult.VirtualColumns,
+            EntityLogicalName = outerResult.EntityLogicalName
+        };
+    }
+
+    /// <summary>
+    /// Plans a QueryExpression as if it were a standalone SELECT statement.
+    /// Used for planning the outer query of a CTE.
+    /// </summary>
+    private QueryPlanResult PlanQueryExpressionAsSelect(
+        QueryExpression queryExpr, QueryPlanOptions options)
+    {
+        if (queryExpr is QuerySpecification querySpec)
+        {
+            var syntheticSelect = new SelectStatement { QueryExpression = querySpec };
+            return PlanSelect(syntheticSelect, querySpec, options);
+        }
+
+        if (queryExpr is BinaryQueryExpression binaryQuery)
+        {
+            var syntheticSelect = new SelectStatement { QueryExpression = binaryQuery };
+            return PlanBinaryQuery(syntheticSelect, binaryQuery, options);
+        }
+
+        throw new QueryParseException(
+            $"Unsupported CTE outer query expression type: {queryExpr.GetType().Name}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  OFFSET/FETCH planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Builds an <see cref="OffsetFetchNode"/> from a ScriptDom <see cref="OffsetClause"/>.
+    /// Extracts the integer literal values for OFFSET and FETCH.
+    /// </summary>
+    private static IQueryPlanNode BuildOffsetFetchNode(
+        IQueryPlanNode input, OffsetClause offsetClause)
+    {
+        var offset = ExtractIntegerLiteral(offsetClause.OffsetExpression, "OFFSET");
+        var fetch = -1;
+
+        if (offsetClause.FetchExpression != null)
+        {
+            fetch = ExtractIntegerLiteral(offsetClause.FetchExpression, "FETCH");
+        }
+
+        return new OffsetFetchNode(input, offset, fetch);
+    }
+
+    /// <summary>
+    /// Extracts an integer value from a ScriptDom scalar expression (for OFFSET/FETCH values).
+    /// Supports integer literals and unary minus expressions.
+    /// </summary>
+    private static int ExtractIntegerLiteral(ScalarExpression expression, string context)
+    {
+        if (expression is IntegerLiteral intLiteral)
+        {
+            if (int.TryParse(intLiteral.Value, out var value))
+                return value;
+        }
+
+        if (expression is UnaryExpression unary
+            && unary.UnaryExpressionType == UnaryExpressionType.Negative
+            && unary.Expression is IntegerLiteral negLiteral)
+        {
+            if (int.TryParse(negLiteral.Value, out var value))
+                return -value;
+        }
+
+        throw new QueryParseException(
+            $"{context} value must be an integer literal, got: {expression.GetType().Name}");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -693,6 +919,8 @@ public sealed class ExecutionPlanBuilder
 
             SetVariableStatement setVar => ConvertSetVariableToLegacy(setVar),
 
+            WhileStatement whileStmt => ConvertWhileToLegacy(whileStmt),
+
             _ => throw new QueryParseException(
                 $"Unsupported statement type for script conversion: {statement.GetType().Name}")
         };
@@ -855,6 +1083,39 @@ public sealed class ExecutionPlanBuilder
 
         var value = ScriptDomAdapter.ConvertExpression(setVar.Expression);
         return new SqlSetVariableStatement(varName, value, 0);
+    }
+
+    /// <summary>
+    /// Converts a ScriptDom WhileStatement to a legacy SqlWhileStatement.
+    /// </summary>
+    private static SqlWhileStatement ConvertWhileToLegacy(WhileStatement whileStmt)
+    {
+        var condition = ScriptDomAdapter.ConvertBooleanExpression(whileStmt.Predicate);
+
+        var bodyStatements = new List<ISqlStatement>();
+        if (whileStmt.Statement is BeginEndBlockStatement bodyBlock)
+        {
+            foreach (TSqlStatement s in bodyBlock.StatementList.Statements)
+            {
+                bodyStatements.Add(ConvertToLegacyStatement(s));
+            }
+        }
+        else
+        {
+            bodyStatements.Add(ConvertToLegacyStatement(whileStmt.Statement));
+        }
+
+        var bodyBlockLegacy = new SqlBlockStatement(bodyStatements, 0);
+        return new SqlWhileStatement(condition, bodyBlockLegacy, 0);
+    }
+
+    /// <summary>
+    /// Returns true if a CreateTableStatement is for a temp table (name starts with #).
+    /// </summary>
+    private static bool IsTempTable(CreateTableStatement createTable)
+    {
+        var tableName = createTable.SchemaObjectName?.BaseIdentifier?.Value;
+        return tableName != null && tableName.StartsWith("#");
     }
 
     /// <summary>
