@@ -123,20 +123,14 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // DML safety check: validate DELETE/UPDATE/INSERT before execution.
-        // The DmlSafetyGuard uses legacy AST types, so parse again with the old parser
-        // as a transitional bridge until the guard is updated to use ScriptDom types.
         int? dmlRowCap = null;
         DmlSafetyResult? safetyResult = null;
 
         if (request.DmlSafety != null)
         {
-            var legacyStatement = ParseLegacyStatement(request.Sql);
-            if (request.TopOverride.HasValue && legacyStatement is SqlSelectStatement legacySelect)
-            {
-                legacyStatement = legacySelect.WithTop(request.TopOverride.Value);
-            }
+            var firstStatement = ExtractFirstStatement(fragment);
 
-            safetyResult = _dmlSafetyGuard.Check(legacyStatement, request.DmlSafety);
+            safetyResult = _dmlSafetyGuard.Check(firstStatement, request.DmlSafety);
 
             if (safetyResult.IsBlocked)
             {
@@ -290,18 +284,14 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
-        // DML safety check: uses legacy AST as transitional bridge
+        // DML safety check
         int? dmlRowCap = null;
 
         if (request.DmlSafety != null)
         {
-            var legacyStatement = ParseLegacyStatement(request.Sql);
-            if (request.TopOverride.HasValue && legacyStatement is SqlSelectStatement legacySelect)
-            {
-                legacyStatement = legacySelect.WithTop(request.TopOverride.Value);
-            }
+            var firstStatement = ExtractFirstStatement(fragment);
 
-            var safetyResult = _dmlSafetyGuard.Check(legacyStatement, request.DmlSafety);
+            var safetyResult = _dmlSafetyGuard.Check(firstStatement, request.DmlSafety);
 
             if (safetyResult.IsBlocked)
             {
