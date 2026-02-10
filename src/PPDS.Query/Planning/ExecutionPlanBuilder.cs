@@ -130,7 +130,6 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Plans a regular SELECT query (non-UNION).
-    /// Mirrors the existing QueryPlanner.PlanSelect behavior.
     /// </summary>
     private QueryPlanResult PlanSelect(
         SelectStatement selectStmt,
@@ -1349,7 +1348,7 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Determines whether an aggregate query should be partitioned for parallel execution.
-    /// Ported from <see cref="QueryPlanner.ShouldPartitionAggregate"/> to work with ScriptDom types.
+    /// Determines whether an aggregate query should use parallel partitioning with ScriptDom types.
     /// Requirements:
     /// - Query must use aggregate functions (COUNT, SUM, AVG, MIN, MAX)
     /// - Pool capacity must be > 1 (partitioning needs parallelism)
@@ -1460,7 +1459,7 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Builds <see cref="MergeAggregateColumn"/> descriptors from a ScriptDom <see cref="QuerySpecification"/>.
-    /// Ported from <see cref="QueryPlanner.BuildMergeAggregateColumns"/> to work with ScriptDom types.
+    /// Builds merge aggregate column descriptors from a ScriptDom QuerySpecification.
     /// </summary>
     private static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumnsFromQuerySpec(
         QuerySpecification querySpec)
@@ -2096,7 +2095,7 @@ public sealed class ExecutionPlanBuilder
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  Aggregate partitioning helpers (duplicated from QueryPlanner
+    //  Aggregate partitioning helpers (ported from legacy planner
     //  because InjectAvgCompanionCounts is internal to PPDS.Dataverse)
     // ═══════════════════════════════════════════════════════════════════
 

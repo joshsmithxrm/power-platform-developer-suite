@@ -11,8 +11,7 @@ namespace PPDS.Query.Execution;
 
 /// <summary>
 /// Compiles ScriptDom AST expression and condition nodes into executable delegates.
-/// Mirrors the evaluation logic of <see cref="ExpressionEvaluator"/> but produces
-/// closures (<see cref="CompiledScalarExpression"/> and <see cref="CompiledPredicate"/>)
+/// Produces closures (<see cref="CompiledScalarExpression"/> and <see cref="CompiledPredicate"/>)
 /// instead of walking the AST at evaluation time.
 /// </summary>
 public sealed class ExpressionCompiler
