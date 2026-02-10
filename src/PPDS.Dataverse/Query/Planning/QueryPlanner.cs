@@ -1121,6 +1121,8 @@ public sealed class QueryPlanner
             SqlAggregateFunction.Avg => AggregateFunction.Avg,
             SqlAggregateFunction.Min => AggregateFunction.Min,
             SqlAggregateFunction.Max => AggregateFunction.Max,
+            SqlAggregateFunction.Stdev => AggregateFunction.Stdev,
+            SqlAggregateFunction.Var => AggregateFunction.Var,
             _ => throw new ArgumentOutOfRangeException(nameof(sqlFunc), sqlFunc, "Unsupported aggregate function")
         };
     }

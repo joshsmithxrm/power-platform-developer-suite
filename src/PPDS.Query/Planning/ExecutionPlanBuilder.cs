@@ -78,7 +78,9 @@ public sealed class ExecutionPlanBuilder
             IfStatement ifStmt => PlanScript(new[] { ifStmt }, options),
             WhileStatement whileStmt => PlanScript(new[] { whileStmt }, options),
             DeclareVariableStatement declareStmt => PlanScript(new[] { declareStmt }, options),
+            BeginEndBlockStatement blockStmt when ContainsTryCatch(blockStmt) => PlanScript(ConvertTryCatchBlock(blockStmt), options),
             BeginEndBlockStatement blockStmt => PlanScript(blockStmt.StatementList.Statements.Cast<TSqlStatement>().ToArray(), options),
+            TryCatchStatement tryCatchStmt => PlanScript(new TSqlStatement[] { tryCatchStmt }, options),
             CreateTableStatement createTable when IsTempTable(createTable) => PlanScript(new[] { createTable }, options),
             DropTableStatement dropTable => PlanScript(new[] { dropTable }, options),
             DeclareCursorStatement declareCursor => PlanDeclareCursor(declareCursor, options),
@@ -89,6 +91,7 @@ public sealed class ExecutionPlanBuilder
             ExecuteAsStatement executeAs => PlanExecuteAs(executeAs),
             RevertStatement revert => PlanRevert(revert),
             ExecuteStatement exec => PlanExecuteMessage(exec),
+            MergeStatement mergeStmt => PlanMerge(mergeStmt, options),
             _ => throw new QueryParseException($"Unsupported statement type: {statement.GetType().Name}")
         };
     }
@@ -134,6 +137,13 @@ public sealed class ExecutionPlanBuilder
         QuerySpecification querySpec,
         QueryPlanOptions options)
     {
+        // Table-valued function routing: STRING_SPLIT
+        var tvfResult = TryPlanTableValuedFunction(querySpec, options);
+        if (tvfResult != null)
+        {
+            return tvfResult;
+        }
+
         // Convert to legacy AST for analysis helpers
         var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
         var entityName = legacySelect.GetEntityName();
@@ -987,6 +997,295 @@ public sealed class ExecutionPlanBuilder
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  Table-valued function planning (STRING_SPLIT)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Checks if the FROM clause references a table-valued function (e.g., STRING_SPLIT)
+    /// and returns a plan for it if found.
+    /// </summary>
+    private static QueryPlanResult? TryPlanTableValuedFunction(
+        QuerySpecification querySpec, QueryPlanOptions options)
+    {
+        if (querySpec.FromClause?.TableReferences == null
+            || querySpec.FromClause.TableReferences.Count == 0)
+        {
+            return null;
+        }
+
+        var tableRef = querySpec.FromClause.TableReferences[0];
+
+        if (tableRef is SchemaObjectFunctionTableReference funcRef)
+        {
+            var funcName = funcRef.SchemaObject?.BaseIdentifier?.Value;
+            if (string.Equals(funcName, "STRING_SPLIT", StringComparison.OrdinalIgnoreCase))
+            {
+                return PlanStringSplitFromSchemaFunc(funcRef);
+            }
+        }
+
+        // ScriptDom parses built-in TVFs like STRING_SPLIT as GlobalFunctionTableReference
+        if (tableRef is GlobalFunctionTableReference globalFuncRef)
+        {
+            var funcName = globalFuncRef.Name?.Value;
+            if (string.Equals(funcName, "STRING_SPLIT", StringComparison.OrdinalIgnoreCase))
+            {
+                return PlanStringSplitFromGlobalFunc(globalFuncRef);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Plans a STRING_SPLIT from a SchemaObjectFunctionTableReference.
+    /// </summary>
+    private static QueryPlanResult PlanStringSplitFromSchemaFunc(
+        SchemaObjectFunctionTableReference funcRef)
+    {
+        if (funcRef.Parameters == null || funcRef.Parameters.Count < 2)
+        {
+            throw new QueryParseException(
+                "STRING_SPLIT requires at least 2 arguments: STRING_SPLIT(string, separator)");
+        }
+
+        var inputString = ExtractStringArgument(funcRef.Parameters[0]);
+        var separator = ExtractStringArgument(funcRef.Parameters[1]);
+
+        var enableOrdinal = false;
+        if (funcRef.Parameters.Count >= 3 && funcRef.Parameters[2] is IntegerLiteral intLit)
+        {
+            enableOrdinal = intLit.Value == "1";
+        }
+
+        return BuildStringSplitResult(inputString, separator, enableOrdinal);
+    }
+
+    /// <summary>
+    /// Plans a STRING_SPLIT from a GlobalFunctionTableReference.
+    /// ScriptDom parses built-in TVFs like STRING_SPLIT as GlobalFunctionTableReference.
+    /// </summary>
+    private static QueryPlanResult PlanStringSplitFromGlobalFunc(
+        GlobalFunctionTableReference globalFuncRef)
+    {
+        if (globalFuncRef.Parameters == null || globalFuncRef.Parameters.Count < 2)
+        {
+            throw new QueryParseException(
+                "STRING_SPLIT requires at least 2 arguments: STRING_SPLIT(string, separator)");
+        }
+
+        var inputString = ExtractStringArgument(globalFuncRef.Parameters[0]);
+        var separator = ExtractStringArgument(globalFuncRef.Parameters[1]);
+
+        var enableOrdinal = false;
+        if (globalFuncRef.Parameters.Count >= 3 && globalFuncRef.Parameters[2] is IntegerLiteral intLit)
+        {
+            enableOrdinal = intLit.Value == "1";
+        }
+
+        return BuildStringSplitResult(inputString, separator, enableOrdinal);
+    }
+
+    /// <summary>
+    /// Builds the plan result for STRING_SPLIT.
+    /// </summary>
+    private static QueryPlanResult BuildStringSplitResult(
+        string inputString, string separator, bool enableOrdinal)
+    {
+        IQueryPlanNode rootNode = new StringSplitNode(inputString, separator, enableOrdinal);
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = $"-- STRING_SPLIT('{inputString}', '{separator}')",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "string_split"
+        };
+    }
+
+    /// <summary>
+    /// Extracts a string value from a ScriptDom scalar expression (for function arguments).
+    /// </summary>
+    private static string ExtractStringArgument(ScalarExpression expr)
+    {
+        return expr switch
+        {
+            StringLiteral strLit => strLit.Value,
+            IntegerLiteral intLit => intLit.Value,
+            NullLiteral => "",
+            _ => expr.ToString() ?? ""
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  MERGE planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a MERGE statement. Extracts source query, ON condition, and WHEN clauses,
+    /// then creates a MergeNode to execute the merge logic.
+    /// </summary>
+    private QueryPlanResult PlanMerge(MergeStatement merge, QueryPlanOptions options)
+    {
+        var spec = merge.MergeSpecification;
+
+        // Target entity
+        string targetEntity;
+        if (spec.Target is NamedTableReference targetTable)
+        {
+            targetEntity = targetTable.SchemaObject?.BaseIdentifier?.Value ?? "unknown";
+        }
+        else
+        {
+            throw new QueryParseException("MERGE target must be a named table.");
+        }
+
+        // Source query: plan the USING clause
+        IQueryPlanNode sourceNode;
+        if (spec.TableReference is NamedTableReference sourceTable)
+        {
+            // USING sourceTable - create a scan of the source table
+            var sourceEntity = sourceTable.SchemaObject?.BaseIdentifier?.Value ?? "unknown";
+            var sourceSelect = new SqlSelectStatement(
+                new ISqlSelectColumn[] { SqlColumnRef.Wildcard() },
+                new SqlTableRef(sourceEntity, sourceTable.Alias?.Value),
+                new List<SqlJoin>(),
+                null);
+            var sourceResult = PlanSelectFromLegacy(sourceSelect, options);
+            sourceNode = sourceResult.RootNode;
+        }
+        else if (spec.TableReference is QueryDerivedTable derivedTable
+            && derivedTable.QueryExpression is QuerySpecification querySpec)
+        {
+            // USING (SELECT ...) AS alias
+            var legacySelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+            var sourceResult = PlanSelectFromLegacy(legacySelect, options);
+            sourceNode = sourceResult.RootNode;
+        }
+        else
+        {
+            throw new QueryParseException(
+                $"Unsupported MERGE source type: {spec.TableReference?.GetType().Name ?? "null"}");
+        }
+
+        // ON condition: extract match columns
+        var matchColumns = ExtractMergeMatchColumns(spec.SearchCondition);
+
+        // WHEN clauses
+        MergeWhenMatched? whenMatched = null;
+        MergeWhenNotMatched? whenNotMatched = null;
+
+        if (spec.ActionClauses != null)
+        {
+            foreach (MergeActionClause clause in spec.ActionClauses)
+            {
+                if (clause.Condition == MergeCondition.Matched && clause.Action is UpdateMergeAction updateAction)
+                {
+                    var setClauses = new List<SqlSetClause>();
+                    foreach (var setClause in updateAction.SetClauses)
+                    {
+                        if (setClause is AssignmentSetClause assignment)
+                        {
+                            var colName = assignment.Column?.MultiPartIdentifier?.Identifiers?.Count > 0
+                                ? assignment.Column.MultiPartIdentifier.Identifiers[
+                                    assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
+                                : "unknown";
+                            var value = ScriptDomAdapter.ConvertExpression(assignment.NewValue);
+                            setClauses.Add(new SqlSetClause(colName, value));
+                        }
+                    }
+                    whenMatched = MergeWhenMatched.Update(setClauses);
+                }
+                else if (clause.Condition == MergeCondition.Matched && clause.Action is DeleteMergeAction)
+                {
+                    whenMatched = MergeWhenMatched.Delete();
+                }
+                else if (clause.Condition == MergeCondition.NotMatched && clause.Action is InsertMergeAction insertAction)
+                {
+                    var columns = new List<string>();
+                    if (insertAction.Columns != null)
+                    {
+                        foreach (var col in insertAction.Columns)
+                        {
+                            var ids = col.MultiPartIdentifier?.Identifiers;
+                            if (ids != null && ids.Count > 0)
+                            {
+                                columns.Add(ids[ids.Count - 1].Value);
+                            }
+                        }
+                    }
+
+                    var values = new List<ISqlExpression>();
+                    if (insertAction.Source is ValuesInsertSource valSource
+                        && valSource.RowValues?.Count > 0)
+                    {
+                        foreach (var val in valSource.RowValues[0].ColumnValues)
+                        {
+                            values.Add(ScriptDomAdapter.ConvertExpression(val));
+                        }
+                    }
+
+                    whenNotMatched = MergeWhenNotMatched.Insert(columns, values);
+                }
+            }
+        }
+
+        var mergeNode = new MergeNode(sourceNode, targetEntity, matchColumns, whenMatched, whenNotMatched);
+
+        return new QueryPlanResult
+        {
+            RootNode = mergeNode,
+            FetchXml = $"-- MERGE INTO {targetEntity}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = targetEntity
+        };
+    }
+
+    /// <summary>
+    /// Extracts match columns from a MERGE ON condition.
+    /// Supports simple equality conditions (target.col = source.col).
+    /// </summary>
+    private static IReadOnlyList<MergeMatchColumn> ExtractMergeMatchColumns(BooleanExpression? searchCondition)
+    {
+        var matchColumns = new List<MergeMatchColumn>();
+
+        if (searchCondition is BooleanComparisonExpression comp
+            && comp.ComparisonType == BooleanComparisonType.Equals)
+        {
+            var left = GetColumnNameFromExpression(comp.FirstExpression);
+            var right = GetColumnNameFromExpression(comp.SecondExpression);
+            if (left != null && right != null)
+            {
+                matchColumns.Add(new MergeMatchColumn(right, left));
+            }
+        }
+        else if (searchCondition is BooleanBinaryExpression binBool
+            && binBool.BinaryExpressionType == BooleanBinaryExpressionType.And)
+        {
+            // Multiple AND conditions
+            var leftMatches = ExtractMergeMatchColumns(binBool.FirstExpression);
+            var rightMatches = ExtractMergeMatchColumns(binBool.SecondExpression);
+            matchColumns.AddRange(leftMatches);
+            matchColumns.AddRange(rightMatches);
+        }
+
+        return matchColumns;
+    }
+
+    private static string? GetColumnNameFromExpression(ScalarExpression expr)
+    {
+        if (expr is ColumnReferenceExpression colRef)
+        {
+            var ids = colRef.MultiPartIdentifier?.Identifiers;
+            if (ids != null && ids.Count > 0)
+            {
+                return ids[ids.Count - 1].Value;
+            }
+        }
+        return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  Aggregate partitioning
     // ═══════════════════════════════════════════════════════════════════
 
@@ -1159,6 +1458,8 @@ public sealed class ExecutionPlanBuilder
             SetVariableStatement setVar => ConvertSetVariableToLegacy(setVar),
 
             WhileStatement whileStmt => ConvertWhileToLegacy(whileStmt),
+
+            TryCatchStatement tryCatch => ConvertTryCatchToLegacy(tryCatch),
 
             _ => throw new QueryParseException(
                 $"Unsupported statement type for script conversion: {statement.GetType().Name}")
@@ -1346,6 +1647,57 @@ public sealed class ExecutionPlanBuilder
 
         var bodyBlockLegacy = new SqlBlockStatement(bodyStatements, 0);
         return new SqlWhileStatement(condition, bodyBlockLegacy, 0);
+    }
+
+    /// <summary>
+    /// Converts a ScriptDom TryCatchStatement to a legacy SqlTryCatchStatement.
+    /// </summary>
+    private static SqlTryCatchStatement ConvertTryCatchToLegacy(TryCatchStatement tryCatch)
+    {
+        var tryStatements = new List<ISqlStatement>();
+        if (tryCatch.TryStatements?.Statements != null)
+        {
+            foreach (TSqlStatement s in tryCatch.TryStatements.Statements)
+            {
+                tryStatements.Add(ConvertToLegacyStatement(s));
+            }
+        }
+        var tryBlockLegacy = new SqlBlockStatement(tryStatements, 0);
+
+        var catchStatements = new List<ISqlStatement>();
+        if (tryCatch.CatchStatements?.Statements != null)
+        {
+            foreach (TSqlStatement s in tryCatch.CatchStatements.Statements)
+            {
+                catchStatements.Add(ConvertToLegacyStatement(s));
+            }
+        }
+        var catchBlockLegacy = new SqlBlockStatement(catchStatements, 0);
+
+        return new SqlTryCatchStatement(tryBlockLegacy, catchBlockLegacy, 0);
+    }
+
+    /// <summary>
+    /// Checks if a BeginEndBlockStatement contains a TryCatchStatement (ScriptDom sometimes
+    /// wraps TRY/CATCH inside a BEGIN...END block).
+    /// </summary>
+    private static bool ContainsTryCatch(BeginEndBlockStatement block)
+    {
+        if (block.StatementList?.Statements == null) return false;
+        foreach (var stmt in block.StatementList.Statements)
+        {
+            if (stmt is TryCatchStatement) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts statements from a BeginEndBlockStatement that contains TryCatchStatement(s),
+    /// keeping them as individual TSqlStatements for proper PlanScript handling.
+    /// </summary>
+    private static TSqlStatement[] ConvertTryCatchBlock(BeginEndBlockStatement block)
+    {
+        return block.StatementList.Statements.Cast<TSqlStatement>().ToArray();
     }
 
     /// <summary>

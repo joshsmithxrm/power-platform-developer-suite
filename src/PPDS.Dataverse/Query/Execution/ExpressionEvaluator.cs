@@ -22,16 +22,26 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
     /// Creates an evaluator with the default function registry (all built-in functions).
     /// </summary>
     public ExpressionEvaluator()
-        : this(FunctionRegistry.CreateDefault())
+        : this(null)
     {
     }
 
     /// <summary>
     /// Creates an evaluator with a custom function registry.
+    /// When null, creates a default registry with all built-in functions including error functions.
     /// </summary>
-    public ExpressionEvaluator(FunctionRegistry functionRegistry)
+    public ExpressionEvaluator(FunctionRegistry? functionRegistry)
     {
-        _functionRegistry = functionRegistry ?? throw new ArgumentNullException(nameof(functionRegistry));
+        if (functionRegistry != null)
+        {
+            _functionRegistry = functionRegistry;
+        }
+        else
+        {
+            _functionRegistry = FunctionRegistry.CreateDefault();
+            // Register error functions with a lazy scope accessor
+            ErrorFunctions.RegisterAll(_functionRegistry, () => VariableScope);
+        }
     }
     /// <inheritdoc />
     public object? Evaluate(ISqlExpression expression, IReadOnlyDictionary<string, QueryValue> row)

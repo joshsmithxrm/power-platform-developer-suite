@@ -111,7 +111,7 @@ internal static class ScriptDomAdapter
 
         // Check for aggregate functions
         var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
-        if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
+        if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "STDEV" or "STDEVP" or "VAR" or "VARP")
         {
             return ConvertAggregateExpression(funcCall);
         }
@@ -142,6 +142,8 @@ internal static class ScriptDomAdapter
             "AVG" => SqlAggregateFunction.Avg,
             "MIN" => SqlAggregateFunction.Min,
             "MAX" => SqlAggregateFunction.Max,
+            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
+            "VAR" or "VARP" => SqlAggregateFunction.Var,
             _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
         };
 
@@ -629,6 +631,8 @@ internal static class ScriptDomAdapter
             "AVG" => SqlAggregateFunction.Avg,
             "MIN" => SqlAggregateFunction.Min,
             "MAX" => SqlAggregateFunction.Max,
+            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
+            "VAR" or "VARP" => SqlAggregateFunction.Var,
             _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
         };
 
