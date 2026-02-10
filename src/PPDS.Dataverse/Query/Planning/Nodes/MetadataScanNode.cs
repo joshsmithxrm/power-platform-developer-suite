@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query.Execution;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -21,8 +20,8 @@ public sealed class MetadataScanNode : IQueryPlanNode
     /// <summary>Columns to return from the metadata table (null = all).</summary>
     public IReadOnlyList<string>? RequestedColumns { get; }
 
-    /// <summary>Optional client-side filter condition.</summary>
-    public ISqlCondition? Filter { get; }
+    /// <summary>Optional compiled client-side filter predicate.</summary>
+    public CompiledPredicate? Filter { get; }
 
     /// <summary>The metadata query executor.</summary>
     public IMetadataQueryExecutor? MetadataExecutor { get; }
@@ -42,7 +41,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
         string metadataTable,
         IMetadataQueryExecutor? metadataExecutor,
         IReadOnlyList<string>? requestedColumns = null,
-        ISqlCondition? filter = null)
+        CompiledPredicate? filter = null)
     {
         MetadataTable = metadataTable ?? throw new ArgumentNullException(nameof(metadataTable));
         MetadataExecutor = metadataExecutor;
@@ -73,7 +72,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
             // Apply client-side filter if present
             if (Filter != null)
             {
-                if (!context.ExpressionEvaluator.EvaluateCondition(Filter, record))
+                if (!Filter(record))
                 {
                     continue;
                 }

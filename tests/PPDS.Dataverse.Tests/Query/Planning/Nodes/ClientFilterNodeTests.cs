@@ -16,12 +16,6 @@ namespace PPDS.Dataverse.Tests.Query.Planning.Nodes;
 [Trait("Category", "PlanUnit")]
 public class ClientFilterNodeTests
 {
-    private static QueryPlanContext CreateContext()
-    {
-        var mockExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
-    }
-
     /// <summary>
     /// A mock plan node that yields predefined rows.
     /// </summary>
@@ -58,6 +52,27 @@ public class ClientFilterNodeTests
         return new QueryRow(values, "account");
     }
 
+    /// <summary>
+    /// Builds a compiled predicate that evaluates a legacy condition via ExpressionEvaluator.
+    /// Mirrors the delegate closure pattern used at plan construction time.
+    /// </summary>
+    private static CompiledPredicate CompileCondition(ISqlCondition condition)
+    {
+        var evaluator = new ExpressionEvaluator();
+        return row => evaluator.EvaluateCondition(condition, row);
+    }
+
+    private static string DescribeCondition(ISqlCondition condition)
+    {
+        return condition switch
+        {
+            SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
+            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
+            SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
+            _ => condition.GetType().Name
+        };
+    }
+
     [Fact]
     public async Task FiltersRows_BasedOnComparisonCondition()
     {
@@ -74,7 +89,7 @@ public class ClientFilterNodeTests
             SqlComparisonOperator.GreaterThan,
             SqlLiteral.Number("5"));
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, CompileCondition(condition), DescribeCondition(condition));
         var ctx = CreateContext();
 
         // Act
@@ -106,7 +121,7 @@ public class ClientFilterNodeTests
             SqlComparisonOperator.GreaterThan,
             SqlLiteral.Number("0"));
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, CompileCondition(condition), DescribeCondition(condition));
         var ctx = CreateContext();
 
         // Act
@@ -136,7 +151,7 @@ public class ClientFilterNodeTests
             SqlComparisonOperator.GreaterThan,
             SqlLiteral.Number("100"));
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, CompileCondition(condition), DescribeCondition(condition));
         var ctx = CreateContext();
 
         // Act
@@ -172,7 +187,7 @@ public class ClientFilterNodeTests
                 SqlComparisonOperator.LessThan,
                 SqlLiteral.Number("10")));
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, CompileCondition(condition), DescribeCondition(condition));
         var ctx = CreateContext();
 
         // Act
@@ -209,7 +224,7 @@ public class ClientFilterNodeTests
                 SqlComparisonOperator.Equal,
                 SqlLiteral.Number("15")));
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, CompileCondition(condition), DescribeCondition(condition));
         var ctx = CreateContext();
 
         // Act
@@ -230,12 +245,8 @@ public class ClientFilterNodeTests
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
 
-        var condition = new SqlComparisonCondition(
-            SqlColumnRef.Simple("cnt"),
-            SqlComparisonOperator.GreaterThan,
-            SqlLiteral.Number("0"));
-
-        var filterNode = new ClientFilterNode(input, condition);
+        CompiledPredicate predicate = _ => true;
+        var filterNode = new ClientFilterNode(input, predicate, "always true");
         var ctx = CreateContext();
 
         var rows = new List<QueryRow>();
@@ -248,15 +259,12 @@ public class ClientFilterNodeTests
     }
 
     [Fact]
-    public void Description_IncludesConditionInfo()
+    public void Description_IncludesPredicateDescription()
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
-        var condition = new SqlComparisonCondition(
-            SqlColumnRef.Simple("cnt"),
-            SqlComparisonOperator.GreaterThan,
-            SqlLiteral.Number("5"));
+        CompiledPredicate predicate = _ => true;
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, predicate, "cnt GreaterThan 5");
 
         Assert.Contains("ClientFilter", filterNode.Description);
         Assert.Contains("cnt", filterNode.Description);
@@ -266,12 +274,9 @@ public class ClientFilterNodeTests
     public void Children_ContainsInputNode()
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
-        var condition = new SqlComparisonCondition(
-            SqlColumnRef.Simple("cnt"),
-            SqlComparisonOperator.GreaterThan,
-            SqlLiteral.Number("5"));
+        CompiledPredicate predicate = _ => true;
 
-        var filterNode = new ClientFilterNode(input, condition);
+        var filterNode = new ClientFilterNode(input, predicate, "test");
 
         Assert.Single(filterNode.Children);
         Assert.Same(input, filterNode.Children[0]);
@@ -280,19 +285,31 @@ public class ClientFilterNodeTests
     [Fact]
     public void Constructor_ThrowsOnNullInput()
     {
-        var condition = new SqlComparisonCondition(
-            SqlColumnRef.Simple("cnt"),
-            SqlComparisonOperator.GreaterThan,
-            SqlLiteral.Number("5"));
+        CompiledPredicate predicate = _ => true;
 
-        Assert.Throws<ArgumentNullException>(() => new ClientFilterNode(null!, condition));
+        Assert.Throws<ArgumentNullException>(() => new ClientFilterNode(null!, predicate, "test"));
     }
 
     [Fact]
-    public void Constructor_ThrowsOnNullCondition()
+    public void Constructor_ThrowsOnNullPredicate()
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
 
-        Assert.Throws<ArgumentNullException>(() => new ClientFilterNode(input, null!));
+        Assert.Throws<ArgumentNullException>(() => new ClientFilterNode(input, null!, "test"));
+    }
+
+    [Fact]
+    public void Constructor_ThrowsOnNullDescription()
+    {
+        var input = new MockPlanNode(Array.Empty<QueryRow>());
+        CompiledPredicate predicate = _ => true;
+
+        Assert.Throws<ArgumentNullException>(() => new ClientFilterNode(input, predicate, null!));
+    }
+
+    private static QueryPlanContext CreateContext()
+    {
+        var mockExecutor = new Mock<IQueryExecutor>();
+        return new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
     }
 }

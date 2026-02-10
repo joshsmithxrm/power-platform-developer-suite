@@ -70,12 +70,8 @@ public class CostEstimatorTests
             "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>",
             "account");
 
-        var condition = new Dataverse.Sql.Ast.SqlComparisonCondition(
-            Dataverse.Sql.Ast.SqlColumnRef.Simple("name"),
-            Dataverse.Sql.Ast.SqlComparisonOperator.Equal,
-            Dataverse.Sql.Ast.SqlLiteral.String("Contoso"));
-
-        var filterNode = new ClientFilterNode(scanNode, condition);
+        Dataverse.Query.Execution.CompiledPredicate predicate = _ => true;
+        var filterNode = new ClientFilterNode(scanNode, predicate, "name Equal Contoso");
 
         var context = new CostContext();
         context.EntityRecordCounts["account"] = 100_000;

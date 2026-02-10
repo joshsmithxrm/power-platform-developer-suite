@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -59,8 +59,8 @@ public sealed class ProjectNode : IQueryPlanNode
             {
                 if (col.Expression != null)
                 {
-                    // Evaluate computed column
-                    var value = context.ExpressionEvaluator.Evaluate(col.Expression, inputRow.Values);
+                    // Evaluate computed column via compiled delegate
+                    var value = col.Expression(inputRow.Values);
                     outputValues[col.OutputName] = QueryValue.Simple(value);
                 }
                 else if (col.SourceName != null)
@@ -111,10 +111,10 @@ public sealed class ProjectColumn
     /// <summary>Output column name in the result row.</summary>
     public string OutputName { get; }
 
-    /// <summary>Expression to evaluate for computed columns. Null for simple copy/rename.</summary>
-    public ISqlExpression? Expression { get; }
+    /// <summary>Compiled expression to evaluate for computed columns. Null for simple copy/rename.</summary>
+    public CompiledScalarExpression? Expression { get; }
 
-    private ProjectColumn(string? sourceName, string outputName, ISqlExpression? expression)
+    private ProjectColumn(string? sourceName, string outputName, CompiledScalarExpression? expression)
     {
         SourceName = sourceName;
         OutputName = outputName ?? throw new ArgumentNullException(nameof(outputName));
@@ -127,6 +127,6 @@ public sealed class ProjectColumn
     /// <summary>Creates a renamed column.</summary>
     public static ProjectColumn Rename(string sourceName, string outputName) => new(sourceName, outputName, null);
 
-    /// <summary>Creates a computed column from an expression.</summary>
-    public static ProjectColumn Computed(string outputName, ISqlExpression expression) => new(null, outputName, expression);
+    /// <summary>Creates a computed column from a compiled expression.</summary>
+    public static ProjectColumn Computed(string outputName, CompiledScalarExpression expression) => new(null, outputName, expression);
 }

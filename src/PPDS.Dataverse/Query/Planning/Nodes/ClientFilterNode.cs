@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
@@ -15,11 +16,20 @@ public sealed class ClientFilterNode : IQueryPlanNode
     /// <summary>The child node that produces input rows.</summary>
     public IQueryPlanNode Input { get; }
 
-    /// <summary>The condition to evaluate against each row.</summary>
-    public ISqlCondition Condition { get; }
+    /// <summary>The compiled predicate to evaluate against each row.</summary>
+    public CompiledPredicate Predicate { get; }
+
+    /// <summary>Human-readable description of the predicate for EXPLAIN output.</summary>
+    public string PredicateDescription { get; }
+
+    /// <summary>
+    /// Optional legacy AST condition retained for optimizer inspection (predicate pushdown,
+    /// constant folding). Will be removed once the optimizer operates on compiled predicates.
+    /// </summary>
+    public ISqlCondition? LegacyCondition { get; }
 
     /// <inheritdoc />
-    public string Description => $"ClientFilter: {ConditionDescription()}";
+    public string Description => $"ClientFilter: {PredicateDescription}";
 
     /// <inheritdoc />
     public long EstimatedRows => Input.EstimatedRows; // Conservative estimate
@@ -28,10 +38,20 @@ public sealed class ClientFilterNode : IQueryPlanNode
     public IReadOnlyList<IQueryPlanNode> Children => new[] { Input };
 
     /// <summary>Initializes a new instance of the <see cref="ClientFilterNode"/> class.</summary>
-    public ClientFilterNode(IQueryPlanNode input, ISqlCondition condition)
+    public ClientFilterNode(IQueryPlanNode input, CompiledPredicate predicate, string predicateDescription)
     {
         Input = input ?? throw new ArgumentNullException(nameof(input));
-        Condition = condition ?? throw new ArgumentNullException(nameof(condition));
+        Predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
+        PredicateDescription = predicateDescription ?? throw new ArgumentNullException(nameof(predicateDescription));
+    }
+
+    /// <summary>
+    /// Initializes a new instance with a legacy condition retained for optimizer inspection.
+    /// </summary>
+    public ClientFilterNode(IQueryPlanNode input, CompiledPredicate predicate, string predicateDescription, ISqlCondition legacyCondition)
+        : this(input, predicate, predicateDescription)
+    {
+        LegacyCondition = legacyCondition;
     }
 
     /// <inheritdoc />
@@ -43,21 +63,10 @@ public sealed class ClientFilterNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (context.ExpressionEvaluator.EvaluateCondition(Condition, row.Values))
+            if (Predicate(row.Values))
             {
                 yield return row;
             }
         }
-    }
-
-    private string ConditionDescription()
-    {
-        return Condition switch
-        {
-            SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
-            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
-            SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
-            _ => Condition.GetType().Name
-        };
     }
 }

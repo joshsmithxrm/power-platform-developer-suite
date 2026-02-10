@@ -9,7 +9,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 using Xunit;
 
 namespace PPDS.Dataverse.Tests.Query.Planning.Nodes;
@@ -118,12 +117,15 @@ public class MetadataScanNodeTests
             .Setup(x => x.QueryMetadataAsync("entity", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mockRecords);
 
-        // Filter: iscustomentity = true (represented as string comparison since ExpressionEvaluator
-        // works with string equality for booleans stored as bool values in QueryValue)
-        var filter = new SqlComparisonCondition(
-            SqlColumnRef.Simple("iscustomentity"),
-            SqlComparisonOperator.Equal,
-            SqlLiteral.String("True"));
+        // Filter: iscustomentity = true (compiled predicate)
+        CompiledPredicate filter = row =>
+        {
+            if (row.TryGetValue("iscustomentity", out var qv))
+            {
+                return string.Equals(qv.Value?.ToString(), "True", StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        };
 
         var node = new MetadataScanNode("entity", mockExecutor.Object, filter: filter);
         var ctx = CreateContext(mockExecutor.Object);
@@ -239,10 +241,7 @@ public class MetadataScanNodeTests
     public void Description_IncludesFilteredIndicator_WhenFilterPresent()
     {
         var mockExecutor = new Mock<IMetadataQueryExecutor>();
-        var filter = new SqlComparisonCondition(
-            SqlColumnRef.Simple("logicalname"),
-            SqlComparisonOperator.Equal,
-            SqlLiteral.String("account"));
+        CompiledPredicate filter = _ => true;
 
         var node = new MetadataScanNode("entity", mockExecutor.Object, filter: filter);
 
@@ -298,10 +297,7 @@ public class MetadataScanNodeTests
     {
         var mockExecutor = new Mock<IMetadataQueryExecutor>();
         var columns = new[] { "logicalname" };
-        var filter = new SqlComparisonCondition(
-            SqlColumnRef.Simple("logicalname"),
-            SqlComparisonOperator.Equal,
-            SqlLiteral.String("account"));
+        CompiledPredicate filter = _ => true;
 
         var node = new MetadataScanNode("attribute", mockExecutor.Object, columns, filter);
 
@@ -325,10 +321,15 @@ public class MetadataScanNodeTests
             .Setup(x => x.QueryMetadataAsync("entity", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mockRecords);
 
-        var filter = new SqlComparisonCondition(
-            SqlColumnRef.Simple("iscustomentity"),
-            SqlComparisonOperator.Equal,
-            SqlLiteral.String("True"));
+        // Filter: iscustomentity = true
+        CompiledPredicate filter = row =>
+        {
+            if (row.TryGetValue("iscustomentity", out var qv))
+            {
+                return string.Equals(qv.Value?.ToString(), "True", StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        };
 
         var node = new MetadataScanNode("entity", mockExecutor.Object, filter: filter);
         var ctx = CreateContext(mockExecutor.Object);

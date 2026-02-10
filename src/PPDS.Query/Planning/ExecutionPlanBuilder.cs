@@ -2166,4 +2166,46 @@ public sealed class ExecutionPlanBuilder
 
         return doc.ToString(SaveOptions.DisableFormatting);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Legacy AST → Compiled Delegate Helpers
+    //  Bridge methods that wrap legacy ISqlCondition/ISqlExpression in
+    //  CompiledPredicate/CompiledScalarExpression delegates via the
+    //  ExpressionEvaluator. These will be removed when the legacy AST
+    //  types are deleted and all callers use ScriptDom compilation.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Compiles a legacy <see cref="ISqlCondition"/> into a <see cref="CompiledPredicate"/>
+    /// by wrapping the <see cref="Dataverse.Query.Execution.ExpressionEvaluator"/>.
+    /// </summary>
+    private static CompiledPredicate CompileLegacyCondition(ISqlCondition condition)
+    {
+        var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
+        return row => evaluator.EvaluateCondition(condition, row);
+    }
+
+    /// <summary>
+    /// Compiles a legacy <see cref="ISqlExpression"/> into a <see cref="CompiledScalarExpression"/>
+    /// by wrapping the <see cref="Dataverse.Query.Execution.ExpressionEvaluator"/>.
+    /// </summary>
+    private static CompiledScalarExpression CompileLegacyExpression(ISqlExpression expression)
+    {
+        var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
+        return row => evaluator.Evaluate(expression, row);
+    }
+
+    /// <summary>
+    /// Produces a human-readable description of a legacy <see cref="ISqlCondition"/>.
+    /// </summary>
+    private static string DescribeLegacyCondition(ISqlCondition condition)
+    {
+        return condition switch
+        {
+            SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
+            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
+            SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
+            _ => condition.GetType().Name
+        };
+    }
 }
