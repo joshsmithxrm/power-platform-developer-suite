@@ -57,33 +57,20 @@ public sealed class ExecuteAsNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // If we have a pre-resolved Guid, use it directly.
-        // Otherwise, store a deterministic Guid derived from the UPN for now.
-        // In a future phase, this will resolve the actual systemuserid from Dataverse.
         if (CallerObjectId.HasValue)
         {
             Session.CallerObjectId = CallerObjectId.Value;
         }
         else
         {
-            // TODO: Resolve the user's systemuserid from Dataverse using the UPN.
-            // For now, generate a deterministic Guid from the UPN for testing purposes.
-            Session.CallerObjectId = GenerateDeterministicGuid(UserPrincipalName);
+            await Task.CompletedTask;
+            throw new NotSupportedException(
+                $"EXECUTE AS USER = '{UserPrincipalName}' cannot resolve the systemuserid. " +
+                "Provide a pre-resolved CallerObjectId or use a future release with Dataverse user lookup.");
         }
 
         await Task.CompletedTask;
         yield break;
-    }
-
-    /// <summary>
-    /// Generates a deterministic Guid from a string (for testing/placeholder purposes).
-    /// </summary>
-    private static Guid GenerateDeterministicGuid(string input)
-    {
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input.ToLowerInvariant());
-        var hash = md5.ComputeHash(bytes);
-        return new Guid(hash);
     }
 }
 
