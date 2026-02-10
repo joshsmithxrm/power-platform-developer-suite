@@ -9,9 +9,10 @@ using PPDS.Cli.Plugins.Registration;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Services;
-using PPDS.Dataverse.Sql.Ast;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Sql.Parsing;
-using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
+using PPDS.Query.Transpilation;
 using StreamJsonRpc;
 
 // Aliases to disambiguate from local DTOs
@@ -590,25 +591,30 @@ public class RpcMethodHandler
         }
 
         // Parse and transpile SQL to FetchXML
-        SqlSelectStatement ast;
+        string fetchXml;
         try
         {
-            var parser = new SqlParser(sql);
-            ast = parser.Parse();
+            var parser = new QueryParser();
+            var script = parser.ParseScript(sql);
+            var statement = QueryParser.GetFirstStatement(script) as SelectStatement
+                ?? throw new SqlParseException("Expected SELECT statement.");
+
+            // Override top if specified via ScriptDom AST.
+            if (top.HasValue && statement.QueryExpression is QuerySpecification qs)
+            {
+                qs.TopRowFilter = new TopRowFilter
+                {
+                    Expression = new IntegerLiteral { Value = top.Value.ToString() }
+                };
+            }
+
+            var generator = new FetchXmlGenerator();
+            fetchXml = generator.Generate(statement).FetchXml;
         }
         catch (SqlParseException ex)
         {
             throw new RpcException(ErrorCodes.Query.ParseError, ex);
         }
-
-        // Override top if specified
-        if (top.HasValue)
-        {
-            ast = ast.WithTop(top.Value);
-        }
-
-        var transpiler = new SqlToFetchXmlTranspiler();
-        var fetchXml = transpiler.Transpile(ast);
 
         // If showFetchXml is true, just return the transpiled FetchXML
         if (showFetchXml)

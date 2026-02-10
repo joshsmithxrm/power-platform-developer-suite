@@ -8,8 +8,10 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Sql.Parsing;
-using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
+using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -815,10 +817,12 @@ public static class UpdateCommand
             sql = $"SELECT TOP {limit.Value + 1} {entity}id FROM {entity} WHERE {filter}";
         }
 
-        var parser = new SqlParser(sql);
-        var ast = parser.Parse();
-        var transpiler = new SqlToFetchXmlTranspiler();
-        var fetchXml = transpiler.Transpile(ast);
+        var parser = new QueryParser();
+        var script = parser.ParseScript(sql);
+        var statement = QueryParser.GetFirstStatement(script) as SelectStatement
+            ?? throw new SqlParseException("Expected SELECT statement.");
+        var generator = new FetchXmlGenerator();
+        var fetchXml = generator.Generate(statement).FetchXml;
 
         await using var client = await pool.GetClientAsync(cancellationToken: cancellationToken);
 
