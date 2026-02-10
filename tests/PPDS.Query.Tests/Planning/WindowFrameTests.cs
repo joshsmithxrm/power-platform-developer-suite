@@ -1,10 +1,9 @@
 using System.Collections.Generic;
 using FluentAssertions;
-using Moq;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Query.Planning.Nodes;
 using Xunit;
 
@@ -17,22 +16,8 @@ public class WindowFrameTests
 
     public WindowFrameTests()
     {
-        var mockExecutor = new Mock<IQueryExecutor>();
-        var mockEvaluator = new Mock<IExpressionEvaluator>();
-
-        // Set up evaluator to handle column expressions
-        mockEvaluator
-            .Setup(e => e.Evaluate(It.IsAny<ISqlExpression>(), It.IsAny<IReadOnlyDictionary<string, QueryValue>>()))
-            .Returns((ISqlExpression expr, IReadOnlyDictionary<string, QueryValue> row) =>
-            {
-                if (expr is SqlColumnExpression colExpr)
-                {
-                    var colName = colExpr.Column.GetFullName();
-                    if (row.TryGetValue(colName, out var qv))
-                        return qv.Value;
-                }
-                return null;
-            });
+        var mockExecutor = new Moq.Mock<IQueryExecutor>();
+        var mockEvaluator = new Moq.Mock<IExpressionEvaluator>();
 
         _context = new QueryPlanContext(mockExecutor.Object, mockEvaluator.Object);
     }
@@ -300,31 +285,35 @@ public class WindowFrameTests
         string outputName, string functionName, string? operandColumn,
         int offset = 1, object? defaultValue = null, WindowFrameSpec? frame = null)
     {
-        ISqlExpression? operand = operandColumn != null
-            ? new SqlColumnExpression(SqlColumnRef.Simple(operandColumn))
+        CompiledScalarExpression? operand = operandColumn != null
+            ? (row => row.TryGetValue(operandColumn, out var qv) ? qv.Value : null)
             : null;
 
-        var windowExpr = new SqlWindowExpression(
-            functionName,
-            operand,
-            partitionBy: null,
-            orderBy: new[] { new SqlOrderByItem(SqlColumnRef.Simple("id"), SqlSortDirection.Ascending) },
-            isCountStar: false);
+        // Compiled order-by on "id" ascending
+        CompiledScalarExpression idExpr = row =>
+            row.TryGetValue("id", out var qv) ? qv.Value : null;
+        var orderBy = new[] { new CompiledOrderByItem("id", idExpr, false) };
 
         return new ExtendedWindowDefinition(
-            outputName, windowExpr, frame, offset, defaultValue);
+            outputName, functionName, operand,
+            partitionBy: null,
+            orderBy: orderBy,
+            frame: frame,
+            offset: offset,
+            defaultValue: defaultValue);
     }
 
     private static ExtendedWindowDefinition CreateNtileWindow(string outputName, int groups)
     {
-        var windowExpr = new SqlWindowExpression(
-            "NTILE",
-            operand: null,
-            partitionBy: null,
-            orderBy: new[] { new SqlOrderByItem(SqlColumnRef.Simple("id"), SqlSortDirection.Ascending) },
-            isCountStar: false);
+        // Compiled order-by on "id" ascending
+        CompiledScalarExpression idExpr = row =>
+            row.TryGetValue("id", out var qv) ? qv.Value : null;
+        var orderBy = new[] { new CompiledOrderByItem("id", idExpr, false) };
 
         return new ExtendedWindowDefinition(
-            outputName, windowExpr, nTileGroups: groups);
+            outputName, "NTILE", operand: null,
+            partitionBy: null,
+            orderBy: orderBy,
+            nTileGroups: groups);
     }
 }

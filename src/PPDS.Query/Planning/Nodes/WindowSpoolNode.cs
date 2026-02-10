@@ -8,7 +8,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Query.Planning.Nodes;
 
@@ -95,15 +94,27 @@ public enum WindowFrameBoundType
 
 /// <summary>
 /// Extended window definition that includes frame specification and additional functions
-/// (LAG, LEAD, NTILE, FIRST_VALUE, LAST_VALUE).
+/// (LAG, LEAD, NTILE, FIRST_VALUE, LAST_VALUE). Uses compiled delegates instead of AST types.
 /// </summary>
 public sealed class ExtendedWindowDefinition
 {
     /// <summary>The output column name.</summary>
     public string OutputColumnName { get; }
 
-    /// <summary>The window function expression.</summary>
-    public SqlWindowExpression Expression { get; }
+    /// <summary>The window function name (ROW_NUMBER, RANK, LAG, LEAD, NTILE, SUM, COUNT, etc.).</summary>
+    public string FunctionName { get; }
+
+    /// <summary>Optional compiled operand for aggregate/value window functions. Null for ROW_NUMBER/RANK/NTILE.</summary>
+    public CompiledScalarExpression? Operand { get; }
+
+    /// <summary>Compiled PARTITION BY expressions. Null or empty if not partitioned.</summary>
+    public IReadOnlyList<CompiledScalarExpression>? PartitionBy { get; }
+
+    /// <summary>Compiled ORDER BY items. Null or empty if not ordered.</summary>
+    public IReadOnlyList<CompiledOrderByItem>? OrderBy { get; }
+
+    /// <summary>True when this is COUNT(*) with star instead of a column expression.</summary>
+    public bool IsCountStar { get; }
 
     /// <summary>Optional frame specification. Null means use the default frame.</summary>
     public WindowFrameSpec? Frame { get; }
@@ -120,14 +131,22 @@ public sealed class ExtendedWindowDefinition
     /// <summary>Initializes a new instance of the <see cref="ExtendedWindowDefinition"/> class.</summary>
     public ExtendedWindowDefinition(
         string outputColumnName,
-        SqlWindowExpression expression,
+        string functionName,
+        CompiledScalarExpression? operand,
+        IReadOnlyList<CompiledScalarExpression>? partitionBy,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        bool isCountStar = false,
         WindowFrameSpec? frame = null,
         int offset = 1,
         object? defaultValue = null,
         int nTileGroups = 0)
     {
         OutputColumnName = outputColumnName ?? throw new ArgumentNullException(nameof(outputColumnName));
-        Expression = expression ?? throw new ArgumentNullException(nameof(expression));
+        FunctionName = functionName ?? throw new ArgumentNullException(nameof(functionName));
+        Operand = operand;
+        PartitionBy = partitionBy;
+        OrderBy = orderBy;
+        IsCountStar = isCountStar;
         Frame = frame;
         Offset = offset;
         DefaultValue = defaultValue;
@@ -140,6 +159,7 @@ public sealed class ExtendedWindowDefinition
 /// (LAG, LEAD, NTILE, FIRST_VALUE, LAST_VALUE) beyond what <see cref="ClientWindowNode"/> provides.
 /// </summary>
 /// <remarks>
+/// Uses compiled delegates for all expression evaluation, with no dependency on legacy AST types.
 /// Supports frame types:
 /// <list type="bullet">
 ///   <item>ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (running totals)</item>
@@ -164,7 +184,7 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         get
         {
             var funcs = string.Join(", ", Windows.Select(w =>
-                $"{w.Expression.FunctionName} AS {w.OutputColumnName}"));
+                $"{w.FunctionName} AS {w.OutputColumnName}"));
             return $"WindowSpool: [{funcs}]";
         }
     }
@@ -218,7 +238,7 @@ public sealed class WindowSpoolNode : IQueryPlanNode
 
         foreach (var windowDef in Windows)
         {
-            ComputeExtendedWindowFunction(windowDef, allRows, windowValues, context);
+            ComputeExtendedWindowFunction(windowDef, allRows, windowValues);
         }
 
         // Step 3: Yield enriched rows
@@ -246,29 +266,27 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     private static void ComputeExtendedWindowFunction(
         ExtendedWindowDefinition windowDef,
         List<QueryRow> allRows,
-        Dictionary<string, object?>[] windowValues,
-        QueryPlanContext context)
+        Dictionary<string, object?>[] windowValues)
     {
-        var expr = windowDef.Expression;
         var columnName = windowDef.OutputColumnName;
-        var functionName = expr.FunctionName.ToUpperInvariant();
+        var functionName = windowDef.FunctionName.ToUpperInvariant();
 
-        var partitions = PartitionRows(allRows, expr.PartitionBy, context);
+        var partitions = PartitionRows(allRows, windowDef.PartitionBy);
 
         foreach (var partition in partitions)
         {
-            var sortedIndices = SortPartition(partition, allRows, expr.OrderBy);
+            var sortedIndices = SortPartition(partition, allRows, windowDef.OrderBy);
 
             switch (functionName)
             {
                 case "LAG":
-                    ComputeLag(sortedIndices, allRows, expr, windowValues, columnName,
-                        windowDef.Offset, windowDef.DefaultValue, context);
+                    ComputeLag(sortedIndices, allRows, windowDef.Operand, windowValues, columnName,
+                        windowDef.Offset, windowDef.DefaultValue);
                     break;
 
                 case "LEAD":
-                    ComputeLead(sortedIndices, allRows, expr, windowValues, columnName,
-                        windowDef.Offset, windowDef.DefaultValue, context);
+                    ComputeLead(sortedIndices, allRows, windowDef.Operand, windowValues, columnName,
+                        windowDef.Offset, windowDef.DefaultValue);
                     break;
 
                 case "NTILE":
@@ -276,13 +294,13 @@ public sealed class WindowSpoolNode : IQueryPlanNode
                     break;
 
                 case "FIRST_VALUE":
-                    ComputeFirstValue(sortedIndices, allRows, expr, windowValues, columnName,
-                        windowDef.Frame, context);
+                    ComputeFirstValue(sortedIndices, allRows, windowDef.Operand, windowValues, columnName,
+                        windowDef.Frame);
                     break;
 
                 case "LAST_VALUE":
-                    ComputeLastValue(sortedIndices, allRows, expr, windowValues, columnName,
-                        windowDef.Frame, context);
+                    ComputeLastValue(sortedIndices, allRows, windowDef.Operand, windowValues, columnName,
+                        windowDef.Frame);
                     break;
 
                 case "SUM":
@@ -290,8 +308,8 @@ public sealed class WindowSpoolNode : IQueryPlanNode
                 case "AVG":
                 case "MIN":
                 case "MAX":
-                    ComputeFramedAggregate(functionName, sortedIndices, allRows, expr, windowValues,
-                        columnName, windowDef.Frame, context);
+                    ComputeFramedAggregate(functionName, sortedIndices, allRows, windowDef.Operand,
+                        windowDef.IsCountStar, windowValues, columnName, windowDef.Frame);
                     break;
 
                 case "ROW_NUMBER":
@@ -304,12 +322,11 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         }
     }
 
-    #region Partitioning and Sorting (same as ClientWindowNode)
+    #region Partitioning and Sorting
 
     private static List<List<int>> PartitionRows(
         List<QueryRow> allRows,
-        IReadOnlyList<ISqlExpression>? partitionBy,
-        QueryPlanContext context)
+        IReadOnlyList<CompiledScalarExpression>? partitionBy)
     {
         if (partitionBy == null || partitionBy.Count == 0)
         {
@@ -321,7 +338,7 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var i = 0; i < allRows.Count; i++)
         {
-            var key = ComputePartitionKey(allRows[i], partitionBy, context);
+            var key = ComputePartitionKey(allRows[i], partitionBy);
             if (!groups.TryGetValue(key, out var group))
             {
                 group = new List<int>();
@@ -334,25 +351,25 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static string ComputePartitionKey(
-        QueryRow row, IReadOnlyList<ISqlExpression> partitionBy, QueryPlanContext context)
+        QueryRow row, IReadOnlyList<CompiledScalarExpression> partitionBy)
     {
         if (partitionBy.Count == 1)
         {
-            var val = context.ExpressionEvaluator.Evaluate(partitionBy[0], row.Values);
+            var val = partitionBy[0](row.Values);
             return val?.ToString() ?? "\0NULL\0";
         }
 
         var parts = new string[partitionBy.Count];
         for (var i = 0; i < partitionBy.Count; i++)
         {
-            var val = context.ExpressionEvaluator.Evaluate(partitionBy[i], row.Values);
+            var val = partitionBy[i](row.Values);
             parts[i] = val?.ToString() ?? "\0NULL\0";
         }
         return string.Join("\0SEP\0", parts);
     }
 
     private static List<int> SortPartition(
-        List<int> partitionIndices, List<QueryRow> allRows, IReadOnlyList<SqlOrderByItem>? orderBy)
+        List<int> partitionIndices, List<QueryRow> allRows, IReadOnlyList<CompiledOrderByItem>? orderBy)
     {
         if (orderBy == null || orderBy.Count == 0) return new List<int>(partitionIndices);
 
@@ -361,15 +378,15 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         return sorted;
     }
 
-    private static int CompareRowsByOrderBy(QueryRow rowA, QueryRow rowB, IReadOnlyList<SqlOrderByItem> orderBy)
+    private static int CompareRowsByOrderBy(QueryRow rowA, QueryRow rowB, IReadOnlyList<CompiledOrderByItem> orderBy)
     {
         foreach (var item in orderBy)
         {
-            var colName = item.Column.GetFullName();
+            var colName = item.ColumnName;
             var valA = GetColumnValue(rowA, colName);
             var valB = GetColumnValue(rowB, colName);
             var cmp = CompareValues(valA, valB);
-            if (cmp != 0) return item.Direction == SqlSortDirection.Descending ? -cmp : cmp;
+            if (cmp != 0) return item.Descending ? -cmp : cmp;
         }
         return 0;
     }
@@ -425,9 +442,9 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     /// LAG(column, offset, default): value from N rows before current in the partition order.
     /// </summary>
     private static void ComputeLag(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
         Dictionary<string, object?>[] windowValues, string columnName,
-        int offset, object? defaultValue, QueryPlanContext context)
+        int offset, object? defaultValue)
     {
         for (var i = 0; i < sortedIndices.Count; i++)
         {
@@ -435,8 +452,8 @@ public sealed class WindowSpoolNode : IQueryPlanNode
             if (sourceIdx >= 0 && sourceIdx < sortedIndices.Count)
             {
                 var sourceRow = allRows[sortedIndices[sourceIdx]];
-                var val = expr.Operand != null
-                    ? context.ExpressionEvaluator.Evaluate(expr.Operand, sourceRow.Values)
+                var val = operand != null
+                    ? operand(sourceRow.Values)
                     : null;
                 windowValues[sortedIndices[i]][columnName] = val;
             }
@@ -451,9 +468,9 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     /// LEAD(column, offset, default): value from N rows after current in the partition order.
     /// </summary>
     private static void ComputeLead(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
         Dictionary<string, object?>[] windowValues, string columnName,
-        int offset, object? defaultValue, QueryPlanContext context)
+        int offset, object? defaultValue)
     {
         for (var i = 0; i < sortedIndices.Count; i++)
         {
@@ -461,8 +478,8 @@ public sealed class WindowSpoolNode : IQueryPlanNode
             if (sourceIdx >= 0 && sourceIdx < sortedIndices.Count)
             {
                 var sourceRow = allRows[sortedIndices[sourceIdx]];
-                var val = expr.Operand != null
-                    ? context.ExpressionEvaluator.Evaluate(expr.Operand, sourceRow.Values)
+                var val = operand != null
+                    ? operand(sourceRow.Values)
                     : null;
                 windowValues[sortedIndices[i]][columnName] = val;
             }
@@ -508,16 +525,16 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     /// FIRST_VALUE(column): first value in the window frame.
     /// </summary>
     private static void ComputeFirstValue(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
         Dictionary<string, object?>[] windowValues, string columnName,
-        WindowFrameSpec? frame, QueryPlanContext context)
+        WindowFrameSpec? frame)
     {
         for (var i = 0; i < sortedIndices.Count; i++)
         {
             var (frameStart, _) = ResolveFrame(frame, i, sortedIndices.Count);
             var sourceRow = allRows[sortedIndices[frameStart]];
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, sourceRow.Values)
+            var val = operand != null
+                ? operand(sourceRow.Values)
                 : null;
             windowValues[sortedIndices[i]][columnName] = val;
         }
@@ -527,16 +544,16 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     /// LAST_VALUE(column): last value in the window frame.
     /// </summary>
     private static void ComputeLastValue(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
         Dictionary<string, object?>[] windowValues, string columnName,
-        WindowFrameSpec? frame, QueryPlanContext context)
+        WindowFrameSpec? frame)
     {
         for (var i = 0; i < sortedIndices.Count; i++)
         {
             var (_, frameEnd) = ResolveFrame(frame, i, sortedIndices.Count);
             var sourceRow = allRows[sortedIndices[frameEnd]];
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, sourceRow.Values)
+            var val = operand != null
+                ? operand(sourceRow.Values)
                 : null;
             windowValues[sortedIndices[i]][columnName] = val;
         }
@@ -547,8 +564,9 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     /// </summary>
     private static void ComputeFramedAggregate(
         string functionName, List<int> sortedIndices, List<QueryRow> allRows,
-        SqlWindowExpression expr, Dictionary<string, object?>[] windowValues,
-        string columnName, WindowFrameSpec? frame, QueryPlanContext context)
+        CompiledScalarExpression? operand, bool isCountStar,
+        Dictionary<string, object?>[] windowValues,
+        string columnName, WindowFrameSpec? frame)
     {
         for (var i = 0; i < sortedIndices.Count; i++)
         {
@@ -556,11 +574,11 @@ public sealed class WindowSpoolNode : IQueryPlanNode
 
             object? result = functionName switch
             {
-                "SUM" => ComputeFrameSum(sortedIndices, allRows, expr, frameStart, frameEnd, context),
-                "COUNT" => ComputeFrameCount(sortedIndices, allRows, expr, frameStart, frameEnd, context),
-                "AVG" => ComputeFrameAvg(sortedIndices, allRows, expr, frameStart, frameEnd, context),
-                "MIN" => ComputeFrameMin(sortedIndices, allRows, expr, frameStart, frameEnd, context),
-                "MAX" => ComputeFrameMax(sortedIndices, allRows, expr, frameStart, frameEnd, context),
+                "SUM" => ComputeFrameSum(sortedIndices, allRows, operand, frameStart, frameEnd),
+                "COUNT" => ComputeFrameCount(sortedIndices, allRows, operand, isCountStar, frameStart, frameEnd),
+                "AVG" => ComputeFrameAvg(sortedIndices, allRows, operand, frameStart, frameEnd),
+                "MIN" => ComputeFrameMin(sortedIndices, allRows, operand, frameStart, frameEnd),
+                "MAX" => ComputeFrameMax(sortedIndices, allRows, operand, frameStart, frameEnd),
                 _ => throw new NotSupportedException($"Aggregate '{functionName}' not supported in window frame.")
             };
 
@@ -604,15 +622,15 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static object? ComputeFrameSum(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
-        int frameStart, int frameEnd, QueryPlanContext context)
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
+        int frameStart, int frameEnd)
     {
         decimal sum = 0;
         var hasValue = false;
         for (var j = frameStart; j <= frameEnd; j++)
         {
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[sortedIndices[j]].Values)
+            var val = operand != null
+                ? operand(allRows[sortedIndices[j]].Values)
                 : null;
             if (val != null)
             {
@@ -624,16 +642,16 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static object? ComputeFrameCount(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
-        int frameStart, int frameEnd, QueryPlanContext context)
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
+        bool isCountStar, int frameStart, int frameEnd)
     {
-        if (expr.IsCountStar) return frameEnd - frameStart + 1;
+        if (isCountStar) return frameEnd - frameStart + 1;
 
         var count = 0;
         for (var j = frameStart; j <= frameEnd; j++)
         {
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[sortedIndices[j]].Values)
+            var val = operand != null
+                ? operand(allRows[sortedIndices[j]].Values)
                 : null;
             if (val != null) count++;
         }
@@ -641,15 +659,15 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static object? ComputeFrameAvg(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
-        int frameStart, int frameEnd, QueryPlanContext context)
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
+        int frameStart, int frameEnd)
     {
         decimal sum = 0;
         var count = 0;
         for (var j = frameStart; j <= frameEnd; j++)
         {
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[sortedIndices[j]].Values)
+            var val = operand != null
+                ? operand(allRows[sortedIndices[j]].Values)
                 : null;
             if (val != null)
             {
@@ -661,14 +679,14 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static object? ComputeFrameMin(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
-        int frameStart, int frameEnd, QueryPlanContext context)
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
+        int frameStart, int frameEnd)
     {
         object? min = null;
         for (var j = frameStart; j <= frameEnd; j++)
         {
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[sortedIndices[j]].Values)
+            var val = operand != null
+                ? operand(allRows[sortedIndices[j]].Values)
                 : null;
             if (val != null && (min == null || CompareValues(val, min) < 0))
             {
@@ -679,14 +697,14 @@ public sealed class WindowSpoolNode : IQueryPlanNode
     }
 
     private static object? ComputeFrameMax(
-        List<int> sortedIndices, List<QueryRow> allRows, SqlWindowExpression expr,
-        int frameStart, int frameEnd, QueryPlanContext context)
+        List<int> sortedIndices, List<QueryRow> allRows, CompiledScalarExpression? operand,
+        int frameStart, int frameEnd)
     {
         object? max = null;
         for (var j = frameStart; j <= frameEnd; j++)
         {
-            var val = expr.Operand != null
-                ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[sortedIndices[j]].Values)
+            var val = operand != null
+                ? operand(allRows[sortedIndices[j]].Values)
                 : null;
             if (val != null && (max == null || CompareValues(val, max) > 0))
             {
