@@ -52,24 +52,11 @@ public sealed class ExecuteMessageNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // TODO: Wire to Dataverse message execution via QueryPlanContext.
-        // For now, return a single row with the message name and parameters as confirmation.
-        var values = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["message"] = QueryValue.Simple(MessageName),
-            ["status"] = QueryValue.Simple("pending"),
-            ["parameter_count"] = QueryValue.Simple(Parameters.Count)
-        };
-
-        // Include each parameter as a column for visibility
-        foreach (var param in Parameters)
-        {
-            values[param.Name] = QueryValue.Simple(param.Value);
-        }
-
-        yield return new QueryRow(values, "message");
-        context.Statistics.IncrementRowsRead();
         await Task.CompletedTask;
+        throw new NotSupportedException(
+            $"EXECUTE '{MessageName}' is not yet supported. " +
+            "Dataverse message execution will be available in a future release.");
+        yield break; // Required for async iterator signature
     }
 }
 
