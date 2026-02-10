@@ -27,6 +27,7 @@ namespace PPDS.Query.Planning;
 public sealed class ExecutionPlanBuilder
 {
     private readonly IFetchXmlGeneratorService _fetchXmlGenerator;
+    private readonly SessionContext? _sessionContext;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ExecutionPlanBuilder"/> class.
@@ -35,10 +36,15 @@ public sealed class ExecutionPlanBuilder
     /// Service that generates FetchXML from ScriptDom fragments. Injected to decouple
     /// plan construction from FetchXML transpilation (wired in a later phase).
     /// </param>
-    public ExecutionPlanBuilder(IFetchXmlGeneratorService fetchXmlGenerator)
+    /// <param name="sessionContext">
+    /// Optional session context for cursor, impersonation, and temp table state.
+    /// When null, cursor and impersonation statements will throw at plan time.
+    /// </param>
+    public ExecutionPlanBuilder(IFetchXmlGeneratorService fetchXmlGenerator, SessionContext? sessionContext = null)
     {
         _fetchXmlGenerator = fetchXmlGenerator
             ?? throw new ArgumentNullException(nameof(fetchXmlGenerator));
+        _sessionContext = sessionContext;
     }
 
     /// <summary>
@@ -75,6 +81,14 @@ public sealed class ExecutionPlanBuilder
             BeginEndBlockStatement blockStmt => PlanScript(blockStmt.StatementList.Statements.Cast<TSqlStatement>().ToArray(), options),
             CreateTableStatement createTable when IsTempTable(createTable) => PlanScript(new[] { createTable }, options),
             DropTableStatement dropTable => PlanScript(new[] { dropTable }, options),
+            DeclareCursorStatement declareCursor => PlanDeclareCursor(declareCursor, options),
+            OpenCursorStatement openCursor => PlanOpenCursor(openCursor),
+            FetchCursorStatement fetchCursor => PlanFetchCursor(fetchCursor),
+            CloseCursorStatement closeCursor => PlanCloseCursor(closeCursor),
+            DeallocateCursorStatement deallocateCursor => PlanDeallocateCursor(deallocateCursor),
+            ExecuteAsStatement executeAs => PlanExecuteAs(executeAs),
+            RevertStatement revert => PlanRevert(revert),
+            ExecuteStatement exec => PlanExecuteMessage(exec),
             _ => throw new QueryParseException($"Unsupported statement type: {statement.GetType().Name}")
         };
     }
@@ -744,6 +758,231 @@ public sealed class ExecutionPlanBuilder
             FetchXml = $"-- TDS Endpoint: SQL passed directly --\n{options.OriginalSql}",
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Cursor planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a DECLARE cursor_name CURSOR FOR SELECT ... statement.
+    /// </summary>
+    private QueryPlanResult PlanDeclareCursor(DeclareCursorStatement declareCursor, QueryPlanOptions options)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Cursor operations require a SessionContext.");
+
+        var cursorName = declareCursor.Name.Value;
+
+        // Plan the cursor's SELECT query
+        var selectStmt = declareCursor.CursorDefinition.Select;
+        var queryResult = PlanStatement(selectStmt, options);
+
+        var node = new DeclareCursorNode(cursorName, queryResult.RootNode, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- DECLARE CURSOR {cursorName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "cursor"
+        };
+    }
+
+    /// <summary>
+    /// Plans an OPEN cursor_name statement.
+    /// </summary>
+    private QueryPlanResult PlanOpenCursor(OpenCursorStatement openCursor)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Cursor operations require a SessionContext.");
+
+        var cursorName = openCursor.Cursor.Name.Value;
+        var node = new OpenCursorNode(cursorName, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- OPEN CURSOR {cursorName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "cursor"
+        };
+    }
+
+    /// <summary>
+    /// Plans a FETCH NEXT FROM cursor_name INTO @var1, @var2, ... statement.
+    /// </summary>
+    private QueryPlanResult PlanFetchCursor(FetchCursorStatement fetchCursor)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Cursor operations require a SessionContext.");
+
+        var cursorName = fetchCursor.Cursor.Name.Value;
+
+        var intoVariables = new List<string>();
+        if (fetchCursor.IntoVariables != null)
+        {
+            foreach (var variable in fetchCursor.IntoVariables)
+            {
+                var varName = variable.Name;
+                if (!varName.StartsWith("@"))
+                    varName = "@" + varName;
+                intoVariables.Add(varName);
+            }
+        }
+
+        var node = new FetchCursorNode(cursorName, intoVariables, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- FETCH NEXT FROM {cursorName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "cursor"
+        };
+    }
+
+    /// <summary>
+    /// Plans a CLOSE cursor_name statement.
+    /// </summary>
+    private QueryPlanResult PlanCloseCursor(CloseCursorStatement closeCursor)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Cursor operations require a SessionContext.");
+
+        var cursorName = closeCursor.Cursor.Name.Value;
+        var node = new CloseCursorNode(cursorName, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- CLOSE CURSOR {cursorName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "cursor"
+        };
+    }
+
+    /// <summary>
+    /// Plans a DEALLOCATE cursor_name statement.
+    /// </summary>
+    private QueryPlanResult PlanDeallocateCursor(DeallocateCursorStatement deallocateCursor)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Cursor operations require a SessionContext.");
+
+        var cursorName = deallocateCursor.Cursor.Name.Value;
+        var node = new DeallocateCursorNode(cursorName, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- DEALLOCATE CURSOR {cursorName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "cursor"
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXECUTE AS / REVERT planning (impersonation)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans an EXECUTE AS USER = 'user@domain.com' statement.
+    /// </summary>
+    private QueryPlanResult PlanExecuteAs(ExecuteAsStatement executeAs)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Impersonation operations require a SessionContext.");
+
+        string? userName = (executeAs.ExecuteContext?.Principal as StringLiteral)?.Value;
+
+        if (string.IsNullOrEmpty(userName))
+            throw new QueryParseException("EXECUTE AS requires a user name string literal.");
+
+        var node = new ExecuteAsNode(userName, session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- EXECUTE AS USER = '{userName}'",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "impersonation"
+        };
+    }
+
+    /// <summary>
+    /// Plans a REVERT statement.
+    /// </summary>
+    private QueryPlanResult PlanRevert(RevertStatement revert)
+    {
+        var session = _sessionContext
+            ?? throw new QueryParseException("Impersonation operations require a SessionContext.");
+
+        var node = new RevertNode(session);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = "-- REVERT",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "impersonation"
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXECUTE message planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans an EXEC message_name @param1 = value1, @param2 = value2 statement.
+    /// </summary>
+    private QueryPlanResult PlanExecuteMessage(ExecuteStatement exec)
+    {
+        var execSpec = exec.ExecuteSpecification;
+        if (execSpec?.ExecutableEntity is not ExecutableProcedureReference procRef)
+            throw new QueryParseException("EXEC statement must reference a procedure or message name.");
+
+        var messageName = procRef.ProcedureReference?.ProcedureReference?.Name?.BaseIdentifier?.Value;
+        if (string.IsNullOrEmpty(messageName))
+            throw new QueryParseException("EXEC statement must specify a message name.");
+
+        var parameters = new List<MessageParameter>();
+        if (execSpec.ExecutableEntity is ExecutableProcedureReference procRefWithParams
+            && procRefWithParams.Parameters != null)
+        {
+            foreach (var param in procRefWithParams.Parameters)
+            {
+                var paramName = param.Variable?.Name ?? $"param{parameters.Count}";
+                if (paramName.StartsWith("@"))
+                    paramName = paramName.Substring(1);
+
+                string? paramValue = null;
+                if (param.ParameterValue is StringLiteral strLit)
+                {
+                    paramValue = strLit.Value;
+                }
+                else if (param.ParameterValue is IntegerLiteral intLit)
+                {
+                    paramValue = intLit.Value;
+                }
+                else if (param.ParameterValue is NullLiteral)
+                {
+                    paramValue = null;
+                }
+
+                parameters.Add(new MessageParameter(paramName, paramValue));
+            }
+        }
+
+        var node = new ExecuteMessageNode(messageName, parameters);
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = $"-- EXEC {messageName}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "message"
         };
     }
 

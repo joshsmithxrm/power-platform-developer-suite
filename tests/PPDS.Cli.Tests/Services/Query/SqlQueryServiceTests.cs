@@ -241,7 +241,7 @@ public class SqlQueryServiceTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidSql_ThrowsSqlParseException()
     {
-        var request = new SqlQueryRequest { Sql = "INVALID SQL" };
+        var request = new SqlQueryRequest { Sql = "SELECT FROM WHERE ,,," };
 
         await Assert.ThrowsAsync<PpdsException>(() => _service.ExecuteAsync(request));
     }

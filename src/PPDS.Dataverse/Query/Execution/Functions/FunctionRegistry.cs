@@ -63,6 +63,7 @@ public sealed class FunctionRegistry
         DateFunctions.RegisterAll(registry);
         MathFunctions.RegisterAll(registry);
         JsonFunctions.RegisterAll(registry);
+        DataverseFunctions.RegisterAll(registry);
         return registry;
     }
 }

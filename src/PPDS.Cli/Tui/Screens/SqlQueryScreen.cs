@@ -4,11 +4,13 @@ using PPDS.Auth.Credentials;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tui.Components;
 using PPDS.Cli.Tui.Dialogs;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Sql.Intellisense;
 using SqlSourceTokenizer = PPDS.Query.Intellisense.SqlSourceTokenizer;
@@ -61,6 +63,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private bool _isExecuting;
     private string _statusText = "Ready";
     private string? _lastErrorMessage;
+    private QueryPlanDescription? _lastExecutionPlan;
+    private long _lastExecutionTimeMs;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -76,6 +80,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             new("Execute", "F5", () => _ = ExecuteQueryAsync()),
             new("Show FetchXML", "Ctrl+Shift+F", ShowFetchXmlDialog),
+            new("Show Execution Plan", "Ctrl+Shift+E", ShowExecutionPlanDialog),
             new("History", "Ctrl+Shift+H", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
@@ -315,6 +320,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     protected override void RegisterHotkeys(IHotkeyRegistry registry)
     {
         RegisterHotkey(registry, Key.CtrlMask | Key.E, "Export results", ShowExportDialog);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.E, "Show execution plan", ShowExecutionPlanDialog);
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.H, "Query history", ShowHistoryDialog);
         RegisterHotkey(registry, Key.F6, "Toggle query/results focus", () =>
         {
@@ -568,6 +574,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     _lastSql = sql;
                     _lastPageNumber = 1;
                     _lastPagingCookie = null;
+                    _lastExecutionTimeMs = elapsedMs;
 
                     _statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms";
                 }
@@ -591,6 +598,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             ErrorService.FireAndForget(
                 SaveToHistoryAsync(sql, totalRows, stopwatch.ElapsedMilliseconds),
                 "SaveHistory");
+
+            // Cache execution plan (fire-and-forget)
+            ErrorService.FireAndForget(
+                CacheExecutionPlanAsync(sql),
+                "CacheExecutionPlan");
         }
         catch (DataverseAuthenticationException authEx) when (authEx.RequiresReauthentication)
         {
@@ -670,6 +682,22 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             System.Diagnostics.Debug.WriteLine($"[TUI] Failed to save query to history: {ex.Message}");
             TuiDebugLog.Log($"History save failed: {ex.Message}");
+        }
+    }
+
+    private async Task CacheExecutionPlanAsync(string sql)
+    {
+        if (EnvironmentUrl == null) return;
+
+        try
+        {
+            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
+            var plan = await service.ExplainAsync(sql, ScreenCancellation);
+            _lastExecutionPlan = plan;
+        }
+        catch (Exception ex)
+        {
+            TuiDebugLog.Log($"Execution plan cache failed: {ex.Message}");
         }
     }
 
@@ -831,6 +859,83 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             var dialog = new FetchXmlPreviewDialog(fetchXml, Session);
             Application.Run(dialog);
         });
+    }
+
+    private void ShowExecutionPlanDialog()
+    {
+        var sql = _queryInput.Text?.ToString()?.Trim();
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            MessageBox.ErrorQuery("Execution Plan", "Enter a SQL query first.", "OK");
+            return;
+        }
+
+        if (EnvironmentUrl == null)
+        {
+            MessageBox.ErrorQuery("Execution Plan", "No environment selected.", "OK");
+            return;
+        }
+
+        // If we have a cached plan from the last execution, show it immediately
+        if (_lastExecutionPlan != null && sql == _lastSql)
+        {
+            ShowPlanDialog(_lastExecutionPlan, _lastExecutionTimeMs);
+            return;
+        }
+
+        // Otherwise, fetch the plan
+        ErrorService.FireAndForget(FetchAndShowPlanAsync(sql), "ShowExecutionPlan");
+    }
+
+    private async Task FetchAndShowPlanAsync(string sql)
+    {
+        try
+        {
+            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl!, ScreenCancellation);
+            var plan = await service.ExplainAsync(sql, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() => ShowPlanDialog(plan, 0));
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                MessageBox.ErrorQuery("Execution Plan", $"Failed to get plan: {ex.Message}", "OK");
+            });
+        }
+    }
+
+    private void ShowPlanDialog(QueryPlanDescription plan, long executionTimeMs)
+    {
+        var planText = QueryPlanView.FormatPlanTree(plan, executionTimeMs);
+
+        var dialog = new Dialog("Execution Plan", 80, 25)
+        {
+            ColorScheme = TuiColorPalette.Default
+        };
+
+        var textView = new TextView
+        {
+            X = 1,
+            Y = 1,
+            Width = Dim.Fill() - 2,
+            Height = Dim.Fill() - 3,
+            ReadOnly = true,
+            WordWrap = false,
+            Text = planText,
+            ColorScheme = TuiColorPalette.ReadOnlyText
+        };
+
+        var closeButton = new Button("Close")
+        {
+            X = Pos.Center(),
+            Y = Pos.AnchorEnd(1)
+        };
+        closeButton.Clicked += () => Application.RequestStop();
+
+        dialog.Add(textView, closeButton);
+        closeButton.SetFocus();
+        Application.Run(dialog);
     }
 
     private void DeleteWordBackward()
