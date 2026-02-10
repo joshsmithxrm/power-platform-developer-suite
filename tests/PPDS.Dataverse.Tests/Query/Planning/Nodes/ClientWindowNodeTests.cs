@@ -8,7 +8,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 using Moq;
 using Xunit;
 
@@ -66,6 +65,22 @@ public class ClientWindowNodeTests
         return rows;
     }
 
+    /// <summary>
+    /// Helper: creates a compiled scalar expression that reads a column by name.
+    /// </summary>
+    private static CompiledScalarExpression ColumnExpr(string columnName)
+    {
+        return row => row.TryGetValue(columnName, out var qv) ? qv.Value : null;
+    }
+
+    /// <summary>
+    /// Helper: creates a compiled order-by item for the given column and direction.
+    /// </summary>
+    private static CompiledOrderByItem OrderBy(string columnName, bool descending = false)
+    {
+        return new CompiledOrderByItem(columnName, ColumnExpr(columnName), descending);
+    }
+
     #region ROW_NUMBER Tests
 
     [Fact]
@@ -79,15 +94,10 @@ public class ClientWindowNodeTests
         });
 
         // ROW_NUMBER() OVER (ORDER BY revenue ASC)
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("revenue"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("revenue") })
         });
 
         var ctx = CreateContext();
@@ -122,15 +132,11 @@ public class ClientWindowNodeTests
         });
 
         // ROW_NUMBER() OVER (PARTITION BY owner ORDER BY revenue ASC)
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            new ISqlExpression[] { new SqlColumnExpression(SqlColumnRef.Simple("owner")) },
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("revenue"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null,
+                new CompiledScalarExpression[] { ColumnExpr("owner") },
+                new[] { OrderBy("revenue") })
         });
 
         var ctx = CreateContext();
@@ -167,15 +173,10 @@ public class ClientWindowNodeTests
         });
 
         // RANK() OVER (ORDER BY score ASC)
-        var windowExpr = new SqlWindowExpression(
-            "RANK",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("score"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rnk", windowExpr)
+            new WindowDefinition("rnk", "RANK", null, null,
+                new[] { OrderBy("score") })
         });
 
         var ctx = CreateContext();
@@ -188,7 +189,7 @@ public class ClientWindowNodeTests
         var c = rows.First(r => (string)r.Values["name"].Value! == "C");
         var d = rows.First(r => (string)r.Values["name"].Value! == "D");
 
-        // score=100 → rank 1, score=200 → rank 2 (tied), score=300 → rank 4 (gap)
+        // score=100 -> rank 1, score=200 -> rank 2 (tied), score=300 -> rank 4 (gap)
         Assert.Equal(1, a.Values["rnk"].Value);
         Assert.Equal(2, b.Values["rnk"].Value);
         Assert.Equal(2, c.Values["rnk"].Value);
@@ -211,15 +212,10 @@ public class ClientWindowNodeTests
         });
 
         // DENSE_RANK() OVER (ORDER BY score ASC)
-        var windowExpr = new SqlWindowExpression(
-            "DENSE_RANK",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("score"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("dr", windowExpr)
+            new WindowDefinition("dr", "DENSE_RANK", null, null,
+                new[] { OrderBy("score") })
         });
 
         var ctx = CreateContext();
@@ -232,7 +228,7 @@ public class ClientWindowNodeTests
         var c = rows.First(r => (string)r.Values["name"].Value! == "C");
         var d = rows.First(r => (string)r.Values["name"].Value! == "D");
 
-        // score=100 → rank 1, score=200 → rank 2 (tied), score=300 → rank 3 (no gap)
+        // score=100 -> rank 1, score=200 -> rank 2 (tied), score=300 -> rank 3 (no gap)
         Assert.Equal(1, a.Values["dr"].Value);
         Assert.Equal(2, b.Values["dr"].Value);
         Assert.Equal(2, c.Values["dr"].Value);
@@ -255,15 +251,10 @@ public class ClientWindowNodeTests
         });
 
         // SUM(revenue) OVER (PARTITION BY industry)
-        var windowExpr = new SqlWindowExpression(
-            "SUM",
-            new SqlColumnExpression(SqlColumnRef.Simple("revenue")),
-            new ISqlExpression[] { new SqlColumnExpression(SqlColumnRef.Simple("industry")) },
-            null);
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("total", windowExpr)
+            new WindowDefinition("total", "SUM", ColumnExpr("revenue"),
+                new CompiledScalarExpression[] { ColumnExpr("industry") }, null)
         });
 
         var ctx = CreateContext();
@@ -297,16 +288,11 @@ public class ClientWindowNodeTests
         });
 
         // COUNT(*) OVER (PARTITION BY status)
-        var windowExpr = new SqlWindowExpression(
-            "COUNT",
-            null,
-            new ISqlExpression[] { new SqlColumnExpression(SqlColumnRef.Simple("status")) },
-            null,
-            isCountStar: true);
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("cnt", windowExpr)
+            new WindowDefinition("cnt", "COUNT", null,
+                new CompiledScalarExpression[] { ColumnExpr("status") }, null,
+                isCountStar: true)
         });
 
         var ctx = CreateContext();
@@ -332,15 +318,10 @@ public class ClientWindowNodeTests
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("name"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("name") })
         });
 
         var ctx = CreateContext();
@@ -357,15 +338,10 @@ public class ClientWindowNodeTests
             MakeRow(("name", "Alice"), ("revenue", 500m))
         });
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("name"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("name") })
         });
 
         var ctx = CreateContext();
@@ -384,15 +360,10 @@ public class ClientWindowNodeTests
     {
         var mockInput = new MockPlanNode(Array.Empty<QueryRow>());
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("name"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(mockInput, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("name") })
         });
 
         Assert.Contains("ROW_NUMBER", windowNode.Description);
@@ -411,15 +382,10 @@ public class ClientWindowNodeTests
         });
 
         // AVG(score) OVER (PARTITION BY team)
-        var windowExpr = new SqlWindowExpression(
-            "AVG",
-            new SqlColumnExpression(SqlColumnRef.Simple("score")),
-            new ISqlExpression[] { new SqlColumnExpression(SqlColumnRef.Simple("team")) },
-            null);
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("avg_score", windowExpr)
+            new WindowDefinition("avg_score", "AVG", ColumnExpr("score"),
+                new CompiledScalarExpression[] { ColumnExpr("team") }, null)
         });
 
         var ctx = CreateContext();
@@ -447,15 +413,10 @@ public class ClientWindowNodeTests
         });
 
         // ROW_NUMBER() OVER (ORDER BY revenue DESC)
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("revenue"), SqlSortDirection.Descending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("revenue", descending: true) })
         });
 
         var ctx = CreateContext();
@@ -487,15 +448,10 @@ public class ClientWindowNodeTests
 
         var input = new MockPlanNode(rows);
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("value"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("value") })
         }, maxMaterializationRows: 50);
 
         var ctx = CreateContext();
@@ -522,15 +478,10 @@ public class ClientWindowNodeTests
 
         var input = new MockPlanNode(rows);
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("value"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("value") })
         }, maxMaterializationRows: 50);
 
         var ctx = CreateContext();
@@ -554,15 +505,10 @@ public class ClientWindowNodeTests
 
         var input = new MockPlanNode(rows);
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("value"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("value") })
         }, maxMaterializationRows: 0);
 
         var ctx = CreateContext();
@@ -587,20 +533,15 @@ public class ClientWindowNodeTests
         var cts = new CancellationTokenSource();
         var cancellingInput = new CancellingMockPlanNode(rows, cts, cancelAfter: 5);
 
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("value"), SqlSortDirection.Ascending) });
-
         var windowNode = new ClientWindowNode(cancellingInput, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("value") })
         });
 
         var ctx = CreateContext();
 
-        // Act & Assert — driving async enumeration should trigger cancellation
+        // Act & Assert -- driving async enumeration should trigger cancellation
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
             await foreach (var row in windowNode.ExecuteAsync(ctx, cts.Token))
@@ -615,15 +556,11 @@ public class ClientWindowNodeTests
     public void MaxMaterializationRows_DefaultValue_Is500000()
     {
         var input = new MockPlanNode(Array.Empty<QueryRow>());
-        var windowExpr = new SqlWindowExpression(
-            "ROW_NUMBER",
-            null,
-            null,
-            new[] { new SqlOrderByItem(SqlColumnRef.Simple("name"), SqlSortDirection.Ascending) });
 
         var windowNode = new ClientWindowNode(input, new[]
         {
-            new WindowDefinition("rn", windowExpr)
+            new WindowDefinition("rn", "ROW_NUMBER", null, null,
+                new[] { OrderBy("name") })
         });
 
         Assert.Equal(500_000, windowNode.MaxMaterializationRows);

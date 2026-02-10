@@ -225,9 +225,6 @@ public class ExecutionPlanBuilderTests
 
     private static IQueryPlanNode GetInput(ClientWindowNode node)
     {
-        var field = typeof(ClientWindowNode).GetField("_input",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return (IQueryPlanNode)(field?.GetValue(node)
-            ?? throw new InvalidOperationException("Could not access _input field"));
+        return node.Input;
     }
 }

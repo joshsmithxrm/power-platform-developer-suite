@@ -877,7 +877,49 @@ public sealed class QueryPlanner
             if (column is SqlComputedColumn { Expression: SqlWindowExpression windowExpr } computed)
             {
                 var outputName = computed.Alias ?? "window_" + windows.Count;
-                windows.Add(new WindowDefinition(outputName, windowExpr));
+
+                // Compile operand
+                CompiledScalarExpression? compiledOperand = null;
+                if (windowExpr.Operand != null)
+                {
+                    compiledOperand = CompileLegacyExpression(windowExpr.Operand);
+                }
+
+                // Compile partition-by expressions
+                IReadOnlyList<CompiledScalarExpression>? compiledPartitionBy = null;
+                if (windowExpr.PartitionBy != null && windowExpr.PartitionBy.Count > 0)
+                {
+                    var partList = new List<CompiledScalarExpression>(windowExpr.PartitionBy.Count);
+                    foreach (var partExpr in windowExpr.PartitionBy)
+                    {
+                        partList.Add(CompileLegacyExpression(partExpr));
+                    }
+                    compiledPartitionBy = partList;
+                }
+
+                // Compile order-by items
+                IReadOnlyList<CompiledOrderByItem>? compiledOrderBy = null;
+                if (windowExpr.OrderBy != null && windowExpr.OrderBy.Count > 0)
+                {
+                    var orderList = new List<CompiledOrderByItem>(windowExpr.OrderBy.Count);
+                    foreach (var orderItem in windowExpr.OrderBy)
+                    {
+                        var colName = orderItem.Column.GetFullName();
+                        var compiled = CompileLegacyExpression(
+                            new SqlColumnExpression(orderItem.Column));
+                        orderList.Add(new CompiledOrderByItem(
+                            colName, compiled, orderItem.Direction == SqlSortDirection.Descending));
+                    }
+                    compiledOrderBy = orderList;
+                }
+
+                windows.Add(new WindowDefinition(
+                    outputName,
+                    windowExpr.FunctionName,
+                    compiledOperand,
+                    compiledPartitionBy,
+                    compiledOrderBy,
+                    windowExpr.IsCountStar));
             }
         }
 
