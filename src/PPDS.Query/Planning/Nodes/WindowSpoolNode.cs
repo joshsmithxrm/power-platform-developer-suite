@@ -316,6 +316,14 @@ public sealed class WindowSpoolNode : IQueryPlanNode
                     ComputeRowNumber(sortedIndices, windowValues, columnName);
                     break;
 
+                case "RANK":
+                    ComputeRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
+                    break;
+
+                case "DENSE_RANK":
+                    ComputeDenseRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
+                    break;
+
                 default:
                     throw new NotSupportedException($"Window function '{functionName}' is not supported.");
             }
@@ -435,6 +443,60 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         for (var i = 0; i < sortedIndices.Count; i++)
         {
             windowValues[sortedIndices[i]][columnName] = i + 1;
+        }
+    }
+
+    /// <summary>
+    /// RANK(): 1-based rank within partition. Ties get the same rank;
+    /// the next rank after a tie skips (1, 2, 2, 4).
+    /// </summary>
+    private static void ComputeRank(
+        List<int> sortedIndices, List<QueryRow> allRows,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        Dictionary<string, object?>[] windowValues, string columnName)
+    {
+        if (sortedIndices.Count == 0) return;
+
+        windowValues[sortedIndices[0]][columnName] = 1;
+
+        for (var i = 1; i < sortedIndices.Count; i++)
+        {
+            if (orderBy != null && orderBy.Count > 0 &&
+                CompareRowsByOrderBy(allRows[sortedIndices[i]], allRows[sortedIndices[i - 1]], orderBy) == 0)
+            {
+                // Tie: same rank as previous
+                windowValues[sortedIndices[i]][columnName] = windowValues[sortedIndices[i - 1]][columnName];
+            }
+            else
+            {
+                // No tie: rank = position + 1 (1-based)
+                windowValues[sortedIndices[i]][columnName] = i + 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// DENSE_RANK(): 1-based rank within partition. Ties get the same rank;
+    /// the next rank after a tie increments by 1 (1, 2, 2, 3).
+    /// </summary>
+    private static void ComputeDenseRank(
+        List<int> sortedIndices, List<QueryRow> allRows,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        Dictionary<string, object?>[] windowValues, string columnName)
+    {
+        if (sortedIndices.Count == 0) return;
+
+        var currentRank = 1;
+        windowValues[sortedIndices[0]][columnName] = currentRank;
+
+        for (var i = 1; i < sortedIndices.Count; i++)
+        {
+            if (orderBy == null || orderBy.Count == 0 ||
+                CompareRowsByOrderBy(allRows[sortedIndices[i]], allRows[sortedIndices[i - 1]], orderBy) != 0)
+            {
+                currentRank++;
+            }
+            windowValues[sortedIndices[i]][columnName] = currentRank;
         }
     }
 
