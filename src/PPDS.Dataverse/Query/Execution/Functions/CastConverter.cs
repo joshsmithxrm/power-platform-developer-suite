@@ -45,6 +45,26 @@ public static class CastConverter
         };
     }
 
+    /// <summary>
+    /// TRY_CAST / TRY_CONVERT: converts a value to the specified SQL type.
+    /// Returns NULL on failure instead of throwing.
+    /// </summary>
+    /// <param name="value">The value to convert. Null propagates as null.</param>
+    /// <param name="targetType">The target SQL type name (case-insensitive).</param>
+    /// <param name="style">Optional CONVERT style code.</param>
+    /// <returns>The converted value, or null if conversion fails.</returns>
+    public static object? TryConvert(object? value, string targetType, int? style = null)
+    {
+        try
+        {
+            return Convert(value, targetType, style);
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     #region Type Name Parsing
 
     /// <summary>

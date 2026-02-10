@@ -162,6 +162,7 @@ public sealed class SqlIifExpression : ISqlExpression
 
 /// <summary>
 /// CAST(expression AS type) or CONVERT(type, expression [, style]).
+/// Also covers TRY_CAST and TRY_CONVERT (IsTry=true returns NULL on failure instead of throwing).
 /// </summary>
 public sealed class SqlCastExpression : ISqlExpression
 {
@@ -174,12 +175,16 @@ public sealed class SqlCastExpression : ISqlExpression
     /// <summary>Optional CONVERT style code (e.g., 120 for ODBC canonical datetime). Null for CAST.</summary>
     public int? Style { get; }
 
+    /// <summary>When true, conversion failures return NULL instead of throwing (TRY_CAST / TRY_CONVERT).</summary>
+    public bool IsTry { get; }
+
     /// <summary>Initializes a new instance of the <see cref="SqlCastExpression"/> class.</summary>
-    public SqlCastExpression(ISqlExpression expression, string targetType, int? style = null)
+    public SqlCastExpression(ISqlExpression expression, string targetType, int? style = null, bool isTry = false)
     {
         Expression = expression ?? throw new ArgumentNullException(nameof(expression));
         TargetType = targetType ?? throw new ArgumentNullException(nameof(targetType));
         Style = style;
+        IsTry = isTry;
     }
 }
 

@@ -92,6 +92,15 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                     }
                     break;
 
+                case SqlWhileStatement whileStmt:
+                    var whileRows = await ExecuteWhileAsync(
+                        whileStmt, scope, evaluator, context, cancellationToken);
+                    if (whileRows != null)
+                    {
+                        lastResultRows = whileRows;
+                    }
+                    break;
+
                 case SqlBlockStatement block:
                     var blockRows = await CollectRowsAsync(
                         ExecuteStatementListAsync(
@@ -175,6 +184,48 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         }
 
         return null;
+    }
+
+    private async Task<List<QueryRow>?> ExecuteWhileAsync(
+        SqlWhileStatement whileStmt,
+        VariableScope scope,
+        IExpressionEvaluator evaluator,
+        QueryPlanContext context,
+        CancellationToken cancellationToken)
+    {
+        const int maxIterations = 10000;
+        List<QueryRow>? lastRows = null;
+
+        for (var i = 0; i < maxIterations; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var conditionResult = evaluator.EvaluateCondition(
+                whileStmt.Condition,
+                new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
+
+            if (!conditionResult)
+                break;
+
+            var iterRows = await CollectRowsAsync(
+                ExecuteStatementListAsync(
+                    whileStmt.Body.Statements, scope, evaluator, context, cancellationToken),
+                cancellationToken);
+
+            if (iterRows.Count > 0)
+            {
+                lastRows ??= new List<QueryRow>();
+                lastRows.AddRange(iterRows);
+            }
+
+            if (i == maxIterations - 1)
+            {
+                throw new InvalidOperationException(
+                    $"WHILE loop exceeded maximum iteration count of {maxIterations}.");
+            }
+        }
+
+        return lastRows;
     }
 
     private async Task<List<QueryRow>> ExecuteDataStatementAsync(

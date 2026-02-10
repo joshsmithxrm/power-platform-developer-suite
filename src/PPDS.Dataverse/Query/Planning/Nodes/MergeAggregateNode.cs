@@ -113,6 +113,10 @@ public sealed class MergeAggregateNode : IQueryPlanNode
         private readonly Dictionary<string, long> _counts;
         private readonly Dictionary<string, decimal> _mins;
         private readonly Dictionary<string, decimal> _maxes;
+        // For STDEV/VAR: sum of squares for online variance calculation
+        private readonly Dictionary<string, decimal> _sumOfSquares;
+        // For STRING_AGG: collected string values
+        private readonly Dictionary<string, List<string>> _stringValues;
         private readonly string _entityLogicalName;
 
         public AggregateAccumulator(
@@ -128,6 +132,8 @@ public sealed class MergeAggregateNode : IQueryPlanNode
             _counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             _mins = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             _maxes = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            _sumOfSquares = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            _stringValues = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             // Capture group-by values from first row
             foreach (var col in groupByColumns)
@@ -145,6 +151,8 @@ public sealed class MergeAggregateNode : IQueryPlanNode
                 _counts[col.Alias] = 0;
                 _mins[col.Alias] = decimal.MaxValue;
                 _maxes[col.Alias] = decimal.MinValue;
+                _sumOfSquares[col.Alias] = 0;
+                _stringValues[col.Alias] = new List<string>();
             }
         }
 
@@ -154,6 +162,18 @@ public sealed class MergeAggregateNode : IQueryPlanNode
             {
                 if (!row.Values.TryGetValue(col.Alias, out var qv) || qv.Value == null)
                     continue;
+
+                // STRING_AGG uses string values
+                if (col.Function == AggregateFunction.StringAgg)
+                {
+                    var strVal = Convert.ToString(qv.Value, CultureInfo.InvariantCulture);
+                    if (strVal != null)
+                    {
+                        _stringValues[col.Alias].Add(strVal);
+                    }
+                    _counts[col.Alias]++;
+                    continue;
+                }
 
                 var value = Convert.ToDecimal(qv.Value, CultureInfo.InvariantCulture);
 
@@ -190,6 +210,13 @@ public sealed class MergeAggregateNode : IQueryPlanNode
                         if (value > _maxes[col.Alias])
                             _maxes[col.Alias] = value;
                         break;
+                    case AggregateFunction.Stdev:
+                    case AggregateFunction.Var:
+                        // Accumulate individual values for variance calculation
+                        _counts[col.Alias]++;
+                        _sums[col.Alias] += value;
+                        _sumOfSquares[col.Alias] += value * value;
+                        break;
                 }
             }
         }
@@ -216,12 +243,53 @@ public sealed class MergeAggregateNode : IQueryPlanNode
                         : 0m,
                     AggregateFunction.Min => _mins[col.Alias] == decimal.MaxValue ? null : _mins[col.Alias],
                     AggregateFunction.Max => _maxes[col.Alias] == decimal.MinValue ? null : _maxes[col.Alias],
+                    AggregateFunction.Stdev => ComputeStdev(col.Alias),
+                    AggregateFunction.Var => ComputeVariance(col.Alias),
+                    AggregateFunction.StringAgg => ComputeStringAgg(col),
                     _ => null
                 };
                 values[col.Alias] = QueryValue.Simple(result);
             }
 
             return new QueryRow(values, _entityLogicalName);
+        }
+
+        /// <summary>
+        /// Computes sample standard deviation using sum, sum of squares, and count.
+        /// Formula: SQRT((SUM(x^2) - SUM(x)^2/n) / (n-1))
+        /// </summary>
+        private object? ComputeStdev(string alias)
+        {
+            var n = _counts[alias];
+            if (n < 2) return n == 1 ? 0m : (object?)null;
+            var sum = _sums[alias];
+            var sumSq = _sumOfSquares[alias];
+            var variance = (sumSq - (sum * sum / n)) / (n - 1);
+            return (decimal)Math.Sqrt((double)variance);
+        }
+
+        /// <summary>
+        /// Computes sample variance using sum, sum of squares, and count.
+        /// Formula: (SUM(x^2) - SUM(x)^2/n) / (n-1)
+        /// </summary>
+        private object? ComputeVariance(string alias)
+        {
+            var n = _counts[alias];
+            if (n < 2) return n == 1 ? 0m : (object?)null;
+            var sum = _sums[alias];
+            var sumSq = _sumOfSquares[alias];
+            return (sumSq - (sum * sum / n)) / (n - 1);
+        }
+
+        /// <summary>
+        /// Concatenates collected string values with the separator from the column definition.
+        /// </summary>
+        private object? ComputeStringAgg(MergeAggregateColumn col)
+        {
+            var items = _stringValues[col.Alias];
+            if (items.Count == 0) return null;
+            var separator = col.Separator ?? ",";
+            return string.Join(separator, items);
         }
     }
 }
@@ -236,15 +304,20 @@ public sealed class MergeAggregateColumn
 
     /// <summary>The aggregate function to apply when merging partitions.</summary>
     public AggregateFunction Function { get; }
+
     /// <summary>For AVG merging, the alias of the companion COUNT column. Null if not tracking.</summary>
     public string? CountAlias { get; }
 
+    /// <summary>For STRING_AGG, the separator string. Defaults to ",".</summary>
+    public string? Separator { get; }
+
     /// <summary>Initializes a new instance of the <see cref="MergeAggregateColumn"/> class.</summary>
-    public MergeAggregateColumn(string alias, AggregateFunction function, string? countAlias = null)
+    public MergeAggregateColumn(string alias, AggregateFunction function, string? countAlias = null, string? separator = null)
     {
         Alias = alias ?? throw new ArgumentNullException(nameof(alias));
         Function = function;
         CountAlias = countAlias;
+        Separator = separator;
     }
 }
 
@@ -269,5 +342,14 @@ public enum AggregateFunction
     Min,
 
     /// <summary>Finds the maximum value.</summary>
-    Max
+    Max,
+
+    /// <summary>Computes standard deviation (client-side).</summary>
+    Stdev,
+
+    /// <summary>Computes variance (client-side).</summary>
+    Var,
+
+    /// <summary>Concatenates values with separator (client-side).</summary>
+    StringAgg
 }

@@ -199,6 +199,11 @@ public sealed class ExpressionEvaluator : IExpressionEvaluator
             return null;
         }
 
+        if (cast.IsTry)
+        {
+            return Functions.CastConverter.TryConvert(value, cast.TargetType, cast.Style);
+        }
+
         return Functions.CastConverter.Convert(value, cast.TargetType, cast.Style);
     }
 

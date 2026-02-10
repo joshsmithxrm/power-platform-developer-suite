@@ -2,6 +2,14 @@
 
 Execute a checked-in implementation plan end-to-end using parallel agents for maximum throughput.
 
+## Prerequisites
+
+Before starting, invoke these superpowers skills to establish the workflow:
+- Use `superpowers:using-superpowers` to load all available skills
+- Use `superpowers:dispatching-parallel-agents` for parallel agent orchestration patterns
+- Use `superpowers:verification-before-completion` before claiming any phase is done
+- Use `superpowers:requesting-code-review` at phase gates and final review
+
 ## Input
 $ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3-design.md`)
 
