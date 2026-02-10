@@ -142,4 +142,38 @@ public class SessionContextTests
         ctx.TempTableExists("#temp").Should().BeTrue();
         ctx.TempTableExists("#TEMP").Should().BeTrue();
     }
+
+    // ────────────────────────────────────────────
+    //  @@ERROR / ERROR_MESSAGE() tracking
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void ErrorNumber_DefaultsToZero()
+    {
+        var session = new SessionContext();
+        session.ErrorNumber.Should().Be(0);
+    }
+
+    [Fact]
+    public void ErrorNumber_SetAndGet()
+    {
+        var session = new SessionContext();
+        session.ErrorNumber = 50000;
+        session.ErrorNumber.Should().Be(50000);
+    }
+
+    [Fact]
+    public void ErrorMessage_DefaultsToEmpty()
+    {
+        var session = new SessionContext();
+        session.ErrorMessage.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ErrorMessage_SetAndGet()
+    {
+        var session = new SessionContext();
+        session.ErrorMessage = "Custom error";
+        session.ErrorMessage.Should().Be("Custom error");
+    }
 }

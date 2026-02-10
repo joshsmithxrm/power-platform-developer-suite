@@ -742,7 +742,7 @@ public sealed class ExecutionPlanBuilder
     private QueryPlanResult PlanScript(
         IReadOnlyList<TSqlStatement> statements, QueryPlanOptions options)
     {
-        var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler);
+        var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler, _sessionContext);
 
         return new QueryPlanResult
         {
@@ -1285,6 +1285,14 @@ public sealed class ExecutionPlanBuilder
                     whenNotMatched = MergeWhenNotMatched.Insert(columns, values);
                 }
             }
+        }
+
+        if (whenMatched != null)
+        {
+            throw new NotSupportedException(
+                "MERGE WHEN MATCHED (UPDATE/DELETE) is not yet supported. " +
+                "Target row lookup from Dataverse is required. " +
+                "Use WHEN NOT MATCHED (INSERT) only, or use separate UPDATE/DELETE statements.");
         }
 
         var mergeNode = new MergeNode(sourceNode, targetEntity, matchColumns, whenMatched, whenNotMatched);

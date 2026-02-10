@@ -28,6 +28,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     private readonly IReadOnlyList<TSqlStatement> _statements;
     private readonly ExecutionPlanBuilder _planBuilder;
     private readonly ExpressionCompiler _expressionCompiler;
+    private readonly SessionContext? _session;
 
     /// <inheritdoc />
     public string Description => $"ScriptExecution: {_statements.Count} statements";
@@ -44,14 +45,17 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     /// <param name="statements">The ordered list of ScriptDom statements to execute.</param>
     /// <param name="planBuilder">Plan builder used to plan inner SELECT/DML statements.</param>
     /// <param name="expressionCompiler">Compiler for scalar expressions and predicates.</param>
+    /// <param name="session">Optional session context for @@ERROR tracking.</param>
     public ScriptExecutionNode(
         IReadOnlyList<TSqlStatement> statements,
         ExecutionPlanBuilder planBuilder,
-        ExpressionCompiler expressionCompiler)
+        ExpressionCompiler expressionCompiler,
+        SessionContext? session = null)
     {
         _statements = statements ?? throw new ArgumentNullException(nameof(statements));
         _planBuilder = planBuilder ?? throw new ArgumentNullException(nameof(planBuilder));
         _expressionCompiler = expressionCompiler ?? throw new ArgumentNullException(nameof(expressionCompiler));
+        _session = session;
     }
 
     /// <inheritdoc />
@@ -272,10 +276,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             var tryStatements = tryCatch.TryStatements?.Statements
                 ?.Cast<TSqlStatement>().ToList()
                 ?? new List<TSqlStatement>();
-            return await CollectRowsAsync(
+            var result = await CollectRowsAsync(
                 ExecuteStatementListAsync(
                     tryStatements, scope, context, cancellationToken),
                 cancellationToken);
+
+            // TRY block completed successfully — reset @@ERROR state
+            if (_session != null)
+            {
+                _session.ErrorNumber = 0;
+                _session.ErrorMessage = string.Empty;
+            }
+
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -285,6 +298,13 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         {
             // Store error information in the variable scope so ERROR_MESSAGE() etc. can access it
             StoreErrorInfo(scope, ex);
+
+            // Track @@ERROR and ERROR_MESSAGE() on the session
+            if (_session != null)
+            {
+                _session.ErrorNumber = 50000; // Generic user-defined error number
+                _session.ErrorMessage = ex.Message;
+            }
 
             var catchStatements = tryCatch.CatchStatements?.Statements
                 ?.Cast<TSqlStatement>().ToList()

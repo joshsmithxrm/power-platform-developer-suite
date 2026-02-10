@@ -25,6 +25,12 @@ public sealed class SessionContext
     /// </summary>
     public int FetchStatus { get; set; } = -1;
 
+    /// <summary>@@ERROR value — the error number from the last statement. 0 means success.</summary>
+    public int ErrorNumber { get; set; }
+
+    /// <summary>ERROR_MESSAGE() value — the error message from the last caught exception.</summary>
+    public string ErrorMessage { get; set; } = string.Empty;
+
     /// <summary>
     /// Optional CallerObjectId for impersonation (EXECUTE AS USER).
     /// When set, Dataverse requests should use this as the CallerObjectId.
