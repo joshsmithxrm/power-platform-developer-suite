@@ -61,40 +61,12 @@ public sealed class QueryPlanner
             return PlanDelete(delete, opts);
         }
 
-        if (statement is SqlIfStatement ifStmt)
-        {
-            return PlanScript(new[] { ifStmt }, opts);
-        }
-
-        if (statement is SqlBlockStatement block)
-        {
-            return PlanScript(block.Statements, opts);
-        }
-
         if (statement is not SqlSelectStatement selectStatement)
         {
             throw new SqlParseException("Unsupported statement type.");
         }
 
         return PlanSelect(selectStatement, opts);
-    }
-
-    /// <summary>
-    /// Builds an execution plan for a multi-statement script (block or IF/ELSE).
-    /// Wraps the statements in a ScriptExecutionNode that handles variable scope,
-    /// DECLARE/SET, and conditional branching.
-    /// </summary>
-    private QueryPlanResult PlanScript(IReadOnlyList<ISqlStatement> statements, QueryPlanOptions options)
-    {
-        var scriptNode = new ScriptExecutionNode(statements, this);
-
-        return new QueryPlanResult
-        {
-            RootNode = scriptNode,
-            FetchXml = "-- Script: multi-statement execution",
-            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
-            EntityLogicalName = "script"
-        };
     }
 
     private QueryPlanResult PlanSelect(SqlSelectStatement statement, QueryPlanOptions options)

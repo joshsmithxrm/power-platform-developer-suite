@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Moq;
@@ -9,7 +14,9 @@ using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
+using PPDS.Query.Planning.Nodes;
 using Xunit;
+using ExpressionCompiler = PPDS.Query.Execution.ExpressionCompiler;
 
 namespace PPDS.Query.Tests.Planning;
 
@@ -63,28 +70,31 @@ public class TryCatchTests
         // BEGIN CATCH
         //   SET @x = -1
         // END CATCH
-        // SELECT @x AS result  <-- should be 20
 
-        var declare = new SqlDeclareStatement("@x", "INT",
-            new SqlLiteralExpression(SqlLiteral.Number("10")), 0);
-
-        var setInTry = new SqlSetVariableStatement("@x",
-            new SqlLiteralExpression(SqlLiteral.Number("20")), 0);
-        var tryBlock = new SqlBlockStatement(new List<ISqlStatement> { setInTry }, 0);
-
-        var setInCatch = new SqlSetVariableStatement("@x",
-            new SqlLiteralExpression(SqlLiteral.Number("-1")), 0);
-        var catchBlock = new SqlBlockStatement(new List<ISqlStatement> { setInCatch }, 0);
-
-        var tryCatch = new SqlTryCatchStatement(tryBlock, catchBlock, 0);
-
-        var statements = new List<ISqlStatement> { declare, tryCatch };
-        var node = new ScriptExecutionNode(statements);
-
-        var evaluator = new ExpressionEvaluator();
         var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var declare = MakeDeclare("@x", "INT", 10);
+
+        var setInTry = MakeSetVariable("@x", new IntegerLiteral { Value = "20" });
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
+
+        var setInCatch = MakeSetVariable("@x", new IntegerLiteral { Value = "-1" });
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
+
+        var statements = new TSqlStatement[] { declare, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
+        var evaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
 
         var rows = new List<QueryRow>();
@@ -112,30 +122,37 @@ public class TryCatchTests
         //   SET @x = -99
         // END CATCH
 
-        var declare = new SqlDeclareStatement("@x", "INT",
-            new SqlLiteralExpression(SqlLiteral.Number("10")), 0);
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var declare = MakeDeclare("@x", "INT", 10);
 
         // 1 / 0 will throw DivideByZeroException
-        var divByZero = new SqlBinaryExpression(
-            new SqlLiteralExpression(SqlLiteral.Number("1")),
-            SqlBinaryOperator.Divide,
-            new SqlLiteralExpression(SqlLiteral.Number("0")));
-        var setInTry = new SqlSetVariableStatement("@x", divByZero, 0);
-        var tryBlock = new SqlBlockStatement(new List<ISqlStatement> { setInTry }, 0);
+        var divByZero = new BinaryExpression
+        {
+            FirstExpression = new IntegerLiteral { Value = "1" },
+            BinaryExpressionType = BinaryExpressionType.Divide,
+            SecondExpression = new IntegerLiteral { Value = "0" }
+        };
+        var setInTry = MakeSetVariable("@x", divByZero);
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
 
-        var setInCatch = new SqlSetVariableStatement("@x",
-            new SqlLiteralExpression(SqlLiteral.Number("-99")), 0);
-        var catchBlock = new SqlBlockStatement(new List<ISqlStatement> { setInCatch }, 0);
+        var setInCatch = MakeSetVariable("@x", new IntegerLiteral { Value = "-99" });
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
 
-        var tryCatch = new SqlTryCatchStatement(tryBlock, catchBlock, 0);
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
 
-        var statements = new List<ISqlStatement> { declare, tryCatch };
-        var node = new ScriptExecutionNode(statements);
-
-        var evaluator = new ExpressionEvaluator();
-        var scope = new VariableScope();
+        var statements = new TSqlStatement[] { declare, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
+        var evaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
 
         var rows = new List<QueryRow>();
@@ -162,30 +179,40 @@ public class TryCatchTests
         //   SET @msg = ERROR_MESSAGE()
         // END CATCH
 
-        var declareX = new SqlDeclareStatement("@x", "INT", null, 0);
-        var declareMsg = new SqlDeclareStatement("@msg", "NVARCHAR", null, 0);
-
-        var divByZero = new SqlBinaryExpression(
-            new SqlLiteralExpression(SqlLiteral.Number("1")),
-            SqlBinaryOperator.Divide,
-            new SqlLiteralExpression(SqlLiteral.Number("0")));
-        var setInTry = new SqlSetVariableStatement("@x", divByZero, 0);
-        var tryBlock = new SqlBlockStatement(new List<ISqlStatement> { setInTry }, 0);
-
-        // In the CATCH, call ERROR_MESSAGE() through a function expression
-        var errorMsgFunc = new SqlFunctionExpression("ERROR_MESSAGE", new List<ISqlExpression>());
-        var setInCatch = new SqlSetVariableStatement("@msg", errorMsgFunc, 0);
-        var catchBlock = new SqlBlockStatement(new List<ISqlStatement> { setInCatch }, 0);
-
-        var tryCatch = new SqlTryCatchStatement(tryBlock, catchBlock, 0);
-
-        var statements = new List<ISqlStatement> { declareX, declareMsg, tryCatch };
-        var node = new ScriptExecutionNode(statements);
-
-        var evaluator = new ExpressionEvaluator();
         var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var declareX = MakeDeclare("@x", "INT");
+        var declareMsg = MakeDeclare("@msg", "NVARCHAR");
+
+        var divByZero = new BinaryExpression
+        {
+            FirstExpression = new IntegerLiteral { Value = "1" },
+            BinaryExpressionType = BinaryExpressionType.Divide,
+            SecondExpression = new IntegerLiteral { Value = "0" }
+        };
+        var setInTry = MakeSetVariable("@x", divByZero);
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
+
+        // ERROR_MESSAGE() call
+        var errorMsgFunc = new FunctionCall();
+        errorMsgFunc.FunctionName = new Identifier { Value = "ERROR_MESSAGE" };
+        var setInCatch = MakeSetVariable("@msg", errorMsgFunc);
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
+
+        var statements = new TSqlStatement[] { declareX, declareMsg, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
 
         var mockExecutor = new Mock<IQueryExecutor>();
+        var evaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(mockExecutor.Object, evaluator, variableScope: scope);
 
         var rows = new List<QueryRow>();
@@ -229,5 +256,59 @@ public class TryCatchTests
         var result = builder.Plan(fragment);
 
         result.RootNode.Should().BeOfType<ScriptExecutionNode>();
+    }
+
+    // ────────────────────────────────────────────
+    //  Helpers
+    // ────────────────────────────────────────────
+
+    private static DeclareVariableStatement MakeDeclare(string varName, string typeName, int? initialValue = null)
+    {
+        var decl = new DeclareVariableElement();
+        decl.VariableName = new Identifier { Value = varName.TrimStart('@') };
+        decl.DataType = new SqlDataTypeReference
+        {
+            SqlDataTypeOption = typeName.ToUpperInvariant() switch
+            {
+                "INT" => SqlDataTypeOption.Int,
+                "NVARCHAR" => SqlDataTypeOption.NVarChar,
+                _ => SqlDataTypeOption.VarChar
+            }
+        };
+        if (initialValue.HasValue)
+        {
+            decl.Value = new IntegerLiteral { Value = initialValue.Value.ToString() };
+        }
+        var stmt = new DeclareVariableStatement();
+        stmt.Declarations.Add(decl);
+        return stmt;
+    }
+
+    private static SetVariableStatement MakeSetVariable(string varName, ScalarExpression expression)
+    {
+        var stmt = new SetVariableStatement();
+        stmt.Variable = new VariableReference { Name = varName };
+        stmt.Expression = expression;
+        return stmt;
+    }
+
+    /// <summary>
+    /// Creates an ExecutionPlanBuilder and ExpressionCompiler with a variable scope accessor.
+    /// </summary>
+    private static (ExecutionPlanBuilder builder, ExpressionCompiler compiler) CreatePlanBuilderAndCompiler(
+        VariableScope scope)
+    {
+        var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
+        mockFetchXmlService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Returns(TranspileResult.Simple(
+                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
+
+        var builder = new ExecutionPlanBuilder(mockFetchXmlService.Object);
+
+        var compiler = new ExpressionCompiler(
+            variableScopeAccessor: () => scope);
+
+        return (builder, compiler);
     }
 }

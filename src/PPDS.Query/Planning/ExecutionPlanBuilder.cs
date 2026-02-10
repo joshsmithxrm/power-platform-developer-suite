@@ -69,7 +69,7 @@ public sealed class ExecutionPlanBuilder
     /// <summary>
     /// Plans a single TSqlStatement. Entry point for recursive planning (used by script execution).
     /// </summary>
-    internal QueryPlanResult PlanStatement(TSqlStatement statement, QueryPlanOptions options)
+    public QueryPlanResult PlanStatement(TSqlStatement statement, QueryPlanOptions options)
     {
         return statement switch
         {
@@ -712,23 +712,13 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Plans a multi-statement script (IF/ELSE blocks, DECLARE/SET, etc.).
-    /// Wraps the statements in a ScriptExecutionNode. The ScriptExecutionNode still
-    /// uses the legacy QueryPlanner internally for inner statement execution.
+    /// Wraps the statements in a <see cref="ScriptExecutionNode"/> that works directly
+    /// with ScriptDom types and uses this builder for inner statement planning.
     /// </summary>
     private QueryPlanResult PlanScript(
         IReadOnlyList<TSqlStatement> statements, QueryPlanOptions options)
     {
-        // Convert ScriptDom statements to legacy AST statements for ScriptExecutionNode
-        var legacyStatements = new List<ISqlStatement>();
-        foreach (var stmt in statements)
-        {
-            legacyStatements.Add(ConvertToLegacyStatement(stmt));
-        }
-
-        // ScriptExecutionNode uses the legacy QueryPlanner for inner statement execution.
-        // TODO: In a future phase, create a v3 ScriptExecutionNode that uses ExecutionPlanBuilder directly.
-        var legacyPlanner = new QueryPlanner();
-        var scriptNode = new ScriptExecutionNode(legacyStatements, legacyPlanner);
+        var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler);
 
         return new QueryPlanResult
         {
@@ -1477,250 +1467,6 @@ public sealed class ExecutionPlanBuilder
         }
 
         return baseSelect;
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom TSqlStatement to a legacy ISqlStatement (for script execution).
-    /// </summary>
-    private static ISqlStatement ConvertToLegacyStatement(TSqlStatement statement)
-    {
-        return statement switch
-        {
-            SelectStatement selectStmt when selectStmt.QueryExpression is QuerySpecification qs =>
-                ConvertToLegacySelect(selectStmt, qs),
-
-            InsertStatement insert => ConvertInsertToLegacy(insert),
-
-            UpdateStatement update => ConvertUpdateToLegacy(update),
-
-            DeleteStatement delete => ConvertDeleteToLegacy(delete),
-
-            IfStatement ifStmt => ConvertIfToLegacy(ifStmt),
-
-            BeginEndBlockStatement block => ConvertBlockToLegacy(block),
-
-            DeclareVariableStatement declare => ConvertDeclareToLegacy(declare),
-
-            SetVariableStatement setVar => ConvertSetVariableToLegacy(setVar),
-
-            WhileStatement whileStmt => ConvertWhileToLegacy(whileStmt),
-
-            TryCatchStatement tryCatch => ConvertTryCatchToLegacy(tryCatch),
-
-            _ => throw new QueryParseException(
-                $"Unsupported statement type for script conversion: {statement.GetType().Name}")
-        };
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom InsertStatement to a legacy SqlInsertStatement.
-    /// </summary>
-    private static SqlInsertStatement ConvertInsertToLegacy(InsertStatement insert)
-    {
-        var targetEntity = ScriptDomAdapter.GetInsertTargetEntity(insert);
-        var columns = ScriptDomAdapter.GetInsertColumns(insert);
-
-        SqlSelectStatement? sourceQuery = null;
-        List<IReadOnlyList<ISqlExpression>>? valueRows = null;
-
-        var selectSource = ScriptDomAdapter.GetInsertSelectSource(insert);
-        if (selectSource != null)
-        {
-            sourceQuery = ScriptDomAdapter.ConvertSelectStatement(selectSource);
-        }
-        else
-        {
-            var rawRows = ScriptDomAdapter.GetInsertValueRows(insert);
-            valueRows = rawRows.Select(r => (IReadOnlyList<ISqlExpression>)r.AsReadOnly()).ToList();
-        }
-
-        return new SqlInsertStatement(targetEntity, columns, valueRows, sourceQuery, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom UpdateStatement to a legacy SqlUpdateStatement.
-    /// </summary>
-    private static SqlUpdateStatement ConvertUpdateToLegacy(UpdateStatement update)
-    {
-        var targetTable = ScriptDomAdapter.GetUpdateTargetTable(update);
-        var setClauses = ScriptDomAdapter.GetUpdateSetClauses(update);
-        var where = ScriptDomAdapter.GetUpdateWhere(update);
-
-        var fromClause = ScriptDomAdapter.GetUpdateFromClause(update);
-        SqlTableRef? fromTable = null;
-        List<SqlJoin>? joins = null;
-        if (fromClause != null)
-        {
-            fromTable = ScriptDomAdapter.ConvertFromClause(fromClause);
-            joins = ScriptDomAdapter.ConvertJoins(fromClause);
-        }
-
-        return new SqlUpdateStatement(targetTable, setClauses, where, fromTable, joins);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom DeleteStatement to a legacy SqlDeleteStatement.
-    /// </summary>
-    private static SqlDeleteStatement ConvertDeleteToLegacy(DeleteStatement delete)
-    {
-        var targetTable = ScriptDomAdapter.GetDeleteTargetTable(delete);
-        var where = ScriptDomAdapter.GetDeleteWhere(delete);
-
-        var fromClause = ScriptDomAdapter.GetDeleteFromClause(delete);
-        SqlTableRef? fromTable = null;
-        List<SqlJoin>? joins = null;
-        if (fromClause != null)
-        {
-            fromTable = ScriptDomAdapter.ConvertFromClause(fromClause);
-            joins = ScriptDomAdapter.ConvertJoins(fromClause);
-        }
-
-        return new SqlDeleteStatement(targetTable, where, fromTable, joins);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom IfStatement to a legacy SqlIfStatement.
-    /// </summary>
-    private static SqlIfStatement ConvertIfToLegacy(IfStatement ifStmt)
-    {
-        var condition = ScriptDomAdapter.ConvertBooleanExpression(ifStmt.Predicate);
-
-        var thenStatements = new List<ISqlStatement>();
-        if (ifStmt.ThenStatement is BeginEndBlockStatement thenBlock)
-        {
-            foreach (TSqlStatement s in thenBlock.StatementList.Statements)
-            {
-                thenStatements.Add(ConvertToLegacyStatement(s));
-            }
-        }
-        else
-        {
-            thenStatements.Add(ConvertToLegacyStatement(ifStmt.ThenStatement));
-        }
-        var thenBlockLegacy = new SqlBlockStatement(thenStatements, 0);
-
-        SqlBlockStatement? elseBlockLegacy = null;
-        if (ifStmt.ElseStatement != null)
-        {
-            var elseStatements = new List<ISqlStatement>();
-            if (ifStmt.ElseStatement is BeginEndBlockStatement elseBlock)
-            {
-                foreach (TSqlStatement s in elseBlock.StatementList.Statements)
-                {
-                    elseStatements.Add(ConvertToLegacyStatement(s));
-                }
-            }
-            else
-            {
-                elseStatements.Add(ConvertToLegacyStatement(ifStmt.ElseStatement));
-            }
-            elseBlockLegacy = new SqlBlockStatement(elseStatements, 0);
-        }
-
-        return new SqlIfStatement(condition, thenBlockLegacy, elseBlockLegacy, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom BeginEndBlockStatement to a legacy SqlBlockStatement.
-    /// </summary>
-    private static SqlBlockStatement ConvertBlockToLegacy(BeginEndBlockStatement block)
-    {
-        var statements = new List<ISqlStatement>();
-        foreach (TSqlStatement stmt in block.StatementList.Statements)
-        {
-            statements.Add(ConvertToLegacyStatement(stmt));
-        }
-        return new SqlBlockStatement(statements, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom DeclareVariableStatement to a legacy SqlDeclareStatement.
-    /// </summary>
-    private static ISqlStatement ConvertDeclareToLegacy(DeclareVariableStatement declare)
-    {
-        // DeclareVariableStatement can have multiple declarations, take the first
-        if (declare.Declarations.Count == 0)
-            throw new QueryParseException("DECLARE statement has no declarations.");
-
-        var decl = declare.Declarations[0];
-        var varName = decl.VariableName.Value;
-        if (!varName.StartsWith("@"))
-            varName = "@" + varName;
-
-        var typeName = FormatDataTypeReference(decl.DataType);
-
-        ISqlExpression? initialValue = null;
-        if (decl.Value != null)
-        {
-            initialValue = ScriptDomAdapter.ConvertExpression(decl.Value);
-        }
-
-        return new SqlDeclareStatement(varName, typeName, initialValue, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom SetVariableStatement to a legacy SqlSetVariableStatement.
-    /// </summary>
-    private static SqlSetVariableStatement ConvertSetVariableToLegacy(SetVariableStatement setVar)
-    {
-        var varName = setVar.Variable.Name;
-        if (!varName.StartsWith("@"))
-            varName = "@" + varName;
-
-        var value = ScriptDomAdapter.ConvertExpression(setVar.Expression);
-        return new SqlSetVariableStatement(varName, value, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom WhileStatement to a legacy SqlWhileStatement.
-    /// </summary>
-    private static SqlWhileStatement ConvertWhileToLegacy(WhileStatement whileStmt)
-    {
-        var condition = ScriptDomAdapter.ConvertBooleanExpression(whileStmt.Predicate);
-
-        var bodyStatements = new List<ISqlStatement>();
-        if (whileStmt.Statement is BeginEndBlockStatement bodyBlock)
-        {
-            foreach (TSqlStatement s in bodyBlock.StatementList.Statements)
-            {
-                bodyStatements.Add(ConvertToLegacyStatement(s));
-            }
-        }
-        else
-        {
-            bodyStatements.Add(ConvertToLegacyStatement(whileStmt.Statement));
-        }
-
-        var bodyBlockLegacy = new SqlBlockStatement(bodyStatements, 0);
-        return new SqlWhileStatement(condition, bodyBlockLegacy, 0);
-    }
-
-    /// <summary>
-    /// Converts a ScriptDom TryCatchStatement to a legacy SqlTryCatchStatement.
-    /// </summary>
-    private static SqlTryCatchStatement ConvertTryCatchToLegacy(TryCatchStatement tryCatch)
-    {
-        var tryStatements = new List<ISqlStatement>();
-        if (tryCatch.TryStatements?.Statements != null)
-        {
-            foreach (TSqlStatement s in tryCatch.TryStatements.Statements)
-            {
-                tryStatements.Add(ConvertToLegacyStatement(s));
-            }
-        }
-        var tryBlockLegacy = new SqlBlockStatement(tryStatements, 0);
-
-        var catchStatements = new List<ISqlStatement>();
-        if (tryCatch.CatchStatements?.Statements != null)
-        {
-            foreach (TSqlStatement s in tryCatch.CatchStatements.Statements)
-            {
-                catchStatements.Add(ConvertToLegacyStatement(s));
-            }
-        }
-        var catchBlockLegacy = new SqlBlockStatement(catchStatements, 0);
-
-        return new SqlTryCatchStatement(tryBlockLegacy, catchBlockLegacy, 0);
     }
 
     /// <summary>

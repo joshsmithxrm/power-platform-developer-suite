@@ -1,22 +1,33 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
-using PPDS.Dataverse.Sql.Ast;
+using PPDS.Dataverse.Query.Planning;
+using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Query.Execution;
 
-namespace PPDS.Dataverse.Query.Planning.Nodes;
+namespace PPDS.Query.Planning.Nodes;
 
 /// <summary>
 /// Executes a sequence of SQL statements (multi-statement scripts) including
-/// IF/ELSE branching. Evaluates statements sequentially, managing variable
-/// scope across blocks. Returns rows from the LAST SELECT/DML statement.
+/// DECLARE, SET, IF/ELSE branching, WHILE loops, and TRY/CATCH. Evaluates
+/// statements sequentially, managing variable scope across blocks.
+/// Returns rows from the LAST SELECT/DML statement.
+///
+/// This node works directly with ScriptDom <see cref="TSqlStatement"/> types,
+/// using the <see cref="ExecutionPlanBuilder"/> for inner statement planning and
+/// <see cref="ExpressionCompiler"/> for expression/predicate compilation.
 /// </summary>
 public sealed class ScriptExecutionNode : IQueryPlanNode
 {
-    private readonly IReadOnlyList<ISqlStatement> _statements;
-    private readonly QueryPlanner _planner;
+    private readonly IReadOnlyList<TSqlStatement> _statements;
+    private readonly ExecutionPlanBuilder _planBuilder;
+    private readonly ExpressionCompiler _expressionCompiler;
 
     /// <inheritdoc />
     public string Description => $"ScriptExecution: {_statements.Count} statements";
@@ -28,14 +39,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
     /// <summary>
-    /// Creates a ScriptExecutionNode for a list of statements.
+    /// Creates a ScriptExecutionNode for a list of ScriptDom statements.
     /// </summary>
-    /// <param name="statements">The ordered list of statements to execute.</param>
-    /// <param name="planner">The planner used to plan inner SELECT/DML statements.</param>
-    public ScriptExecutionNode(IReadOnlyList<ISqlStatement> statements, QueryPlanner? planner = null)
+    /// <param name="statements">The ordered list of ScriptDom statements to execute.</param>
+    /// <param name="planBuilder">Plan builder used to plan inner SELECT/DML statements.</param>
+    /// <param name="expressionCompiler">Compiler for scalar expressions and predicates.</param>
+    public ScriptExecutionNode(
+        IReadOnlyList<TSqlStatement> statements,
+        ExecutionPlanBuilder planBuilder,
+        ExpressionCompiler expressionCompiler)
     {
         _statements = statements ?? throw new ArgumentNullException(nameof(statements));
-        _planner = planner ?? new QueryPlanner();
+        _planBuilder = planBuilder ?? throw new ArgumentNullException(nameof(planBuilder));
+        _expressionCompiler = expressionCompiler ?? throw new ArgumentNullException(nameof(expressionCompiler));
     }
 
     /// <inheritdoc />
@@ -44,13 +60,9 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var scope = context.VariableScope ?? new VariableScope();
-        var evaluator = context.ExpressionEvaluator;
-
-        // Set the variable scope on the expression evaluator
-        evaluator.VariableScope = scope;
 
         await foreach (var row in ExecuteStatementListAsync(
-            _statements, scope, evaluator, context, cancellationToken))
+            _statements, scope, context, cancellationToken))
         {
             yield return row;
         }
@@ -61,9 +73,8 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     /// last result-producing statement (SELECT/DML/IF with results).
     /// </summary>
     private async IAsyncEnumerable<QueryRow> ExecuteStatementListAsync(
-        IReadOnlyList<ISqlStatement> statements,
+        IReadOnlyList<TSqlStatement> statements,
         VariableScope scope,
-        IExpressionEvaluator evaluator,
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -75,45 +86,47 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
 
             switch (statement)
             {
-                case SqlDeclareStatement declare:
-                    ExecuteDeclare(declare, scope, evaluator);
+                case DeclareVariableStatement declare:
+                    ExecuteDeclare(declare, scope);
                     break;
 
-                case SqlSetVariableStatement setVar:
-                    ExecuteSetVariable(setVar, scope, evaluator);
+                case SetVariableStatement setVar:
+                    ExecuteSetVariable(setVar, scope);
                     break;
 
-                case SqlIfStatement ifStmt:
+                case IfStatement ifStmt:
                     var ifRows = await ExecuteIfAsync(
-                        ifStmt, scope, evaluator, context, cancellationToken);
+                        ifStmt, scope, context, cancellationToken);
                     if (ifRows != null)
                     {
                         lastResultRows = ifRows;
                     }
                     break;
 
-                case SqlWhileStatement whileStmt:
+                case WhileStatement whileStmt:
                     var whileRows = await ExecuteWhileAsync(
-                        whileStmt, scope, evaluator, context, cancellationToken);
+                        whileStmt, scope, context, cancellationToken);
                     if (whileRows != null)
                     {
                         lastResultRows = whileRows;
                     }
                     break;
 
-                case SqlTryCatchStatement tryCatch:
+                case TryCatchStatement tryCatch:
                     var tryCatchRows = await ExecuteTryCatchAsync(
-                        tryCatch, scope, evaluator, context, cancellationToken);
+                        tryCatch, scope, context, cancellationToken);
                     if (tryCatchRows != null)
                     {
                         lastResultRows = tryCatchRows;
                     }
                     break;
 
-                case SqlBlockStatement block:
+                case BeginEndBlockStatement block:
+                    var blockStatements = block.StatementList.Statements
+                        .Cast<TSqlStatement>().ToList();
                     var blockRows = await CollectRowsAsync(
                         ExecuteStatementListAsync(
-                            block.Statements, scope, evaluator, context, cancellationToken),
+                            blockStatements, scope, context, cancellationToken),
                         cancellationToken);
                     if (blockRows.Count > 0 || lastResultRows == null)
                     {
@@ -139,56 +152,67 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         }
     }
 
-    private static void ExecuteDeclare(
-        SqlDeclareStatement declare,
-        VariableScope scope,
-        IExpressionEvaluator evaluator)
+    private void ExecuteDeclare(
+        DeclareVariableStatement declare,
+        VariableScope scope)
     {
-        object? initialValue = null;
-        if (declare.InitialValue != null)
+        foreach (var decl in declare.Declarations)
         {
-            initialValue = evaluator.Evaluate(
-                declare.InitialValue,
-                new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
+            var varName = decl.VariableName.Value;
+            if (!varName.StartsWith("@"))
+                varName = "@" + varName;
+
+            var typeName = FormatDataTypeReference(decl.DataType);
+
+            object? initialValue = null;
+            if (decl.Value != null)
+            {
+                var compiledExpr = _expressionCompiler.CompileScalar(decl.Value);
+                initialValue = compiledExpr(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            scope.Declare(varName, typeName, initialValue);
         }
-        scope.Declare(declare.VariableName, declare.TypeName, initialValue);
     }
 
-    private static void ExecuteSetVariable(
-        SqlSetVariableStatement setVar,
-        VariableScope scope,
-        IExpressionEvaluator evaluator)
+    private void ExecuteSetVariable(
+        SetVariableStatement setVar,
+        VariableScope scope)
     {
-        var value = evaluator.Evaluate(
-            setVar.Value,
-            new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
-        scope.Set(setVar.VariableName, value);
+        var varName = setVar.Variable.Name;
+        if (!varName.StartsWith("@"))
+            varName = "@" + varName;
+
+        var compiledExpr = _expressionCompiler.CompileScalar(setVar.Expression);
+        var value = compiledExpr(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
+        scope.Set(varName, value);
     }
 
     private async Task<List<QueryRow>?> ExecuteIfAsync(
-        SqlIfStatement ifStmt,
+        IfStatement ifStmt,
         VariableScope scope,
-        IExpressionEvaluator evaluator,
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
-        var conditionResult = evaluator.EvaluateCondition(
-            ifStmt.Condition,
+        var compiledPredicate = _expressionCompiler.CompilePredicate(ifStmt.Predicate);
+        var conditionResult = compiledPredicate(
             new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
 
         if (conditionResult)
         {
+            var thenStatements = UnwrapStatement(ifStmt.ThenStatement);
             return await CollectRowsAsync(
                 ExecuteStatementListAsync(
-                    ifStmt.ThenBlock.Statements, scope, evaluator, context, cancellationToken),
+                    thenStatements, scope, context, cancellationToken),
                 cancellationToken);
         }
 
-        if (ifStmt.ElseBlock != null)
+        if (ifStmt.ElseStatement != null)
         {
+            var elseStatements = UnwrapStatement(ifStmt.ElseStatement);
             return await CollectRowsAsync(
                 ExecuteStatementListAsync(
-                    ifStmt.ElseBlock.Statements, scope, evaluator, context, cancellationToken),
+                    elseStatements, scope, context, cancellationToken),
                 cancellationToken);
         }
 
@@ -196,9 +220,8 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     }
 
     private async Task<List<QueryRow>?> ExecuteWhileAsync(
-        SqlWhileStatement whileStmt,
+        WhileStatement whileStmt,
         VariableScope scope,
-        IExpressionEvaluator evaluator,
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
@@ -209,16 +232,17 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var conditionResult = evaluator.EvaluateCondition(
-                whileStmt.Condition,
+            var compiledPredicate = _expressionCompiler.CompilePredicate(whileStmt.Predicate);
+            var conditionResult = compiledPredicate(
                 new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
 
             if (!conditionResult)
                 break;
 
+            var bodyStatements = UnwrapStatement(whileStmt.Statement);
             var iterRows = await CollectRowsAsync(
                 ExecuteStatementListAsync(
-                    whileStmt.Body.Statements, scope, evaluator, context, cancellationToken),
+                    bodyStatements, scope, context, cancellationToken),
                 cancellationToken);
 
             if (iterRows.Count > 0)
@@ -238,17 +262,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     }
 
     private async Task<List<QueryRow>?> ExecuteTryCatchAsync(
-        SqlTryCatchStatement tryCatch,
+        TryCatchStatement tryCatch,
         VariableScope scope,
-        IExpressionEvaluator evaluator,
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
         try
         {
+            var tryStatements = tryCatch.TryStatements?.Statements
+                ?.Cast<TSqlStatement>().ToList()
+                ?? new List<TSqlStatement>();
             return await CollectRowsAsync(
                 ExecuteStatementListAsync(
-                    tryCatch.TryBlock.Statements, scope, evaluator, context, cancellationToken),
+                    tryStatements, scope, context, cancellationToken),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -260,9 +286,12 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             // Store error information in the variable scope so ERROR_MESSAGE() etc. can access it
             StoreErrorInfo(scope, ex);
 
+            var catchStatements = tryCatch.CatchStatements?.Statements
+                ?.Cast<TSqlStatement>().ToList()
+                ?? new List<TSqlStatement>();
             return await CollectRowsAsync(
                 ExecuteStatementListAsync(
-                    tryCatch.CatchBlock.Statements, scope, evaluator, context, cancellationToken),
+                    catchStatements, scope, context, cancellationToken),
                 cancellationToken);
         }
     }
@@ -299,7 +328,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     }
 
     private async Task<List<QueryRow>> ExecuteDataStatementAsync(
-        ISqlStatement statement,
+        TSqlStatement statement,
         VariableScope scope,
         QueryPlanContext context,
         CancellationToken cancellationToken)
@@ -309,7 +338,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             VariableScope = scope
         };
 
-        var planResult = _planner.Plan(statement, options);
+        var planResult = _planBuilder.PlanStatement(statement, options);
 
         var rows = new List<QueryRow>();
         await foreach (var row in planResult.RootNode.ExecuteAsync(context, cancellationToken))
@@ -317,6 +346,21 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             rows.Add(row);
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Unwraps a single TSqlStatement into a list of statements.
+    /// If the statement is a BeginEndBlockStatement, returns its inner statements.
+    /// Otherwise, returns a single-element list.
+    /// </summary>
+    private static IReadOnlyList<TSqlStatement> UnwrapStatement(TSqlStatement statement)
+    {
+        if (statement is BeginEndBlockStatement block)
+        {
+            return block.StatementList.Statements.Cast<TSqlStatement>().ToList();
+        }
+
+        return new[] { statement };
     }
 
     private static async Task<List<QueryRow>> CollectRowsAsync(
@@ -329,5 +373,23 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             rows.Add(row);
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Formats a ScriptDom DataTypeReference to a string for VariableScope.
+    /// </summary>
+    private static string FormatDataTypeReference(DataTypeReference dataType)
+    {
+        if (dataType is SqlDataTypeReference sqlType)
+        {
+            var name = sqlType.SqlDataTypeOption.ToString().ToUpperInvariant();
+            if (sqlType.Parameters.Count > 0)
+            {
+                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
+                return $"{name}({parms})";
+            }
+            return name;
+        }
+        return "NVARCHAR";
     }
 }
