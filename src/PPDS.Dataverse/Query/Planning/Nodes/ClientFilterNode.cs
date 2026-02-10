@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query.Execution;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -22,12 +21,6 @@ public sealed class ClientFilterNode : IQueryPlanNode
     /// <summary>Human-readable description of the predicate for EXPLAIN output.</summary>
     public string PredicateDescription { get; }
 
-    /// <summary>
-    /// Optional legacy AST condition retained for optimizer inspection (predicate pushdown,
-    /// constant folding). Will be removed once the optimizer operates on compiled predicates.
-    /// </summary>
-    public ISqlCondition? LegacyCondition { get; }
-
     /// <inheritdoc />
     public string Description => $"ClientFilter: {PredicateDescription}";
 
@@ -43,15 +36,6 @@ public sealed class ClientFilterNode : IQueryPlanNode
         Input = input ?? throw new ArgumentNullException(nameof(input));
         Predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
         PredicateDescription = predicateDescription ?? throw new ArgumentNullException(nameof(predicateDescription));
-    }
-
-    /// <summary>
-    /// Initializes a new instance with a legacy condition retained for optimizer inspection.
-    /// </summary>
-    public ClientFilterNode(IQueryPlanNode input, CompiledPredicate predicate, string predicateDescription, ISqlCondition legacyCondition)
-        : this(input, predicate, predicateDescription)
-    {
-        LegacyCondition = legacyCondition;
     }
 
     /// <inheritdoc />

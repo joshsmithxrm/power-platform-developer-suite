@@ -36,14 +36,14 @@ public class ExecutionPlanOptimizerTests
     }
 
     // ────────────────────────────────────────────
-    //  Predicate pushdown: removes redundant client filter
+    //  Predicate pushdown: now handled at plan-build time
     // ────────────────────────────────────────────
 
     [Fact]
-    public void PredicatePushdown_RemovesRedundantClientFilter()
+    public void PredicatePushdown_CompiledPredicateOnly_PassesThrough()
     {
-        // Create: ClientFilter(comparison) -> FetchXmlScan
-        // Since comparison conditions ARE in FetchXML, the client filter is redundant
+        // With compiled predicates only (no legacy condition), predicate pushdown is a no-op.
+        // The planner handles pushdown at build time, so the optimizer just passes through.
         var scanNode = new FetchXmlScanNode(
             "<fetch><entity name=\"account\"><filter><condition attribute=\"name\" operator=\"eq\" value=\"Contoso\" /></filter></entity></fetch>",
             "account");
@@ -53,7 +53,7 @@ public class ExecutionPlanOptimizerTests
             SqlComparisonOperator.Equal,
             SqlLiteral.String("Contoso"));
 
-        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition), condition);
+        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition));
 
         var plan = new QueryPlanResult
         {
@@ -65,14 +65,15 @@ public class ExecutionPlanOptimizerTests
 
         var optimized = _optimizer.Optimize(plan);
 
-        // The optimizer should remove the redundant client filter
-        optimized.RootNode.Should().BeAssignableTo<FetchXmlScanNode>();
+        // With no legacy condition, optimizer cannot inspect and passes through
+        optimized.RootNode.Should().BeSameAs(plan.RootNode);
     }
 
     [Fact]
-    public void PredicatePushdown_KeepsExpressionFilter()
+    public void PredicatePushdown_ExpressionFilter_PassesThrough()
     {
-        // Expression conditions (column-to-column) cannot be pushed to FetchXML
+        // Expression conditions (column-to-column) cannot be pushed to FetchXML.
+        // With compiled predicates, the optimizer passes these through unchanged.
         var scanNode = new FetchXmlScanNode(
             "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>",
             "account");
@@ -82,7 +83,7 @@ public class ExecutionPlanOptimizerTests
             SqlComparisonOperator.GreaterThan,
             new SqlColumnExpression(SqlColumnRef.Simple("cost")));
 
-        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition), condition);
+        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition));
 
         var plan = new QueryPlanResult
         {

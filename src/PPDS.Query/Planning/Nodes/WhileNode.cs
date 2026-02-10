@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Query.Planning.Nodes;
 
@@ -14,7 +14,7 @@ namespace PPDS.Query.Planning.Nodes;
 /// </summary>
 public sealed class WhileNode : IQueryPlanNode
 {
-    private readonly ISqlCondition _condition;
+    private readonly CompiledPredicate _condition;
     private readonly IQueryPlanNode _body;
 
     /// <summary>Maximum number of iterations to prevent infinite loops.</summary>
@@ -32,10 +32,10 @@ public sealed class WhileNode : IQueryPlanNode
     /// <summary>
     /// Initializes a new instance of the <see cref="WhileNode"/> class.
     /// </summary>
-    /// <param name="condition">The loop condition to evaluate before each iteration.</param>
+    /// <param name="condition">The compiled predicate to evaluate before each iteration.</param>
     /// <param name="body">The body node to execute each iteration.</param>
     /// <param name="maxIterations">Maximum iterations to prevent infinite loops. Default is 10000.</param>
-    public WhileNode(ISqlCondition condition, IQueryPlanNode body, int maxIterations = 10000)
+    public WhileNode(CompiledPredicate condition, IQueryPlanNode body, int maxIterations = 10000)
     {
         _condition = condition ?? throw new ArgumentNullException(nameof(condition));
         _body = body ?? throw new ArgumentNullException(nameof(body));
@@ -53,10 +53,9 @@ public sealed class WhileNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Evaluate the loop condition using the expression evaluator
-            // For WHILE conditions, we evaluate against an empty row context
+            // Evaluate the loop condition against an empty row context
             var emptyValues = new Dictionary<string, Dataverse.Query.QueryValue>();
-            if (!context.ExpressionEvaluator.EvaluateCondition(_condition, emptyValues))
+            if (!_condition(emptyValues))
             {
                 yield break;
             }

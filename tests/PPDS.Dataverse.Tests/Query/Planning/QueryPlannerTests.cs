@@ -182,9 +182,9 @@ public class QueryPlannerTests
         var filterNode = Assert.IsType<ClientFilterNode>(result.RootNode);
         Assert.IsType<FetchXmlScanNode>(filterNode.Input);
 
-        // Filter's legacy condition should be the expression condition (retained for optimizer)
-        Assert.NotNull(filterNode.LegacyCondition);
-        Assert.IsType<SqlExpressionCondition>(filterNode.LegacyCondition);
+        // Filter should have a compiled predicate and description
+        Assert.NotNull(filterNode.Predicate);
+        Assert.False(string.IsNullOrEmpty(filterNode.PredicateDescription));
     }
 
     [Fact]
@@ -211,9 +211,9 @@ public class QueryPlannerTests
         var filterNode = Assert.IsType<ClientFilterNode>(result.RootNode);
         Assert.IsType<FetchXmlScanNode>(filterNode.Input);
 
-        // Only the expression condition should be in the client filter (retained for optimizer)
-        Assert.NotNull(filterNode.LegacyCondition);
-        Assert.IsType<SqlExpressionCondition>(filterNode.LegacyCondition);
+        // Filter should have a compiled predicate and description
+        Assert.NotNull(filterNode.Predicate);
+        Assert.False(string.IsNullOrEmpty(filterNode.PredicateDescription));
     }
 
     [Fact]

@@ -67,28 +67,18 @@ public sealed class ExecutionPlanOptimizer
     /// and pushes them into the FetchXML scan node, removing the ClientFilterNode.
     /// </summary>
     /// <remarks>
-    /// With compiled predicates, the optimizer can no longer inspect condition structure.
-    /// Predicate pushdown now relies on the legacy condition stored in LegacyCondition
-    /// (if available). When conditions are compiled at plan time, this pass is a no-op.
+    /// With compiled predicates, the optimizer cannot inspect condition structure directly.
+    /// Predicate pushdown is now handled at plan-build time: the planner only creates a
+    /// ClientFilterNode for conditions that truly cannot be expressed in FetchXML (e.g.,
+    /// column-to-column comparisons). Simple comparisons are pushed into FetchXML during
+    /// planning and never produce a ClientFilterNode, so this pass is a no-op.
     /// </remarks>
     private static (IQueryPlanNode root, string fetchXml) ApplyPredicatePushdown(
         IQueryPlanNode root, string fetchXml)
     {
-        // Look for pattern: ClientFilterNode -> FetchXmlScanNode
-        // where the filter condition is a simple comparison pushable to FetchXML.
-        // With compiled predicates, we check LegacyCondition for structural inspection.
-        if (root is ClientFilterNode filterNode &&
-            filterNode.Input is FetchXmlScanNode scanNode &&
-            filterNode.LegacyCondition != null)
-        {
-            if (CanPushToFetchXml(filterNode.LegacyCondition))
-            {
-                // The condition is already in FetchXML (it was put there by the transpiler).
-                // Remove the redundant client-side filter.
-                return (filterNode.Input, fetchXml);
-            }
-        }
-
+        // Predicate pushdown is now handled at plan-build time.
+        // The planner only creates ClientFilterNode for non-pushable conditions,
+        // so there is nothing to push down at optimization time.
         return (root, fetchXml);
     }
 
@@ -116,44 +106,21 @@ public sealed class ExecutionPlanOptimizer
     /// Walks the plan tree and replaces constant expressions in filter/project nodes.
     /// For example, a filter condition comparing a column to (1 + 1) folds to 2.
     /// </summary>
+    /// <remarks>
+    /// With compiled predicates, constant folding cannot inspect the predicate structure.
+    /// Constant folding for filter conditions is now performed at compile time by the
+    /// ExpressionCompiler. This pass still recurses into children for project nodes and
+    /// other structural optimizations.
+    /// </remarks>
     private static IQueryPlanNode ApplyConstantFolding(IQueryPlanNode node)
     {
         if (node is ClientFilterNode filterNode)
         {
-            // With compiled predicates, constant folding operates on the legacy
-            // condition (if available). If only compiled predicate exists, we can
-            // still recurse into children but cannot fold the predicate itself.
-            if (filterNode.LegacyCondition != null)
+            // Compiled predicate: recurse into children but cannot fold the predicate itself
+            var foldedInput = ApplyConstantFolding(filterNode.Input);
+            if (!ReferenceEquals(foldedInput, filterNode.Input))
             {
-                var foldedCondition = FoldCondition(filterNode.LegacyCondition);
-                var foldedInput = ApplyConstantFolding(filterNode.Input);
-
-                // Check if folded condition is a tautology (always true)
-                if (IsAlwaysTrue(foldedCondition))
-                {
-                    return foldedInput;
-                }
-
-                // Check if folded condition is a contradiction (always false) -- keep as is
-                // since we need to return zero rows
-
-                if (!ReferenceEquals(foldedCondition, filterNode.LegacyCondition) ||
-                    !ReferenceEquals(foldedInput, filterNode.Input))
-                {
-                    // Re-compile the folded condition into a new predicate
-                    var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
-                    var newPredicate = (Dataverse.Query.Execution.CompiledPredicate)(row => evaluator.EvaluateCondition(foldedCondition, row));
-                    return new ClientFilterNode(foldedInput, newPredicate, filterNode.PredicateDescription, foldedCondition);
-                }
-            }
-            else
-            {
-                // Compiled-only predicate: just recurse into children
-                var foldedInput = ApplyConstantFolding(filterNode.Input);
-                if (!ReferenceEquals(foldedInput, filterNode.Input))
-                {
-                    return new ClientFilterNode(foldedInput, filterNode.Predicate, filterNode.PredicateDescription);
-                }
+                return new ClientFilterNode(foldedInput, filterNode.Predicate, filterNode.PredicateDescription);
             }
         }
 

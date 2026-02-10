@@ -188,7 +188,7 @@ public sealed class QueryPlanner
         {
             var predicate = CompileLegacyCondition(clientWhereCondition);
             var description = DescribeLegacyCondition(clientWhereCondition);
-            rootNode = new ClientFilterNode(rootNode, predicate, description, clientWhereCondition);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         // HAVING clause: add client-side filter after aggregate FetchXML scan.
@@ -197,7 +197,7 @@ public sealed class QueryPlanner
         {
             var predicate = CompileLegacyCondition(statement.Having);
             var description = DescribeLegacyCondition(statement.Having);
-            rootNode = new ClientFilterNode(rootNode, predicate, description, statement.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         // Window functions: add ClientWindowNode to compute window values client-side.
@@ -1103,7 +1103,7 @@ public sealed class QueryPlanner
         {
             var predicate = CompileLegacyCondition(statement.Having);
             var description = DescribeLegacyCondition(statement.Having);
-            rootNode = new ClientFilterNode(rootNode, predicate, description, statement.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         return new QueryPlanResult
