@@ -324,6 +324,14 @@ public sealed class WindowSpoolNode : IQueryPlanNode
                     ComputeDenseRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
                     break;
 
+                case "CUME_DIST":
+                    ComputeCumeDist(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
+                    break;
+
+                case "PERCENT_RANK":
+                    ComputePercentRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
+                    break;
+
                 default:
                     throw new NotSupportedException($"Window function '{functionName}' is not supported.");
             }
@@ -497,6 +505,80 @@ public sealed class WindowSpoolNode : IQueryPlanNode
                 currentRank++;
             }
             windowValues[sortedIndices[i]][columnName] = currentRank;
+        }
+    }
+
+    /// <summary>
+    /// CUME_DIST(): cumulative distribution = (rows with value &lt;= current) / (total rows in partition).
+    /// </summary>
+    private static void ComputeCumeDist(
+        List<int> sortedIndices, List<QueryRow> allRows,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        Dictionary<string, object?>[] windowValues, string columnName)
+    {
+        var n = sortedIndices.Count;
+        if (n == 0) return;
+
+        // Walk from end to find how many rows share each ORDER BY value
+        var i = n - 1;
+        while (i >= 0)
+        {
+            // Find the start of the current tie group
+            var groupEnd = i;
+            while (i > 0 && orderBy != null && orderBy.Count > 0 &&
+                   CompareRowsByOrderBy(allRows[sortedIndices[i]], allRows[sortedIndices[i - 1]], orderBy) == 0)
+            {
+                i--;
+            }
+
+            // All rows in this group get CUME_DIST = (groupEnd + 1) / n
+            var cumeDist = (double)(groupEnd + 1) / n;
+            for (var j = i; j <= groupEnd; j++)
+            {
+                windowValues[sortedIndices[j]][columnName] = cumeDist;
+            }
+
+            i--;
+        }
+    }
+
+    /// <summary>
+    /// PERCENT_RANK(): (RANK - 1) / (total rows in partition - 1). Returns 0 for single-row partitions.
+    /// </summary>
+    private static void ComputePercentRank(
+        List<int> sortedIndices, List<QueryRow> allRows,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        Dictionary<string, object?>[] windowValues, string columnName)
+    {
+        var n = sortedIndices.Count;
+        if (n == 0) return;
+
+        if (n == 1)
+        {
+            windowValues[sortedIndices[0]][columnName] = 0.0;
+            return;
+        }
+
+        // First compute RANK values
+        var ranks = new int[n];
+        ranks[0] = 1;
+        for (var i = 1; i < n; i++)
+        {
+            if (orderBy != null && orderBy.Count > 0 &&
+                CompareRowsByOrderBy(allRows[sortedIndices[i]], allRows[sortedIndices[i - 1]], orderBy) == 0)
+            {
+                ranks[i] = ranks[i - 1];
+            }
+            else
+            {
+                ranks[i] = i + 1;
+            }
+        }
+
+        // PERCENT_RANK = (rank - 1) / (n - 1)
+        for (var i = 0; i < n; i++)
+        {
+            windowValues[sortedIndices[i]][columnName] = (double)(ranks[i] - 1) / (n - 1);
         }
     }
 

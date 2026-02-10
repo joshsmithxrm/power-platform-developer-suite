@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using PPDS.Dataverse.Query;
@@ -91,5 +92,79 @@ public class WindowSpoolNodeTests
         result[0].Values["r"].Value.Should().Be(3); // v=3 is rank 3 in ASC order
         result[1].Values["r"].Value.Should().Be(1); // v=1 is rank 1 in ASC order
         result[2].Values["r"].Value.Should().Be(2); // v=2 is rank 2 in ASC order
+    }
+
+    [Fact]
+    public async Task CumeDist_ReturnsCorrectDistribution()
+    {
+        // Values: 1, 2, 2, 3 (already sorted ASC) → CUME_DIST: 0.25, 0.75, 0.75, 1.0
+        var rows = TestSourceNode.Create("test",
+            TestSourceNode.MakeRow("test", ("v", 1)),
+            TestSourceNode.MakeRow("test", ("v", 2)),
+            TestSourceNode.MakeRow("test", ("v", 2)),
+            TestSourceNode.MakeRow("test", ("v", 3)));
+
+        var orderBy = new List<CompiledOrderByItem>
+        {
+            new("v", r => r.TryGetValue("v", out var qv) ? qv.Value : null, false)
+        };
+
+        var windowDef = new ExtendedWindowDefinition("cd", "CUME_DIST", null, null, orderBy);
+        var node = new WindowSpoolNode(rows, new List<ExtendedWindowDefinition> { windowDef });
+
+        var result = await TestHelpers.CollectRowsAsync(node);
+
+        result.Should().HaveCount(4);
+        Convert.ToDouble(result[0].Values["cd"].Value).Should().BeApproximately(0.25, 0.001);
+        Convert.ToDouble(result[1].Values["cd"].Value).Should().BeApproximately(0.75, 0.001);
+        Convert.ToDouble(result[2].Values["cd"].Value).Should().BeApproximately(0.75, 0.001);
+        Convert.ToDouble(result[3].Values["cd"].Value).Should().BeApproximately(1.0, 0.001);
+    }
+
+    [Fact]
+    public async Task PercentRank_ReturnsCorrectPercentage()
+    {
+        // Values: 1, 2, 2, 3 → RANK: 1, 2, 2, 4 → PERCENT_RANK: 0/3=0, 1/3≈0.333, 1/3≈0.333, 3/3=1.0
+        var rows = TestSourceNode.Create("test",
+            TestSourceNode.MakeRow("test", ("v", 1)),
+            TestSourceNode.MakeRow("test", ("v", 2)),
+            TestSourceNode.MakeRow("test", ("v", 2)),
+            TestSourceNode.MakeRow("test", ("v", 3)));
+
+        var orderBy = new List<CompiledOrderByItem>
+        {
+            new("v", r => r.TryGetValue("v", out var qv) ? qv.Value : null, false)
+        };
+
+        var windowDef = new ExtendedWindowDefinition("pr", "PERCENT_RANK", null, null, orderBy);
+        var node = new WindowSpoolNode(rows, new List<ExtendedWindowDefinition> { windowDef });
+
+        var result = await TestHelpers.CollectRowsAsync(node);
+
+        result.Should().HaveCount(4);
+        Convert.ToDouble(result[0].Values["pr"].Value).Should().BeApproximately(0.0, 0.001);
+        Convert.ToDouble(result[1].Values["pr"].Value).Should().BeApproximately(0.333, 0.001);
+        Convert.ToDouble(result[2].Values["pr"].Value).Should().BeApproximately(0.333, 0.001);
+        Convert.ToDouble(result[3].Values["pr"].Value).Should().BeApproximately(1.0, 0.001);
+    }
+
+    [Fact]
+    public async Task PercentRank_SingleRow_ReturnsZero()
+    {
+        var rows = TestSourceNode.Create("test",
+            TestSourceNode.MakeRow("test", ("v", 42)));
+
+        var orderBy = new List<CompiledOrderByItem>
+        {
+            new("v", r => r.TryGetValue("v", out var qv) ? qv.Value : null, false)
+        };
+
+        var windowDef = new ExtendedWindowDefinition("pr", "PERCENT_RANK", null, null, orderBy);
+        var node = new WindowSpoolNode(rows, new List<ExtendedWindowDefinition> { windowDef });
+
+        var result = await TestHelpers.CollectRowsAsync(node);
+
+        result.Should().HaveCount(1);
+        Convert.ToDouble(result[0].Values["pr"].Value).Should().Be(0.0);
     }
 }
