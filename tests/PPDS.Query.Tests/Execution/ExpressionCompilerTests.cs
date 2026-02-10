@@ -775,6 +775,34 @@ public class ExpressionCompilerTests
     }
 
     // ════════════════════════════════════════════════════════════════════
+    //  16b. TRY_CAST / TRY_CONVERT
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileScalar_TryCast_ValidConversion_ReturnsValue()
+    {
+        var expr = ParseExpression("TRY_CAST('123' AS INT)");
+        var compiled = _compiler.CompileScalar(expr);
+        Assert.Equal(123, compiled(EmptyRow));
+    }
+
+    [Fact]
+    public void CompileScalar_TryCast_InvalidConversion_ReturnsNull()
+    {
+        var expr = ParseExpression("TRY_CAST('abc' AS INT)");
+        var compiled = _compiler.CompileScalar(expr);
+        Assert.Null(compiled(EmptyRow));
+    }
+
+    [Fact]
+    public void CompileScalar_TryConvert_InvalidConversion_ReturnsNull()
+    {
+        var expr = ParseExpression("TRY_CONVERT(INT, 'abc')");
+        var compiled = _compiler.CompileScalar(expr);
+        Assert.Null(compiled(EmptyRow));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     //  17. Variable references
     // ════════════════════════════════════════════════════════════════════
 

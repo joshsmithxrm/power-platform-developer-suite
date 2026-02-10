@@ -30,7 +30,18 @@ public sealed class ExpressionCompiler
         FunctionRegistry? functionRegistry = null,
         Func<VariableScope?>? variableScopeAccessor = null)
     {
-        _functionRegistry = functionRegistry ?? FunctionRegistry.CreateDefault();
+        if (functionRegistry == null)
+        {
+            _functionRegistry = FunctionRegistry.CreateDefault();
+            if (variableScopeAccessor != null)
+            {
+                ErrorFunctions.RegisterAll(_functionRegistry, () => variableScopeAccessor()!);
+            }
+        }
+        else
+        {
+            _functionRegistry = functionRegistry;
+        }
         _variableScopeAccessor = variableScopeAccessor;
     }
 
@@ -61,6 +72,8 @@ public sealed class ExpressionCompiler
             FunctionCall funcCall => CompileFunctionCall(funcCall),
             CastCall castCall => CompileCastCall(castCall),
             ConvertCall convertCall => CompileConvertCall(convertCall),
+            TryCastCall tryCast => CompileTryCast(tryCast),
+            TryConvertCall tryConvert => CompileTryConvert(tryConvert),
             VariableReference varRef => CompileVariableReference(varRef),
             _ => throw new NotSupportedException(
                 $"ScriptDom expression type {expression.GetType().Name} is not yet supported by ExpressionCompiler.")
@@ -138,6 +151,7 @@ public sealed class ExpressionCompiler
         // Build full qualified name (e.g. "table.column") and simple name (last identifier)
         var fullName = string.Join(".", identifiers.Select(id => id.Value));
         var simpleName = identifiers[identifiers.Count - 1].Value;
+        var isQualified = identifiers.Count > 1;
 
         return row =>
         {
@@ -153,7 +167,7 @@ public sealed class ExpressionCompiler
             }
 
             // For qualified names (table.column), also try just the column name
-            if (identifiers.Count > 1)
+            if (isQualified)
             {
                 if (row.TryGetValue(simpleName, out var simpleQv))
                     return simpleQv.Value;
@@ -303,6 +317,41 @@ public sealed class ExpressionCompiler
             if (value is null)
                 return null;
             return CastConverter.Convert(value, targetType, style);
+        };
+    }
+
+    private CompiledScalarExpression CompileTryCast(TryCastCall tryCast)
+    {
+        var compiledInner = CompileScalar(tryCast.Parameter);
+        var targetType = FormatDataType(tryCast.DataType);
+
+        return row =>
+        {
+            var value = compiledInner(row);
+            if (value is null)
+                return null;
+            return CastConverter.TryConvert(value, targetType);
+        };
+    }
+
+    private CompiledScalarExpression CompileTryConvert(TryConvertCall tryConvert)
+    {
+        var compiledInner = CompileScalar(tryConvert.Parameter);
+        var targetType = FormatDataType(tryConvert.DataType);
+
+        // Style is optional — usually an IntegerLiteral
+        int? style = null;
+        if (tryConvert.Style is IntegerLiteral styleLit)
+        {
+            style = int.Parse(styleLit.Value, CultureInfo.InvariantCulture);
+        }
+
+        return row =>
+        {
+            var value = compiledInner(row);
+            if (value is null)
+                return null;
+            return CastConverter.TryConvert(value, targetType, style);
         };
     }
 
