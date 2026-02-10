@@ -146,14 +146,15 @@ public sealed class ExecutionPlanBuilder
             return tvfResult;
         }
 
-        // Convert to legacy AST for analysis helpers
-        var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
-        var entityName = legacySelect.GetEntityName();
+        // Extract entity name and TOP directly from ScriptDom AST
+        var entityName = ExtractEntityNameFromQuerySpec(querySpec)
+            ?? throw new QueryParseException("Cannot determine entity name from SELECT statement.");
+        var top = ExtractTopFromQuerySpec(querySpec);
 
         // Phase 6: Metadata virtual table routing
         if (entityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
         {
-            return PlanMetadataQuery(legacySelect, entityName);
+            return PlanMetadataQuery(querySpec, entityName);
         }
 
         // Phase 3.5: TDS Endpoint routing
@@ -166,17 +167,21 @@ public sealed class ExecutionPlanBuilder
 
             if (compatibility == TdsCompatibility.Compatible)
             {
-                return PlanTds(legacySelect, options);
+                return PlanTds(entityName, top, options);
             }
         }
 
         // Generate FetchXML using the injected service
         var transpileResult = _fetchXmlGenerator.Generate(selectStmt);
 
-        // Phase 4: Aggregate partitioning
-        if (ShouldPartitionAggregate(legacySelect, options))
+        // Phase 4: Aggregate partitioning (still requires legacy AST)
+        if (HasAggregatesInQuerySpec(querySpec) && options.EstimatedRecordCount.HasValue)
         {
-            return PlanAggregateWithPartitioning(legacySelect, options, transpileResult);
+            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
+            if (ShouldPartitionAggregate(legacySelect, options))
+            {
+                return PlanAggregateWithPartitioning(legacySelect, options, transpileResult);
+            }
         }
 
         // When caller provides a page number or paging cookie, use single-page mode
@@ -186,7 +191,7 @@ public sealed class ExecutionPlanBuilder
             transpileResult.FetchXml,
             entityName,
             autoPage: !isCallerPaged,
-            maxRows: options.MaxRows ?? legacySelect.Top,
+            maxRows: options.MaxRows ?? top,
             initialPageNumber: options.PageNumber,
             initialPagingCookie: options.PagingCookie,
             includeCount: options.IncludeCount);
@@ -195,18 +200,21 @@ public sealed class ExecutionPlanBuilder
         IQueryPlanNode rootNode = scanNode;
 
         // Wrap with PrefetchScanNode for page-ahead buffering
-        if (options.EnablePrefetch && !legacySelect.HasAggregates() && !isCallerPaged)
+        if (options.EnablePrefetch && !HasAggregatesInQuerySpec(querySpec) && !isCallerPaged)
         {
             rootNode = new PrefetchScanNode(rootNode, options.PrefetchBufferSize);
         }
 
-        // Expression conditions in WHERE (column-to-column, computed expressions)
-        var clientWhereCondition = ExtractExpressionConditions(legacySelect.Where);
-        if (clientWhereCondition != null)
+        // Expression conditions in WHERE (still requires legacy AST for client-side filter)
         {
-            var predicate = CompileLegacyCondition(clientWhereCondition);
-            var description = DescribeLegacyCondition(clientWhereCondition);
-            rootNode = new ClientFilterNode(rootNode, predicate, description);
+            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
+            var clientWhereCondition = ExtractExpressionConditions(legacySelect.Where);
+            if (clientWhereCondition != null)
+            {
+                var predicate = CompileLegacyCondition(clientWhereCondition);
+                var description = DescribeLegacyCondition(clientWhereCondition);
+                rootNode = new ClientFilterNode(rootNode, predicate, description);
+            }
         }
 
         // HAVING clause: compile directly from ScriptDom
@@ -217,15 +225,17 @@ public sealed class ExecutionPlanBuilder
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
-        // Window functions
-        if (HasWindowFunctions(legacySelect))
+        // Window functions (still requires legacy AST for BuildWindowNode)
+        if (HasWindowFunctionsInQuerySpec(querySpec))
         {
+            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
             rootNode = BuildWindowNode(rootNode, legacySelect.Columns);
         }
 
-        // Computed columns (CASE/IIF expressions)
-        if (HasComputedColumns(legacySelect))
+        // Computed columns (CASE/IIF expressions) (still requires legacy AST for BuildProjectNode)
+        if (HasComputedColumnsInQuerySpec(querySpec))
         {
+            var legacySelect = ConvertToLegacySelect(selectStmt, querySpec);
             rootNode = BuildProjectNode(rootNode, legacySelect.Columns);
         }
 
@@ -730,7 +740,56 @@ public sealed class ExecutionPlanBuilder
     /// Plans a metadata virtual table query (e.g., FROM metadata.entity).
     /// Bypasses FetchXML transpilation entirely.
     /// </summary>
-    private static QueryPlanResult PlanMetadataQuery(
+    private QueryPlanResult PlanMetadataQuery(
+        QuerySpecification querySpec, string entityName)
+    {
+        var metadataTable = entityName;
+        if (metadataTable.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
+            metadataTable = metadataTable["metadata.".Length..];
+
+        List<string>? requestedColumns = null;
+        if (querySpec.SelectElements.Count > 0
+            && !(querySpec.SelectElements.Count == 1 && querySpec.SelectElements[0] is SelectStarExpression))
+        {
+            requestedColumns = new List<string>();
+            foreach (var element in querySpec.SelectElements)
+            {
+                if (element is SelectScalarExpression { Expression: ColumnReferenceExpression colRef } scalar)
+                {
+                    var colName = colRef.MultiPartIdentifier?.Identifiers?.Count > 0
+                        ? colRef.MultiPartIdentifier.Identifiers[colRef.MultiPartIdentifier.Identifiers.Count - 1].Value
+                        : "unknown";
+                    requestedColumns.Add(scalar.ColumnName?.Value ?? colName);
+                }
+            }
+        }
+
+        CompiledPredicate? filter = null;
+        if (querySpec.WhereClause?.SearchCondition != null)
+        {
+            filter = _expressionCompiler.CompilePredicate(querySpec.WhereClause.SearchCondition);
+        }
+
+        var scanNode = new MetadataScanNode(
+            metadataTable,
+            metadataExecutor: null,
+            requestedColumns,
+            filter);
+
+        return new QueryPlanResult
+        {
+            RootNode = scanNode,
+            FetchXml = $"-- Metadata query: {metadataTable}",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = metadataTable
+        };
+    }
+
+    /// <summary>
+    /// Legacy overload of <see cref="PlanMetadataQuery(QuerySpecification, string)"/> for
+    /// internal synthetic SELECTs built by DML planning (which still use <see cref="SqlSelectStatement"/>).
+    /// </summary>
+    private static QueryPlanResult PlanMetadataQueryLegacy(
         SqlSelectStatement statement, string entityName)
     {
         var metadataTable = entityName;
@@ -780,14 +839,13 @@ public sealed class ExecutionPlanBuilder
     /// Plans a TDS Endpoint query that sends SQL directly over the TDS wire protocol.
     /// </summary>
     private static QueryPlanResult PlanTds(
-        SqlSelectStatement statement, QueryPlanOptions options)
+        string entityName, int? top, QueryPlanOptions options)
     {
-        var entityName = statement.GetEntityName();
         var tdsNode = new TdsScanNode(
             options.OriginalSql!,
             entityName,
             options.TdsQueryExecutor!,
-            maxRows: options.MaxRows ?? statement.Top);
+            maxRows: options.MaxRows ?? top);
 
         return new QueryPlanResult
         {
@@ -796,6 +854,17 @@ public sealed class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    /// <summary>
+    /// Legacy overload of <see cref="PlanTds(string, int?, QueryPlanOptions)"/> for
+    /// internal synthetic SELECTs built by DML planning (which still use <see cref="SqlSelectStatement"/>).
+    /// </summary>
+    private static QueryPlanResult PlanTdsLegacy(
+        SqlSelectStatement statement, QueryPlanOptions options)
+    {
+        var entityName = statement.GetEntityName();
+        return PlanTds(entityName, statement.Top, options);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1396,7 +1465,7 @@ public sealed class ExecutionPlanBuilder
         // Phase 6: Metadata virtual table routing
         if (entityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
         {
-            return PlanMetadataQuery(statement, entityName);
+            return PlanMetadataQueryLegacy(statement, entityName);
         }
 
         // Phase 3.5: TDS Endpoint routing
@@ -1409,7 +1478,7 @@ public sealed class ExecutionPlanBuilder
 
             if (compatibility == TdsCompatibility.Compatible)
             {
-                return PlanTds(statement, options);
+                return PlanTdsLegacy(statement, options);
             }
         }
 
