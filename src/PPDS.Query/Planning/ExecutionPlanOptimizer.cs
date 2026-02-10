@@ -1,11 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
-using PPDS.Dataverse.Sql.Transpilation;
 
 namespace PPDS.Query.Planning;
 
@@ -82,29 +78,12 @@ public sealed class ExecutionPlanOptimizer
         return (root, fetchXml);
     }
 
-    /// <summary>
-    /// Determines if a condition can be expressed in FetchXML.
-    /// Simple column comparisons to literal values are pushable.
-    /// Expression conditions (column-to-column, computed) are not.
-    /// </summary>
-    internal static bool CanPushToFetchXml(ISqlCondition condition)
-    {
-        return condition switch
-        {
-            SqlComparisonCondition => true,
-            SqlLogicalCondition logical => logical.Conditions.All(CanPushToFetchXml),
-            SqlExpressionCondition => false,
-            _ => false
-        };
-    }
-
     // ═══════════════════════════════════════════════════════════════════
     //  Pass 2: Constant Folding
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
     /// Walks the plan tree and replaces constant expressions in filter/project nodes.
-    /// For example, a filter condition comparing a column to (1 + 1) folds to 2.
     /// </summary>
     /// <remarks>
     /// With compiled predicates, constant folding cannot inspect the predicate structure.
@@ -135,151 +114,6 @@ public sealed class ExecutionPlanOptimizer
         }
 
         return node;
-    }
-
-    /// <summary>
-    /// Folds constant expressions within a condition.
-    /// </summary>
-    internal static ISqlCondition FoldCondition(ISqlCondition condition)
-    {
-        return condition switch
-        {
-            SqlExpressionCondition exprCond => FoldExpressionCondition(exprCond),
-            SqlLogicalCondition logical => FoldLogicalCondition(logical),
-            _ => condition
-        };
-    }
-
-    private static ISqlCondition FoldExpressionCondition(SqlExpressionCondition condition)
-    {
-        var foldedLeft = FoldExpression(condition.Left);
-        var foldedRight = FoldExpression(condition.Right);
-
-        if (!ReferenceEquals(foldedLeft, condition.Left) || !ReferenceEquals(foldedRight, condition.Right))
-        {
-            return new SqlExpressionCondition(foldedLeft, condition.Operator, foldedRight);
-        }
-
-        return condition;
-    }
-
-    private static ISqlCondition FoldLogicalCondition(SqlLogicalCondition logical)
-    {
-        var folded = new List<ISqlCondition>();
-        var changed = false;
-
-        foreach (var child in logical.Conditions)
-        {
-            var foldedChild = FoldCondition(child);
-            folded.Add(foldedChild);
-            if (!ReferenceEquals(foldedChild, child))
-            {
-                changed = true;
-            }
-        }
-
-        return changed ? new SqlLogicalCondition(logical.Operator, folded) : logical;
-    }
-
-    /// <summary>
-    /// Folds a constant expression. If the expression is a binary operation on two literals,
-    /// computes the result at plan time.
-    /// </summary>
-    internal static ISqlExpression FoldExpression(ISqlExpression expression)
-    {
-        if (expression is SqlBinaryExpression binary)
-        {
-            var foldedLeft = FoldExpression(binary.Left);
-            var foldedRight = FoldExpression(binary.Right);
-
-            // If both sides are now literals, compute the result
-            if (foldedLeft is SqlLiteralExpression leftLit &&
-                foldedRight is SqlLiteralExpression rightLit)
-            {
-                var result = EvaluateConstantBinary(leftLit.Value, binary.Operator, rightLit.Value);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-
-            if (!ReferenceEquals(foldedLeft, binary.Left) || !ReferenceEquals(foldedRight, binary.Right))
-            {
-                return new SqlBinaryExpression(foldedLeft, binary.Operator, foldedRight);
-            }
-        }
-
-        return expression;
-    }
-
-    /// <summary>
-    /// Evaluates a binary operation on two literal values at plan time.
-    /// Returns null if evaluation is not possible.
-    /// </summary>
-    private static SqlLiteralExpression? EvaluateConstantBinary(
-        SqlLiteral left, SqlBinaryOperator op, SqlLiteral right)
-    {
-        // Only fold numeric operations
-        if (!TryGetNumber(left, out var leftNum) || !TryGetNumber(right, out var rightNum))
-        {
-            return null;
-        }
-
-        decimal result;
-        switch (op)
-        {
-            case SqlBinaryOperator.Add:
-                result = leftNum + rightNum;
-                break;
-            case SqlBinaryOperator.Subtract:
-                result = leftNum - rightNum;
-                break;
-            case SqlBinaryOperator.Multiply:
-                result = leftNum * rightNum;
-                break;
-            case SqlBinaryOperator.Divide:
-                if (rightNum == 0) return null; // Avoid division by zero at plan time
-                result = leftNum / rightNum;
-                break;
-            case SqlBinaryOperator.Modulo:
-                if (rightNum == 0) return null;
-                result = leftNum % rightNum;
-                break;
-            default:
-                return null;
-        }
-
-        return new SqlLiteralExpression(
-            SqlLiteral.Number(result.ToString(CultureInfo.InvariantCulture)));
-    }
-
-    private static bool TryGetNumber(SqlLiteral literal, out decimal value)
-    {
-        value = 0;
-        if (literal.Type != SqlLiteralType.Number)
-            return false;
-
-        return decimal.TryParse(literal.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
-    }
-
-    /// <summary>
-    /// Checks if a folded condition is always true (tautology).
-    /// This is a simple heuristic check for cases like 1 = 1.
-    /// </summary>
-    private static bool IsAlwaysTrue(ISqlCondition condition)
-    {
-        if (condition is SqlExpressionCondition exprCond &&
-            exprCond.Left is SqlLiteralExpression leftLit &&
-            exprCond.Right is SqlLiteralExpression rightLit &&
-            exprCond.Operator == SqlComparisonOperator.Equal)
-        {
-            return string.Equals(
-                leftLit.Value.Value,
-                rightLit.Value.Value,
-                StringComparison.Ordinal);
-        }
-
-        return false;
     }
 
     // ═══════════════════════════════════════════════════════════════════
