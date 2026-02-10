@@ -66,59 +66,28 @@ public class ImpersonationNodeTests
     // ────────────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsNode_SetsCallerObjectIdOnSession()
+    public async Task ExecuteAsNode_WithoutPreResolvedGuid_ThrowsNotSupportedException()
+    {
+        var session = new SessionContext();
+        var node = new ExecuteAsNode("user@contoso.com", session);
+
+        var act = async () => await TestHelpers.CollectRowsAsync(node);
+        await act.Should().ThrowAsync<NotSupportedException>()
+            .WithMessage("*EXECUTE AS*systemuserid*");
+    }
+
+    [Fact]
+    public async Task ExecuteAsNode_WithExplicitGuid_SetsCallerObjectId()
     {
         var session = new SessionContext();
         session.CallerObjectId.Should().BeNull();
 
-        var node = new ExecuteAsNode("user@contoso.com", session);
+        var explicitGuid = Guid.NewGuid();
+        var node = new ExecuteAsNode("user@contoso.com", session, explicitGuid);
         var rows = await TestHelpers.CollectRowsAsync(node);
 
         rows.Should().BeEmpty();
-        session.CallerObjectId.Should().NotBeNull();
-        session.CallerObjectId.Should().NotBe(Guid.Empty);
-    }
-
-    [Fact]
-    public async Task ExecuteAsNode_WithExplicitGuid_SetsExactCallerObjectId()
-    {
-        var session = new SessionContext();
-        var explicitId = Guid.Parse("12345678-1234-1234-1234-123456789abc");
-
-        var node = new ExecuteAsNode("user@contoso.com", session, callerObjectId: explicitId);
-        await TestHelpers.CollectRowsAsync(node);
-
-        session.CallerObjectId.Should().Be(explicitId);
-    }
-
-    [Fact]
-    public async Task ExecuteAsNode_DeterministicGuid_SameInputProducesSameOutput()
-    {
-        var session1 = new SessionContext();
-        var session2 = new SessionContext();
-
-        var node1 = new ExecuteAsNode("user@contoso.com", session1);
-        var node2 = new ExecuteAsNode("user@contoso.com", session2);
-
-        await TestHelpers.CollectRowsAsync(node1);
-        await TestHelpers.CollectRowsAsync(node2);
-
-        session1.CallerObjectId.Should().Be(session2.CallerObjectId);
-    }
-
-    [Fact]
-    public async Task ExecuteAsNode_DifferentUsers_ProduceDifferentGuids()
-    {
-        var session1 = new SessionContext();
-        var session2 = new SessionContext();
-
-        var node1 = new ExecuteAsNode("user1@contoso.com", session1);
-        var node2 = new ExecuteAsNode("user2@contoso.com", session2);
-
-        await TestHelpers.CollectRowsAsync(node1);
-        await TestHelpers.CollectRowsAsync(node2);
-
-        session1.CallerObjectId!.Value.Should().NotBe(session2.CallerObjectId!.Value);
+        session.CallerObjectId.Should().Be(explicitGuid);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -190,24 +159,23 @@ public class ImpersonationNodeTests
     public async Task ExecuteAsAndRevert_FullLifecycle()
     {
         var session = new SessionContext();
-
-        // Initially no impersonation
         session.CallerObjectId.Should().BeNull();
 
-        // EXECUTE AS
-        var executeAsNode = new ExecuteAsNode("admin@contoso.com", session);
+        var guid = Guid.NewGuid();
+
+        // EXECUTE AS with explicit GUID
+        var executeAsNode = new ExecuteAsNode("admin@contoso.com", session, guid);
         await TestHelpers.CollectRowsAsync(executeAsNode);
-        session.CallerObjectId.Should().NotBeNull();
-        var impersonatedId = session.CallerObjectId;
+        session.CallerObjectId.Should().Be(guid);
 
         // REVERT
         var revertNode = new RevertNode(session);
         await TestHelpers.CollectRowsAsync(revertNode);
         session.CallerObjectId.Should().BeNull();
 
-        // EXECUTE AS again with same user should produce same ID
-        var executeAsNode2 = new ExecuteAsNode("admin@contoso.com", session);
+        // EXECUTE AS again with same GUID
+        var executeAsNode2 = new ExecuteAsNode("admin@contoso.com", session, guid);
         await TestHelpers.CollectRowsAsync(executeAsNode2);
-        session.CallerObjectId.Should().Be(impersonatedId);
+        session.CallerObjectId.Should().Be(guid);
     }
 }
