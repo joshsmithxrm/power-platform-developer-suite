@@ -183,6 +183,23 @@ public class PpdsDbCommandTests
     }
 
     // ────────────────────────────────────────────
+    //  ApplyParameters
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void ApplyParameters_OverlappingNames_SubstitutesCorrectly()
+    {
+        var cmd = new PpdsDbCommand();
+        cmd.Parameters.AddWithValue("@p1", "short");
+        cmd.Parameters.AddWithValue("@p10", "long");
+        cmd.CommandText = "SELECT @p1, @p10";
+
+        // Prepare validates syntax — if @p10 becomes 'short'0 it will fail to parse.
+        var act = () => cmd.Prepare();
+        act.Should().NotThrow();
+    }
+
+    // ────────────────────────────────────────────
     //  Connection type validation
     // ────────────────────────────────────────────
 

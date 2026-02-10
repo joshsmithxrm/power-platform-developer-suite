@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Data.Common;
 using System.Threading;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
@@ -241,7 +242,12 @@ public sealed class PpdsDbCommand : DbCommand
             return sql;
 
         var result = sql;
-        foreach (var param in _parameters.InternalList)
+        // Sort by name length descending to prevent @p1 matching inside @p10
+        var sorted = _parameters.InternalList
+            .OrderByDescending(p => p.ParameterName.Length)
+            .ToList();
+
+        foreach (var param in sorted)
         {
             var paramName = param.ParameterName;
             if (!paramName.StartsWith("@"))
