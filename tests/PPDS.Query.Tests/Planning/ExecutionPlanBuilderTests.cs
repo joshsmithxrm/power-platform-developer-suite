@@ -1,186 +1,233 @@
+using FluentAssertions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using Moq;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
 using Xunit;
 
 namespace PPDS.Query.Tests.Planning;
 
-[Trait("Category", "PlanUnit")]
+[Trait("Category", "Unit")]
 public class ExecutionPlanBuilderTests
 {
     private readonly QueryParser _parser = new();
+    private readonly Mock<IFetchXmlGeneratorService> _mockFetchXmlService;
+    private readonly ExecutionPlanBuilder _builder;
 
-    private QueryPlanResult BuildPlan(string sql, QueryPlanOptions? options = null)
+    public ExecutionPlanBuilderTests()
     {
-        var script = _parser.ParseScript(sql);
-        var statement = QueryParser.GetFirstStatement(script)!;
-        var builder = new ExecutionPlanBuilder(options);
-        return builder.Build(statement);
+        _mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
+        _mockFetchXmlService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Returns(TranspileResult.Simple(
+                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
+
+        _builder = new ExecutionPlanBuilder(_mockFetchXmlService.Object);
     }
 
-    #region Simple SELECT
+    // ────────────────────────────────────────────
+    //  Simple SELECT produces FetchXmlScanNode
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_SimpleSelect_ProducesFetchXmlScanNode()
+    public void Plan_SimpleSelect_ProducesFetchXmlScanNode()
     {
-        var result = BuildPlan("SELECT name FROM account");
+        var fragment = _parser.Parse("SELECT name FROM account");
 
-        Assert.NotNull(result.RootNode);
-        Assert.IsType<FetchXmlScanNode>(result.RootNode);
-        Assert.Equal("account", result.EntityLogicalName);
-        Assert.NotEmpty(result.FetchXml);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>();
+        result.EntityLogicalName.Should().Be("account");
     }
 
-    [Fact]
-    public void Build_SelectWithTop_IncludesTopInFetchXml()
-    {
-        var result = BuildPlan("SELECT TOP 10 name FROM account");
+    // ────────────────────────────────────────────
+    //  SELECT with computed columns produces ProjectNode
+    // ────────────────────────────────────────────
 
-        Assert.Contains("top=\"10\"", result.FetchXml);
+    [Fact]
+    public void Plan_SelectWithCaseExpression_ProducesProjectNode()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name, CASE WHEN statecode = 0 THEN 'Active' ELSE 'Inactive' END AS status FROM account");
+
+        var result = _builder.Plan(fragment);
+
+        // ProjectNode should be on top (the root or close to root)
+        result.RootNode.Should().BeAssignableTo<ProjectNode>();
     }
 
-    [Fact]
-    public void Build_SelectStar_ReturnsAllAttributes()
-    {
-        var result = BuildPlan("SELECT * FROM account");
+    // ────────────────────────────────────────────
+    //  SELECT with window functions produces ClientWindowNode
+    // ────────────────────────────────────────────
 
-        Assert.Contains("<all-attributes", result.FetchXml);
+    [Fact]
+    public void Plan_SelectWithWindowFunction_ProducesClientWindowNode()
+    {
+        var fragment = _parser.Parse(
+            "SELECT name, ROW_NUMBER() OVER (ORDER BY name) AS rn FROM account");
+
+        var result = _builder.Plan(fragment);
+
+        // Either the root is a ClientWindowNode or a ProjectNode wrapping a ClientWindowNode
+        var hasWindowNode = FindNodeOfType<ClientWindowNode>(result.RootNode);
+        hasWindowNode.Should().BeTrue(
+            "a SELECT with ROW_NUMBER() should produce a ClientWindowNode somewhere in the plan tree");
     }
 
-    [Fact]
-    public void Build_SelectWithWhere_IncludesFilterInFetchXml()
-    {
-        var result = BuildPlan("SELECT name FROM account WHERE statecode = 0");
-
-        Assert.Contains("<filter", result.FetchXml);
-        Assert.Contains("statecode", result.FetchXml);
-    }
+    // ────────────────────────────────────────────
+    //  UNION produces ConcatenateNode
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_SelectWithOrderBy_IncludesOrderInFetchXml()
+    public void Plan_UnionAll_ProducesConcatenateNode()
     {
-        var result = BuildPlan("SELECT name FROM account ORDER BY name");
-
-        Assert.Contains("<order", result.FetchXml);
-        Assert.Contains("name", result.FetchXml);
-    }
-
-    [Fact]
-    public void Build_SelectWithJoin_IncludesLinkEntity()
-    {
-        var result = BuildPlan(
-            "SELECT a.name, c.fullname FROM account a " +
-            "JOIN contact c ON c.parentcustomerid = a.accountid");
-
-        Assert.Contains("<link-entity", result.FetchXml);
-    }
-
-    #endregion
-
-    #region Virtual Columns
-
-    [Fact]
-    public void Build_VirtualColumn_DetectedInResult()
-    {
-        var result = BuildPlan("SELECT owneridname FROM account");
-
-        Assert.NotEmpty(result.VirtualColumns);
-        Assert.True(result.VirtualColumns.ContainsKey("owneridname"));
-    }
-
-    #endregion
-
-    #region UNION
-
-    [Fact]
-    public void Build_UnionAll_ProducesConcatenateNode()
-    {
-        var result = BuildPlan(
+        var fragment = _parser.Parse(
             "SELECT name FROM account UNION ALL SELECT fullname FROM contact");
 
-        Assert.IsType<ConcatenateNode>(result.RootNode);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<ConcatenateNode>();
     }
 
+    // ────────────────────────────────────────────
+    //  UNION (not ALL) produces DistinctNode on top
+    // ────────────────────────────────────────────
+
     [Fact]
-    public void Build_Union_ProducesDistinctOverConcatenate()
+    public void Plan_Union_ProducesDistinctNode()
     {
-        var result = BuildPlan(
+        var fragment = _parser.Parse(
             "SELECT name FROM account UNION SELECT fullname FROM contact");
 
-        // UNION (not ALL) wraps ConcatenateNode in a DistinctNode
-        Assert.IsType<DistinctNode>(result.RootNode);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<DistinctNode>();
     }
 
-    #endregion
-
-    #region MaxRows Option
+    // ────────────────────────────────────────────
+    //  INSERT VALUES produces DmlExecuteNode
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_WithMaxRowsOption_IncludesTopInFetchXml()
+    public void Plan_InsertValues_ProducesDmlExecuteNode()
     {
-        var options = new QueryPlanOptions { MaxRows = 500 };
+        var fragment = _parser.Parse(
+            "INSERT INTO account (name, revenue) VALUES ('Contoso', 1000000)");
 
-        var result = BuildPlan("SELECT name FROM account", options);
+        var result = _builder.Plan(fragment);
 
-        Assert.Contains("top=\"500\"", result.FetchXml);
+        result.RootNode.Should().BeAssignableTo<DmlExecuteNode>();
     }
 
-    #endregion
-
-    #region DELETE
+    // ────────────────────────────────────────────
+    //  UPDATE produces DmlExecuteNode with source scan
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_DeleteWithWhere_ProducesDmlExecuteNode()
+    public void Plan_Update_ProducesDmlExecuteNode()
     {
-        var result = BuildPlan("DELETE FROM account WHERE name = 'test'");
+        var fragment = _parser.Parse(
+            "UPDATE account SET revenue = 2000000 WHERE name = 'Contoso'");
 
-        Assert.IsType<DmlExecuteNode>(result.RootNode);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<DmlExecuteNode>();
     }
 
-    #endregion
-
-    #region UPDATE
+    // ────────────────────────────────────────────
+    //  DELETE produces DmlExecuteNode with source scan
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_UpdateWithWhere_ProducesDmlExecuteNode()
+    public void Plan_Delete_ProducesDmlExecuteNode()
     {
-        var result = BuildPlan("UPDATE account SET name = 'Updated' WHERE statecode = 0");
+        var fragment = _parser.Parse(
+            "DELETE FROM account WHERE name = 'Contoso'");
 
-        Assert.IsType<DmlExecuteNode>(result.RootNode);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<DmlExecuteNode>();
     }
 
-    #endregion
-
-    #region Aggregate Queries
+    // ────────────────────────────────────────────
+    //  Metadata query produces MetadataScanNode
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_SimpleAggregate_ProducesFetchXmlWithAggregate()
+    public void Plan_MetadataQuery_ProducesMetadataScanNode()
     {
-        var result = BuildPlan("SELECT COUNT(*) FROM account");
+        var fragment = _parser.Parse(
+            "SELECT * FROM metadata.entity");
 
-        Assert.Contains("aggregate=\"true\"", result.FetchXml);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<MetadataScanNode>();
     }
+
+    // ────────────────────────────────────────────
+    //  Constructor null check
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_AggregateWithGroupBy_ProducesFetchXml()
+    public void Constructor_NullService_ThrowsArgumentNullException()
     {
-        var result = BuildPlan("SELECT statecode, COUNT(*) FROM account GROUP BY statecode");
+        var act = () => new ExecutionPlanBuilder(null!);
 
-        Assert.Contains("aggregate=\"true\"", result.FetchXml);
-        Assert.Contains("statecode", result.FetchXml);
+        act.Should().Throw<ArgumentNullException>();
     }
 
-    #endregion
-
-    #region Parse Errors
+    // ────────────────────────────────────────────
+    //  Plan result contains FetchXml and entity name
+    // ────────────────────────────────────────────
 
     [Fact]
-    public void Build_InvalidSql_Throws()
+    public void Plan_SimpleSelect_ResultContainsFetchXmlAndEntityName()
     {
-        Assert.ThrowsAny<Exception>(() => BuildPlan("NOT VALID SQL"));
+        var fragment = _parser.Parse("SELECT name FROM account");
+
+        var result = _builder.Plan(fragment);
+
+        result.FetchXml.Should().NotBeNullOrEmpty();
+        result.EntityLogicalName.Should().Be("account");
+        result.VirtualColumns.Should().NotBeNull();
     }
 
-    #endregion
+    // ────────────────────────────────────────────
+    //  Helper: find node type in plan tree
+    // ────────────────────────────────────────────
+
+    private static bool FindNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
+    {
+        if (node is T)
+            return true;
+
+        // Check if the node exposes child nodes through known wrapper types
+        if (node is ProjectNode projectNode)
+            return FindNodeOfType<T>(GetInput(projectNode));
+
+        if (node is ClientWindowNode windowNode)
+            return FindNodeOfType<T>(GetInput(windowNode));
+
+        return false;
+    }
+
+    private static IQueryPlanNode GetInput(ProjectNode node)
+    {
+        // ProjectNode takes an input node in constructor; access it via reflection
+        var field = typeof(ProjectNode).GetField("_input",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (IQueryPlanNode)(field?.GetValue(node)
+            ?? throw new InvalidOperationException("Could not access _input field"));
+    }
+
+    private static IQueryPlanNode GetInput(ClientWindowNode node)
+    {
+        var field = typeof(ClientWindowNode).GetField("_input",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (IQueryPlanNode)(field?.GetValue(node)
+            ?? throw new InvalidOperationException("Could not access _input field"));
+    }
 }

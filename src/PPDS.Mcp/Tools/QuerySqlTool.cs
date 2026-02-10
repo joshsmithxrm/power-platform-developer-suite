@@ -1,12 +1,11 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SqlServer.TransactSql.ScriptDom;
 using ModelContextProtocol.Server;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Mcp.Infrastructure;
-using PPDS.Query.Parsing;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Mcp.Tools;
 
@@ -52,30 +51,22 @@ public sealed class QuerySqlTool
         maxRows = Math.Clamp(maxRows, 1, 5000);
 
         // Parse and transpile SQL to FetchXML.
-        string fetchXml;
+        SqlSelectStatement ast;
         try
         {
-            var parser = new QueryParser();
-            var script = parser.ParseScript(sql);
-            var statement = QueryParser.GetFirstStatement(script) as SelectStatement
-                ?? throw new SqlParseException("Expected SELECT statement.");
-
-            // Apply row limit via ScriptDom AST.
-            if (statement.QueryExpression is QuerySpecification qs)
-            {
-                qs.TopRowFilter = new TopRowFilter
-                {
-                    Expression = new IntegerLiteral { Value = maxRows.ToString() }
-                };
-            }
-
-            var generator = new FetchXmlGenerator();
-            fetchXml = generator.Generate(statement).FetchXml;
+            var parser = new SqlParser(sql);
+            ast = parser.Parse();
         }
         catch (SqlParseException ex)
         {
             throw new InvalidOperationException($"SQL parse error: {ex.Message}", ex);
         }
+
+        // Apply row limit.
+        ast = ast.WithTop(maxRows);
+
+        var transpiler = new SqlToFetchXmlTranspiler();
+        var fetchXml = transpiler.Transpile(ast);
 
         // Execute query.
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);

@@ -47,6 +47,10 @@
     <PackageVersion Include="StreamJsonRpc" Version="2.24.84" />
   </ItemGroup>
 
+  <ItemGroup Label="SQL Parsing">
+    <PackageVersion Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="170.3.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Analyzers and Build">
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />

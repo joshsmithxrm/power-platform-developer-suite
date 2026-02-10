@@ -3,7 +3,7 @@ using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Cli.Infrastructure.Errors;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services.Query;
@@ -238,7 +238,7 @@ public class ExplainTests
     [Fact]
     public async Task ExplainAsync_InvalidSql_ThrowsSqlParseException()
     {
-        await Assert.ThrowsAsync<SqlParseException>(
+        await Assert.ThrowsAsync<PpdsException>(
             () => _service.ExplainAsync("NOT VALID SQL"));
     }
 

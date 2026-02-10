@@ -9,10 +9,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <!-- Strong naming for Dataverse compatibility -->
-    <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>..\PPDS.Dataverse\PPDS.Dataverse.snk</AssemblyOriginatorKeyFile>
-
     <!-- MinVer Configuration -->
     <MinVerTagPrefix>Query-v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
@@ -21,14 +17,13 @@
     <PackageId>PPDS.Query</PackageId>
     <Authors>Josh Smith</Authors>
     <Company>Power Platform Developer Suite</Company>
-    <Description>SQL query engine for Dataverse. Parses T-SQL, builds execution plans, generates FetchXML, and provides IntelliSense. Uses Microsoft.SqlServer.TransactSql.ScriptDom for complete T-SQL grammar support.</Description>
-    <PackageTags>dataverse;sql;query;fetchxml;parser;intellisense</PackageTags>
+    <Description>Production-grade SQL query engine for Dataverse. Provides full T-SQL parsing via ScriptDom, FetchXML transpilation, streaming execution with cost-based optimization, and an ADO.NET provider (PpdsDbConnection) for any .NET application.</Description>
+    <PackageTags>dataverse;dynamics365;powerplatform;sql;query;fetchxml;ado-net;ppds</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Copyright>Copyright (c) 2025 Josh Smith</Copyright>
+    <Copyright>Copyright (c) 2026 Josh Smith</Copyright>
     <PackageProjectUrl>https://github.com/joshsmithxrm/power-platform-developer-suite</PackageProjectUrl>
     <RepositoryUrl>https://github.com/joshsmithxrm/power-platform-developer-suite.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!-- Source Link for debugging -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -38,12 +33,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="PPDS.Query.Tests" />
+    <InternalsVisibleTo Include="PPDS.Cli" />
+    <InternalsVisibleTo Include="PPDS.Cli.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
   </ItemGroup>

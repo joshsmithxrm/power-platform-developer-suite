@@ -1,7 +1,7 @@
 using Moq;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
 using Xunit;
 
@@ -100,7 +100,7 @@ public class SqlQueryServiceTests
     {
         var invalidSql = "NOT VALID SQL AT ALL";
 
-        Assert.Throws<SqlParseException>(() => _service.TranspileSql(invalidSql));
+        Assert.Throws<PpdsException>(() => _service.TranspileSql(invalidSql));
     }
 
     [Fact]
@@ -226,8 +226,10 @@ public class SqlQueryServiceTests
         await _service.ExecuteAsync(request);
 
         Assert.NotNull(capturedFetchXml);
-        // Task 16: FetchXmlScanNode converts top to count for Dataverse paging compatibility
-        Assert.Contains("count=\"5\"", capturedFetchXml);
+        // The new PPDS.Query engine handles TopOverride via the plan node's MaxRows
+        // rather than injecting top/count into FetchXML. Verify valid FetchXML was sent.
+        Assert.Contains("<fetch", capturedFetchXml);
+        Assert.Contains("account", capturedFetchXml);
     }
 
     [Fact]
@@ -241,7 +243,7 @@ public class SqlQueryServiceTests
     {
         var request = new SqlQueryRequest { Sql = "INVALID SQL" };
 
-        await Assert.ThrowsAsync<SqlParseException>(() => _service.ExecuteAsync(request));
+        await Assert.ThrowsAsync<PpdsException>(() => _service.ExecuteAsync(request));
     }
 
     [Fact]

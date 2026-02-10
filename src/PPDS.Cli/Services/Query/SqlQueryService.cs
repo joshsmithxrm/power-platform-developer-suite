@@ -7,11 +7,11 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -26,9 +26,11 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly int _poolCapacity;
-    private readonly QueryParser _queryParser = new();
+    private readonly ExecutionPlanBuilder _planBuilder;
     private readonly PlanExecutor _planExecutor;
     private readonly DmlSafetyGuard _dmlSafetyGuard = new();
+    private readonly QueryParser _queryParser = new();
+    private readonly PPDS.Query.Transpilation.FetchXmlGeneratorService _fetchXmlGeneratorService = new();
 
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
@@ -50,6 +52,7 @@ public sealed class SqlQueryService : ISqlQueryService
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
         _poolCapacity = poolCapacity;
+        _planBuilder = new ExecutionPlanBuilder(_fetchXmlGeneratorService);
         _planExecutor = new PlanExecutor();
     }
 
@@ -58,26 +61,47 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var script = _queryParser.ParseScript(sql);
-        var statement = QueryParser.GetFirstStatement(script)
-            ?? throw new SqlParseException("No SQL statements found.");
-
-        if (statement is not SelectStatement select)
-            throw new SqlParseException("TranspileSql only supports SELECT statements.");
-
-        // TopOverride is handled by the caller through QueryPlanOptions.MaxRows.
-        // For transpile-only, apply it to the AST by setting TopRowFilter on the QuerySpecification.
-        if (topOverride.HasValue && select.QueryExpression is QuerySpecification querySpec)
+        try
         {
-            querySpec.TopRowFilter = new TopRowFilter
+            var fragment = _queryParser.Parse(sql);
+
+            if (topOverride.HasValue)
             {
-                Expression = new IntegerLiteral { Value = topOverride.Value.ToString() }
-            };
+                // Inject TOP override into the ScriptDom AST before transpilation
+                InjectTopOverride(fragment, topOverride.Value);
+            }
+
+            // Extract the first statement from the TSqlScript wrapper.
+            // QueryParser.Parse returns a TSqlScript, but FetchXmlGenerator
+            // expects a SelectStatement or QuerySpecification.
+            var statement = ExtractFirstStatement(fragment);
+            var generator = new PPDS.Query.Transpilation.FetchXmlGenerator();
+            return generator.Generate(statement);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the first <see cref="TSqlStatement"/> from a parsed fragment.
+    /// </summary>
+    private static TSqlStatement ExtractFirstStatement(TSqlFragment fragment)
+    {
+        if (fragment is TSqlScript script)
+        {
+            foreach (var batch in script.Batches)
+            {
+                if (batch.Statements.Count > 0)
+                    return batch.Statements[0];
+            }
         }
 
-        var generator = new FetchXmlGenerator();
-        var result = generator.Generate(select);
-        return result.FetchXml;
+        if (fragment is TSqlStatement statement)
+            return statement;
+
+        throw new PpdsException(ErrorCodes.Query.ParseError, "SQL text does not contain any statements.");
     }
 
     /// <inheritdoc />
@@ -88,23 +112,31 @@ public sealed class SqlQueryService : ISqlQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
-        // Parse SQL into ScriptDom AST
-        var script = _queryParser.ParseScript(request.Sql);
-        var statement = QueryParser.GetFirstStatement(script)
-            ?? throw new SqlParseException("No SQL statements found.");
-
-        // TopOverride is handled via QueryPlanOptions.MaxRows — no AST mutation needed.
-        // The ExecutionPlanBuilder already respects MaxRows.
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(request.Sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
         // DML safety check: validate DELETE/UPDATE/INSERT before execution.
-        // When DmlSafety options are provided, the guard blocks unsafe operations
-        // (DELETE/UPDATE without WHERE) and enforces row caps.
+        // The DmlSafetyGuard uses legacy AST types, so parse again with the old parser
+        // as a transitional bridge until the guard is updated to use ScriptDom types.
         int? dmlRowCap = null;
         DmlSafetyResult? safetyResult = null;
 
         if (request.DmlSafety != null)
         {
-            safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
+            var legacyStatement = ParseLegacyStatement(request.Sql);
+            if (request.TopOverride.HasValue && legacyStatement is SqlSelectStatement legacySelect)
+            {
+                legacyStatement = legacySelect.WithTop(request.TopOverride.Value);
+            }
+
+            safetyResult = _dmlSafetyGuard.Check(legacyStatement, request.DmlSafety);
 
             if (safetyResult.IsBlocked)
             {
@@ -113,7 +145,7 @@ public sealed class SqlQueryService : ISqlQueryService
                     safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
             }
 
-            // Don't return yet for dry-run -- we need to run the planner first
+            // Don't return yet for dry-run — we need to run the planner first
             // so the user sees the execution plan. The dry-run check moves
             // to after planning.
 
@@ -130,7 +162,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // For aggregate queries, fetch metadata needed for partitioning decisions.
         // This enables the planner to partition large aggregates across the pool.
         var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
+            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
 
         // Build execution plan via ExecutionPlanBuilder
         var planOptions = new QueryPlanOptions
@@ -150,7 +182,15 @@ public sealed class SqlQueryService : ISqlQueryService
             MaxDate = maxDate
         };
 
-        var planResult = new ExecutionPlanBuilder(planOptions).Build(statement);
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment, planOptions);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -179,9 +219,9 @@ public sealed class SqlQueryService : ISqlQueryService
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
         // SDK-specific FormattedValues metadata from the Entity objects.
-        // Aggregate results are excluded -- their FormattedValues are locale-formatted
+        // Aggregate results are excluded — their FormattedValues are locale-formatted
         // numbers, not meaningful attribute labels.
-        var isAggregate = HasAggregates(statement);
+        var isAggregate = HasAggregatesInFragment(fragment);
         var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
             result,
             planResult.VirtualColumns,
@@ -200,11 +240,26 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var script = _queryParser.ParseScript(sql);
-        var statement = QueryParser.GetFirstStatement(script)
-            ?? throw new SqlParseException("No SQL statements found.");
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
-        var planResult = new ExecutionPlanBuilder().Build(statement);
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
 
         // Extract parallelism metadata from plan tree
@@ -225,18 +280,28 @@ public sealed class SqlQueryService : ISqlQueryService
 
         if (chunkSize <= 0) chunkSize = 100;
 
-        // Parse SQL into ScriptDom AST
-        var script = _queryParser.ParseScript(request.Sql);
-        var statement = QueryParser.GetFirstStatement(script)
-            ?? throw new SqlParseException("No SQL statements found.");
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(request.Sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
-        // TopOverride is handled via QueryPlanOptions.MaxRows -- no AST mutation needed.
-
+        // DML safety check: uses legacy AST as transitional bridge
         int? dmlRowCap = null;
 
         if (request.DmlSafety != null)
         {
-            var safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
+            var legacyStatement = ParseLegacyStatement(request.Sql);
+            if (request.TopOverride.HasValue && legacyStatement is SqlSelectStatement legacySelect)
+            {
+                legacyStatement = legacySelect.WithTop(request.TopOverride.Value);
+            }
+
+            var safetyResult = _dmlSafetyGuard.Check(legacyStatement, request.DmlSafety);
 
             if (safetyResult.IsBlocked)
             {
@@ -257,7 +322,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
         // For aggregate queries, fetch metadata needed for partitioning decisions.
         var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
+            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
 
         // Build execution plan via ExecutionPlanBuilder
         var planOptions = new QueryPlanOptions
@@ -277,7 +342,15 @@ public sealed class SqlQueryService : ISqlQueryService
             MaxDate = maxDate
         };
 
-        var planResult = new ExecutionPlanBuilder(planOptions).Build(statement);
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment, planOptions);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
         // Execute the plan with streaming
         var expressionEvaluator = new ExpressionEvaluator();
@@ -292,7 +365,7 @@ public sealed class SqlQueryService : ISqlQueryService
         IReadOnlyList<QueryColumn>? columns = null;
         var totalRows = 0;
         var isFirstChunk = true;
-        var streamIsAggregate = HasAggregates(statement);
+        var streamIsAggregate = HasAggregatesInFragment(fragment);
 
         await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
         {
@@ -341,71 +414,158 @@ public sealed class SqlQueryService : ISqlQueryService
         };
     }
 
-    /// <summary>
-    /// Checks if a ScriptDom statement contains aggregate functions in the SELECT list.
-    /// </summary>
-    private static bool HasAggregates(TSqlStatement statement)
-    {
-        if (statement is not SelectStatement select) return false;
-        if (select.QueryExpression is not QuerySpecification spec) return false;
-        return spec.SelectElements.OfType<SelectScalarExpression>()
-            .Any(s => s.Expression is FunctionCall func && IsAggregateFunction(func));
-    }
-
-    private static bool IsAggregateFunction(FunctionCall func)
-    {
-        var name = func.FunctionName.Value;
-        return name.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("SUM", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("AVG", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("MIN", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("MAX", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Gets the entity name from a ScriptDom statement's FROM clause.
-    /// </summary>
-    private static string GetEntityNameFromStatement(TSqlStatement statement)
-    {
-        if (statement is not SelectStatement select) return "";
-        if (select.QueryExpression is not QuerySpecification spec) return "";
-        if (spec.FromClause?.TableReferences.Count > 0)
-        {
-            if (spec.FromClause.TableReferences[0] is NamedTableReference named)
-                return named.SchemaObject.BaseIdentifier?.Value ?? "";
-            if (spec.FromClause.TableReferences[0] is QualifiedJoin join
-                && join.FirstTableReference is NamedTableReference joinNamed)
-                return joinNamed.SchemaObject.BaseIdentifier?.Value ?? "";
-        }
-        return "";
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    //  ScriptDom AST helpers (replace legacy ISqlStatement checks)
+    // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
     /// Fetches estimated record count and date range for aggregate queries.
     /// Returns nulls for non-aggregate statements (no metadata fetch needed).
-    /// The two metadata calls run in parallel via Task.WhenAll.
+    /// Uses ScriptDom AST analysis instead of legacy ISqlStatement.
     /// </summary>
     private async Task<(long? EstimatedRecordCount, DateTime? MinDate, DateTime? MaxDate)> FetchAggregateMetadataAsync(
-        TSqlStatement statement,
+        TSqlFragment fragment,
         CancellationToken cancellationToken)
     {
-        if (HasAggregates(statement))
-        {
-            var entityName = GetEntityNameFromStatement(statement);
-            if (!string.IsNullOrEmpty(entityName))
-            {
-                var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
-                var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
-                await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+        var querySpec = ExtractQuerySpecification(fragment);
+        if (querySpec is null) return (null, null, null);
 
-                var count = await countTask.ConfigureAwait(false);
-                var dateRange = await dateTask.ConfigureAwait(false);
-                return (count, dateRange.Min, dateRange.Max);
+        if (!HasAggregateColumns(querySpec)) return (null, null, null);
+
+        var entityName = ExtractEntityName(querySpec);
+        if (entityName is null) return (null, null, null);
+
+        var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
+        var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
+        await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+
+        var count = await countTask.ConfigureAwait(false);
+        var dateRange = await dateTask.ConfigureAwait(false);
+        return (count, dateRange.Min, dateRange.Max);
+    }
+
+    /// <summary>
+    /// Checks if a parsed ScriptDom fragment represents a SELECT with aggregate functions.
+    /// </summary>
+    private static bool HasAggregatesInFragment(TSqlFragment fragment)
+    {
+        var querySpec = ExtractQuerySpecification(fragment);
+        return querySpec is not null && HasAggregateColumns(querySpec);
+    }
+
+    /// <summary>
+    /// Extracts a <see cref="QuerySpecification"/> from a parsed fragment.
+    /// </summary>
+    private static QuerySpecification? ExtractQuerySpecification(TSqlFragment fragment)
+    {
+        if (fragment is TSqlScript script)
+        {
+            foreach (var batch in script.Batches)
+            {
+                foreach (var stmt in batch.Statements)
+                {
+                    if (stmt is SelectStatement sel && sel.QueryExpression is QuerySpecification qs)
+                        return qs;
+                }
             }
+            return null;
         }
 
-        return (null, null, null);
+        if (fragment is SelectStatement selectStmt && selectStmt.QueryExpression is QuerySpecification querySpec)
+            return querySpec;
+
+        if (fragment is QuerySpecification directQs)
+            return directQs;
+
+        return null;
     }
+
+    /// <summary>
+    /// Checks if a QuerySpecification's SELECT list contains aggregate function calls.
+    /// </summary>
+    private static bool HasAggregateColumns(QuerySpecification querySpec)
+    {
+        foreach (var elem in querySpec.SelectElements)
+        {
+            if (elem is SelectScalarExpression scalar && scalar.Expression is FunctionCall funcCall)
+            {
+                var funcName = funcCall.FunctionName?.Value;
+                if (funcName is not null && IsAggregateFunction(funcName))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a function name is a recognized aggregate function.
+    /// </summary>
+    private static bool IsAggregateFunction(string functionName)
+    {
+        return functionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("SUM", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("AVG", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MIN", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Extracts the primary entity name from a QuerySpecification's FROM clause.
+    /// </summary>
+    private static string? ExtractEntityName(QuerySpecification querySpec)
+    {
+        if (querySpec.FromClause is null || querySpec.FromClause.TableReferences.Count == 0)
+            return null;
+
+        var tableRef = querySpec.FromClause.TableReferences[0];
+
+        // Drill through qualified joins to the base table
+        while (tableRef is QualifiedJoin qj)
+        {
+            tableRef = qj.FirstTableReference;
+        }
+
+        if (tableRef is NamedTableReference named)
+        {
+            return named.SchemaObject.BaseIdentifier.Value;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Injects a TOP override into the first SelectStatement's QuerySpecification.
+    /// Modifies the ScriptDom AST in place.
+    /// </summary>
+    private static void InjectTopOverride(TSqlFragment fragment, int topValue)
+    {
+        var querySpec = ExtractQuerySpecification(fragment);
+        if (querySpec is null) return;
+
+        querySpec.TopRowFilter = new TopRowFilter
+        {
+            Expression = new IntegerLiteral { Value = topValue.ToString() }
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Legacy bridge (transitional - removed when DmlSafetyGuard is updated)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Parses SQL using the legacy <see cref="SqlParser"/> to get an <see cref="ISqlStatement"/>
+    /// for the <see cref="DmlSafetyGuard"/>. This is a transitional bridge until the guard
+    /// is updated to accept ScriptDom types directly.
+    /// </summary>
+    private static ISqlStatement ParseLegacyStatement(string sql)
+    {
+        var parser = new SqlParser(sql);
+        return parser.ParseStatement();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Result helpers
+    // ═══════════════════════════════════════════════════════════════════
 
     private static IReadOnlyList<QueryColumn> InferColumnsFromRow(QueryRow row)
     {

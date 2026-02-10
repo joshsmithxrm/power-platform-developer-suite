@@ -11,6 +11,7 @@ using PPDS.Cli.Tui.Testing.States;
 using PPDS.Cli.Tui.Views;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Sql.Intellisense;
+using SqlSourceTokenizer = PPDS.Query.Intellisense.SqlSourceTokenizer;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Screens;

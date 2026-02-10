@@ -5,6 +5,10 @@ using System.Threading.Tasks;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Sql.Intellisense;
+using SqlCompletionEngine = PPDS.Query.Intellisense.SqlCompletionEngine;
+using SqlCursorContext = PPDS.Query.Intellisense.SqlCursorContext;
+using SqlSourceTokenizer = PPDS.Query.Intellisense.SqlSourceTokenizer;
+using SqlValidator = PPDS.Query.Intellisense.SqlValidator;
 
 namespace PPDS.Cli.Services;
 
