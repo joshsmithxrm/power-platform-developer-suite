@@ -29,7 +29,7 @@ namespace PPDS.Query.Parsing
             var fragment = _parser.Parse(new StringReader(sql), out IList<ParseError> errors);
 
             if (errors.Count > 0)
-                throw new QueryParseException(errors);
+                throw new QueryParseException(errors, sql);
 
             return fragment;
         }
