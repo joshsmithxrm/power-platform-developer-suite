@@ -1399,7 +1399,6 @@ public sealed class ExecutionPlanBuilder
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Determines whether an aggregate query should be partitioned for parallel execution.
     /// Determines whether an aggregate query should use parallel partitioning with ScriptDom types.
     /// Requirements:
     /// - Query must use aggregate functions (COUNT, SUM, AVG, MIN, MAX)
@@ -1510,7 +1509,6 @@ public sealed class ExecutionPlanBuilder
     }
 
     /// <summary>
-    /// Builds <see cref="MergeAggregateColumn"/> descriptors from a ScriptDom <see cref="QuerySpecification"/>.
     /// Builds merge aggregate column descriptors from a ScriptDom QuerySpecification.
     /// </summary>
     private static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumnsFromQuerySpec(

@@ -28,6 +28,7 @@ public sealed class OpenJsonNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => Array.Empty<IQueryPlanNode>();
 
+    /// <summary>Initializes a new instance of the <see cref="OpenJsonNode"/> class.</summary>
     public OpenJsonNode(CompiledScalarExpression jsonExpression, string? path = null)
     {
         _jsonExpression = jsonExpression ?? throw new ArgumentNullException(nameof(jsonExpression));
