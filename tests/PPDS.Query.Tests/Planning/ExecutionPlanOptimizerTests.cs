@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using FluentAssertions;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Ast;
@@ -13,6 +14,26 @@ namespace PPDS.Query.Tests.Planning;
 public class ExecutionPlanOptimizerTests
 {
     private readonly ExecutionPlanOptimizer _optimizer = new();
+
+    /// <summary>
+    /// Compiles a legacy condition into a CompiledPredicate via ExpressionEvaluator closure.
+    /// </summary>
+    private static CompiledPredicate CompileCondition(ISqlCondition condition)
+    {
+        var evaluator = new ExpressionEvaluator();
+        return row => evaluator.EvaluateCondition(condition, row);
+    }
+
+    private static string DescribeCondition(ISqlCondition condition)
+    {
+        return condition switch
+        {
+            SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
+            SqlExpressionCondition expr => $"expr {expr.Operator} expr",
+            SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
+            _ => condition.GetType().Name
+        };
+    }
 
     // ────────────────────────────────────────────
     //  Predicate pushdown: removes redundant client filter
@@ -32,7 +53,7 @@ public class ExecutionPlanOptimizerTests
             SqlComparisonOperator.Equal,
             SqlLiteral.String("Contoso"));
 
-        var filterNode = new ClientFilterNode(scanNode, condition);
+        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition), condition);
 
         var plan = new QueryPlanResult
         {
@@ -61,7 +82,7 @@ public class ExecutionPlanOptimizerTests
             SqlComparisonOperator.GreaterThan,
             new SqlColumnExpression(SqlColumnRef.Simple("cost")));
 
-        var filterNode = new ClientFilterNode(scanNode, condition);
+        var filterNode = new ClientFilterNode(scanNode, CompileCondition(condition), DescribeCondition(condition), condition);
 
         var plan = new QueryPlanResult
         {

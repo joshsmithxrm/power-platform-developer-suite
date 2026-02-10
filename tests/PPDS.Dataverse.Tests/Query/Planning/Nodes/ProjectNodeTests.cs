@@ -8,7 +8,6 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 using Moq;
 using Xunit;
 
@@ -118,16 +117,18 @@ public class ProjectNodeTests
             MakeRow(("revenue", 1000m))
         });
 
-        // revenue * 0.1 AS tax
-        var expr = new SqlBinaryExpression(
-            new SqlColumnExpression(SqlColumnRef.Simple("revenue")),
-            SqlBinaryOperator.Multiply,
-            new SqlLiteralExpression(SqlLiteral.Number("0.1")));
+        // revenue * 0.1 AS tax — compiled as a delegate
+        CompiledScalarExpression taxExpr = row =>
+        {
+            var revenue = row.TryGetValue("revenue", out var rv) ? rv.Value : null;
+            if (revenue is decimal d) return d * 0.1m;
+            return null;
+        };
 
         var project = new ProjectNode(input, new[]
         {
             ProjectColumn.PassThrough("revenue"),
-            ProjectColumn.Computed("tax", expr)
+            ProjectColumn.Computed("tax", taxExpr)
         });
 
         var ctx = CreateContext();

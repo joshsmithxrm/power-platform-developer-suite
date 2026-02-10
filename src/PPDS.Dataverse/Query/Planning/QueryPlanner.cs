@@ -214,14 +214,18 @@ public sealed class QueryPlanner
         var clientWhereCondition = ExtractExpressionConditions(statement.Where);
         if (clientWhereCondition != null)
         {
-            rootNode = new ClientFilterNode(rootNode, clientWhereCondition);
+            var predicate = CompileLegacyCondition(clientWhereCondition);
+            var description = DescribeLegacyCondition(clientWhereCondition);
+            rootNode = new ClientFilterNode(rootNode, predicate, description, clientWhereCondition);
         }
 
         // HAVING clause: add client-side filter after aggregate FetchXML scan.
         // FetchXML doesn't support HAVING natively, so we filter client-side.
         if (statement.Having != null)
         {
-            rootNode = new ClientFilterNode(rootNode, statement.Having);
+            var predicate = CompileLegacyCondition(statement.Having);
+            var description = DescribeLegacyCondition(statement.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description, statement.Having);
         }
 
         // Window functions: add ClientWindowNode to compute window values client-side.
@@ -907,11 +911,17 @@ public sealed class QueryPlanner
             }
         }
 
+        CompiledPredicate? metadataFilter = null;
+        if (statement.Where != null)
+        {
+            metadataFilter = CompileLegacyCondition(statement.Where);
+        }
+
         var scanNode = new MetadataScanNode(
             metadataTable,
             metadataExecutor: null, // Will be resolved from context at execution time
             requestedColumns,
-            statement.Where);
+            metadataFilter);
 
         return new QueryPlanResult
         {
@@ -954,7 +964,7 @@ public sealed class QueryPlanner
                     break;
                 case SqlComputedColumn computed:
                     var compAlias = computed.Alias ?? "computed";
-                    projections.Add(ProjectColumn.Computed(compAlias, computed.Expression));
+                    projections.Add(ProjectColumn.Computed(compAlias, CompileLegacyExpression(computed.Expression)));
                     break;
             }
         }
@@ -1077,7 +1087,9 @@ public sealed class QueryPlanner
         // HAVING clause: apply after merging (filters on merged aggregate results)
         if (statement.Having != null)
         {
-            rootNode = new ClientFilterNode(rootNode, statement.Having);
+            var predicate = CompileLegacyCondition(statement.Having);
+            var description = DescribeLegacyCondition(statement.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description, statement.Having);
         }
 
         return new QueryPlanResult

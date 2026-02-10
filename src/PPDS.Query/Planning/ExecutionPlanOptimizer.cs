@@ -66,15 +66,22 @@ public sealed class ExecutionPlanOptimizer
     /// Identifies client-side filter conditions that can be expressed in FetchXML
     /// and pushes them into the FetchXML scan node, removing the ClientFilterNode.
     /// </summary>
+    /// <remarks>
+    /// With compiled predicates, the optimizer can no longer inspect condition structure.
+    /// Predicate pushdown now relies on the legacy condition stored in LegacyCondition
+    /// (if available). When conditions are compiled at plan time, this pass is a no-op.
+    /// </remarks>
     private static (IQueryPlanNode root, string fetchXml) ApplyPredicatePushdown(
         IQueryPlanNode root, string fetchXml)
     {
         // Look for pattern: ClientFilterNode -> FetchXmlScanNode
-        // where the filter condition is a simple comparison pushable to FetchXML
+        // where the filter condition is a simple comparison pushable to FetchXML.
+        // With compiled predicates, we check LegacyCondition for structural inspection.
         if (root is ClientFilterNode filterNode &&
-            filterNode.Input is FetchXmlScanNode scanNode)
+            filterNode.Input is FetchXmlScanNode scanNode &&
+            filterNode.LegacyCondition != null)
         {
-            if (CanPushToFetchXml(filterNode.Condition))
+            if (CanPushToFetchXml(filterNode.LegacyCondition))
             {
                 // The condition is already in FetchXML (it was put there by the transpiler).
                 // Remove the redundant client-side filter.
@@ -113,22 +120,40 @@ public sealed class ExecutionPlanOptimizer
     {
         if (node is ClientFilterNode filterNode)
         {
-            var foldedCondition = FoldCondition(filterNode.Condition);
-            var foldedInput = ApplyConstantFolding(filterNode.Input);
-
-            // Check if folded condition is a tautology (always true)
-            if (IsAlwaysTrue(foldedCondition))
+            // With compiled predicates, constant folding operates on the legacy
+            // condition (if available). If only compiled predicate exists, we can
+            // still recurse into children but cannot fold the predicate itself.
+            if (filterNode.LegacyCondition != null)
             {
-                return foldedInput;
+                var foldedCondition = FoldCondition(filterNode.LegacyCondition);
+                var foldedInput = ApplyConstantFolding(filterNode.Input);
+
+                // Check if folded condition is a tautology (always true)
+                if (IsAlwaysTrue(foldedCondition))
+                {
+                    return foldedInput;
+                }
+
+                // Check if folded condition is a contradiction (always false) -- keep as is
+                // since we need to return zero rows
+
+                if (!ReferenceEquals(foldedCondition, filterNode.LegacyCondition) ||
+                    !ReferenceEquals(foldedInput, filterNode.Input))
+                {
+                    // Re-compile the folded condition into a new predicate
+                    var evaluator = new Dataverse.Query.Execution.ExpressionEvaluator();
+                    var newPredicate = (Dataverse.Query.Execution.CompiledPredicate)(row => evaluator.EvaluateCondition(foldedCondition, row));
+                    return new ClientFilterNode(foldedInput, newPredicate, filterNode.PredicateDescription, foldedCondition);
+                }
             }
-
-            // Check if folded condition is a contradiction (always false) -- keep as is
-            // since we need to return zero rows
-
-            if (!ReferenceEquals(foldedCondition, filterNode.Condition) ||
-                !ReferenceEquals(foldedInput, filterNode.Input))
+            else
             {
-                return new ClientFilterNode(foldedInput, foldedCondition);
+                // Compiled-only predicate: just recurse into children
+                var foldedInput = ApplyConstantFolding(filterNode.Input);
+                if (!ReferenceEquals(foldedInput, filterNode.Input))
+                {
+                    return new ClientFilterNode(foldedInput, filterNode.Predicate, filterNode.PredicateDescription);
+                }
             }
         }
 
