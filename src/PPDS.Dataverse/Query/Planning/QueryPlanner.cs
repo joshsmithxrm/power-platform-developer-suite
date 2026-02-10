@@ -259,11 +259,18 @@ public sealed class QueryPlanner
 
         if (insert.ValueRows != null)
         {
-            // INSERT VALUES: create DmlExecuteNode directly with value rows
+            // INSERT VALUES: wrap legacy ISqlExpression values in compiled delegates
+            var evaluator = new ExpressionEvaluator();
+            var compiledRows = insert.ValueRows.Select(row =>
+                (IReadOnlyList<CompiledScalarExpression>)row.Select(expr =>
+                    (CompiledScalarExpression)(r => evaluator.Evaluate(expr, r))
+                ).ToList()
+            ).ToList();
+
             rootNode = DmlExecuteNode.InsertValues(
                 insert.TargetEntity,
                 insert.Columns,
-                insert.ValueRows,
+                compiledRows,
                 rowCap: options.DmlRowCap ?? int.MaxValue);
         }
         else if (insert.SourceQuery != null)
@@ -327,10 +334,18 @@ public sealed class QueryPlanner
 
         var selectResult = PlanSelect(selectStatement, options);
 
+        // Wrap legacy SqlSetClause values in compiled delegates
+        var evaluator = new ExpressionEvaluator();
+        var compiledClauses = update.SetClauses.Select(clause =>
+            new CompiledSetClause(
+                clause.ColumnName,
+                (CompiledScalarExpression)(r => evaluator.Evaluate(clause.Value, r)))
+        ).ToList();
+
         var rootNode = DmlExecuteNode.Update(
             entityName,
             selectResult.RootNode,
-            update.SetClauses,
+            compiledClauses,
             rowCap: options.DmlRowCap ?? int.MaxValue);
 
         return new QueryPlanResult
@@ -1189,6 +1204,44 @@ public sealed class QueryPlanner
         }
 
         return fetchXml[..entityCloseIndex] + filterXml + "\n" + fetchXml[entityCloseIndex..];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Legacy AST bridge helpers
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Compiles a legacy <see cref="ISqlCondition"/> into a <see cref="CompiledPredicate"/>
+    /// by wrapping the <see cref="ExpressionEvaluator"/>.
+    /// </summary>
+    internal static CompiledPredicate CompileLegacyCondition(Sql.Ast.ISqlCondition condition)
+    {
+        var evaluator = new ExpressionEvaluator();
+        return row => evaluator.EvaluateCondition(condition, row);
+    }
+
+    /// <summary>
+    /// Compiles a legacy <see cref="ISqlExpression"/> into a <see cref="CompiledScalarExpression"/>
+    /// by wrapping the <see cref="ExpressionEvaluator"/>.
+    /// </summary>
+    internal static CompiledScalarExpression CompileLegacyExpression(Sql.Ast.ISqlExpression expression)
+    {
+        var evaluator = new ExpressionEvaluator();
+        return row => evaluator.Evaluate(expression, row);
+    }
+
+    /// <summary>
+    /// Produces a human-readable description of a legacy <see cref="ISqlCondition"/>.
+    /// </summary>
+    internal static string DescribeLegacyCondition(Sql.Ast.ISqlCondition condition)
+    {
+        return condition switch
+        {
+            Sql.Ast.SqlComparisonCondition comp => $"{comp.Column.GetFullName()} {comp.Operator} {comp.Value.Value}",
+            Sql.Ast.SqlExpressionCondition expr => $"expr {expr.Operator} expr",
+            Sql.Ast.SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
+            _ => condition.GetType().Name
+        };
     }
 }
 

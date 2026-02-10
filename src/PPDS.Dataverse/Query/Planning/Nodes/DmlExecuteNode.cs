@@ -5,9 +5,11 @@ using System.Threading;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Progress;
 using PPDS.Dataverse.Query.Execution;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
+
+/// <summary>A compiled SET clause for UPDATE statements.</summary>
+public sealed record CompiledSetClause(string ColumnName, CompiledScalarExpression Value);
 
 /// <summary>
 /// Executes DML operations (INSERT, UPDATE, DELETE) using BulkOperationExecutor.
@@ -27,11 +29,11 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     /// <summary>Column names for INSERT statements.</summary>
     public IReadOnlyList<string>? InsertColumns { get; }
 
-    /// <summary>Value rows for INSERT VALUES statements.</summary>
-    public IReadOnlyList<IReadOnlyList<ISqlExpression>>? InsertValueRows { get; }
+    /// <summary>Value rows for INSERT VALUES statements (compiled delegates).</summary>
+    public IReadOnlyList<IReadOnlyList<CompiledScalarExpression>>? InsertValueRows { get; }
 
-    /// <summary>SET clauses for UPDATE statements.</summary>
-    public IReadOnlyList<SqlSetClause>? SetClauses { get; }
+    /// <summary>SET clauses for UPDATE statements (compiled delegates).</summary>
+    public IReadOnlyList<CompiledSetClause>? SetClauses { get; }
 
     /// <summary>Source column names for INSERT...SELECT ordinal mapping.</summary>
     public IReadOnlyList<string>? SourceColumns { get; }
@@ -66,7 +68,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     public static DmlExecuteNode InsertValues(
         string entityLogicalName,
         IReadOnlyList<string> columns,
-        IReadOnlyList<IReadOnlyList<ISqlExpression>> valueRows,
+        IReadOnlyList<IReadOnlyList<CompiledScalarExpression>> valueRows,
         int rowCap = int.MaxValue)
     {
         return new DmlExecuteNode(
@@ -102,7 +104,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     public static DmlExecuteNode Update(
         string entityLogicalName,
         IQueryPlanNode sourceNode,
-        IReadOnlyList<SqlSetClause> setClauses,
+        IReadOnlyList<CompiledSetClause> setClauses,
         int rowCap = int.MaxValue)
     {
         return new DmlExecuteNode(
@@ -133,8 +135,8 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         string entityLogicalName,
         IQueryPlanNode? sourceNode = null,
         IReadOnlyList<string>? insertColumns = null,
-        IReadOnlyList<IReadOnlyList<ISqlExpression>>? insertValueRows = null,
-        IReadOnlyList<SqlSetClause>? setClauses = null,
+        IReadOnlyList<IReadOnlyList<CompiledScalarExpression>>? insertValueRows = null,
+        IReadOnlyList<CompiledSetClause>? setClauses = null,
         IReadOnlyList<string>? sourceColumns = null,
         int rowCap = int.MaxValue)
     {
@@ -218,7 +220,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName);
             for (var i = 0; i < InsertColumns!.Count; i++)
             {
-                var value = context.ExpressionEvaluator.Evaluate(row[i], EmptyRow);
+                var value = row[i](EmptyRow);
                 entity[InsertColumns[i]] = value;
             }
             entities.Add(entity);
@@ -312,10 +314,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName, recordId);
 
-            // Evaluate SET clauses against the source row values
+            // Evaluate compiled SET clauses against the source row values
             foreach (var clause in SetClauses!)
             {
-                var value = context.ExpressionEvaluator.Evaluate(clause.Value, row.Values);
+                var value = clause.Value(row.Values);
                 entity[clause.ColumnName] = value;
             }
 

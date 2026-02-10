@@ -1,7 +1,7 @@
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
-using PPDS.Dataverse.Sql.Parsing;
 using Xunit;
 
 namespace PPDS.Dataverse.Tests.Query.Planning.Nodes;
@@ -12,16 +12,15 @@ public class DmlExecuteNodeTests
     [Fact]
     public void InsertValues_HasCorrectDescription()
     {
+        CompiledScalarExpression contosoExpr = _ => "Contoso";
+        CompiledScalarExpression revenueExpr = _ => 1000;
+
         var node = DmlExecuteNode.InsertValues(
             "account",
             new[] { "name", "revenue" },
-            new ISqlExpression[][]
+            new IReadOnlyList<CompiledScalarExpression>[]
             {
-                new ISqlExpression[]
-                {
-                    new SqlLiteralExpression(SqlLiteral.String("Contoso")),
-                    new SqlLiteralExpression(SqlLiteral.Number("1000"))
-                }
+                new CompiledScalarExpression[] { contosoExpr, revenueExpr }
             });
 
         Assert.Contains("INSERT", node.Description);
@@ -49,9 +48,10 @@ public class DmlExecuteNodeTests
     public void Update_HasCorrectDescription()
     {
         var mockSource = new MockPlanNode();
+        CompiledScalarExpression updatedExpr = _ => "Updated";
         var setClauses = new[]
         {
-            new SqlSetClause("name", new SqlLiteralExpression(SqlLiteral.String("Updated")))
+            new CompiledSetClause("name", updatedExpr)
         };
         var node = DmlExecuteNode.Update("account", mockSource, setClauses);
 
@@ -81,12 +81,13 @@ public class DmlExecuteNodeTests
     [Fact]
     public void InsertValues_RowCapDefaultIsMaxValue()
     {
+        CompiledScalarExpression testExpr = _ => "Test";
         var node = DmlExecuteNode.InsertValues(
             "account",
             new[] { "name" },
-            new ISqlExpression[][]
+            new IReadOnlyList<CompiledScalarExpression>[]
             {
-                new ISqlExpression[] { new SqlLiteralExpression(SqlLiteral.String("Test")) }
+                new CompiledScalarExpression[] { testExpr }
             });
 
         Assert.Equal(int.MaxValue, node.RowCap);

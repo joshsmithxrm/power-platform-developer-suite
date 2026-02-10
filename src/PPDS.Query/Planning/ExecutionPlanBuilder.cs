@@ -28,6 +28,7 @@ public sealed class ExecutionPlanBuilder
 {
     private readonly IFetchXmlGeneratorService _fetchXmlGenerator;
     private readonly SessionContext? _sessionContext;
+    private readonly ExpressionCompiler _expressionCompiler;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ExecutionPlanBuilder"/> class.
@@ -45,6 +46,7 @@ public sealed class ExecutionPlanBuilder
         _fetchXmlGenerator = fetchXmlGenerator
             ?? throw new ArgumentNullException(nameof(fetchXmlGenerator));
         _sessionContext = sessionContext;
+        _expressionCompiler = new ExpressionCompiler();
     }
 
     /// <summary>
@@ -202,13 +204,23 @@ public sealed class ExecutionPlanBuilder
         var clientWhereCondition = ExtractExpressionConditions(legacySelect.Where);
         if (clientWhereCondition != null)
         {
-            rootNode = new ClientFilterNode(rootNode, clientWhereCondition);
+            var predicate = CompileLegacyCondition(clientWhereCondition);
+            var description = DescribeLegacyCondition(clientWhereCondition);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
-        // HAVING clause
-        if (legacySelect.Having != null)
+        // HAVING clause: compile from ScriptDom if available, else bridge from legacy
+        if (querySpec.HavingClause?.SearchCondition != null)
         {
-            rootNode = new ClientFilterNode(rootNode, legacySelect.Having);
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
+            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
+        }
+        else if (legacySelect.Having != null)
+        {
+            var predicate = CompileLegacyCondition(legacySelect.Having);
+            var description = DescribeLegacyCondition(legacySelect.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         // Window functions
@@ -270,16 +282,25 @@ public sealed class ExecutionPlanBuilder
         }
         else
         {
-            // INSERT VALUES
-            var valueRows = ScriptDomAdapter.GetInsertValueRows(insert);
-            var typedRows = valueRows
-                .Select(r => (IReadOnlyList<ISqlExpression>)r.AsReadOnly())
-                .ToList();
+            // INSERT VALUES: compile ScriptDom expressions directly to delegates
+            var compiledRows = new List<IReadOnlyList<CompiledScalarExpression>>();
+            if (insert.InsertSpecification.InsertSource is ValuesInsertSource valuesSource)
+            {
+                foreach (var rowValue in valuesSource.RowValues)
+                {
+                    var compiledRow = new List<CompiledScalarExpression>();
+                    foreach (var colVal in rowValue.ColumnValues)
+                    {
+                        compiledRow.Add(_expressionCompiler.CompileScalar(colVal));
+                    }
+                    compiledRows.Add(compiledRow);
+                }
+            }
 
             rootNode = DmlExecuteNode.InsertValues(
                 targetEntity,
                 columns,
-                typedRows,
+                compiledRows,
                 rowCap: options.DmlRowCap ?? int.MaxValue);
         }
 
@@ -303,8 +324,29 @@ public sealed class ExecutionPlanBuilder
     {
         var targetTable = ScriptDomAdapter.GetUpdateTargetTable(update);
         var entityName = targetTable.TableName;
-        var setClauses = ScriptDomAdapter.GetUpdateSetClauses(update);
         var where = ScriptDomAdapter.GetUpdateWhere(update);
+
+        // Compile SET clauses directly from ScriptDom AST to delegates
+        var compiledClauses = new List<CompiledSetClause>();
+        var referencedColumnNames = new List<string>();
+
+        foreach (var setClause in update.UpdateSpecification.SetClauses)
+        {
+            if (setClause is AssignmentSetClause assignment)
+            {
+                var colName = assignment.Column?.MultiPartIdentifier?.Identifiers?.Count > 0
+                    ? assignment.Column.MultiPartIdentifier.Identifiers[
+                        assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
+                    : "unknown";
+                var compiled = _expressionCompiler.CompileScalar(assignment.NewValue);
+                compiledClauses.Add(new CompiledSetClause(colName, compiled));
+
+                // Also extract column names referenced in the expression for the SELECT
+                var legacyValue = ScriptDomAdapter.ConvertExpression(assignment.NewValue);
+                var refCols = ExtractColumnNames(legacyValue);
+                referencedColumnNames.AddRange(refCols);
+            }
+        }
 
         // Build a SELECT to find records matching the WHERE clause.
         // SELECT entityid FROM entity WHERE ...
@@ -312,15 +354,11 @@ public sealed class ExecutionPlanBuilder
         var selectColumns = new List<ISqlSelectColumn> { idColumn };
 
         // Also include any columns referenced in SET clause expressions
-        foreach (var clause in setClauses)
+        foreach (var colName in referencedColumnNames)
         {
-            var referencedColumns = ExtractColumnNames(clause.Value);
-            foreach (var colName in referencedColumns)
+            if (!selectColumns.Exists(c => c is SqlColumnRef cr && cr.ColumnName == colName))
             {
-                if (!selectColumns.Exists(c => c is SqlColumnRef cr && cr.ColumnName == colName))
-                {
-                    selectColumns.Add(SqlColumnRef.Simple(colName));
-                }
+                selectColumns.Add(SqlColumnRef.Simple(colName));
             }
         }
 
@@ -341,7 +379,7 @@ public sealed class ExecutionPlanBuilder
         var rootNode = DmlExecuteNode.Update(
             entityName,
             selectResult.RootNode,
-            setClauses,
+            compiledClauses,
             rowCap: options.DmlRowCap ?? int.MaxValue);
 
         return new QueryPlanResult
@@ -730,11 +768,17 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
+        CompiledPredicate? filter = null;
+        if (statement.Where != null)
+        {
+            filter = CompileLegacyCondition(statement.Where);
+        }
+
         var scanNode = new MetadataScanNode(
             metadataTable,
             metadataExecutor: null,
             requestedColumns,
-            statement.Where);
+            filter);
 
         return new QueryPlanResult
         {
@@ -1339,7 +1383,9 @@ public sealed class ExecutionPlanBuilder
         // HAVING clause: apply after merging
         if (statement.Having != null)
         {
-            rootNode = new ClientFilterNode(rootNode, statement.Having);
+            var predicate = CompileLegacyCondition(statement.Having);
+            var description = DescribeLegacyCondition(statement.Having);
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         return new QueryPlanResult
@@ -1844,7 +1890,7 @@ public sealed class ExecutionPlanBuilder
                     break;
                 case SqlComputedColumn computed:
                     var compAlias = computed.Alias ?? "computed";
-                    projections.Add(ProjectColumn.Computed(compAlias, computed.Expression));
+                    projections.Add(ProjectColumn.Computed(compAlias, CompileLegacyExpression(computed.Expression)));
                     break;
             }
         }
