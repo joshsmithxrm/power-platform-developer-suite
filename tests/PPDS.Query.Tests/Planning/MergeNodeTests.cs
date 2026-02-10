@@ -194,7 +194,7 @@ public class MergeNodeTests
     // ────────────────────────────────────────────
 
     [Fact]
-    public void Plan_MergeStatement_ProducesMergeNode()
+    public void Plan_MergeWithWhenMatched_ThrowsNotSupportedException()
     {
         var parser = new QueryParser();
         var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
@@ -210,7 +210,30 @@ public class MergeNodeTests
             USING source_table AS src
             ON target.accountid = src.id
             WHEN MATCHED THEN
-                UPDATE SET name = src.name
+                UPDATE SET name = src.name;";
+
+        var fragment = parser.Parse(sql);
+        var act = () => builder.Plan(fragment);
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*WHEN MATCHED*not yet supported*");
+    }
+
+    [Fact]
+    public void Plan_MergeStatement_ProducesMergeNode()
+    {
+        var parser = new QueryParser();
+        var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
+        mockFetchXmlService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Returns(TranspileResult.Simple(
+                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
+
+        var builder = new ExecutionPlanBuilder(mockFetchXmlService.Object);
+
+        var sql = @"
+            MERGE INTO account AS target
+            USING source_table AS src
+            ON target.accountid = src.id
             WHEN NOT MATCHED THEN
                 INSERT (name) VALUES (src.name);";
 
