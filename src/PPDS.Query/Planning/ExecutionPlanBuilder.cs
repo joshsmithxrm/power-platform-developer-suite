@@ -20,8 +20,8 @@ namespace PPDS.Query.Planning;
 /// <summary>
 /// Builds an execution plan from a ScriptDom <see cref="TSqlFragment"/> AST.
 /// This is the v3 replacement for the legacy <see cref="QueryPlanner"/> that worked with
-/// the custom PPDS SQL AST. It walks the ScriptDom AST, uses <see cref="ScriptDomAdapter"/>
-/// to bridge to the legacy AST types where plan nodes require them, and produces the same
+/// the custom PPDS SQL AST. It walks the ScriptDom AST directly and bridges to legacy AST
+/// types where plan nodes still require them, producing the same
 /// <see cref="IQueryPlanNode"/> tree that the existing executor expects.
 /// </summary>
 public sealed class ExecutionPlanBuilder
@@ -259,17 +259,17 @@ public sealed class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanInsert(InsertStatement insert, QueryPlanOptions options)
     {
-        var targetEntity = ScriptDomAdapter.GetInsertTargetEntity(insert);
-        var columns = ScriptDomAdapter.GetInsertColumns(insert);
+        var targetEntity = GetInsertTargetEntity(insert);
+        var columns = GetInsertColumns(insert);
 
         IQueryPlanNode rootNode;
 
         // Check if this is INSERT ... SELECT
-        var selectSource = ScriptDomAdapter.GetInsertSelectSource(insert);
+        var selectSource = GetInsertSelectSource(insert);
         if (selectSource != null)
         {
             // INSERT SELECT: plan the source SELECT, wrap with DmlExecuteNode
-            var sourceSelectStmt = ScriptDomAdapter.ConvertSelectStatement(selectSource);
+            var sourceSelectStmt = ConvertSelectStatement(selectSource);
             var sourceResult = PlanSelectFromLegacy(sourceSelectStmt, options);
 
             var sourceColumns = ExtractSelectColumnNames(sourceSelectStmt);
@@ -322,9 +322,9 @@ public sealed class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
-        var targetTable = ScriptDomAdapter.GetUpdateTargetTable(update);
+        var targetTable = GetUpdateTargetTable(update);
         var entityName = targetTable.TableName;
-        var where = ScriptDomAdapter.GetUpdateWhere(update);
+        var where = GetUpdateWhere(update);
 
         // Compile SET clauses directly from ScriptDom AST to delegates
         var compiledClauses = new List<CompiledSetClause>();
@@ -342,7 +342,7 @@ public sealed class ExecutionPlanBuilder
                 compiledClauses.Add(new CompiledSetClause(colName, compiled));
 
                 // Also extract column names referenced in the expression for the SELECT
-                var legacyValue = ScriptDomAdapter.ConvertExpression(assignment.NewValue);
+                var legacyValue = ConvertExpression(assignment.NewValue);
                 var refCols = ExtractColumnNames(legacyValue);
                 referencedColumnNames.AddRange(refCols);
             }
@@ -363,9 +363,9 @@ public sealed class ExecutionPlanBuilder
         }
 
         // Extract JOINs from the UPDATE's FROM clause
-        var fromClause = ScriptDomAdapter.GetUpdateFromClause(update);
+        var fromClause = update.UpdateSpecification.FromClause;
         var joins = fromClause != null
-            ? ScriptDomAdapter.ConvertJoins(fromClause)
+            ? ConvertJoins(fromClause)
             : new List<SqlJoin>();
 
         var selectStatement = new SqlSelectStatement(
@@ -400,17 +400,17 @@ public sealed class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
-        var targetTable = ScriptDomAdapter.GetDeleteTargetTable(delete);
+        var targetTable = GetDeleteTargetTable(delete);
         var entityName = targetTable.TableName;
-        var where = ScriptDomAdapter.GetDeleteWhere(delete);
+        var where = GetDeleteWhere(delete);
 
         // Build a SELECT to find record IDs matching the WHERE clause.
         var idColumn = SqlColumnRef.Simple(entityName + "id");
 
         // Extract JOINs from the DELETE's FROM clause
-        var fromClause = ScriptDomAdapter.GetDeleteFromClause(delete);
-        var joins = fromClause != null
-            ? ScriptDomAdapter.ConvertJoins(fromClause)
+        var deleteFromClause = delete.DeleteSpecification.FromClause;
+        var joins = deleteFromClause != null
+            ? ConvertJoins(deleteFromClause)
             : new List<SqlJoin>();
 
         var selectStatement = new SqlSelectStatement(
@@ -501,7 +501,7 @@ public sealed class ExecutionPlanBuilder
     {
         if (queryExpr is QuerySpecification querySpec)
         {
-            var legacySelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+            var legacySelect = ConvertSelectStatement(querySpec);
             return PlanSelectFromLegacy(legacySelect, options);
         }
 
@@ -547,7 +547,7 @@ public sealed class ExecutionPlanBuilder
         // Flatten the union tree into a list of queries
         var querySpecs = new List<QuerySpecification>();
         var isUnionAll = new List<bool>();
-        ScriptDomAdapter.FlattenUnion(binaryQuery, querySpecs, isUnionAll);
+        FlattenUnion(binaryQuery, querySpecs, isUnionAll);
 
         // Validate column count consistency
         var firstColumnCount = GetColumnCount(querySpecs[0]);
@@ -569,7 +569,7 @@ public sealed class ExecutionPlanBuilder
 
         foreach (var querySpec in querySpecs)
         {
-            var legacySelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+            var legacySelect = ConvertSelectStatement(querySpec);
             var branchResult = PlanSelectFromLegacy(legacySelect, options);
             branchNodes.Add(branchResult.RootNode);
             allFetchXml.Add(branchResult.FetchXml);
@@ -1192,7 +1192,7 @@ public sealed class ExecutionPlanBuilder
             && derivedTable.QueryExpression is QuerySpecification querySpec)
         {
             // USING (SELECT ...) AS alias
-            var legacySelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+            var legacySelect = ConvertSelectStatement(querySpec);
             var sourceResult = PlanSelectFromLegacy(legacySelect, options);
             sourceNode = sourceResult.RootNode;
         }
@@ -1224,7 +1224,7 @@ public sealed class ExecutionPlanBuilder
                                 ? assignment.Column.MultiPartIdentifier.Identifiers[
                                     assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
                                 : "unknown";
-                            var value = ScriptDomAdapter.ConvertExpression(assignment.NewValue);
+                            var value = ConvertExpression(assignment.NewValue);
                             setClauses.Add(new SqlSetClause(colName, value));
                         }
                     }
@@ -1255,7 +1255,7 @@ public sealed class ExecutionPlanBuilder
                     {
                         foreach (var val in valSource.RowValues[0].ColumnValues)
                         {
-                            values.Add(ScriptDomAdapter.ConvertExpression(val));
+                            values.Add(ConvertExpression(val));
                         }
                     }
 
@@ -1440,7 +1440,7 @@ public sealed class ExecutionPlanBuilder
     private static SqlSelectStatement ConvertToLegacySelect(
         SelectStatement selectStmt, QuerySpecification querySpec)
     {
-        var baseSelect = ScriptDomAdapter.ConvertSelectStatement(querySpec);
+        var baseSelect = ConvertSelectStatement(querySpec);
 
         // Apply ORDER BY from the SelectStatement level (ScriptDom sometimes has it here)
         var orderBy = new List<SqlOrderByItem>();
@@ -1453,7 +1453,7 @@ public sealed class ExecutionPlanBuilder
                     var direction = orderElem.SortOrder == SortOrder.Descending
                         ? SqlSortDirection.Descending
                         : SqlSortDirection.Ascending;
-                    orderBy.Add(new SqlOrderByItem(ScriptDomAdapter.ConvertColumnRef(orderCol), direction));
+                    orderBy.Add(new SqlOrderByItem(ConvertColumnRef(orderCol), direction));
                 }
             }
         }
@@ -1994,6 +1994,996 @@ public sealed class ExecutionPlanBuilder
             SqlExpressionCondition expr => $"expr {expr.Operator} expr",
             SqlLogicalCondition logical => $"({logical.Operator} with {logical.Conditions.Count} conditions)",
             _ => condition.GetType().Name
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ScriptDom → Legacy AST bridge methods
+    //  (formerly in ScriptDomAdapter; kept as private methods until
+    //  legacy AST types are fully removed)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ── DML property extraction ──────────────────────────────────────
+
+    private static string GetInsertTargetEntity(InsertStatement insert)
+    {
+        if (insert.InsertSpecification.Target is NamedTableReference named)
+        {
+            return GetMultiPartName(named.SchemaObject);
+        }
+        throw new QueryParseException("INSERT target must be a named table.");
+    }
+
+    private static List<string> GetInsertColumns(InsertStatement insert)
+    {
+        var columns = new List<string>();
+        if (insert.InsertSpecification.Columns != null)
+        {
+            foreach (var col in insert.InsertSpecification.Columns)
+            {
+                columns.Add(GetScriptDomColumnName(col));
+            }
+        }
+        return columns;
+    }
+
+    private static QuerySpecification? GetInsertSelectSource(InsertStatement insert)
+    {
+        if (insert.InsertSpecification.InsertSource is SelectInsertSource selectSource
+            && selectSource.Select is QuerySpecification querySpec)
+        {
+            return querySpec;
+        }
+        return null;
+    }
+
+    private static SqlTableRef GetUpdateTargetTable(UpdateStatement update)
+    {
+        if (update.UpdateSpecification.Target is NamedTableReference named)
+        {
+            return ConvertNamedTable(named);
+        }
+        throw new QueryParseException("UPDATE target must be a named table.");
+    }
+
+    private static ISqlCondition? GetUpdateWhere(UpdateStatement update)
+    {
+        return update.UpdateSpecification.WhereClause?.SearchCondition != null
+            ? ConvertBooleanExpression(update.UpdateSpecification.WhereClause.SearchCondition)
+            : null;
+    }
+
+    private static SqlTableRef GetDeleteTargetTable(DeleteStatement delete)
+    {
+        if (delete.DeleteSpecification.Target is NamedTableReference named)
+        {
+            return ConvertNamedTable(named);
+        }
+        throw new QueryParseException("DELETE target must be a named table.");
+    }
+
+    private static ISqlCondition? GetDeleteWhere(DeleteStatement delete)
+    {
+        return delete.DeleteSpecification.WhereClause?.SearchCondition != null
+            ? ConvertBooleanExpression(delete.DeleteSpecification.WhereClause.SearchCondition)
+            : null;
+    }
+
+    // ── Expression conversion ────────────────────────────────────────
+
+    private static ISqlExpression ConvertExpression(ScalarExpression expr)
+    {
+        if (expr is null)
+            throw new ArgumentNullException(nameof(expr));
+
+        return expr switch
+        {
+            IntegerLiteral intLit =>
+                new SqlLiteralExpression(SqlLiteral.Number(intLit.Value)),
+
+            NumericLiteral numLit =>
+                new SqlLiteralExpression(SqlLiteral.Number(numLit.Value)),
+
+            RealLiteral realLit =>
+                new SqlLiteralExpression(SqlLiteral.Number(realLit.Value)),
+
+            MoneyLiteral moneyLit =>
+                new SqlLiteralExpression(SqlLiteral.Number(moneyLit.Value)),
+
+            StringLiteral strLit =>
+                new SqlLiteralExpression(SqlLiteral.String(strLit.Value)),
+
+            NullLiteral =>
+                new SqlLiteralExpression(SqlLiteral.Null()),
+
+            ColumnReferenceExpression colRef =>
+                new SqlColumnExpression(ConvertColumnRef(colRef)),
+
+            BinaryExpression binExpr =>
+                new SqlBinaryExpression(
+                    ConvertExpression(binExpr.FirstExpression),
+                    ConvertBinaryOperator(binExpr.BinaryExpressionType),
+                    ConvertExpression(binExpr.SecondExpression)),
+
+            UnaryExpression unaryExpr =>
+                new SqlUnaryExpression(
+                    ConvertUnaryOperator(unaryExpr.UnaryExpressionType),
+                    ConvertExpression(unaryExpr.Expression)),
+
+            ParenthesisExpression parenExpr =>
+                ConvertExpression(parenExpr.Expression),
+
+            FunctionCall funcCall =>
+                ConvertFunctionCall(funcCall),
+
+            SearchedCaseExpression caseExpr =>
+                ConvertSearchedCase(caseExpr),
+
+            IIfCall iifCall =>
+                new SqlIifExpression(
+                    ConvertBooleanExpression(iifCall.Predicate),
+                    ConvertExpression(iifCall.ThenExpression),
+                    ConvertExpression(iifCall.ElseExpression)),
+
+            CastCall castCall =>
+                new SqlCastExpression(
+                    ConvertExpression(castCall.Parameter),
+                    FormatDataType(castCall.DataType)),
+
+            ConvertCall convertCall =>
+                ConvertConvertCall(convertCall),
+
+            VariableReference varRef =>
+                new SqlVariableExpression(varRef.Name.StartsWith("@") ? varRef.Name : "@" + varRef.Name),
+
+            GlobalVariableExpression globalVar =>
+                new SqlVariableExpression(globalVar.Name),
+
+            ScalarSubquery subquery =>
+                ConvertScalarSubquery(subquery),
+
+            _ => throw new QueryParseException(
+                $"Unsupported ScriptDom expression type: {expr.GetType().Name}")
+        };
+    }
+
+    private static ISqlExpression ConvertFunctionCall(FunctionCall funcCall)
+    {
+        if (funcCall.OverClause != null)
+        {
+            return ConvertWindowFunction(funcCall);
+        }
+
+        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
+        if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "STDEV" or "STDEVP" or "VAR" or "VARP")
+        {
+            return ConvertAggregateExpression(funcCall);
+        }
+
+        var args = new List<ISqlExpression>();
+        if (funcCall.Parameters != null)
+        {
+            foreach (var param in funcCall.Parameters)
+            {
+                args.Add(ConvertExpression(param));
+            }
+        }
+
+        return new SqlFunctionExpression(funcCall.FunctionName.Value, args);
+    }
+
+    private static SqlAggregateExpression ConvertAggregateExpression(FunctionCall funcCall)
+    {
+        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
+        var aggFunc = funcName switch
+        {
+            "COUNT" => SqlAggregateFunction.Count,
+            "SUM" => SqlAggregateFunction.Sum,
+            "AVG" => SqlAggregateFunction.Avg,
+            "MIN" => SqlAggregateFunction.Min,
+            "MAX" => SqlAggregateFunction.Max,
+            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
+            "VAR" or "VARP" => SqlAggregateFunction.Var,
+            _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
+        };
+
+        var isDistinct = funcCall.UniqueRowFilter == UniqueRowFilter.Distinct;
+        ISqlExpression? operand = null;
+
+        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
+        {
+            var firstParam = funcCall.Parameters[0];
+            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
+            {
+                operand = null; // COUNT(*)
+            }
+            else
+            {
+                operand = ConvertExpression(firstParam);
+            }
+        }
+
+        return new SqlAggregateExpression(aggFunc, operand, isDistinct);
+    }
+
+    private static SqlWindowExpression ConvertWindowFunction(FunctionCall funcCall)
+    {
+        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
+        ISqlExpression? operand = null;
+        var isCountStar = false;
+
+        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
+        {
+            var firstParam = funcCall.Parameters[0];
+            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
+            {
+                isCountStar = true;
+            }
+            else
+            {
+                operand = ConvertExpression(firstParam);
+            }
+        }
+
+        List<ISqlExpression>? partitionBy = null;
+        if (funcCall.OverClause.Partitions != null && funcCall.OverClause.Partitions.Count > 0)
+        {
+            partitionBy = new List<ISqlExpression>();
+            foreach (var partition in funcCall.OverClause.Partitions)
+            {
+                partitionBy.Add(ConvertExpression(partition));
+            }
+        }
+
+        List<SqlOrderByItem>? orderByItems = null;
+        if (funcCall.OverClause.OrderByClause?.OrderByElements != null)
+        {
+            orderByItems = new List<SqlOrderByItem>();
+            foreach (var orderElem in funcCall.OverClause.OrderByClause.OrderByElements)
+            {
+                if (orderElem.Expression is ColumnReferenceExpression orderCol)
+                {
+                    var direction = orderElem.SortOrder == SortOrder.Descending
+                        ? SqlSortDirection.Descending
+                        : SqlSortDirection.Ascending;
+                    orderByItems.Add(new SqlOrderByItem(ConvertColumnRef(orderCol), direction));
+                }
+            }
+        }
+
+        return new SqlWindowExpression(funcName, operand, partitionBy, orderByItems, isCountStar);
+    }
+
+    private static SqlCaseExpression ConvertSearchedCase(SearchedCaseExpression caseExpr)
+    {
+        var whenClauses = new List<SqlWhenClause>();
+        foreach (var when in caseExpr.WhenClauses)
+        {
+            if (when is SearchedWhenClause searched)
+            {
+                whenClauses.Add(new SqlWhenClause(
+                    ConvertBooleanExpression(searched.WhenExpression),
+                    ConvertExpression(searched.ThenExpression)));
+            }
+        }
+
+        ISqlExpression? elseExpr = null;
+        if (caseExpr.ElseExpression != null)
+        {
+            elseExpr = ConvertExpression(caseExpr.ElseExpression);
+        }
+
+        return new SqlCaseExpression(whenClauses, elseExpr);
+    }
+
+    private static SqlCastExpression ConvertConvertCall(ConvertCall convertCall)
+    {
+        int? style = null;
+        if (convertCall.Style != null)
+        {
+            if (convertCall.Style is IntegerLiteral intStyle &&
+                int.TryParse(intStyle.Value, out var styleVal))
+            {
+                style = styleVal;
+            }
+        }
+
+        return new SqlCastExpression(
+            ConvertExpression(convertCall.Parameter),
+            FormatDataType(convertCall.DataType),
+            style);
+    }
+
+    private static SqlSubqueryExpression ConvertScalarSubquery(ScalarSubquery subquery)
+    {
+        if (subquery.QueryExpression is QuerySpecification querySpec)
+        {
+            return new SqlSubqueryExpression(ConvertSelectStatement(querySpec));
+        }
+        throw new QueryParseException("Unsupported scalar subquery type.");
+    }
+
+    // ── Boolean expression conversion ────────────────────────────────
+
+    private static ISqlCondition ConvertBooleanExpression(BooleanExpression boolExpr)
+    {
+        if (boolExpr is null)
+            throw new ArgumentNullException(nameof(boolExpr));
+
+        return boolExpr switch
+        {
+            BooleanComparisonExpression compExpr =>
+                ConvertComparison(compExpr),
+
+            BooleanBinaryExpression binBool =>
+                ConvertLogicalCondition(binBool),
+
+            BooleanParenthesisExpression parenBool =>
+                ConvertBooleanExpression(parenBool.Expression),
+
+            BooleanNotExpression notExpr =>
+                ConvertNotExpression(notExpr),
+
+            BooleanIsNullExpression isNullExpr =>
+                ConvertIsNullExpression(isNullExpr),
+
+            LikePredicate likePred =>
+                ConvertLikePredicate(likePred),
+
+            InPredicate inPred =>
+                ConvertInPredicate(inPred),
+
+            ExistsPredicate existsPred =>
+                ConvertExistsPredicate(existsPred),
+
+            BooleanTernaryExpression ternary =>
+                ConvertBetweenExpression(ternary),
+
+            _ => throw new QueryParseException(
+                $"Unsupported ScriptDom boolean expression type: {boolExpr.GetType().Name}")
+        };
+    }
+
+    private static ISqlCondition ConvertComparison(BooleanComparisonExpression compExpr)
+    {
+        var op = ConvertComparisonOperator(compExpr.ComparisonType);
+
+        if (compExpr.FirstExpression is ColumnReferenceExpression leftCol
+            && IsLiteralExpression(compExpr.SecondExpression))
+        {
+            return new SqlComparisonCondition(
+                ConvertColumnRef(leftCol),
+                op,
+                ExtractLiteral(compExpr.SecondExpression));
+        }
+
+        if (IsLiteralExpression(compExpr.FirstExpression)
+            && compExpr.SecondExpression is ColumnReferenceExpression rightCol)
+        {
+            return new SqlComparisonCondition(
+                ConvertColumnRef(rightCol),
+                ReverseOperator(op),
+                ExtractLiteral(compExpr.FirstExpression));
+        }
+
+        return new SqlExpressionCondition(
+            ConvertExpression(compExpr.FirstExpression),
+            op,
+            ConvertExpression(compExpr.SecondExpression));
+    }
+
+    private static SqlLogicalCondition ConvertLogicalCondition(BooleanBinaryExpression binBool)
+    {
+        var op = binBool.BinaryExpressionType == BooleanBinaryExpressionType.And
+            ? SqlLogicalOperator.And
+            : SqlLogicalOperator.Or;
+
+        var conditions = new List<ISqlCondition>();
+        FlattenLogical(binBool, op, conditions);
+
+        return new SqlLogicalCondition(op, conditions);
+    }
+
+    private static void FlattenLogical(
+        BooleanExpression expr, SqlLogicalOperator targetOp, List<ISqlCondition> conditions)
+    {
+        if (expr is BooleanBinaryExpression binBool)
+        {
+            var exprOp = binBool.BinaryExpressionType == BooleanBinaryExpressionType.And
+                ? SqlLogicalOperator.And
+                : SqlLogicalOperator.Or;
+
+            if (exprOp == targetOp)
+            {
+                FlattenLogical(binBool.FirstExpression, targetOp, conditions);
+                FlattenLogical(binBool.SecondExpression, targetOp, conditions);
+                return;
+            }
+        }
+
+        conditions.Add(ConvertBooleanExpression(expr));
+    }
+
+    private static ISqlCondition ConvertNotExpression(BooleanNotExpression notExpr)
+    {
+        var inner = notExpr.Expression;
+
+        if (inner is BooleanIsNullExpression isNull)
+        {
+            return new SqlNullCondition(
+                ConvertColumnRef((ColumnReferenceExpression)isNull.Expression),
+                isNegated: true);
+        }
+
+        if (inner is LikePredicate like)
+        {
+            return ConvertLikePredicate(like, forceNegate: true);
+        }
+
+        if (inner is InPredicate inPred)
+        {
+            return ConvertInPredicate(inPred, forceNegate: true);
+        }
+
+        if (inner is ExistsPredicate existsPred)
+        {
+            return ConvertExistsPredicate(existsPred, forceNegate: true);
+        }
+
+        var innerCondition = ConvertBooleanExpression(inner);
+        return innerCondition;
+    }
+
+    private static SqlNullCondition ConvertIsNullExpression(BooleanIsNullExpression isNullExpr)
+    {
+        if (isNullExpr.Expression is ColumnReferenceExpression colRef)
+        {
+            return new SqlNullCondition(ConvertColumnRef(colRef), isNullExpr.IsNot);
+        }
+
+        throw new QueryParseException(
+            "IS NULL on complex expressions is not yet supported. Use a column reference.");
+    }
+
+    private static SqlLikeCondition ConvertLikePredicate(LikePredicate likePred, bool forceNegate = false)
+    {
+        if (likePred.FirstExpression is not ColumnReferenceExpression colRef)
+        {
+            throw new QueryParseException(
+                "LIKE predicate must have a column reference on the left side.");
+        }
+
+        var pattern = ExtractStringValue(likePred.SecondExpression);
+        var isNegated = likePred.NotDefined || forceNegate;
+
+        return new SqlLikeCondition(ConvertColumnRef(colRef), pattern, isNegated);
+    }
+
+    private static ISqlCondition ConvertInPredicate(InPredicate inPred, bool forceNegate = false)
+    {
+        if (inPred.Expression is not ColumnReferenceExpression colRef)
+        {
+            throw new QueryParseException(
+                "IN predicate must have a column reference on the left side.");
+        }
+
+        var isNegated = inPred.NotDefined || forceNegate;
+
+        if (inPred.Subquery != null)
+        {
+            if (inPred.Subquery.QueryExpression is QuerySpecification querySpec)
+            {
+                var subSelect = ConvertSelectStatement(querySpec);
+                return new SqlInSubqueryCondition(
+                    ConvertColumnRef(colRef), subSelect, isNegated);
+            }
+            throw new QueryParseException("Unsupported IN subquery type.");
+        }
+
+        var values = new List<SqlLiteral>();
+        foreach (var val in inPred.Values)
+        {
+            values.Add(ExtractLiteral(val));
+        }
+
+        return new SqlInCondition(ConvertColumnRef(colRef), values, isNegated);
+    }
+
+    private static SqlExistsCondition ConvertExistsPredicate(
+        ExistsPredicate existsPred, bool forceNegate = false)
+    {
+        if (existsPred.Subquery?.QueryExpression is QuerySpecification querySpec)
+        {
+            var subSelect = ConvertSelectStatement(querySpec);
+            return new SqlExistsCondition(subSelect, forceNegate);
+        }
+
+        throw new QueryParseException("EXISTS predicate must contain a SELECT subquery.");
+    }
+
+    private static ISqlCondition ConvertBetweenExpression(BooleanTernaryExpression ternary)
+    {
+        if (ternary.TernaryExpressionType == BooleanTernaryExpressionType.Between)
+        {
+            var col = ConvertExpression(ternary.FirstExpression);
+            var low = ConvertExpression(ternary.SecondExpression);
+            var high = ConvertExpression(ternary.ThirdExpression);
+
+            var geCond = new SqlExpressionCondition(col, SqlComparisonOperator.GreaterThanOrEqual, low);
+            var leCond = new SqlExpressionCondition(col, SqlComparisonOperator.LessThanOrEqual, high);
+
+            return SqlLogicalCondition.And(geCond, leCond);
+        }
+
+        if (ternary.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween)
+        {
+            var col = ConvertExpression(ternary.FirstExpression);
+            var low = ConvertExpression(ternary.SecondExpression);
+            var high = ConvertExpression(ternary.ThirdExpression);
+
+            var ltCond = new SqlExpressionCondition(col, SqlComparisonOperator.LessThan, low);
+            var gtCond = new SqlExpressionCondition(col, SqlComparisonOperator.GreaterThan, high);
+
+            return SqlLogicalCondition.Or(ltCond, gtCond);
+        }
+
+        throw new QueryParseException(
+            $"Unsupported ternary expression type: {ternary.TernaryExpressionType}");
+    }
+
+    // ── SELECT element conversion ────────────────────────────────────
+
+    private static ISqlSelectColumn ConvertSelectElement(SelectElement element)
+    {
+        return element switch
+        {
+            SelectStarExpression star =>
+                ConvertSelectStar(star),
+
+            SelectScalarExpression scalar =>
+                ConvertSelectScalar(scalar),
+
+            _ => throw new QueryParseException(
+                $"Unsupported SELECT element type: {element.GetType().Name}")
+        };
+    }
+
+    private static SqlColumnRef ConvertSelectStar(SelectStarExpression star)
+    {
+        string? tableName = null;
+        if (star.Qualifier != null && star.Qualifier.Identifiers.Count > 0)
+        {
+            tableName = star.Qualifier.Identifiers[star.Qualifier.Identifiers.Count - 1].Value;
+        }
+        return SqlColumnRef.Wildcard(tableName);
+    }
+
+    private static ISqlSelectColumn ConvertSelectScalar(SelectScalarExpression scalar)
+    {
+        var alias = scalar.ColumnName?.Value;
+
+        if (scalar.Expression is ColumnReferenceExpression colRef
+            && colRef.ColumnType != ColumnType.Wildcard)
+        {
+            var converted = ConvertColumnRef(colRef);
+            return new SqlColumnRef(converted.TableName, converted.ColumnName, alias, false);
+        }
+
+        if (scalar.Expression is FunctionCall funcCall && funcCall.OverClause == null)
+        {
+            var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
+            if (funcName is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
+            {
+                return ConvertAggregateColumn(funcCall, alias);
+            }
+        }
+
+        var expression = ConvertExpression(scalar.Expression);
+        return new SqlComputedColumn(expression, alias);
+    }
+
+    private static SqlAggregateColumn ConvertAggregateColumn(FunctionCall funcCall, string? alias)
+    {
+        var funcName = funcCall.FunctionName.Value.ToUpperInvariant();
+        var aggFunc = funcName switch
+        {
+            "COUNT" => SqlAggregateFunction.Count,
+            "SUM" => SqlAggregateFunction.Sum,
+            "AVG" => SqlAggregateFunction.Avg,
+            "MIN" => SqlAggregateFunction.Min,
+            "MAX" => SqlAggregateFunction.Max,
+            "STDEV" or "STDEVP" => SqlAggregateFunction.Stdev,
+            "VAR" or "VARP" => SqlAggregateFunction.Var,
+            _ => throw new QueryParseException($"Unknown aggregate function: {funcName}")
+        };
+
+        var isDistinct = funcCall.UniqueRowFilter == UniqueRowFilter.Distinct;
+        SqlColumnRef? column = null;
+
+        if (funcCall.Parameters != null && funcCall.Parameters.Count > 0)
+        {
+            var firstParam = funcCall.Parameters[0];
+            if (firstParam is ColumnReferenceExpression { ColumnType: ColumnType.Wildcard })
+            {
+                column = null; // COUNT(*)
+            }
+            else if (firstParam is ColumnReferenceExpression paramCol)
+            {
+                column = ConvertColumnRef(paramCol);
+            }
+            else
+            {
+                column = null;
+            }
+        }
+
+        return new SqlAggregateColumn(aggFunc, column, isDistinct, alias);
+    }
+
+    // ── Statement conversion ─────────────────────────────────────────
+
+    private static SqlSelectStatement ConvertSelectStatement(QuerySpecification querySpec)
+    {
+        var columns = new List<ISqlSelectColumn>();
+        foreach (var elem in querySpec.SelectElements)
+        {
+            columns.Add(ConvertSelectElement(elem));
+        }
+
+        var from = ConvertFromClause(querySpec.FromClause);
+        var joins = ConvertJoins(querySpec.FromClause);
+
+        ISqlCondition? where = null;
+        if (querySpec.WhereClause?.SearchCondition != null)
+        {
+            where = ConvertBooleanExpression(querySpec.WhereClause.SearchCondition);
+        }
+
+        var selectOrderBy = new List<SqlOrderByItem>();
+
+        int? top = null;
+        if (querySpec.TopRowFilter != null && querySpec.TopRowFilter.Expression is IntegerLiteral topLit)
+        {
+            if (int.TryParse(topLit.Value, out var topVal))
+            {
+                top = topVal;
+            }
+        }
+
+        var distinct = querySpec.UniqueRowFilter == UniqueRowFilter.Distinct;
+
+        var groupBy = new List<SqlColumnRef>();
+        var groupByExpressions = new List<ISqlExpression>();
+        if (querySpec.GroupByClause?.GroupingSpecifications != null)
+        {
+            foreach (var groupSpec in querySpec.GroupByClause.GroupingSpecifications)
+            {
+                if (groupSpec is ExpressionGroupingSpecification exprGroup)
+                {
+                    if (exprGroup.Expression is ColumnReferenceExpression groupCol)
+                    {
+                        groupBy.Add(ConvertColumnRef(groupCol));
+                    }
+                    else
+                    {
+                        groupByExpressions.Add(ConvertExpression(exprGroup.Expression));
+                    }
+                }
+            }
+        }
+
+        ISqlCondition? having = null;
+        if (querySpec.HavingClause?.SearchCondition != null)
+        {
+            having = ConvertBooleanExpression(querySpec.HavingClause.SearchCondition);
+        }
+
+        return new SqlSelectStatement(
+            columns, from, joins, where, selectOrderBy, top, distinct, groupBy, having,
+            sourcePosition: 0, groupByExpressions: groupByExpressions);
+    }
+
+    // ── FROM / JOIN conversion ───────────────────────────────────────
+
+    private static SqlTableRef ConvertFromClause(FromClause? fromClause)
+    {
+        if (fromClause == null || fromClause.TableReferences.Count == 0)
+        {
+            throw new QueryParseException("FROM clause is required.");
+        }
+
+        return ExtractPrimaryTable(fromClause.TableReferences[0]);
+    }
+
+    private static SqlTableRef ExtractPrimaryTable(TableReference tableRef)
+    {
+        return tableRef switch
+        {
+            NamedTableReference named => ConvertNamedTable(named),
+            QualifiedJoin join => ExtractPrimaryTable(join.FirstTableReference),
+            _ => throw new QueryParseException(
+                $"Unsupported table reference type: {tableRef.GetType().Name}")
+        };
+    }
+
+    private static SqlTableRef ConvertNamedTable(NamedTableReference named)
+    {
+        var tableName = GetMultiPartName(named.SchemaObject);
+        var alias = named.Alias?.Value;
+        return new SqlTableRef(tableName, alias);
+    }
+
+    private static List<SqlJoin> ConvertJoins(FromClause? fromClause)
+    {
+        var joins = new List<SqlJoin>();
+        if (fromClause == null) return joins;
+
+        foreach (var tableRef in fromClause.TableReferences)
+        {
+            CollectJoins(tableRef, joins);
+        }
+
+        return joins;
+    }
+
+    private static void CollectJoins(TableReference tableRef, List<SqlJoin> joins)
+    {
+        if (tableRef is QualifiedJoin qualifiedJoin)
+        {
+            CollectJoins(qualifiedJoin.FirstTableReference, joins);
+
+            var joinType = qualifiedJoin.QualifiedJoinType switch
+            {
+                QualifiedJoinType.Inner => SqlJoinType.Inner,
+                QualifiedJoinType.LeftOuter => SqlJoinType.Left,
+                QualifiedJoinType.RightOuter => SqlJoinType.Right,
+                QualifiedJoinType.FullOuter => SqlJoinType.Left,
+                _ => SqlJoinType.Inner
+            };
+
+            SqlTableRef joinedTable;
+            if (qualifiedJoin.SecondTableReference is NamedTableReference joinNamed)
+            {
+                joinedTable = ConvertNamedTable(joinNamed);
+            }
+            else
+            {
+                CollectJoins(qualifiedJoin.SecondTableReference, joins);
+                return;
+            }
+
+            if (qualifiedJoin.SearchCondition is BooleanComparisonExpression onCondition
+                && onCondition.FirstExpression is ColumnReferenceExpression leftOnCol
+                && onCondition.SecondExpression is ColumnReferenceExpression rightOnCol)
+            {
+                joins.Add(new SqlJoin(
+                    joinType,
+                    joinedTable,
+                    ConvertColumnRef(leftOnCol),
+                    ConvertColumnRef(rightOnCol)));
+            }
+            else
+            {
+                var colRefs = new List<ColumnReferenceExpression>();
+                ExtractColumnRefsFromBoolExpr(qualifiedJoin.SearchCondition, colRefs);
+
+                if (colRefs.Count >= 2)
+                {
+                    joins.Add(new SqlJoin(
+                        joinType,
+                        joinedTable,
+                        ConvertColumnRef(colRefs[0]),
+                        ConvertColumnRef(colRefs[1])));
+                }
+                else
+                {
+                    throw new QueryParseException(
+                        "JOIN ON clause must reference at least two columns.");
+                }
+            }
+        }
+    }
+
+    private static void ExtractColumnRefsFromBoolExpr(
+        BooleanExpression boolExpr, List<ColumnReferenceExpression> refs)
+    {
+        switch (boolExpr)
+        {
+            case BooleanComparisonExpression comp:
+                if (comp.FirstExpression is ColumnReferenceExpression left) refs.Add(left);
+                if (comp.SecondExpression is ColumnReferenceExpression right) refs.Add(right);
+                break;
+            case BooleanBinaryExpression bin:
+                ExtractColumnRefsFromBoolExpr(bin.FirstExpression, refs);
+                ExtractColumnRefsFromBoolExpr(bin.SecondExpression, refs);
+                break;
+            case BooleanParenthesisExpression paren:
+                ExtractColumnRefsFromBoolExpr(paren.Expression, refs);
+                break;
+        }
+    }
+
+    // ── Column reference conversion ──────────────────────────────────
+
+    private static SqlColumnRef ConvertColumnRef(ColumnReferenceExpression colRef)
+    {
+        if (colRef.ColumnType == ColumnType.Wildcard)
+        {
+            return SqlColumnRef.Wildcard();
+        }
+
+        var identifiers = colRef.MultiPartIdentifier?.Identifiers;
+        if (identifiers == null || identifiers.Count == 0)
+        {
+            return SqlColumnRef.Simple("*");
+        }
+
+        if (identifiers.Count == 1)
+        {
+            return SqlColumnRef.Simple(identifiers[0].Value);
+        }
+
+        var tableName = identifiers[identifiers.Count - 2].Value;
+        var columnName = identifiers[identifiers.Count - 1].Value;
+        return SqlColumnRef.Qualified(tableName, columnName);
+    }
+
+    private static string GetScriptDomColumnName(ColumnReferenceExpression colRef)
+    {
+        var ids = colRef.MultiPartIdentifier?.Identifiers;
+        if (ids == null || ids.Count == 0)
+            return "*";
+        return ids[ids.Count - 1].Value;
+    }
+
+    // ── UNION flattening ─────────────────────────────────────────────
+
+    private static void FlattenUnion(
+        BinaryQueryExpression binaryQuery,
+        List<QuerySpecification> queries,
+        List<bool> isUnionAll)
+    {
+        if (binaryQuery.FirstQueryExpression is BinaryQueryExpression leftBinary)
+        {
+            FlattenUnion(leftBinary, queries, isUnionAll);
+        }
+        else if (binaryQuery.FirstQueryExpression is QuerySpecification leftSpec)
+        {
+            queries.Add(leftSpec);
+        }
+
+        isUnionAll.Add(binaryQuery.All);
+
+        if (binaryQuery.SecondQueryExpression is BinaryQueryExpression rightBinary)
+        {
+            FlattenUnion(rightBinary, queries, isUnionAll);
+        }
+        else if (binaryQuery.SecondQueryExpression is QuerySpecification rightSpec)
+        {
+            queries.Add(rightSpec);
+        }
+    }
+
+    // ── Literal & type utilities ─────────────────────────────────────
+
+    private static bool IsLiteralExpression(ScalarExpression expr)
+    {
+        return expr is IntegerLiteral or NumericLiteral or RealLiteral or MoneyLiteral
+            or StringLiteral or NullLiteral;
+    }
+
+    private static SqlLiteral ExtractLiteral(ScalarExpression expr)
+    {
+        return expr switch
+        {
+            IntegerLiteral intLit => SqlLiteral.Number(intLit.Value),
+            NumericLiteral numLit => SqlLiteral.Number(numLit.Value),
+            RealLiteral realLit => SqlLiteral.Number(realLit.Value),
+            MoneyLiteral moneyLit => SqlLiteral.Number(moneyLit.Value),
+            StringLiteral strLit => SqlLiteral.String(strLit.Value),
+            NullLiteral => SqlLiteral.Null(),
+            _ => SqlLiteral.String(expr.ToString() ?? "")
+        };
+    }
+
+    private static string ExtractStringValue(ScalarExpression expr)
+    {
+        return expr switch
+        {
+            StringLiteral strLit => strLit.Value,
+            IntegerLiteral intLit => intLit.Value,
+            _ => expr.ToString() ?? ""
+        };
+    }
+
+    private static string FormatDataType(DataTypeReference dataType)
+    {
+        if (dataType is SqlDataTypeReference sqlType)
+        {
+            var name = sqlType.SqlDataTypeOption.ToString().ToLowerInvariant();
+            if (sqlType.Parameters.Count > 0)
+            {
+                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
+                return $"{name}({parms})";
+            }
+            return name;
+        }
+
+        if (dataType is XmlDataTypeReference)
+            return "xml";
+
+        if (dataType.Name?.Identifiers != null && dataType.Name.Identifiers.Count > 0)
+        {
+            return string.Join(".", dataType.Name.Identifiers.Select(i => i.Value));
+        }
+
+        return "varchar";
+    }
+
+    private static string GetMultiPartName(SchemaObjectName schemaObject)
+    {
+        var parts = new List<string>();
+        if (schemaObject.SchemaIdentifier != null)
+        {
+            parts.Add(schemaObject.SchemaIdentifier.Value);
+        }
+        if (schemaObject.BaseIdentifier != null)
+        {
+            parts.Add(schemaObject.BaseIdentifier.Value);
+        }
+
+        return parts.Count > 0 ? string.Join(".", parts) : "unknown";
+    }
+
+    // ── Operator conversion ──────────────────────────────────────────
+
+    private static SqlComparisonOperator ConvertComparisonOperator(BooleanComparisonType type)
+    {
+        return type switch
+        {
+            BooleanComparisonType.Equals => SqlComparisonOperator.Equal,
+            BooleanComparisonType.NotEqualToBrackets => SqlComparisonOperator.NotEqual,
+            BooleanComparisonType.NotEqualToExclamation => SqlComparisonOperator.NotEqual,
+            BooleanComparisonType.LessThan => SqlComparisonOperator.LessThan,
+            BooleanComparisonType.GreaterThan => SqlComparisonOperator.GreaterThan,
+            BooleanComparisonType.LessThanOrEqualTo => SqlComparisonOperator.LessThanOrEqual,
+            BooleanComparisonType.GreaterThanOrEqualTo => SqlComparisonOperator.GreaterThanOrEqual,
+            _ => SqlComparisonOperator.Equal
+        };
+    }
+
+    private static SqlComparisonOperator ReverseOperator(SqlComparisonOperator op)
+    {
+        return op switch
+        {
+            SqlComparisonOperator.LessThan => SqlComparisonOperator.GreaterThan,
+            SqlComparisonOperator.GreaterThan => SqlComparisonOperator.LessThan,
+            SqlComparisonOperator.LessThanOrEqual => SqlComparisonOperator.GreaterThanOrEqual,
+            SqlComparisonOperator.GreaterThanOrEqual => SqlComparisonOperator.LessThanOrEqual,
+            _ => op
+        };
+    }
+
+    private static SqlBinaryOperator ConvertBinaryOperator(BinaryExpressionType type)
+    {
+        return type switch
+        {
+            BinaryExpressionType.Add => SqlBinaryOperator.Add,
+            BinaryExpressionType.Subtract => SqlBinaryOperator.Subtract,
+            BinaryExpressionType.Multiply => SqlBinaryOperator.Multiply,
+            BinaryExpressionType.Divide => SqlBinaryOperator.Divide,
+            BinaryExpressionType.Modulo => SqlBinaryOperator.Modulo,
+            _ => SqlBinaryOperator.Add
+        };
+    }
+
+    private static SqlUnaryOperator ConvertUnaryOperator(UnaryExpressionType type)
+    {
+        return type switch
+        {
+            UnaryExpressionType.Negative => SqlUnaryOperator.Negate,
+            UnaryExpressionType.Positive => SqlUnaryOperator.Negate,
+            _ => SqlUnaryOperator.Negate
         };
     }
 }
