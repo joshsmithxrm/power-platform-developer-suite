@@ -1,16 +1,9 @@
-using System.Collections.Generic;
-using PPDS.Dataverse.Query;
+// Delegate types CompiledScalarExpression and CompiledPredicate have been moved to
+// PPDS.Dataverse.Query.Execution namespace (PPDS.Dataverse assembly) so they can be used by
+// plan node classes without circular project dependencies.
+//
+// For convenience, re-export them into this namespace via global using aliases
+// so existing code referencing PPDS.Query.Execution.CompiledScalarExpression still compiles.
 
-namespace PPDS.Query.Execution;
-
-/// <summary>
-/// Compiled scalar expression: evaluates against a row and returns a value.
-/// Produced by <see cref="ExpressionCompiler.CompileScalar"/> from ScriptDom AST nodes.
-/// </summary>
-public delegate object? CompiledScalarExpression(IReadOnlyDictionary<string, QueryValue> row);
-
-/// <summary>
-/// Compiled predicate: evaluates against a row and returns true/false.
-/// Produced by <see cref="ExpressionCompiler.CompilePredicate"/> from ScriptDom AST nodes.
-/// </summary>
-public delegate bool CompiledPredicate(IReadOnlyDictionary<string, QueryValue> row);
+global using CompiledScalarExpression = PPDS.Dataverse.Query.Execution.CompiledScalarExpression;
+global using CompiledPredicate = PPDS.Dataverse.Query.Execution.CompiledPredicate;
