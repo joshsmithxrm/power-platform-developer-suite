@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
@@ -6,9 +7,11 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
 using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
+using PPDS.Query.Planning;
+using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -23,7 +26,7 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly int _poolCapacity;
-    private readonly QueryPlanner _planner;
+    private readonly QueryParser _queryParser = new();
     private readonly PlanExecutor _planExecutor;
     private readonly DmlSafetyGuard _dmlSafetyGuard = new();
 
@@ -47,7 +50,6 @@ public sealed class SqlQueryService : ISqlQueryService
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
         _poolCapacity = poolCapacity;
-        _planner = new QueryPlanner();
         _planExecutor = new PlanExecutor();
     }
 
@@ -56,16 +58,26 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var parser = new SqlParser(sql);
-        var ast = parser.Parse();
+        var script = _queryParser.ParseScript(sql);
+        var statement = QueryParser.GetFirstStatement(script)
+            ?? throw new SqlParseException("No SQL statements found.");
 
-        if (topOverride.HasValue)
+        if (statement is not SelectStatement select)
+            throw new SqlParseException("TranspileSql only supports SELECT statements.");
+
+        // TopOverride is handled by the caller through QueryPlanOptions.MaxRows.
+        // For transpile-only, apply it to the AST by setting TopRowFilter on the QuerySpecification.
+        if (topOverride.HasValue && select.QueryExpression is QuerySpecification querySpec)
         {
-            ast = ast.WithTop(topOverride.Value);
+            querySpec.TopRowFilter = new TopRowFilter
+            {
+                Expression = new IntegerLiteral { Value = topOverride.Value.ToString() }
+            };
         }
 
-        var transpiler = new SqlToFetchXmlTranspiler();
-        return transpiler.Transpile(ast);
+        var generator = new FetchXmlGenerator();
+        var result = generator.Generate(select);
+        return result.FetchXml;
     }
 
     /// <inheritdoc />
@@ -76,15 +88,13 @@ public sealed class SqlQueryService : ISqlQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
-        // Parse SQL into AST
-        var parser = new SqlParser(request.Sql);
-        var statement = parser.ParseStatement();
+        // Parse SQL into ScriptDom AST
+        var script = _queryParser.ParseScript(request.Sql);
+        var statement = QueryParser.GetFirstStatement(script)
+            ?? throw new SqlParseException("No SQL statements found.");
 
-        // Apply TopOverride if the statement is a SELECT
-        if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
-        {
-            statement = selectStmt.WithTop(request.TopOverride.Value);
-        }
+        // TopOverride is handled via QueryPlanOptions.MaxRows — no AST mutation needed.
+        // The ExecutionPlanBuilder already respects MaxRows.
 
         // DML safety check: validate DELETE/UPDATE/INSERT before execution.
         // When DmlSafety options are provided, the guard blocks unsafe operations
@@ -103,7 +113,7 @@ public sealed class SqlQueryService : ISqlQueryService
                     safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
             }
 
-            // Don't return yet for dry-run — we need to run the planner first
+            // Don't return yet for dry-run -- we need to run the planner first
             // so the user sees the execution plan. The dry-run check moves
             // to after planning.
 
@@ -122,7 +132,7 @@ public sealed class SqlQueryService : ISqlQueryService
         var (estimatedRecordCount, minDate, maxDate) =
             await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
 
-        // Build execution plan via QueryPlanner
+        // Build execution plan via ExecutionPlanBuilder
         var planOptions = new QueryPlanOptions
         {
             MaxRows = request.TopOverride,
@@ -140,7 +150,7 @@ public sealed class SqlQueryService : ISqlQueryService
             MaxDate = maxDate
         };
 
-        var planResult = _planner.Plan(statement, planOptions);
+        var planResult = new ExecutionPlanBuilder(planOptions).Build(statement);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -169,9 +179,9 @@ public sealed class SqlQueryService : ISqlQueryService
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
         // SDK-specific FormattedValues metadata from the Entity objects.
-        // Aggregate results are excluded — their FormattedValues are locale-formatted
+        // Aggregate results are excluded -- their FormattedValues are locale-formatted
         // numbers, not meaningful attribute labels.
-        var isAggregate = statement is SqlSelectStatement sel && sel.HasAggregates();
+        var isAggregate = HasAggregates(statement);
         var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
             result,
             planResult.VirtualColumns,
@@ -190,10 +200,11 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var parser = new SqlParser(sql);
-        var statement = parser.ParseStatement();
+        var script = _queryParser.ParseScript(sql);
+        var statement = QueryParser.GetFirstStatement(script)
+            ?? throw new SqlParseException("No SQL statements found.");
 
-        var planResult = _planner.Plan(statement);
+        var planResult = new ExecutionPlanBuilder().Build(statement);
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
 
         // Extract parallelism metadata from plan tree
@@ -214,15 +225,12 @@ public sealed class SqlQueryService : ISqlQueryService
 
         if (chunkSize <= 0) chunkSize = 100;
 
-        // Parse SQL into AST
-        var parser = new SqlParser(request.Sql);
-        var statement = parser.ParseStatement();
+        // Parse SQL into ScriptDom AST
+        var script = _queryParser.ParseScript(request.Sql);
+        var statement = QueryParser.GetFirstStatement(script)
+            ?? throw new SqlParseException("No SQL statements found.");
 
-        // Apply TopOverride if the statement is a SELECT
-        if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
-        {
-            statement = selectStmt.WithTop(request.TopOverride.Value);
-        }
+        // TopOverride is handled via QueryPlanOptions.MaxRows -- no AST mutation needed.
 
         int? dmlRowCap = null;
 
@@ -251,7 +259,7 @@ public sealed class SqlQueryService : ISqlQueryService
         var (estimatedRecordCount, minDate, maxDate) =
             await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
 
-        // Build execution plan via QueryPlanner
+        // Build execution plan via ExecutionPlanBuilder
         var planOptions = new QueryPlanOptions
         {
             MaxRows = request.TopOverride,
@@ -269,7 +277,7 @@ public sealed class SqlQueryService : ISqlQueryService
             MaxDate = maxDate
         };
 
-        var planResult = _planner.Plan(statement, planOptions);
+        var planResult = new ExecutionPlanBuilder(planOptions).Build(statement);
 
         // Execute the plan with streaming
         var expressionEvaluator = new ExpressionEvaluator();
@@ -284,7 +292,7 @@ public sealed class SqlQueryService : ISqlQueryService
         IReadOnlyList<QueryColumn>? columns = null;
         var totalRows = 0;
         var isFirstChunk = true;
-        var streamIsAggregate = statement is SqlSelectStatement streamSel && streamSel.HasAggregates();
+        var streamIsAggregate = HasAggregates(statement);
 
         await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
         {
@@ -334,24 +342,66 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
+    /// Checks if a ScriptDom statement contains aggregate functions in the SELECT list.
+    /// </summary>
+    private static bool HasAggregates(TSqlStatement statement)
+    {
+        if (statement is not SelectStatement select) return false;
+        if (select.QueryExpression is not QuerySpecification spec) return false;
+        return spec.SelectElements.OfType<SelectScalarExpression>()
+            .Any(s => s.Expression is FunctionCall func && IsAggregateFunction(func));
+    }
+
+    private static bool IsAggregateFunction(FunctionCall func)
+    {
+        var name = func.FunctionName.Value;
+        return name.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("SUM", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AVG", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("MIN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Gets the entity name from a ScriptDom statement's FROM clause.
+    /// </summary>
+    private static string GetEntityNameFromStatement(TSqlStatement statement)
+    {
+        if (statement is not SelectStatement select) return "";
+        if (select.QueryExpression is not QuerySpecification spec) return "";
+        if (spec.FromClause?.TableReferences.Count > 0)
+        {
+            if (spec.FromClause.TableReferences[0] is NamedTableReference named)
+                return named.SchemaObject.BaseIdentifier?.Value ?? "";
+            if (spec.FromClause.TableReferences[0] is QualifiedJoin join
+                && join.FirstTableReference is NamedTableReference joinNamed)
+                return joinNamed.SchemaObject.BaseIdentifier?.Value ?? "";
+        }
+        return "";
+    }
+
+    /// <summary>
     /// Fetches estimated record count and date range for aggregate queries.
     /// Returns nulls for non-aggregate statements (no metadata fetch needed).
     /// The two metadata calls run in parallel via Task.WhenAll.
     /// </summary>
     private async Task<(long? EstimatedRecordCount, DateTime? MinDate, DateTime? MaxDate)> FetchAggregateMetadataAsync(
-        ISqlStatement statement,
+        TSqlStatement statement,
         CancellationToken cancellationToken)
     {
-        if (statement is SqlSelectStatement select && select.HasAggregates())
+        if (HasAggregates(statement))
         {
-            var entityName = select.GetEntityName();
-            var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
-            var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
-            await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+            var entityName = GetEntityNameFromStatement(statement);
+            if (!string.IsNullOrEmpty(entityName))
+            {
+                var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
+                var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
+                await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
 
-            var count = await countTask.ConfigureAwait(false);
-            var dateRange = await dateTask.ConfigureAwait(false);
-            return (count, dateRange.Min, dateRange.Max);
+                var count = await countTask.ConfigureAwait(false);
+                var dateRange = await dateTask.ConfigureAwait(false);
+                return (count, dateRange.Min, dateRange.Max);
+            }
         }
 
         return (null, null, null);

@@ -56,6 +56,7 @@
     <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
     <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+    <ProjectReference Include="..\PPDS.Query\PPDS.Query.csproj" />
     <ProjectReference Include="..\PPDS.Plugins\PPDS.Plugins.csproj" />
     <!-- PPDS architectural enforcement analyzers -->
     <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"
