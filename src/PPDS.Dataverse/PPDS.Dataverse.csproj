@@ -45,6 +45,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  <PackageReference Include="Microsoft.Identity.Client" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
     <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
