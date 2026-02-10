@@ -31,6 +31,7 @@ public static class DateFunctions
         registry.Register("SYSDATETIME", new SysDateTimeFunction());
         registry.Register("SWITCHOFFSET", new SwitchOffsetFunction());
         registry.Register("TODATETIMEOFFSET", new ToDateTimeOffsetFunction());
+        registry.Register("TIMEFROMPARTS", new TimeFromPartsFunction());
     }
 
     /// <summary>
@@ -481,6 +482,35 @@ public static class DateFunctions
             if (offset is null) return null;
 
             return new DateTimeOffset(DateTime.SpecifyKind(dt.Value, DateTimeKind.Unspecified), offset.Value);
+        }
+    }
+
+    // ── TIMEFROMPARTS ───────────────────────────────────────────────
+    /// <summary>
+    /// TIMEFROMPARTS(hour, minute, seconds, fractions, precision) - constructs a time from parts.
+    /// </summary>
+    private sealed class TimeFromPartsFunction : IScalarFunction
+    {
+        public int MinArgs => 5;
+        public int MaxArgs => 5;
+
+        public object? Execute(object?[] args)
+        {
+            if (args[0] is null || args[1] is null || args[2] is null)
+                return null;
+
+            var hour = Convert.ToInt32(args[0], CultureInfo.InvariantCulture);
+            var minute = Convert.ToInt32(args[1], CultureInfo.InvariantCulture);
+            var seconds = Convert.ToInt32(args[2], CultureInfo.InvariantCulture);
+            var fractions = args[3] is null ? 0 : Convert.ToInt32(args[3], CultureInfo.InvariantCulture);
+            var precision = args[4] is null ? 0 : Convert.ToInt32(args[4], CultureInfo.InvariantCulture);
+
+            // Fractions are in units of 10^(-precision) seconds
+            var fractionalTicks = precision > 0
+                ? (long)(fractions * Math.Pow(10, 7 - precision))
+                : 0;
+
+            return new TimeSpan(0, hour, minute, seconds) + TimeSpan.FromTicks(fractionalTicks);
         }
     }
 

@@ -1165,4 +1165,20 @@ public class ExpressionCompilerTests
 
         compiled(EmptyRow).Should().Be(4);
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  27. TIMEFROMPARTS
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileScalar_TimeFromParts_ReturnsTimeSpan()
+    {
+        var expr = ParseExpression("TIMEFROMPARTS(14, 30, 45, 0, 0)");
+        var compiled = _compiler.CompileScalar(expr);
+        var result = compiled(EmptyRow);
+        result.Should().BeOfType<TimeSpan>();
+        ((TimeSpan)result!).Hours.Should().Be(14);
+        ((TimeSpan)result!).Minutes.Should().Be(30);
+        ((TimeSpan)result!).Seconds.Should().Be(45);
+    }
 }
