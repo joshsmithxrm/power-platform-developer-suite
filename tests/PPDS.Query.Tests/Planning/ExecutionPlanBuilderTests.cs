@@ -6,6 +6,7 @@ using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
+using PPDS.Query.Planning.Nodes;
 using Xunit;
 
 namespace PPDS.Query.Tests.Planning;
@@ -193,6 +194,21 @@ public class ExecutionPlanBuilderTests
         result.FetchXml.Should().NotBeNullOrEmpty();
         result.EntityLogicalName.Should().Be("account");
         result.VirtualColumns.Should().NotBeNull();
+    }
+
+    // ────────────────────────────────────────────
+    //  OPENJSON produces OpenJsonNode
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_OpenJson_ProducesOpenJsonNode()
+    {
+        var fragment = _parser.Parse("SELECT [key], value, type FROM OPENJSON('[1,2,3]')");
+        var result = _builder.Plan(fragment);
+        // OpenJsonNode may be wrapped in a ProjectNode, so check the tree
+        var hasOpenJson = result.RootNode is OpenJsonNode
+            || result.RootNode.Children.Any(c => c is OpenJsonNode);
+        hasOpenJson.Should().BeTrue("the plan should contain an OpenJsonNode");
     }
 
     // ────────────────────────────────────────────

@@ -1064,7 +1064,7 @@ public sealed class ExecutionPlanBuilder
     /// Checks if the FROM clause references a table-valued function (e.g., STRING_SPLIT)
     /// and returns a plan for it if found.
     /// </summary>
-    private static QueryPlanResult? TryPlanTableValuedFunction(
+    private QueryPlanResult? TryPlanTableValuedFunction(
         QuerySpecification querySpec, QueryPlanOptions options)
     {
         if (querySpec.FromClause?.TableReferences == null
@@ -1084,6 +1084,12 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
+        // ScriptDom parses OPENJSON as a dedicated OpenJsonTableReference node
+        if (tableRef is OpenJsonTableReference openJsonRef)
+        {
+            return PlanOpenJson(openJsonRef, querySpec, options);
+        }
+
         // ScriptDom parses built-in TVFs like STRING_SPLIT as GlobalFunctionTableReference
         if (tableRef is GlobalFunctionTableReference globalFuncRef)
         {
@@ -1095,6 +1101,44 @@ public sealed class ExecutionPlanBuilder
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Plans an OPENJSON table-valued function from a ScriptDom <see cref="OpenJsonTableReference"/>.
+    /// </summary>
+    private QueryPlanResult PlanOpenJson(
+        OpenJsonTableReference openJsonRef,
+        QuerySpecification querySpec,
+        QueryPlanOptions options)
+    {
+        if (openJsonRef.Variable == null)
+            throw new QueryParseException("OPENJSON requires at least one argument.");
+
+        var jsonExpr = _expressionCompiler.CompileScalar(openJsonRef.Variable);
+        string? path = null;
+
+        if (openJsonRef.RowPattern is StringLiteral pathLit)
+        {
+            path = pathLit.Value;
+        }
+
+        IQueryPlanNode node = new OpenJsonNode(jsonExpr, path);
+
+        // Apply WHERE if present
+        if (querySpec.WhereClause?.SearchCondition != null)
+        {
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.WhereClause.SearchCondition);
+            var description = querySpec.WhereClause.SearchCondition.ToString() ?? "filter";
+            node = new ClientFilterNode(node, predicate, description);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = node,
+            FetchXml = "-- OPENJSON",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = "openjson"
+        };
     }
 
     /// <summary>
