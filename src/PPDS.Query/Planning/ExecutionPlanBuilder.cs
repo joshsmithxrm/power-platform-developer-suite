@@ -209,17 +209,11 @@ public sealed class ExecutionPlanBuilder
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
-        // HAVING clause: compile from ScriptDom if available, else bridge from legacy
+        // HAVING clause: compile directly from ScriptDom
         if (querySpec.HavingClause?.SearchCondition != null)
         {
             var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
             var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
-            rootNode = new ClientFilterNode(rootNode, predicate, description);
-        }
-        else if (legacySelect.Having != null)
-        {
-            var predicate = CompileLegacyCondition(legacySelect.Having);
-            var description = DescribeLegacyCondition(legacySelect.Having);
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
@@ -342,8 +336,7 @@ public sealed class ExecutionPlanBuilder
                 compiledClauses.Add(new CompiledSetClause(colName, compiled));
 
                 // Also extract column names referenced in the expression for the SELECT
-                var legacyValue = ConvertExpression(assignment.NewValue);
-                var refCols = ExtractColumnNames(legacyValue);
+                var refCols = ExtractColumnNamesFromScriptDom(assignment.NewValue);
                 referencedColumnNames.AddRange(refCols);
             }
         }
@@ -1588,6 +1581,109 @@ public sealed class ExecutionPlanBuilder
             col is SqlComputedColumn computed && computed.Expression is SqlWindowExpression);
     }
 
+    // ── ScriptDom QuerySpecification analysis helpers ──────────────
+
+    /// <summary>
+    /// Checks whether the SELECT list of a <see cref="QuerySpecification"/> contains
+    /// aggregate function calls (COUNT, SUM, AVG, MIN, MAX, etc.) without an OVER clause.
+    /// </summary>
+    private static bool HasAggregatesInQuerySpec(QuerySpecification querySpec)
+    {
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression { Expression: FunctionCall func }
+                && func.OverClause == null
+                && IsAggregateFunctionName(func.FunctionName?.Value))
+            {
+                return true;
+            }
+        }
+        return querySpec.GroupByClause?.GroupingSpecifications.Count > 0;
+    }
+
+    /// <summary>
+    /// Checks whether the SELECT list contains any computed expressions
+    /// (non-column, non-aggregate, non-window expressions such as CASE, IIF, arithmetic).
+    /// </summary>
+    private static bool HasComputedColumnsInQuerySpec(QuerySpecification querySpec)
+    {
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression scalar
+                && scalar.Expression is not ColumnReferenceExpression
+                && !IsAggregateOrWindowFunction(scalar.Expression))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether the SELECT list contains any window function expressions
+    /// (functions with an OVER clause).
+    /// </summary>
+    private static bool HasWindowFunctionsInQuerySpec(QuerySpecification querySpec)
+    {
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression { Expression: FunctionCall func }
+                && func.OverClause != null)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts the entity (table) name from the FROM clause of a <see cref="QuerySpecification"/>.
+    /// </summary>
+    private static string? ExtractEntityNameFromQuerySpec(QuerySpecification querySpec)
+    {
+        if (querySpec.FromClause?.TableReferences.Count > 0
+            && querySpec.FromClause.TableReferences[0] is NamedTableReference named)
+        {
+            return GetMultiPartName(named.SchemaObject);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts the TOP value from a <see cref="QuerySpecification"/>, if present.
+    /// Returns null if no TOP clause exists or the value is not a literal integer.
+    /// </summary>
+    private static int? ExtractTopFromQuerySpec(QuerySpecification querySpec)
+    {
+        if (querySpec.TopRowFilter?.Expression is IntegerLiteral lit
+            && int.TryParse(lit.Value, out var top))
+        {
+            return top;
+        }
+        return null;
+    }
+
+    private static bool IsAggregateFunctionName(string? name)
+    {
+        if (name == null) return false;
+        return name.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("SUM", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AVG", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("MIN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("MAX", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("COUNT_BIG", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("STDEV", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("STDEVP", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("VAR", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("VARP", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAggregateOrWindowFunction(ScalarExpression expr)
+    {
+        return expr is FunctionCall func
+            && (func.OverClause != null || IsAggregateFunctionName(func.FunctionName?.Value));
+    }
+
     /// <summary>
     /// Builds a ClientWindowNode that computes window function values.
     /// </summary>
@@ -1792,6 +1888,51 @@ public sealed class ExecutionPlanBuilder
                 break;
             case SqlCastExpression cast:
                 ExtractColumnNamesRecursive(cast.Expression, columns);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Extracts column names referenced in a ScriptDom <see cref="ScalarExpression"/>.
+    /// Used for UPDATE SET clause dependency detection without converting to legacy AST.
+    /// </summary>
+    private static List<string> ExtractColumnNamesFromScriptDom(ScalarExpression expr)
+    {
+        var columns = new List<string>();
+        ExtractColumnNamesFromScriptDomRecursive(expr, columns);
+        return columns;
+    }
+
+    private static void ExtractColumnNamesFromScriptDomRecursive(ScalarExpression expr, List<string> columns)
+    {
+        switch (expr)
+        {
+            case ColumnReferenceExpression col:
+                columns.Add(GetScriptDomColumnName(col));
+                break;
+            case BinaryExpression bin:
+                ExtractColumnNamesFromScriptDomRecursive(bin.FirstExpression, columns);
+                ExtractColumnNamesFromScriptDomRecursive(bin.SecondExpression, columns);
+                break;
+            case UnaryExpression unary:
+                ExtractColumnNamesFromScriptDomRecursive(unary.Expression, columns);
+                break;
+            case ParenthesisExpression paren:
+                ExtractColumnNamesFromScriptDomRecursive(paren.Expression, columns);
+                break;
+            case FunctionCall func:
+                if (func.Parameters != null)
+                    foreach (var p in func.Parameters)
+                        ExtractColumnNamesFromScriptDomRecursive(p, columns);
+                break;
+            case CastCall cast:
+                ExtractColumnNamesFromScriptDomRecursive(cast.Parameter, columns);
+                break;
+            case SearchedCaseExpression caseExpr:
+                foreach (var w in caseExpr.WhenClauses)
+                    ExtractColumnNamesFromScriptDomRecursive(w.ThenExpression, columns);
+                if (caseExpr.ElseExpression != null)
+                    ExtractColumnNamesFromScriptDomRecursive(caseExpr.ElseExpression, columns);
                 break;
         }
     }
