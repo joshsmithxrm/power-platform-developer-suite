@@ -64,6 +64,7 @@ public sealed class FunctionRegistry
         MathFunctions.RegisterAll(registry);
         JsonFunctions.RegisterAll(registry);
         DataverseFunctions.RegisterAll(registry);
+        NullFunctions.RegisterAll(registry);
         return registry;
     }
 }

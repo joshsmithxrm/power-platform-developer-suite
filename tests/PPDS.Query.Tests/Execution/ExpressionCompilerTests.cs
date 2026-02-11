@@ -366,6 +366,96 @@ public class ExpressionCompilerTests
     }
 
     // ════════════════════════════════════════════════════════════════════
+    //  6c. ISNULL / COALESCE / NULLIF
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileScalar_Isnull_ReturnsValueWhenNotNull()
+    {
+        var expr = ParseExpression("ISNULL(name, 'Unknown')");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(MakeRow(("name", "Contoso"))).Should().Be("Contoso");
+    }
+
+    [Fact]
+    public void CompileScalar_Isnull_ReturnsReplacementWhenNull()
+    {
+        var expr = ParseExpression("ISNULL(name, 'Unknown')");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(MakeRow(("name", (object?)null))).Should().Be("Unknown");
+    }
+
+    [Fact]
+    public void CompileScalar_Coalesce_ReturnsFirstNonNull()
+    {
+        var expr = ParseExpression("COALESCE(NULL, NULL, 'fallback')");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("fallback");
+    }
+
+    [Fact]
+    public void CompileScalar_Coalesce_ReturnsFirstArg_WhenNotNull()
+    {
+        var expr = ParseExpression("COALESCE('first', 'second', 'third')");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("first");
+    }
+
+    [Fact]
+    public void CompileScalar_Coalesce_WithColumns()
+    {
+        var expr = ParseExpression("COALESCE(phone1, phone2, 'N/A')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        compiled(MakeRow(("phone1", (object?)null), ("phone2", "555-1234"))).Should().Be("555-1234");
+        compiled(MakeRow(("phone1", (object?)null), ("phone2", (object?)null))).Should().Be("N/A");
+        compiled(MakeRow(("phone1", "555-0000"), ("phone2", "555-1234"))).Should().Be("555-0000");
+    }
+
+    [Fact]
+    public void CompileScalar_Coalesce_AllNull_ReturnsNull()
+    {
+        var expr = ParseExpression("COALESCE(NULL, NULL)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().BeNull();
+    }
+
+    [Fact]
+    public void CompileScalar_NullIf_EqualValues_ReturnsNull()
+    {
+        var expr = ParseExpression("NULLIF(1, 1)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().BeNull();
+    }
+
+    [Fact]
+    public void CompileScalar_NullIf_DifferentValues_ReturnsFirst()
+    {
+        var expr = ParseExpression("NULLIF(1, 2)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be(1);
+    }
+
+    [Fact]
+    public void CompileScalar_NullIf_NullFirst_ReturnsNull()
+    {
+        var expr = ParseExpression("NULLIF(NULL, 1)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().BeNull();
+    }
+
+    [Fact]
+    public void CompileScalar_NullIf_DivisionGuard()
+    {
+        // Common pattern: revenue / NULLIF(quantity, 0) — returns NULL instead of div-by-zero
+        var expr = ParseExpression("NULLIF(quantity, 0)");
+        var compiled = _compiler.CompileScalar(expr);
+
+        compiled(MakeRow(("quantity", 5))).Should().Be(5);
+        compiled(MakeRow(("quantity", 0))).Should().BeNull();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     //  7. IIF
     // ════════════════════════════════════════════════════════════════════
 

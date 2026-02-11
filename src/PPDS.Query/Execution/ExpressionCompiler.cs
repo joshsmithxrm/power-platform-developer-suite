@@ -68,6 +68,8 @@ public sealed class ExpressionCompiler
             ParenthesisExpression parenExpr => CompileScalar(parenExpr.Expression),
             SearchedCaseExpression caseExpr => CompileSearchedCase(caseExpr),
             SimpleCaseExpression simpleCaseExpr => CompileSimpleCase(simpleCaseExpr),
+            CoalesceExpression coalesce => CompileCoalesce(coalesce),
+            NullIfExpression nullIf => CompileNullIf(nullIf),
             IIfCall iifCall => CompileIIfCall(iifCall),
             FunctionCall funcCall => CompileFunctionCall(funcCall),
             CastCall castCall => CompileCastCall(castCall),
@@ -288,6 +290,40 @@ public sealed class ExpressionCompiler
                     return result(row);
             }
             return elseExpr?.Invoke(row);
+        };
+    }
+
+    private CompiledScalarExpression CompileCoalesce(CoalesceExpression coalesce)
+    {
+        var compiledExprs = coalesce.Expressions.Select(CompileScalar).ToArray();
+
+        return row =>
+        {
+            foreach (var expr in compiledExprs)
+            {
+                var value = expr(row);
+                if (value is not null)
+                    return value;
+            }
+            return null;
+        };
+    }
+
+    private CompiledScalarExpression CompileNullIf(NullIfExpression nullIf)
+    {
+        var compiledFirst = CompileScalar(nullIf.FirstExpression);
+        var compiledSecond = CompileScalar(nullIf.SecondExpression);
+
+        return row =>
+        {
+            var first = compiledFirst(row);
+            var second = compiledSecond(row);
+
+            if (first is null)
+                return null;
+            if (second is not null && CompareValues(first, second) == 0)
+                return null;
+            return first;
         };
     }
 
