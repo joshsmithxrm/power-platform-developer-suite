@@ -310,6 +310,62 @@ public class ExpressionCompilerTests
     }
 
     // ════════════════════════════════════════════════════════════════════
+    //  6b. Simple CASE
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileScalar_SimpleCase_MatchesFirstWhen()
+    {
+        var expr = ParseExpression("CASE 1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("one");
+    }
+
+    [Fact]
+    public void CompileScalar_SimpleCase_MatchesSecondWhen()
+    {
+        var expr = ParseExpression("CASE 2 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("two");
+    }
+
+    [Fact]
+    public void CompileScalar_SimpleCase_FallsToElse()
+    {
+        var expr = ParseExpression("CASE 99 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("other");
+    }
+
+    [Fact]
+    public void CompileScalar_SimpleCase_NoElse_ReturnsNull()
+    {
+        var expr = ParseExpression("CASE 99 WHEN 1 THEN 'one' WHEN 2 THEN 'two' END");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().BeNull();
+    }
+
+    [Fact]
+    public void CompileScalar_SimpleCase_WithColumnData()
+    {
+        var expr = ParseExpression(
+            "CASE statecode WHEN 0 THEN 'Active' WHEN 1 THEN 'Inactive' ELSE 'Other' END");
+        var compiled = _compiler.CompileScalar(expr);
+
+        compiled(MakeRow(("statecode", 0))).Should().Be("Active");
+        compiled(MakeRow(("statecode", 1))).Should().Be("Inactive");
+        compiled(MakeRow(("statecode", 9))).Should().Be("Other");
+    }
+
+    [Fact]
+    public void CompileScalar_SimpleCase_NullInput_ReturnsElse()
+    {
+        var expr = ParseExpression("CASE NULL WHEN 1 THEN 'one' ELSE 'null input' END");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(EmptyRow).Should().Be("null input");
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     //  7. IIF
     // ════════════════════════════════════════════════════════════════════
 

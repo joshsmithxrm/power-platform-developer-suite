@@ -67,6 +67,7 @@ public sealed class ExpressionCompiler
             UnaryExpression unaryExpr => CompileUnaryExpression(unaryExpr),
             ParenthesisExpression parenExpr => CompileScalar(parenExpr.Expression),
             SearchedCaseExpression caseExpr => CompileSearchedCase(caseExpr),
+            SimpleCaseExpression simpleCaseExpr => CompileSimpleCase(simpleCaseExpr),
             IIfCall iifCall => CompileIIfCall(iifCall),
             FunctionCall funcCall => CompileFunctionCall(funcCall),
             CastCall castCall => CompileCastCall(castCall),
@@ -252,6 +253,37 @@ public sealed class ExpressionCompiler
             foreach (var (condition, result) in whenClauses)
             {
                 if (condition(row))
+                    return result(row);
+            }
+            return elseExpr?.Invoke(row);
+        };
+    }
+
+    private CompiledScalarExpression CompileSimpleCase(SimpleCaseExpression caseExpr)
+    {
+        var compiledInput = CompileScalar(caseExpr.InputExpression);
+        var whenClauses = new List<(CompiledScalarExpression compareValue, CompiledScalarExpression result)>();
+        foreach (var whenClause in caseExpr.WhenClauses)
+        {
+            var compareValue = CompileScalar(whenClause.WhenExpression);
+            var result = CompileScalar(whenClause.ThenExpression);
+            whenClauses.Add((compareValue, result));
+        }
+
+        var elseExpr = caseExpr.ElseExpression != null
+            ? CompileScalar(caseExpr.ElseExpression)
+            : null;
+
+        return row =>
+        {
+            var inputValue = compiledInput(row);
+            if (inputValue is null)
+                return elseExpr?.Invoke(row);
+
+            foreach (var (compareValue, result) in whenClauses)
+            {
+                var whenValue = compareValue(row);
+                if (whenValue is not null && CompareValues(inputValue, whenValue) == 0)
                     return result(row);
             }
             return elseExpr?.Invoke(row);
