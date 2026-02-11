@@ -17,6 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $WorkspaceFolder = Split-Path -Parent $PSScriptRoot
+$ImageName = 'ppds-devcontainer'
 $VolumeName = 'ppds-claude-plugins'
 
 function Write-Step($msg) { Write-Host "  $msg" -ForegroundColor Cyan }
@@ -32,6 +33,18 @@ function Stop-Container {
     if ($ids) {
         Write-Step 'Stopping container...'
         $ids | ForEach-Object { docker rm -f $_ } | Out-Null
+    }
+}
+
+function Ensure-ContainerRunning {
+    $id = docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder"
+    if (-not $id) {
+        Write-Step 'Container not running, starting it...'
+        devcontainer up --workspace-folder $WorkspaceFolder | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Failed to start container.'
+            exit 1
+        }
     }
 }
 
@@ -52,20 +65,12 @@ switch ($Command) {
     }
 
     'shell' {
-        $id = docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder"
-        if (-not $id) {
-            Write-Step 'Container not running, starting it...'
-            devcontainer up --workspace-folder $WorkspaceFolder | Out-Null
-        }
+        Ensure-ContainerRunning
         devcontainer exec --workspace-folder $WorkspaceFolder bash
     }
 
     'claude' {
-        $id = docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder"
-        if (-not $id) {
-            Write-Step 'Container not running, starting it...'
-            devcontainer up --workspace-folder $WorkspaceFolder | Out-Null
-        }
+        Ensure-ContainerRunning
         devcontainer exec --workspace-folder $WorkspaceFolder claude --dangerously-skip-permissions
     }
 
@@ -98,9 +103,16 @@ switch ($Command) {
             docker volume rm $VolumeName | Out-Null
         }
 
+        # Remove the named image so it rebuilds from scratch
+        $img = docker images -q $ImageName 2>$null
+        if ($img) {
+            Write-Step "Removing image $ImageName..."
+            docker rmi $ImageName | Out-Null
+        }
+
         # Full rebuild no cache
         Write-Step 'Rebuilding image (no cache)...'
-        devcontainer build --workspace-folder $WorkspaceFolder --no-cache
+        docker build --no-cache -t $ImageName "$WorkspaceFolder/.devcontainer/"
         if ($LASTEXITCODE -ne 0) { Write-Err 'Build failed.'; exit 1 }
 
         # Start fresh

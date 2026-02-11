@@ -41,7 +41,6 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 USER vscode
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/vscode/.local/bin:${PATH}"
-USER root
 
 # Set terminal for TUI support (Terminal.Gui)
 ENV TERM=xterm-256color
