@@ -215,12 +215,23 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
-        // HAVING clause: compile directly from ScriptDom
+        // HAVING clause: compile directly from ScriptDom.
+        // Aggregate alias map lets COUNT(*)/SUM(x)/etc. resolve to output column aliases.
+        // ORDER BY aggregate references are handled by FetchXML pushdown, not this map.
         if (querySpec.HavingClause?.SearchCondition != null)
         {
-            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
-            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
-            rootNode = new ClientFilterNode(rootNode, predicate, description);
+            var aggMap = BuildAggregateAliasMap(querySpec);
+            _expressionCompiler.SetAggregateAliasMap(aggMap);
+            try
+            {
+                var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
+                var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+                rootNode = new ClientFilterNode(rootNode, predicate, description);
+            }
+            finally
+            {
+                _expressionCompiler.SetAggregateAliasMap(null);
+            }
         }
 
         // Window functions (compiled directly from ScriptDom)
@@ -1494,12 +1505,22 @@ public sealed class ExecutionPlanBuilder
         var parallelNode = new ParallelPartitionNode(partitionNodes, options.PoolCapacity);
         IQueryPlanNode rootNode = new MergeAggregateNode(parallelNode, mergeColumns, groupByColumns);
 
-        // HAVING clause: compile directly from ScriptDom
+        // HAVING clause: compile directly from ScriptDom (partitioned path).
+        // Same aggregate alias resolution as non-partitioned path above.
         if (querySpec.HavingClause?.SearchCondition != null)
         {
-            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
-            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
-            rootNode = new ClientFilterNode(rootNode, predicate, description);
+            var aggMap = BuildAggregateAliasMap(querySpec);
+            _expressionCompiler.SetAggregateAliasMap(aggMap);
+            try
+            {
+                var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
+                var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+                rootNode = new ClientFilterNode(rootNode, predicate, description);
+            }
+            finally
+            {
+                _expressionCompiler.SetAggregateAliasMap(null);
+            }
         }
 
         return new QueryPlanResult
@@ -1545,6 +1566,36 @@ public sealed class ExecutionPlanBuilder
         }
 
         return columns;
+    }
+
+    /// <summary>
+    /// Builds a mapping from aggregate function signatures to their output column aliases.
+    /// Used by <see cref="ExpressionCompiler"/> to resolve aggregate references in HAVING/ORDER BY.
+    /// </summary>
+    private static Dictionary<string, string> BuildAggregateAliasMap(QuerySpecification querySpec)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var aliasCounter = 0;
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is not SelectScalarExpression { Expression: FunctionCall func } scalar
+                || func.OverClause != null)
+                continue;
+
+            var funcName = func.FunctionName?.Value;
+            if (!IsAggregateFunctionName(funcName))
+                continue;
+
+            aliasCounter++;
+            var alias = scalar.ColumnName?.Value
+                ?? $"{funcName!.ToLowerInvariant()}_{aliasCounter}";
+
+            var sig = ExpressionCompiler.GetAggregateSignature(func);
+            map.TryAdd(sig, alias);
+        }
+
+        return map;
     }
 
     /// <summary>

@@ -455,6 +455,19 @@ public class ExpressionCompilerTests
         compiled(MakeRow(("quantity", 0))).Should().BeNull();
     }
 
+    [Fact]
+    public void CompileScalar_Coalesce_NullIf_Nested()
+    {
+        // Common pattern: COALESCE(NULLIF(name, ''), 'Unnamed')
+        // Returns 'Unnamed' when name is empty string or null
+        var expr = ParseExpression("COALESCE(NULLIF(name, ''), 'Unnamed')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        compiled(MakeRow(("name", "Contoso"))).Should().Be("Contoso");
+        compiled(MakeRow(("name", ""))).Should().Be("Unnamed");
+        compiled(MakeRow(("name", (object?)null))).Should().Be("Unnamed");
+    }
+
     // ════════════════════════════════════════════════════════════════════
     //  7. IIF
     // ════════════════════════════════════════════════════════════════════
@@ -1329,6 +1342,114 @@ public class ExpressionCompilerTests
     }
 
     // ════════════════════════════════════════════════════════════════════
+    //  Aggregate Alias Resolution in HAVING/ORDER BY
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileFunctionCall_CountStar_WithAggregateMap_ResolvesToColumn()
+    {
+        var aggMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["COUNT(*)"] = "cnt"
+        };
+        _compiler.SetAggregateAliasMap(aggMap);
+
+        var expr = ParseExpression("COUNT(*)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(MakeRow(("cnt", 42))).Should().Be(42);
+
+        _compiler.SetAggregateAliasMap(null);
+    }
+
+    [Fact]
+    public void CompileFunctionCall_SumColumn_WithAggregateMap_ResolvesToColumn()
+    {
+        var aggMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SUM(REVENUE)"] = "total_revenue"
+        };
+        _compiler.SetAggregateAliasMap(aggMap);
+
+        var expr = ParseExpression("SUM(revenue)");
+        var compiled = _compiler.CompileScalar(expr);
+        compiled(MakeRow(("total_revenue", 99999m))).Should().Be(99999m);
+
+        _compiler.SetAggregateAliasMap(null);
+    }
+
+    [Fact]
+    public void CompilePredicate_HavingCountStar_WithAggregateMap()
+    {
+        var aggMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["COUNT(*)"] = "cnt"
+        };
+        _compiler.SetAggregateAliasMap(aggMap);
+
+        var pred = ParsePredicate("COUNT(*) > 1");
+        var compiled = _compiler.CompilePredicate(pred);
+
+        compiled(MakeRow(("cnt", 5))).Should().BeTrue();
+        compiled(MakeRow(("cnt", 1))).Should().BeFalse();
+        compiled(MakeRow(("cnt", 0))).Should().BeFalse();
+
+        _compiler.SetAggregateAliasMap(null);
+    }
+
+    [Fact]
+    public void CompilePredicate_HavingSumBetween_WithAggregateMap()
+    {
+        var aggMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SUM(AMOUNT)"] = "total_amount"
+        };
+        _compiler.SetAggregateAliasMap(aggMap);
+
+        var pred = ParsePredicate("SUM(amount) BETWEEN 100 AND 1000");
+        var compiled = _compiler.CompilePredicate(pred);
+
+        compiled(MakeRow(("total_amount", 500))).Should().BeTrue();
+        compiled(MakeRow(("total_amount", 50))).Should().BeFalse();
+        compiled(MakeRow(("total_amount", 1500))).Should().BeFalse();
+
+        _compiler.SetAggregateAliasMap(null);
+    }
+
+    [Fact]
+    public void CompileFunctionCall_WithoutAggregateMap_InvokesFunctionRegistry()
+    {
+        // Without aggregate map, COUNT should fail (not registered as scalar function)
+        var expr = ParseExpression("COUNT(*)");
+        var compiled = _compiler.CompileScalar(expr);
+        var act = () => compiled(EmptyRow);
+        act.Should().Throw<NotSupportedException>().WithMessage("*COUNT*");
+    }
+
+    [Fact]
+    public void GetAggregateSignature_CountStar()
+    {
+        var funcCall = ParseExpression("COUNT(*)") as FunctionCall;
+        funcCall.Should().NotBeNull();
+        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("COUNT(*)");
+    }
+
+    [Fact]
+    public void GetAggregateSignature_SumColumn()
+    {
+        var funcCall = ParseExpression("SUM(revenue)") as FunctionCall;
+        funcCall.Should().NotBeNull();
+        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("SUM(REVENUE)");
+    }
+
+    [Fact]
+    public void GetAggregateSignature_AvgDistinctColumn()
+    {
+        var funcCall = ParseExpression("AVG(DISTINCT price)") as FunctionCall;
+        funcCall.Should().NotBeNull();
+        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("AVG(DISTINCT PRICE)");
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     //  BETWEEN / NOT BETWEEN (client-side)
     // ════════════════════════════════════════════════════════════════════
 
@@ -1399,5 +1520,13 @@ public class ExpressionCompilerTests
 
         compiled(MakeRow(("name", "Contoso"))).Should().BeTrue();
         compiled(MakeRow(("name", "Zebra"))).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CompilePredicate_NotBetween_NullValue_ReturnsFalse()
+    {
+        var pred = ParsePredicate("revenue NOT BETWEEN 1000 AND 5000");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(MakeRow(("revenue", (object?)null))).Should().BeFalse();
     }
 }

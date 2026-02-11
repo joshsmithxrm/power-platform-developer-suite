@@ -18,6 +18,7 @@ public sealed class ExpressionCompiler
 {
     private readonly FunctionRegistry _functionRegistry;
     private readonly Func<VariableScope?>? _variableScopeAccessor;
+    private Dictionary<string, string>? _aggregateAliasMap;
 
     /// <summary>
     /// Creates a compiler with optional function registry and variable scope accessor.
@@ -43,6 +44,64 @@ public sealed class ExpressionCompiler
         }
         _variableScopeAccessor = variableScopeAccessor;
     }
+
+    /// <summary>
+    /// Sets a mapping from aggregate function signatures (e.g. "COUNT(*)", "SUM(revenue)")
+    /// to their output column aliases. When set, <see cref="CompileFunctionCall"/> resolves
+    /// known aggregates as column references instead of invoking them via FunctionRegistry.
+    /// </summary>
+    /// <param name="map">
+    /// Dictionary keyed by normalized aggregate signature (case-insensitive).
+    /// Null or empty clears the mapping.
+    /// </param>
+    public void SetAggregateAliasMap(Dictionary<string, string>? map)
+    {
+        _aggregateAliasMap = map is { Count: > 0 } ? map : null;
+    }
+
+    /// <summary>
+    /// Builds a normalized signature string for an aggregate function call AST node.
+    /// Used to match HAVING/ORDER BY aggregate references against SELECT-list aliases.
+    /// </summary>
+    internal static string GetAggregateSignature(FunctionCall funcCall)
+    {
+        var name = funcCall.FunctionName.Value.ToUpperInvariant();
+
+        // COUNT(*) or COUNT() with wildcard
+        if (name is "COUNT" or "COUNT_BIG"
+            && (funcCall.Parameters.Count == 0
+                || (funcCall.Parameters.Count == 1
+                    && funcCall.Parameters[0] is ColumnReferenceExpression cr
+                    && cr.ColumnType == ColumnType.Wildcard)))
+        {
+            return $"{name}(*)";
+        }
+
+        // SUM(col), AVG(col), etc.
+        if (funcCall.Parameters.Count > 0
+            && funcCall.Parameters[0] is ColumnReferenceExpression colRef)
+        {
+            var colName = colRef.MultiPartIdentifier?.Identifiers.Count > 0
+                ? colRef.MultiPartIdentifier.Identifiers[^1].Value.ToUpperInvariant()
+                : "*";
+            var distinct = funcCall.UniqueRowFilter == UniqueRowFilter.Distinct ? "DISTINCT " : "";
+            return $"{name}({distinct}{colName})";
+        }
+
+        // Fallback for expressions: use full text
+        if (funcCall.Parameters.Count > 0)
+        {
+            var paramText = funcCall.Parameters[0].ToString()?.ToUpperInvariant() ?? "";
+            return $"{name}({paramText})";
+        }
+
+        return $"{name}()";
+    }
+
+    private static readonly HashSet<string> AggregateNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_BIG", "STDEV", "STDEVP", "VAR", "VARP"
+    };
 
     // ═══════════════════════════════════════════════════════════════════
     //  CompileScalar — ScriptDom ScalarExpression → CompiledScalarExpression
@@ -339,6 +398,31 @@ public sealed class ExpressionCompiler
     private CompiledScalarExpression CompileFunctionCall(FunctionCall funcCall)
     {
         var functionName = funcCall.FunctionName.Value;
+
+        // Aggregate alias resolution: when compiling HAVING/ORDER BY,
+        // aggregate calls like COUNT(*) should resolve to the output column alias.
+        if (_aggregateAliasMap != null && AggregateNames.Contains(functionName))
+        {
+            var sig = GetAggregateSignature(funcCall);
+            if (_aggregateAliasMap.TryGetValue(sig, out var alias))
+            {
+                // Compile as a column reference to the aggregate alias
+                return row =>
+                {
+                    if (row.TryGetValue(alias, out var qv))
+                        return qv.Value;
+
+                    // Case-insensitive fallback
+                    foreach (var kvp in row)
+                    {
+                        if (string.Equals(kvp.Key, alias, StringComparison.OrdinalIgnoreCase))
+                            return kvp.Value.Value;
+                    }
+                    return null;
+                };
+            }
+        }
+
         var compiledArgs = funcCall.Parameters?.Select(CompileScalar).ToArray()
                            ?? Array.Empty<CompiledScalarExpression>();
 
