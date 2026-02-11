@@ -85,9 +85,10 @@ function Ensure-WorkspaceVolume {
 }
 
 function Get-Worktrees {
-    $wtDir = Join-Path $WorkspaceFolder '.worktrees'
-    if (Test-Path $wtDir) {
-        Get-ChildItem -Directory $wtDir | Select-Object -ExpandProperty Name
+    # Query the container for worktrees (they live in the volume, not on Windows)
+    $raw = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
+    if ($raw) {
+        $raw -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') -replace '^\.worktrees/','' } | Where-Object { $_ }
     }
 }
 
@@ -107,15 +108,19 @@ function Select-WorkingDirectory {
         exit 1
     }
 
+    # Get main branch name from container
+    $mainBranch = devcontainer exec --workspace-folder $WorkspaceFolder git branch --show-current 2>$null
+    if (-not $mainBranch) { $mainBranch = 'main' }
+
     # Prompt user to pick
     Write-Host ''
     Write-Host '  Where do you want to work?' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host "  [0] main repo ($(git -C $WorkspaceFolder branch --show-current))" -ForegroundColor White
+    Write-Host "  [0] main repo ($($mainBranch.Trim()))" -ForegroundColor White
     for ($i = 0; $i -lt $worktrees.Count; $i++) {
-        $branch = git -C (Join-Path $WorkspaceFolder ".worktrees/$($worktrees[$i])") branch --show-current 2>$null
+        $branch = devcontainer exec --workspace-folder $WorkspaceFolder git -C ".worktrees/$($worktrees[$i])" branch --show-current 2>$null
         if (-not $branch) { $branch = $worktrees[$i] }
-        Write-Host "  [$($i + 1)] $($worktrees[$i]) ($branch)" -ForegroundColor White
+        Write-Host "  [$($i + 1)] $($worktrees[$i]) ($($branch.Trim()))" -ForegroundColor White
     }
     Write-Host ''
     $choice = Read-Host '  Select'
