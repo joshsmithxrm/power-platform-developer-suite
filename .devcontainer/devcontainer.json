@@ -1,13 +1,16 @@
 {
   "name": "PPDS",
-  "initializeCommand": "docker build -t ppds-devcontainer .devcontainer/",
-  "image": "ppds-devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
   "mounts": [
     "source=${localEnv:USERPROFILE}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind",
     "source=${localEnv:USERPROFILE}/.claude.json,target=/tmp/host-claude-config.json,type=bind,readonly",
     "source=${localEnv:USERPROFILE}/.claude/settings.json,target=/tmp/host-claude-settings.json,type=bind,readonly",
     "source=${localEnv:USERPROFILE}/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly",
-    "source=${localEnv:USERPROFILE}/.gitconfig,target=/tmp/host-gitconfig,type=bind,readonly"
+    "source=${localEnv:USERPROFILE}/.gitconfig,target=/tmp/host-gitconfig,type=bind,readonly",
+    "source=ppds-nuget-cache,target=/home/vscode/.nuget/packages,type=volume"
   ],
   "postCreateCommand": "sed -i 's/\\r$//' .devcontainer/setup.sh && bash .devcontainer/setup.sh",
   "customizations": {

@@ -8,7 +8,7 @@ PLUGINS_DIR="$CLAUDE_DIR/plugins"
 STAGED_CONFIG="/tmp/host-claude-config.json"
 STAGED_SETTINGS="/tmp/host-claude-settings.json"
 
-# --- Step 0: Mark bind-mounted workspace as safe for git ---
+# --- Step 0: Mark workspace as safe for git ---
 echo "=== Configuring git safe directories ==="
 WORKSPACE_ROOT="$(pwd)"
 git config --global --add safe.directory "$WORKSPACE_ROOT"
@@ -36,35 +36,6 @@ if [ -f "$HOST_GITCONFIG" ]; then
     fi
 else
     echo "WARNING: Host .gitconfig not found. Git commits will require manual config."
-fi
-
-# --- Step 0b: Fix worktree .git paths (Windows -> Linux) ---
-echo "=== Fixing worktree paths ==="
-WORKSPACE_ROOT="$(pwd)"
-if [ -d ".worktrees" ]; then
-    for wt_dir in .worktrees/*/; do
-        gitfile="$wt_dir.git"
-        if [ -f "$gitfile" ]; then
-            gitdir=$(sed 's/^gitdir: //' "$gitfile")
-            if echo "$gitdir" | grep -qE '^[A-Za-z]:'; then
-                wt_name=$(basename "$wt_dir")
-                new_gitdir="$WORKSPACE_ROOT/.git/worktrees/$wt_name"
-                if [ -d "$new_gitdir" ]; then
-                    echo "gitdir: $new_gitdir" > "$gitfile"
-                    # Fix the reverse pointer so git knows where the worktree is
-                    reverse_file="$new_gitdir/gitdir"
-                    if [ -f "$reverse_file" ]; then
-                        echo "$WORKSPACE_ROOT/.worktrees/$wt_name/.git" > "$reverse_file"
-                    fi
-                    echo "Fixed worktree: $wt_name"
-                else
-                    echo "WARNING: Worktree metadata not found for $wt_name at $new_gitdir"
-                fi
-            fi
-        fi
-    done
-else
-    echo "No worktrees found."
 fi
 
 # --- Step 1: Extract oauthAccount from staged host config ---
