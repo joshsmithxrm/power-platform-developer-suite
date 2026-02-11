@@ -150,6 +150,28 @@ switch ($Command) {
         Write-Step 'Building and starting devcontainer...'
         devcontainer up --workspace-folder $WorkspaceFolder
         if ($LASTEXITCODE -eq 0) {
+            # Recreate worktrees from host into the volume
+            $hostWtDir = Join-Path $WorkspaceFolder '.worktrees'
+            if (Test-Path $hostWtDir) {
+                $hostWorktrees = Get-ChildItem -Directory $hostWtDir | Select-Object -ExpandProperty Name
+                foreach ($wt in $hostWorktrees) {
+                    $branch = git -C (Join-Path $hostWtDir $wt) branch --show-current 2>$null
+                    if (-not $branch) { $branch = $wt }
+                    # Check if worktree already exists in container
+                    $exists = devcontainer exec --workspace-folder $WorkspaceFolder sh -c "test -d .worktrees/$wt && echo yes" 2>$null
+                    if ($exists -ne 'yes') {
+                        Write-Step "Creating worktree: $wt ($branch)..."
+                        devcontainer exec --workspace-folder $WorkspaceFolder git worktree add ".worktrees/$wt" $branch 2>$null
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Ok "Worktree ready: $wt ($branch)"
+                        }
+                        else {
+                            Write-Err "Failed to create worktree $wt — branch '$branch' may not exist on remote"
+                        }
+                    }
+                }
+            }
+
             Write-Ok 'Container is running.'
             Write-Host ''
             Write-Host '  Next steps:' -ForegroundColor Yellow
