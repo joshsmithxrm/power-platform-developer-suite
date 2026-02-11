@@ -107,7 +107,11 @@ switch ($Command) {
         $img = docker images -q $ImageName 2>$null
         if ($img) {
             Write-Step "Removing image $ImageName..."
-            docker rmi $ImageName | Out-Null
+            docker rmi $ImageName
+            if ($LASTEXITCODE -ne 0) {
+                Write-Err "Failed to remove image '$ImageName'. It may be in use. Aborting reset."
+                exit 1
+            }
         }
 
         # Full rebuild no cache
