@@ -1237,4 +1237,77 @@ public class ExpressionCompilerTests
         ((TimeSpan)result!).Minutes.Should().Be(30);
         ((TimeSpan)result!).Seconds.Should().Be(45);
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  BETWEEN / NOT BETWEEN (client-side)
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompilePredicate_Between_InRange()
+    {
+        var pred = ParsePredicate("5 BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CompilePredicate_Between_LowBound()
+    {
+        var pred = ParsePredicate("1 BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CompilePredicate_Between_HighBound()
+    {
+        var pred = ParsePredicate("10 BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CompilePredicate_Between_OutOfRange()
+    {
+        var pred = ParsePredicate("11 BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CompilePredicate_NotBetween_InRange()
+    {
+        var pred = ParsePredicate("5 NOT BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CompilePredicate_NotBetween_OutOfRange()
+    {
+        var pred = ParsePredicate("15 NOT BETWEEN 1 AND 10");
+        var compiled = _compiler.CompilePredicate(pred);
+        compiled(EmptyRow).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CompilePredicate_Between_WithColumn()
+    {
+        var pred = ParsePredicate("revenue BETWEEN 1000 AND 5000");
+        var compiled = _compiler.CompilePredicate(pred);
+
+        compiled(MakeRow(("revenue", 3000))).Should().BeTrue();
+        compiled(MakeRow(("revenue", 10000))).Should().BeFalse();
+        compiled(MakeRow(("revenue", (object?)null))).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CompilePredicate_Between_StringValues()
+    {
+        var pred = ParsePredicate("name BETWEEN 'A' AND 'M'");
+        var compiled = _compiler.CompilePredicate(pred);
+
+        compiled(MakeRow(("name", "Contoso"))).Should().BeTrue();
+        compiled(MakeRow(("name", "Zebra"))).Should().BeFalse();
+    }
 }

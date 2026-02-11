@@ -100,6 +100,7 @@ public sealed class ExpressionCompiler
             BooleanBinaryExpression boolBin => CompileBooleanBinary(boolBin),
             BooleanNotExpression notExpr => CompileBooleanNot(notExpr),
             BooleanParenthesisExpression parenExpr => CompilePredicate(parenExpr.Expression),
+            BooleanTernaryExpression between => CompileBetween(between),
             ExistsPredicate => throw new NotSupportedException(
                 "EXISTS predicates are handled at the plan level, not by the ExpressionCompiler."),
             _ => throw new NotSupportedException(
@@ -517,6 +518,31 @@ public sealed class ExpressionCompiler
     {
         var compiledInner = CompilePredicate(notExpr.Expression);
         return row => !compiledInner(row);
+    }
+
+    private CompiledPredicate CompileBetween(BooleanTernaryExpression between)
+    {
+        var compiledExpr = CompileScalar(between.FirstExpression);
+        var compiledLow = CompileScalar(between.SecondExpression);
+        var compiledHigh = CompileScalar(between.ThirdExpression);
+        var isNot = between.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween;
+
+        return row =>
+        {
+            var value = compiledExpr(row);
+            var low = compiledLow(row);
+            var high = compiledHigh(row);
+
+            // SQL semantics: BETWEEN with NULL returns false
+            if (value is null || low is null || high is null)
+                return false;
+
+            var cmpLow = CompareValues(value, low);
+            var cmpHigh = CompareValues(value, high);
+            var inRange = cmpLow >= 0 && cmpHigh <= 0;
+
+            return isNot ? !inRange : inRange;
+        };
     }
 
     // ═══════════════════════════════════════════════════════════════════
