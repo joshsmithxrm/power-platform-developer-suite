@@ -98,8 +98,6 @@ node -e "
 
 # --- Step 4: Restore .NET packages ---
 echo "=== Restoring .NET packages ==="
-# Fix ownership on NuGet volume (Docker creates volume mount points as root)
-sudo chown -R vscode:vscode "$HOME/.nuget"
 dotnet restore PPDS.sln
 
 echo "=== Setup complete ==="
