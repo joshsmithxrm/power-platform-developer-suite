@@ -209,8 +209,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     break;
 
                 case Key.CtrlMask | Key.Y:
-                    // Redo - pass through to TextView's built-in handler
-                    _queryInput.ProcessKey(new KeyEvent(Key.Y | Key.CtrlMask, new KeyModifiers { Ctrl = true }));
+                    // Ctrl+Y is emacs yank (paste) in Terminal.Gui — consume to prevent
+                    // accidental paste that conflicts with Ctrl+V paste handling.
+                    // True redo is not supported by Terminal.Gui's TextView.
                     e.Handled = true;
                     break;
             }
