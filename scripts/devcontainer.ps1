@@ -11,6 +11,8 @@
     .\scripts\devcontainer.ps1 shell query-engine-v3    # bash shell in worktree
     .\scripts\devcontainer.ps1 claude                   # claude code (prompts for worktree)
     .\scripts\devcontainer.ps1 claude query-engine-v3   # claude code in worktree
+    .\scripts\devcontainer.ps1 ppds                     # launch TUI (prompts for worktree, builds if needed)
+    .\scripts\devcontainer.ps1 ppds query-engine-v3     # launch TUI in worktree
     .\scripts\devcontainer.ps1 down                     # stop container
     .\scripts\devcontainer.ps1 sync                     # push local changes into the workspace volume
     .\scripts\devcontainer.ps1 reset                    # nuke everything, full clean rebuild
@@ -18,7 +20,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'shell', 'claude', 'down', 'status', 'sync', 'reset', 'help')]
+    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'sync', 'reset', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)]
@@ -177,6 +179,7 @@ switch ($Command) {
             Write-Host '  Next steps:' -ForegroundColor Yellow
             Write-Host '    .\scripts\devcontainer.ps1 shell     # bash shell'
             Write-Host '    .\scripts\devcontainer.ps1 claude    # claude code'
+            Write-Host '    .\scripts\devcontainer.ps1 ppds      # launch TUI'
             Write-Host ''
         }
         else { Write-Err 'Failed to start container.'; exit 1 }
@@ -202,6 +205,21 @@ switch ($Command) {
         else {
             devcontainer exec --workspace-folder $WorkspaceFolder claude --dangerously-skip-permissions
         }
+    }
+
+    'ppds' {
+        Ensure-ContainerRunning
+        $subdir = Select-WorkingDirectory -Target $Target
+        $workdir = if ($subdir) { $subdir } else { '.' }
+        Write-Step 'Building PPDS CLI...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && dotnet build src/PPDS.Cli -f net10.0"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Build failed.'
+            exit 1
+        }
+
+        Write-Step 'Launching TUI...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && PPDS_FORCE_TUI=1 dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll"
     }
 
     'down' {
@@ -278,6 +296,7 @@ switch ($Command) {
         Write-Host '    up                    Build + clone into volume + start'
         Write-Host '    shell [worktree]      Open bash shell (prompts for worktree if any exist)'
         Write-Host '    claude [worktree]     Start Claude Code (prompts for worktree if any exist)'
+        Write-Host '    ppds [worktree]       Launch PPDS TUI (builds if needed, prompts for worktree)'
         Write-Host '    down                  Stop the container'
         Write-Host '    status                Check if container is running'
         Write-Host '    sync                  Push local repo state into the workspace volume'
@@ -286,6 +305,8 @@ switch ($Command) {
         Write-Host '  Examples:' -ForegroundColor White
         Write-Host '    .\scripts\devcontainer.ps1 claude                   # prompts for location'
         Write-Host '    .\scripts\devcontainer.ps1 claude query-engine-v3   # straight to worktree'
+        Write-Host '    .\scripts\devcontainer.ps1 ppds                      # build + launch TUI'
+        Write-Host '    .\scripts\devcontainer.ps1 ppds query-engine-v3      # TUI from worktree'
         Write-Host '    .\scripts\devcontainer.ps1 shell main               # shell at repo root'
         Write-Host '    .\scripts\devcontainer.ps1 sync                     # push local changes to volume'
         Write-Host ''
