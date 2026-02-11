@@ -13,7 +13,8 @@
     "source=${localEnv:USERPROFILE}/.claude/skills,target=/home/vscode/.claude/skills,type=bind,readonly",
     "source=${localEnv:USERPROFILE}/.gitconfig,target=/tmp/host-gitconfig,type=bind,readonly",
     "source=ppds-nuget-cache,target=/home/vscode/.nuget,type=volume",
-    "source=ppds-auth-cache,target=/home/vscode/.ppds,type=volume"
+    "source=ppds-auth-cache,target=/home/vscode/.ppds,type=volume",
+    "source=ppds-claude-sessions,target=/home/vscode/.claude/projects,type=volume"
   ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
