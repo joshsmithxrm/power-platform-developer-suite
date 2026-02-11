@@ -11,14 +11,19 @@
     .\scripts\devcontainer.ps1 shell query-engine-v3    # bash shell in worktree
     .\scripts\devcontainer.ps1 claude                   # claude code (prompts for worktree)
     .\scripts\devcontainer.ps1 claude query-engine-v3   # claude code in worktree
+    .\scripts\devcontainer.ps1 ppds                     # launch TUI (prompts for worktree, builds if needed)
+    .\scripts\devcontainer.ps1 ppds query-engine-v3     # launch TUI in worktree
     .\scripts\devcontainer.ps1 down                     # stop container
-    .\scripts\devcontainer.ps1 sync                     # push local changes into the workspace volume
+    .\scripts\devcontainer.ps1 push                      # push container commits via host (prompts for worktree)
+    .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host
+    .\scripts\devcontainer.ps1 send                      # send host files to container (prompts for worktree)
+    .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container worktree
     .\scripts\devcontainer.ps1 reset                    # nuke everything, full clean rebuild
 #>
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'shell', 'claude', 'down', 'status', 'sync', 'reset', 'help')]
+    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'send', 'push', 'reset', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)]
@@ -29,6 +34,8 @@ $ErrorActionPreference = 'Stop'
 $WorkspaceFolder = Split-Path -Parent $PSScriptRoot
 $WorkspaceVolume = 'ppds-workspace'
 $NugetVolume = 'ppds-nuget-cache'
+$AuthVolume = 'ppds-auth-cache'
+$ClaudeSessionsVolume = 'ppds-claude-sessions'
 $PluginVolume = 'ppds-claude-plugins'
 $RepoUrl = 'https://github.com/joshsmithxrm/power-platform-developer-suite.git'
 
@@ -140,18 +147,36 @@ switch ($Command) {
     'up' {
         Ensure-WorkspaceVolume
 
-        # Ensure NuGet volume exists with correct ownership (Docker creates as root)
-        $nugetExists = docker volume ls -q --filter "name=^${NugetVolume}$"
-        if (-not $nugetExists) {
-            docker volume create $NugetVolume | Out-Null
+        # Ensure cache volumes exist with correct ownership (Docker creates as root)
+        foreach ($vol in @($NugetVolume, $AuthVolume, $ClaudeSessionsVolume)) {
+            $exists = docker volume ls -q --filter "name=^${vol}$"
+            if (-not $exists) {
+                docker volume create $vol | Out-Null
+            }
         }
-        docker run --rm -v "${NugetVolume}:/nuget" alpine chown -R 1000:1000 /nuget
+        docker run --rm -v "${NugetVolume}:/nuget" -v "${AuthVolume}:/auth" -v "${ClaudeSessionsVolume}:/sessions" alpine sh -c "chown -R 1000:1000 /nuget /auth /sessions"
 
         Write-Step 'Building and starting devcontainer...'
         devcontainer up --workspace-folder $WorkspaceFolder
         if ($LASTEXITCODE -eq 0) {
-            # Recreate worktrees from host into the volume
+            # Repair host worktrees — fix .git files that have container Linux paths
             $hostWtDir = Join-Path $WorkspaceFolder '.worktrees'
+            if (Test-Path $hostWtDir) {
+                $hostWorktrees = Get-ChildItem -Directory $hostWtDir | Select-Object -ExpandProperty Name
+                foreach ($wt in $hostWorktrees) {
+                    $wtGitFile = Join-Path $hostWtDir $wt '.git'
+                    if (Test-Path $wtGitFile) {
+                        $gitdir = (Get-Content $wtGitFile -Raw).Trim()
+                        if ($gitdir -match '^gitdir:\s*/workspaces/') {
+                            $correctPath = Join-Path $WorkspaceFolder ".git/worktrees/$wt"
+                            Write-Step "Repairing worktree '$wt' .git file (was container Linux path)..."
+                            Set-Content -Path $wtGitFile -Value "gitdir: $($correctPath -replace '\\','/')" -NoNewline
+                        }
+                    }
+                }
+            }
+
+            # Recreate worktrees from host into the volume
             if (Test-Path $hostWtDir) {
                 $hostWorktrees = Get-ChildItem -Directory $hostWtDir | Select-Object -ExpandProperty Name
                 foreach ($wt in $hostWorktrees) {
@@ -177,6 +202,7 @@ switch ($Command) {
             Write-Host '  Next steps:' -ForegroundColor Yellow
             Write-Host '    .\scripts\devcontainer.ps1 shell     # bash shell'
             Write-Host '    .\scripts\devcontainer.ps1 claude    # claude code'
+            Write-Host '    .\scripts\devcontainer.ps1 ppds      # launch TUI'
             Write-Host ''
         }
         else { Write-Err 'Failed to start container.'; exit 1 }
@@ -204,6 +230,21 @@ switch ($Command) {
         }
     }
 
+    'ppds' {
+        Ensure-ContainerRunning
+        $subdir = Select-WorkingDirectory -Target $Target
+        $workdir = if ($subdir) { $subdir } else { '.' }
+        Write-Step 'Building PPDS CLI...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && dotnet build src/PPDS.Cli -f net10.0"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Build failed.'
+            exit 1
+        }
+
+        Write-Step 'Launching TUI...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && PPDS_FORCE_TUI=1 dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll"
+    }
+
     'down' {
         Stop-Container
         Write-Ok 'Container stopped.'
@@ -220,21 +261,122 @@ switch ($Command) {
         }
     }
 
-    'sync' {
-        # Push current local branch state into the workspace volume
-        $branch = git -C $WorkspaceFolder branch --show-current
-        Write-Step "Syncing local repo into volume (branch: $branch)..."
-        $volExists = docker volume ls -q --filter "name=^${WorkspaceVolume}$"
-        if (-not $volExists) {
-            Write-Err "Workspace volume does not exist. Run 'up' first."
+    'push' {
+        # Push container commits to origin via the host (container has no git credentials)
+        Ensure-ContainerRunning
+        $subdir = Select-WorkingDirectory -Target $Target
+        $workdir = if ($subdir) { $subdir } else { '.' }
+
+        # Get branch name and local HEAD SHA from container
+        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git branch --show-current").Trim()
+        if (-not $branch) {
+            Write-Err "Could not determine branch (detached HEAD?)."
             exit 1
         }
+        $localSha = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-parse HEAD").Trim()
+
+        # Compare against actual remote state (not local tracking refs which may be stale)
+        $remoteSha = (git -C $WorkspaceFolder ls-remote origin "refs/heads/${branch}" 2>$null)
+        if ($remoteSha) { $remoteSha = ($remoteSha -split '\s')[0] }
+
+        if ($localSha -eq $remoteSha) {
+            Write-Ok "Branch '$branch' is already up-to-date on origin."
+            return
+        }
+
+        if (-not $remoteSha) {
+            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-list --count HEAD").Trim()
+            Write-Step "New branch '$branch' ($ahead commit(s))."
+        }
+        else {
+            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-list --count $remoteSha..HEAD 2>/dev/null").Trim()
+            if (-not $ahead -or $ahead -eq '0') {
+                Write-Ok "Branch '$branch' is already up-to-date on origin."
+                return
+            }
+            Write-Step "Branch '$branch' is $ahead commit(s) ahead of origin."
+        }
+
+        # Create git bundle in container
+        Write-Step 'Bundling commits...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git bundle create /tmp/push.bundle $branch" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Failed to create git bundle.'
+            exit 1
+        }
+
+        # Copy bundle from container to host
+        $containerId = (docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder").Trim()
+        $tempBundle = Join-Path $env:TEMP 'ppds-push.bundle'
+        docker cp "${containerId}:/tmp/push.bundle" $tempBundle | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Failed to copy bundle from container.'
+            exit 1
+        }
+
+        # Fetch objects from bundle into host repo (sets FETCH_HEAD, doesn't touch working tree)
+        Write-Step 'Fetching into host repo...'
+        git -C $WorkspaceFolder fetch $tempBundle "refs/heads/${branch}"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Failed to fetch from bundle.'
+            Remove-Item $tempBundle -ErrorAction SilentlyContinue
+            exit 1
+        }
+
+        # Push from host using FETCH_HEAD (host has git credentials)
+        Write-Step 'Pushing to origin...'
+        git -C $WorkspaceFolder push origin "FETCH_HEAD:refs/heads/${branch}"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'Push failed. You may need to pull/rebase first.'
+            Remove-Item $tempBundle -ErrorAction SilentlyContinue
+            exit 1
+        }
+
+        # Clean up
+        Remove-Item $tempBundle -ErrorAction SilentlyContinue
+        devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/push.bundle
+
+        # Update container's remote tracking ref so git status shows up-to-date
+        Write-Step 'Updating container remote refs...'
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git fetch origin $branch 2>/dev/null || git update-ref refs/remotes/origin/$branch HEAD"
+
+        Write-Ok "Pushed '$branch' to origin ($ahead commit(s))."
+    }
+
+    'send' {
+        # Sync host working tree into the container volume (preserves .git and .worktrees)
+        Ensure-ContainerRunning
+        $subdir = Select-WorkingDirectory -Target $Target
+
+        if ($subdir) {
+            $wtName = $subdir -replace '^\.worktrees/', ''
+            $hostPath = Join-Path $WorkspaceFolder ".worktrees\$wtName"
+            $containerTarget = ".worktrees/$wtName"
+            $label = "worktree '$wtName'"
+            $excludes = "--exclude='.git'"
+        }
+        else {
+            $hostPath = $WorkspaceFolder
+            $containerTarget = '.'
+            $label = 'main repo'
+            $excludes = "--exclude='.git/' --exclude='.worktrees/'"
+        }
+
+        if (-not (Test-Path $hostPath)) {
+            Write-Err "Host path not found: $hostPath"
+            exit 1
+        }
+
+        $branch = git -C $hostPath branch --show-current 2>$null
+        if (-not $branch) { $branch = 'unknown' }
+        Write-Step "Syncing $label to container ($branch)..."
+
         docker run --rm `
             -v "${WorkspaceVolume}:/workspace" `
-            -v "${WorkspaceFolder}:/source:ro" `
-            alpine sh -c "cd /workspace && find . -mindepth 1 -delete; cp -a /source/. ."
+            -v "${hostPath}:/source:ro" `
+            alpine sh -c "apk add --no-cache rsync >/dev/null 2>&1 && rsync -a --delete $excludes /source/ /workspace/${containerTarget}/ && chown -R 1000:1000 /workspace/${containerTarget}/"
         if ($LASTEXITCODE -eq 0) {
-            Write-Ok "Volume synced to local state ($branch)."
+            Write-Ok "Synced $label to container ($branch)."
         }
         else { Write-Err 'Sync failed.'; exit 1 }
     }
@@ -246,7 +388,7 @@ switch ($Command) {
         Stop-Container
 
         # Remove all named volumes
-        foreach ($vol in @($WorkspaceVolume, $NugetVolume, $PluginVolume)) {
+        foreach ($vol in @($WorkspaceVolume, $NugetVolume, $AuthVolume, $ClaudeSessionsVolume, $PluginVolume)) {
             $exists = docker volume ls -q --filter "name=^${vol}$"
             if ($exists) {
                 Write-Step "Removing volume $vol..."
@@ -278,16 +420,21 @@ switch ($Command) {
         Write-Host '    up                    Build + clone into volume + start'
         Write-Host '    shell [worktree]      Open bash shell (prompts for worktree if any exist)'
         Write-Host '    claude [worktree]     Start Claude Code (prompts for worktree if any exist)'
+        Write-Host '    ppds [worktree]       Launch PPDS TUI (builds if needed, prompts for worktree)'
         Write-Host '    down                  Stop the container'
         Write-Host '    status                Check if container is running'
-        Write-Host '    sync                  Push local repo state into the workspace volume'
+        Write-Host '    push [worktree]       Push container commits to origin via host credentials'
+        Write-Host '    send [worktree]       Send host files to container (preserves .git state)'
         Write-Host '    reset                 Nuke container + all volumes + rebuild from scratch'
         Write-Host ''
         Write-Host '  Examples:' -ForegroundColor White
         Write-Host '    .\scripts\devcontainer.ps1 claude                   # prompts for location'
         Write-Host '    .\scripts\devcontainer.ps1 claude query-engine-v3   # straight to worktree'
+        Write-Host '    .\scripts\devcontainer.ps1 ppds                      # build + launch TUI'
+        Write-Host '    .\scripts\devcontainer.ps1 ppds query-engine-v3      # TUI from worktree'
         Write-Host '    .\scripts\devcontainer.ps1 shell main               # shell at repo root'
-        Write-Host '    .\scripts\devcontainer.ps1 sync                     # push local changes to volume'
+        Write-Host '    .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host'
+        Write-Host '    .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container'
         Write-Host ''
     }
 }

@@ -73,7 +73,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     {
         new MenuBarItem("_Query", new MenuItem[]
         {
-            new("Execute", "Ctrl+Enter", () => _ = ExecuteQueryAsync()),
+            new("Execute", "F5", () => _ = ExecuteQueryAsync()),
             new("Show FetchXML", "Ctrl+Shift+F", ShowFetchXmlDialog),
             new("History", "Ctrl+Shift+H", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
@@ -92,7 +92,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _deviceCodeCallback = deviceCodeCallback;
 
         // Query input area
-        _queryFrame = new FrameView("Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
+        _queryFrame = new FrameView("Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)")
         {
             X = 0,
             Y = 0,
@@ -266,11 +266,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         // The table's built-in selection highlighting is sufficient
         _queryFrame.Enter += (_) =>
         {
-            _queryFrame.Title = "\u25b6 Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
+            _queryFrame.Title = "\u25b6 Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
         };
         _queryFrame.Leave += (_) =>
         {
-            _queryFrame.Title = "Query (Ctrl+Enter to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
+            _queryFrame.Title = "Query (F5 to execute, Ctrl+Space for suggestions, Alt+\u2191\u2193 to resize, F6 to toggle focus)";
         };
         _resultsTable.Enter += (_) =>
         {
@@ -322,7 +322,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             else
                 _queryInput.SetFocus();
         });
-        RegisterHotkey(registry, Key.CtrlMask | Key.Enter, "Execute query", () => _ = ExecuteQueryAsync());
+        RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
     }
 

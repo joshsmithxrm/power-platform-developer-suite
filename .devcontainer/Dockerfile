@@ -34,6 +34,11 @@ RUN (type -p wget >/dev/null || apt-get install -y --no-install-recommends wget)
     && apt-get update \
     && apt-get install -y --no-install-recommends gh
 
+# Configure UTF-8 locale (required for Terminal.Gui box-drawing characters)
+RUN apt-get update && apt-get install -y --no-install-recommends locales \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen
+
 # Clean up apt cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -42,5 +47,7 @@ USER vscode
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 
-# Set terminal for TUI support (Terminal.Gui)
+# Set terminal and locale for TUI support (Terminal.Gui)
 ENV TERM=xterm-256color
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
