@@ -61,6 +61,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private string? _lastPagingCookie;
     private int _lastPageNumber = 1;
     private bool _isExecuting;
+    private CancellationTokenSource? _queryCts;
     private string _statusText = "Ready";
     private string? _lastErrorMessage;
     private QueryPlanDescription? _lastExecutionPlan;
@@ -121,6 +122,15 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             switch (e.KeyEvent.Key)
             {
+                case Key.Esc:
+                    if (_isExecuting && _queryCts is { } cts)
+                    {
+                        cts.Cancel();
+                        _statusSpinner!.Message = "Cancelling...";
+                        e.Handled = true;
+                    }
+                    break;
+
                 case Key.CtrlMask | Key.A:
                     // Select all text
                     var text = _queryInput.Text?.ToString() ?? string.Empty;
@@ -473,12 +483,18 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
         TuiDebugLog.Log($"Starting streaming query execution for: {EnvironmentUrl}");
 
+        // Create/reset query-level cancellation
+        _queryCts?.Cancel();
+        _queryCts?.Dispose();
+        _queryCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
+        var queryCt = _queryCts.Token;
+
         _isExecuting = true;
         _lastErrorMessage = null;
 
         // Show spinner, hide status label
         _statusLabel.Visible = false;
-        _statusSpinner.Start("Executing query...");
+        _statusSpinner.Start("Executing query... (press Escape to cancel)");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var streamingStarted = false;
@@ -488,7 +504,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             if (!_isExecuting) return false;
             if (!streamingStarted)
-                _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s";
+                _statusSpinner.Message = $"Executing query... {stopwatch.Elapsed.TotalSeconds:F0}s (press Escape to cancel)";
             return true;
         });
 
@@ -498,7 +514,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             TuiDebugLog.Log($"Getting SQL query service for URL: {EnvironmentUrl}");
 
-            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, ScreenCancellation);
+            var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
 
             var request = new SqlQueryRequest
@@ -513,7 +529,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             var totalRows = 0;
             var isFirstChunk = true;
 
-            await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, ScreenCancellation))
+            await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, queryCt))
             {
                 // Capture column metadata from first chunk
                 if (isFirstChunk && chunk.Columns != null)
@@ -648,6 +664,14 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 _statusLabel.Text = _statusText;
                 _isExecuting = false;
             }
+        }
+        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !ScreenCancellation.IsCancellationRequested)
+        {
+            // Query was cancelled by user (Escape), not by screen closing
+            _statusSpinner.Stop();
+            _statusLabel.Text = "Query cancelled.";
+            _statusLabel.Visible = true;
+            _isExecuting = false;
         }
         catch (Exception ex)
         {
@@ -1063,5 +1087,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
 
     protected override void OnDispose()
     {
+        _queryCts?.Cancel();
+        _queryCts?.Dispose();
     }
 }
