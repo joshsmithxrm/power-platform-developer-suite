@@ -309,8 +309,10 @@ public sealed class FetchXmlGenerator
     {
         QualifiedJoinType.Inner => "inner",
         QualifiedJoinType.LeftOuter => "outer",
-        QualifiedJoinType.RightOuter => "outer",
-        QualifiedJoinType.FullOuter => "outer",
+        QualifiedJoinType.RightOuter => throw new NotSupportedException(
+            "RIGHT JOIN cannot be transpiled to FetchXML. Use client-side join execution."),
+        QualifiedJoinType.FullOuter => throw new NotSupportedException(
+            "FULL OUTER JOIN cannot be transpiled to FetchXML. Use client-side join execution."),
         _ => "inner"
     };
 

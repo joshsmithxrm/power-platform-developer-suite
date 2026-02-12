@@ -461,4 +461,26 @@ public class FetchXmlGeneratorTests
 
         fetchXml.Should().Contain("operator=\"le\"");
     }
+
+    // ────────────────────────────────────────────
+    //  JOIN type rejection: RIGHT and FULL OUTER
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Generate_RightJoin_ThrowsNotSupportedException()
+    {
+        var sql = "SELECT a.name, c.fullname FROM account a RIGHT JOIN contact c ON a.accountid = c.parentcustomerid";
+        var act = () => GenerateFetchXml(sql);
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*RIGHT*client-side*");
+    }
+
+    [Fact]
+    public void Generate_FullOuterJoin_ThrowsNotSupportedException()
+    {
+        var sql = "SELECT a.name, c.fullname FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var act = () => GenerateFetchXml(sql);
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*FULL OUTER*client-side*");
+    }
 }
