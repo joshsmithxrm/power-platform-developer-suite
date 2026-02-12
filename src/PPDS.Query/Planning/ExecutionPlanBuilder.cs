@@ -338,6 +338,14 @@ public sealed class ExecutionPlanBuilder
             _ => JoinType.Inner
         };
 
+        // RIGHT JOIN optimization: swap children and convert to LEFT JOIN
+        if (joinType == JoinType.Right)
+        {
+            (leftResult, rightResult) = (rightResult, leftResult);
+            (leftCol, rightCol) = (rightCol, leftCol);
+            joinType = JoinType.Left;
+        }
+
         // Use HashJoin for best general-purpose performance on unsorted data
         var joinNode = new HashJoinNode(
             leftResult.node, rightResult.node,
