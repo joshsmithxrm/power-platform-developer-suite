@@ -246,15 +246,16 @@ public class ExecutionPlanBuilderTests
     }
 
     [Fact]
-    public void Plan_WhereInSubquery_ThrowsQueryParseException()
+    public void Plan_WhereInSubquery_ProducesPlan()
     {
         var fragment = _parser.Parse(
             "SELECT name FROM account WHERE accountid IN (SELECT parentcustomerid FROM contact)");
 
-        var act = () => _builder.Plan(fragment);
+        var result = _builder.Plan(fragment);
 
-        act.Should().Throw<QueryParseException>()
-            .WithMessage("*IN (SELECT*");
+        result.RootNode.Should().NotBeNull();
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "IN (subquery) should now produce a HashSemiJoinNode instead of throwing");
     }
 
     // ────────────────────────────────────────────
@@ -646,6 +647,46 @@ public class ExecutionPlanBuilderTests
         var result = _builder.Plan(fragment);
 
         result.RootNode.Should().NotBeNull();
+    }
+
+    // ────────────────────────────────────────────
+    //  IN (subquery) / NOT IN (subquery)
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereInSubquery_ProducesHashSemiJoin()
+    {
+        var sql = "SELECT name FROM account WHERE accountid IN (SELECT parentcustomerid FROM contact WHERE statecode = 0)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "a WHERE ... IN (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereNotInSubquery_ProducesHashSemiJoin()
+    {
+        var sql = "SELECT name FROM account WHERE accountid NOT IN (SELECT parentcustomerid FROM contact)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "a WHERE ... NOT IN (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereInSubquery_WithAdditionalWhereCondition()
+    {
+        var sql = "SELECT name FROM account WHERE statecode = 0 AND accountid IN (SELECT parentcustomerid FROM contact)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "IN (subquery) combined with other WHERE conditions should still produce a HashSemiJoinNode");
     }
 
     // ────────────────────────────────────────────
