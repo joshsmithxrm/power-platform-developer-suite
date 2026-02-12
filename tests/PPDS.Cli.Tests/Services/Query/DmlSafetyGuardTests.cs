@@ -625,4 +625,55 @@ public class DmlSafetyGuardTests
     }
 
     #endregion
+
+    // ── End-to-End Safety Policy ─────────────────────────────────────
+
+    #region End-to-End Safety Policy Tests
+
+    [Theory]
+    [InlineData("DELETE FROM account", ProtectionLevel.Production, true, false)]
+    [InlineData("DELETE FROM account", ProtectionLevel.Development, true, false)]
+    [InlineData("DELETE FROM account WHERE x = 1", ProtectionLevel.Production, false, true)]
+    [InlineData("DELETE FROM account WHERE x = 1", ProtectionLevel.Test, false, true)]
+    [InlineData("UPDATE account SET name = 'x'", ProtectionLevel.Production, true, false)]
+    [InlineData("INSERT INTO account (name) VALUES ('x')", ProtectionLevel.Production, false, true)]
+    public void Check_ProtectionLevel_EnforcesCorrectPolicy(
+        string sql, ProtectionLevel level, bool expectBlocked, bool expectConfirmation)
+    {
+        var result = _guard.Check(Parse(sql), new DmlSafetyOptions(), protectionLevel: level);
+
+        Assert.Equal(expectBlocked, result.IsBlocked);
+        if (!expectBlocked)
+            Assert.Equal(expectConfirmation, result.RequiresConfirmation);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM account WHERE x = 1", ProtectionLevel.Production, true)]
+    [InlineData("DELETE FROM account WHERE x = 1", ProtectionLevel.Test, false)]
+    [InlineData("UPDATE account SET name = 'x' WHERE accountid = '123'", ProtectionLevel.Production, true)]
+    [InlineData("INSERT INTO account (name) VALUES ('x')", ProtectionLevel.Production, true)]
+    public void Check_ProtectionLevel_PreviewRequirement(
+        string sql, ProtectionLevel level, bool expectPreview)
+    {
+        var result = _guard.Check(Parse(sql), new DmlSafetyOptions(), protectionLevel: level);
+
+        Assert.Equal(expectPreview, result.RequiresPreview);
+    }
+
+    [Fact]
+    public void Check_ConfigurableSettings_WithProtectionLevel_Combined()
+    {
+        // Development + disabled prevention = allow DELETE without WHERE (with confirmation)
+        var settings = new QuerySafetySettings { PreventDeleteWithoutWhere = false };
+        var result = _guard.Check(
+            Parse("DELETE FROM account"),
+            new DmlSafetyOptions(),
+            settings,
+            ProtectionLevel.Development);
+
+        Assert.False(result.IsBlocked);
+        Assert.True(result.RequiresConfirmation);
+    }
+
+    #endregion
 }
