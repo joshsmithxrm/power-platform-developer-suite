@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Moq;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
@@ -732,6 +733,58 @@ public class ExecutionPlanBuilderTests
 
         act.Should().Throw<QueryParseException>()
             .WithMessage("*correlation*");
+    }
+
+    // ────────────────────────────────────────────
+    //  Cross-environment query planning
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_CrossEnvironment_ProducesRemoteScanNode()
+    {
+        var sql = "SELECT name FROM [UAT].dbo.account";
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => label == "UAT" ? mockRemoteExecutor : null
+        };
+
+        var result = _builder.Plan(_parser.Parse(sql), options);
+
+        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+            "cross-environment [UAT].dbo.account should produce RemoteScanNode");
+        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+            "remote scan should be wrapped in TableSpoolNode for materialization");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_CrossEnvironment_UnknownLabel_ThrowsDescriptiveError()
+    {
+        var sql = "SELECT name FROM [STAGING].dbo.account";
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => null  // No matching profile
+        };
+
+        var act = () => _builder.Plan(_parser.Parse(sql), options);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*STAGING*");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_CrossEnvironment_NoFactory_ThrowsDescriptiveError()
+    {
+        var sql = "SELECT name FROM [UAT].dbo.account";
+        var options = new QueryPlanOptions();  // No RemoteExecutorFactory
+
+        var act = () => _builder.Plan(_parser.Parse(sql), options);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*remote executor factory*");
     }
 
     // ────────────────────────────────────────────

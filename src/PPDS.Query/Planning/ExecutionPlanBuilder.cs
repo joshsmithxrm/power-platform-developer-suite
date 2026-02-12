@@ -182,6 +182,13 @@ public sealed class ExecutionPlanBuilder
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
 
+        // Cross-environment references ([LABEL].dbo.entity) cannot be transpiled to FetchXML —
+        // route to client-side planning which resolves the remote executor via PlanTableReference.
+        if (ContainsCrossEnvironmentReference(querySpec.FromClause))
+        {
+            return PlanClientSideJoin(selectStmt, querySpec, options);
+        }
+
         // EXISTS / NOT EXISTS — route to client-side semi-join
         if (querySpec.WhereClause?.SearchCondition != null
             && ContainsExistsPredicate(querySpec.WhereClause.SearchCondition))
@@ -799,6 +806,17 @@ public sealed class ExecutionPlanBuilder
 
         if (tableRef is NamedTableReference named)
         {
+            // Cross-environment reference: ScriptDom parses [LABEL].dbo.entity as a 3-part name
+            // with DatabaseIdentifier="LABEL", or [SERVER].[DB].dbo.entity as 4-part with
+            // ServerIdentifier="SERVER". Either indicates a cross-environment reference.
+            var profileLabel = named.SchemaObject.ServerIdentifier?.Value
+                ?? named.SchemaObject.DatabaseIdentifier?.Value;
+
+            if (profileLabel != null)
+            {
+                return PlanRemoteTableReference(named, profileLabel, options);
+            }
+
             var entityName = GetMultiPartName(named.SchemaObject);
             var fetchXml = $"<fetch><entity name=\"{entityName}\"><all-attributes /></entity></fetch>";
             var scanNode = new FetchXmlScanNode(fetchXml, entityName);
@@ -806,6 +824,33 @@ public sealed class ExecutionPlanBuilder
         }
 
         throw new QueryParseException($"Unsupported table reference type in client-side join: {tableRef.GetType().Name}");
+    }
+
+    /// <summary>
+    /// Plans a cross-environment table reference ([LABEL].entity).
+    /// Resolves the profile label, creates a RemoteScanNode for FetchXML execution
+    /// against the remote environment, and wraps it in a TableSpoolNode for materialization.
+    /// </summary>
+    private static (IQueryPlanNode node, string entityName) PlanRemoteTableReference(
+        NamedTableReference named,
+        string profileLabel,
+        QueryPlanOptions options)
+    {
+        if (options.RemoteExecutorFactory == null)
+            throw new QueryParseException(
+                $"Cross-environment query references '[{profileLabel}]' but no remote executor factory is configured.");
+
+        var remoteExecutor = options.RemoteExecutorFactory(profileLabel)
+            ?? throw new QueryParseException(
+                $"No environment found matching label '{profileLabel}'. Configure a profile with label '{profileLabel}' to use cross-environment queries.");
+
+        var entityName = named.SchemaObject.BaseIdentifier.Value;
+        var fetchXml = $"<fetch><entity name=\"{entityName}\"><all-attributes /></entity></fetch>";
+
+        var remoteScan = new RemoteScanNode(fetchXml, entityName, profileLabel, remoteExecutor);
+        var spool = new TableSpoolNode(remoteScan);
+
+        return (spool, entityName);
     }
 
     /// <summary>
@@ -908,6 +953,35 @@ public sealed class ExecutionPlanBuilder
         if (tableRef is UnqualifiedJoin unqualified)
             return ContainsDerivedTableInTableRef(unqualified.FirstTableReference)
                 || ContainsDerivedTableInTableRef(unqualified.SecondTableReference);
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a FROM clause contains any cross-environment reference
+    /// (bracket-delimited server identifier, e.g. <c>[UAT].dbo.account</c>) at any nesting level.
+    /// </summary>
+    private static bool ContainsCrossEnvironmentReference(FromClause? fromClause)
+    {
+        if (fromClause == null) return false;
+        foreach (var tableRef in fromClause.TableReferences)
+        {
+            if (ContainsCrossEnvironmentReferenceInTableRef(tableRef))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool ContainsCrossEnvironmentReferenceInTableRef(TableReference tableRef)
+    {
+        if (tableRef is NamedTableReference named
+            && (named.SchemaObject.ServerIdentifier != null || named.SchemaObject.DatabaseIdentifier != null))
+            return true;
+        if (tableRef is QualifiedJoin qualified)
+            return ContainsCrossEnvironmentReferenceInTableRef(qualified.FirstTableReference)
+                || ContainsCrossEnvironmentReferenceInTableRef(qualified.SecondTableReference);
+        if (tableRef is UnqualifiedJoin unqualified)
+            return ContainsCrossEnvironmentReferenceInTableRef(unqualified.FirstTableReference)
+                || ContainsCrossEnvironmentReferenceInTableRef(unqualified.SecondTableReference);
         return false;
     }
 

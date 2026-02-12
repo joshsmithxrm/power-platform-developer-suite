@@ -92,4 +92,12 @@ public sealed class QueryPlanOptions
 
     /// <summary>Number of rows to buffer ahead for prefetch. Default 5000 (~3 FetchXML pages).</summary>
     public int PrefetchBufferSize { get; init; } = 5000;
+
+    /// <summary>
+    /// Factory for creating IQueryExecutor instances for remote environments.
+    /// Takes a profile label (e.g., "UAT"), returns an IQueryExecutor for that environment,
+    /// or null if the label is not found.
+    /// Combines profile resolution and executor creation. Set by the caller.
+    /// </summary>
+    public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; init; }
 }
