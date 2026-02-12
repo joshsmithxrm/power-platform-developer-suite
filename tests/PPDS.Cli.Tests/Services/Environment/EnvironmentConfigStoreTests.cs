@@ -150,6 +150,44 @@ public class EnvironmentConfigStoreTests : IDisposable
         Assert.Equal(EnvironmentColor.Green, result.Color);
     }
 
+    [Fact]
+    public async Task SafetySettings_RoundTrips()
+    {
+        var config = await _store.SaveConfigAsync(
+            "https://test.crm.dynamics.com",
+            label: "TEST",
+            type: "Sandbox");
+
+        config.SafetySettings = new QuerySafetySettings
+        {
+            WarnInsertThreshold = 10,
+            WarnUpdateThreshold = 0,
+            WarnDeleteThreshold = 0,
+            PreventUpdateWithoutWhere = true,
+            PreventDeleteWithoutWhere = true,
+            DmlBatchSize = 200,
+            MaxResultRows = 50000,
+            QueryTimeoutSeconds = 120,
+            UseTdsEndpoint = false,
+            BypassCustomPlugins = BypassPluginMode.None,
+            BypassPowerAutomateFlows = false
+        };
+
+        // Save the collection (config is stored by reference)
+        await _store.SaveAsync(await _store.LoadAsync());
+
+        // Reload from disk via fresh store
+        using var store2 = new EnvironmentConfigStore(Path.Combine(_tempDir, "environments.json"));
+        var reloaded = await store2.GetConfigAsync("https://test.crm.dynamics.com");
+
+        Assert.NotNull(reloaded);
+        Assert.NotNull(reloaded!.SafetySettings);
+        Assert.Equal(10, reloaded.SafetySettings!.WarnInsertThreshold);
+        Assert.Equal(200, reloaded.SafetySettings.DmlBatchSize);
+        Assert.True(reloaded.SafetySettings.PreventDeleteWithoutWhere);
+        Assert.Equal(BypassPluginMode.None, reloaded.SafetySettings.BypassCustomPlugins);
+    }
+
     public void Dispose()
     {
         _store.Dispose();

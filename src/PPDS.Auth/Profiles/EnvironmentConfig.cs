@@ -37,6 +37,13 @@ public sealed class EnvironmentConfig
     public EnvironmentColor? Color { get; set; }
 
     /// <summary>
+    /// Per-environment query safety settings (DML thresholds, execution options).
+    /// Null means use defaults for all settings.
+    /// </summary>
+    [JsonPropertyName("safety_settings")]
+    public QuerySafetySettings? SafetySettings { get; set; }
+
+    /// <summary>
     /// Normalizes a URL for use as a lookup key (lowercase, ensures trailing slash).
     /// </summary>
     public static string NormalizeUrl(string url)
