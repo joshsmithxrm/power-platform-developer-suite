@@ -18,5 +18,11 @@ public enum JoinType
     FullOuter,
 
     /// <summary>CROSS JOIN: Cartesian product of both sides (no predicate).</summary>
-    Cross
+    Cross,
+
+    /// <summary>CROSS APPLY: inner side re-evaluated per outer row, only matching rows.</summary>
+    CrossApply,
+
+    /// <summary>OUTER APPLY: inner side re-evaluated per outer row, nulls when inner is empty.</summary>
+    OuterApply
 }

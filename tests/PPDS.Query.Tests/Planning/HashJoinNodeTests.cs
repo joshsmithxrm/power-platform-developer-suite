@@ -189,4 +189,56 @@ public class HashJoinNodeTests
         var act = () => new HashJoinNode(left, null!, "id", "fk");
         act.Should().Throw<ArgumentNullException>();
     }
+
+    // ────────────────────────────────────────────
+    //  RIGHT JOIN: all right rows preserved
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task RightJoin_PreservesAllBuildSideRows()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "Contoso")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("aid", 1), ("val", "X")),
+            TestSourceNode.MakeRow("b", ("aid", 99), ("val", "Y")));
+
+        var join = new HashJoinNode(left, right, "id", "aid", JoinType.Right);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        rows.Should().HaveCount(2);
+        var matched = rows.Single(r => "X".Equals(r.Values["val"].Value));
+        matched.Values["name"].Value.Should().Be("Contoso");
+        var unmatched = rows.Single(r => "Y".Equals(r.Values["val"].Value));
+        unmatched.Values["name"].Value.Should().BeNull();
+    }
+
+    // ────────────────────────────────────────────
+    //  FULL OUTER JOIN: all rows preserved
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task FullOuterJoin_PreservesAllRows()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "Contoso")),
+            TestSourceNode.MakeRow("a", ("id", 2), ("name", "Fabrikam")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("aid", 1), ("val", "X")),
+            TestSourceNode.MakeRow("b", ("aid", 3), ("val", "Z")));
+
+        var join = new HashJoinNode(left, right, "id", "aid", JoinType.FullOuter);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        rows.Should().HaveCount(3);
+        // Matched: Contoso + X
+        var matched = rows.Single(r => "Contoso".Equals(r.Values["name"].Value));
+        matched.Values["val"].Value.Should().Be("X");
+        // Unmatched left: Fabrikam + null
+        var unmatchedLeft = rows.Single(r => "Fabrikam".Equals(r.Values["name"].Value));
+        unmatchedLeft.Values["val"].Value.Should().BeNull();
+        // Unmatched right: null + Z
+        var unmatchedRight = rows.Single(r => "Z".Equals(r.Values["val"].Value));
+        unmatchedRight.Values["name"].Value.Should().BeNull();
+    }
 }

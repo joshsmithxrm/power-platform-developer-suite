@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
@@ -11,12 +12,14 @@ namespace PPDS.Query.Planning.Nodes;
 /// <summary>
 /// Nested loop join: for each outer row, scans all inner rows and emits matches.
 /// Suitable for small inner sets or when no equijoin condition is available.
+/// Also supports CROSS APPLY/OUTER APPLY via a correlated inner factory.
 /// O(n * m) complexity but no additional memory overhead beyond materializing the inner side.
 /// </summary>
 public sealed class NestedLoopJoinNode : IQueryPlanNode
 {
     private readonly IQueryPlanNode _left;
-    private readonly IQueryPlanNode _right;
+    private readonly IQueryPlanNode? _right;
+    private readonly Func<QueryRow, IEnumerable<QueryRow>>? _correlatedInnerFactory;
 
     /// <summary>The left (outer) join key column name.</summary>
     public string? LeftKeyColumn { get; }
@@ -28,24 +31,31 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
     public JoinType JoinType { get; }
 
     /// <inheritdoc />
-    public string Description => JoinType == JoinType.Cross
-        ? "NestedLoopJoin: CROSS JOIN"
-        : $"NestedLoopJoin: {JoinType} ON {LeftKeyColumn} = {RightKeyColumn}";
+    public string Description => JoinType switch
+    {
+        JoinType.Cross => "NestedLoopJoin: CROSS JOIN",
+        JoinType.CrossApply => "NestedLoopJoin: CROSS APPLY",
+        JoinType.OuterApply => "NestedLoopJoin: OUTER APPLY",
+        _ => $"NestedLoopJoin: {JoinType} ON {LeftKeyColumn} = {RightKeyColumn}"
+    };
 
     /// <inheritdoc />
     public long EstimatedRows
     {
         get
         {
+            if (_correlatedInnerFactory != null) return -1; // Cannot estimate for correlated
             var l = _left.EstimatedRows;
-            var r = _right.EstimatedRows;
+            var r = _right!.EstimatedRows;
             if (l < 0 || r < 0) return -1;
             return JoinType is JoinType.Left or JoinType.FullOuter ? l : l * r;
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<IQueryPlanNode> Children => new[] { _left, _right };
+    public IReadOnlyList<IQueryPlanNode> Children => _right != null
+        ? new[] { _left, _right }
+        : new[] { _left };
 
     /// <summary>Initializes a new instance of the <see cref="NestedLoopJoinNode"/> class.</summary>
     /// <param name="left">The outer (driving) input node.</param>
@@ -76,15 +86,62 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
         }
     }
 
+    /// <summary>
+    /// Creates a correlated (APPLY) nested loop join.
+    /// The inner factory is invoked per outer row to produce the correlated inner rows.
+    /// </summary>
+    public NestedLoopJoinNode(
+        IQueryPlanNode left,
+        Func<QueryRow, IEnumerable<QueryRow>> correlatedInnerFactory,
+        JoinType joinType)
+    {
+        _left = left ?? throw new ArgumentNullException(nameof(left));
+        _correlatedInnerFactory = correlatedInnerFactory ?? throw new ArgumentNullException(nameof(correlatedInnerFactory));
+        _right = null;
+        LeftKeyColumn = null;
+        RightKeyColumn = null;
+        JoinType = joinType;
+
+        if (joinType is not (JoinType.CrossApply or JoinType.OuterApply))
+            throw new ArgumentException("Correlated constructor requires CrossApply or OuterApply join type.");
+    }
+
     /// <inheritdoc />
     public async IAsyncEnumerable<QueryRow> ExecuteAsync(
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        // APPLY mode: correlated inner evaluation per outer row
+        if (_correlatedInnerFactory != null)
+        {
+            QueryRow? innerTemplate = null;
+
+            await foreach (var outerRow in _left.ExecuteAsync(context, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var correlatedRows = _correlatedInnerFactory(outerRow).ToList();
+
+                if (correlatedRows.Count > 0)
+                {
+                    innerTemplate ??= correlatedRows[0];
+                    foreach (var innerRow in correlatedRows)
+                    {
+                        yield return CombineRows(outerRow, innerRow);
+                    }
+                }
+                else if (JoinType == JoinType.OuterApply)
+                {
+                    // Emit outer row with nulls for inner columns
+                    yield return CombineWithNulls(outerRow, innerTemplate);
+                }
+            }
+            yield break;
+        }
+
         // Phase 1: Materialize the inner (right) side
         var innerRows = new List<QueryRow>();
         QueryRow? rightTemplate = null;
-        await foreach (var row in _right.ExecuteAsync(context, cancellationToken))
+        await foreach (var row in _right!.ExecuteAsync(context, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             innerRows.Add(row);
