@@ -331,8 +331,9 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        // Primary entity should be the leftmost table (account)
-        result.EntityLogicalName.Should().Be("account");
+        // After RIGHT JOIN swap, the preserved (right) side becomes the left,
+        // so the primary entity is now "contact" (the original right table).
+        result.EntityLogicalName.Should().Be("contact");
     }
 
     // ────────────────────────────────────────────
@@ -413,8 +414,43 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  RIGHT JOIN planner swap: converts to LEFT JOIN
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_RightJoin_SwapsToLeftJoin()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("RIGHT JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, c.fullname FROM account a RIGHT JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Should produce a client-side HashJoinNode with LEFT type (swapped from RIGHT)
+        var hashJoin = FindNode<HashJoinNode>(result.RootNode);
+        hashJoin.Should().NotBeNull("RIGHT JOIN should produce a client-side HashJoinNode");
+        hashJoin!.JoinType.Should().Be(JoinType.Left,
+            "planner should swap RIGHT JOIN to LEFT JOIN by swapping children");
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
+
+    private static T? FindNode<T>(IQueryPlanNode node) where T : class, IQueryPlanNode
+    {
+        if (node is T match) return match;
+        foreach (var child in node.Children)
+        {
+            var found = FindNode<T>(child);
+            if (found != null) return found;
+        }
+        return null;
+    }
 
     private static bool ContainsNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
     {
