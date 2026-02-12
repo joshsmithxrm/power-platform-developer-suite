@@ -71,8 +71,9 @@ public sealed class HashJoinNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Phase 1: Build hash table from the right (build) side
-        var hashTable = new Dictionary<string, List<QueryRow>>(StringComparer.OrdinalIgnoreCase);
+        var hashTable = new Dictionary<string, List<(QueryRow row, int index)>>(StringComparer.OrdinalIgnoreCase);
         QueryRow? rightTemplate = null;
+        var buildRowCount = 0;
 
         await foreach (var row in _right.ExecuteAsync(context, cancellationToken))
         {
@@ -83,30 +84,61 @@ public sealed class HashJoinNode : IQueryPlanNode
 
             if (!hashTable.TryGetValue(key, out var bucket))
             {
-                bucket = new List<QueryRow>();
+                bucket = new List<(QueryRow, int)>();
                 hashTable[key] = bucket;
             }
-            bucket.Add(row);
+            bucket.Add((row, buildRowCount));
+            buildRowCount++;
         }
+
+        if (buildRowCount == 0 && JoinType == JoinType.Inner)
+            yield break;
+
+        // Track matched build-side rows (for Right and FullOuter)
+        var buildMatched = (JoinType is JoinType.Right or JoinType.FullOuter)
+            ? new bool[buildRowCount]
+            : null;
+
+        QueryRow? leftTemplate = null;
 
         // Phase 2: Probe the hash table with each left-side row
         await foreach (var leftRow in _left.ExecuteAsync(context, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            leftTemplate ??= leftRow;
 
             var probeKey = NormalizeKey(GetColumnValue(leftRow, LeftKeyColumn));
+            var matched = false;
 
-            if (hashTable.TryGetValue(probeKey, out var matchingRows))
+            if (hashTable.TryGetValue(probeKey, out var bucket))
             {
-                foreach (var rightRow in matchingRows)
+                matched = true;
+                foreach (var (buildRow, buildIndex) in bucket)
                 {
-                    yield return NestedLoopJoinNode.CombineRows(leftRow, rightRow);
+                    if (buildMatched != null) buildMatched[buildIndex] = true;
+                    yield return NestedLoopJoinNode.CombineRows(leftRow, buildRow);
                 }
             }
-            else if (JoinType == JoinType.Left)
+
+            // LEFT or FULL OUTER: emit unmatched probe row with nulls
+            if (!matched && JoinType is JoinType.Left or JoinType.FullOuter)
             {
-                // LEFT JOIN: emit left row with nulls for right side
-                yield return CombineWithNulls(leftRow, rightTemplate);
+                yield return NestedLoopJoinNode.CombineWithNulls(leftRow, rightTemplate);
+            }
+        }
+
+        // RIGHT or FULL OUTER: emit unmatched build-side rows
+        if (buildMatched != null && leftTemplate != null)
+        {
+            foreach (var bucket in hashTable.Values)
+            {
+                foreach (var (buildRow, buildIndex) in bucket)
+                {
+                    if (!buildMatched[buildIndex])
+                    {
+                        yield return NestedLoopJoinNode.CombineWithNullsReversed(leftTemplate, buildRow);
+                    }
+                }
             }
         }
     }
@@ -154,29 +186,4 @@ public sealed class HashJoinNode : IQueryPlanNode
         return value is int or long or short or byte or decimal or double or float;
     }
 
-    /// <summary>
-    /// Combines the left row with null values for the right side (LEFT JOIN with no match).
-    /// </summary>
-    private static QueryRow CombineWithNulls(QueryRow left, QueryRow? rightTemplate)
-    {
-        var combined = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var kvp in left.Values)
-        {
-            combined[kvp.Key] = kvp.Value;
-        }
-
-        if (rightTemplate != null)
-        {
-            foreach (var kvp in rightTemplate.Values)
-            {
-                var key = combined.ContainsKey(kvp.Key)
-                    ? rightTemplate.EntityLogicalName + "." + kvp.Key
-                    : kvp.Key;
-                combined[key] = QueryValue.Null;
-            }
-        }
-
-        return new QueryRow(combined, left.EntityLogicalName);
-    }
 }

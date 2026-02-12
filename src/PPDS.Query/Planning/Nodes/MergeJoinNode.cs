@@ -25,7 +25,7 @@ public sealed class MergeJoinNode : IQueryPlanNode
     /// <summary>The right join key column name.</summary>
     public string RightKeyColumn { get; }
 
-    /// <summary>The join type (Inner or Left).</summary>
+    /// <summary>The join type.</summary>
     public JoinType JoinType { get; }
 
     /// <inheritdoc />
@@ -39,7 +39,7 @@ public sealed class MergeJoinNode : IQueryPlanNode
             var l = _left.EstimatedRows;
             var r = _right.EstimatedRows;
             if (l < 0 || r < 0) return -1;
-            return JoinType == JoinType.Left ? l : Math.Min(l, r);
+            return JoinType is JoinType.Left or JoinType.FullOuter ? l : Math.Min(l, r);
         }
     }
 
@@ -51,7 +51,7 @@ public sealed class MergeJoinNode : IQueryPlanNode
     /// <param name="right">The right input node (must be sorted on rightKeyColumn).</param>
     /// <param name="leftKeyColumn">Column name on the left side for the equijoin condition.</param>
     /// <param name="rightKeyColumn">Column name on the right side for the equijoin condition.</param>
-    /// <param name="joinType">The join type (Inner or Left).</param>
+    /// <param name="joinType">The join type.</param>
     public MergeJoinNode(
         IQueryPlanNode left,
         IQueryPlanNode right,
@@ -72,8 +72,6 @@ public sealed class MergeJoinNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Materialize both sides since we need random access for handling duplicates.
-        // A streaming merge join would be more memory-efficient but the IAsyncEnumerable
-        // interface makes handling the "rewind right for duplicates" case complex.
         var leftRows = new List<QueryRow>();
         var rightRows = new List<QueryRow>();
 
@@ -93,24 +91,9 @@ public sealed class MergeJoinNode : IQueryPlanNode
         var leftIdx = 0;
         var rightIdx = 0;
 
-        while (leftIdx < leftRows.Count)
+        while (leftIdx < leftRows.Count && rightIdx < rightRows.Count)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (rightIdx >= rightRows.Count)
-            {
-                // Right side exhausted
-                if (JoinType == JoinType.Left)
-                {
-                    // Emit remaining left rows with nulls
-                    while (leftIdx < leftRows.Count)
-                    {
-                        yield return CombineWithNulls(leftRows[leftIdx], rightRows.Count > 0 ? rightRows[0] : null);
-                        leftIdx++;
-                    }
-                }
-                yield break;
-            }
 
             var leftKey = GetColumnValue(leftRows[leftIdx], LeftKeyColumn);
             var rightKey = GetColumnValue(rightRows[rightIdx], RightKeyColumn);
@@ -119,15 +102,19 @@ public sealed class MergeJoinNode : IQueryPlanNode
             if (cmp < 0)
             {
                 // Left key is smaller: advance left
-                if (JoinType == JoinType.Left)
+                if (JoinType is JoinType.Left or JoinType.FullOuter)
                 {
-                    yield return CombineWithNulls(leftRows[leftIdx], rightRows[0]);
+                    yield return NestedLoopJoinNode.CombineWithNulls(leftRows[leftIdx], rightRows[0]);
                 }
                 leftIdx++;
             }
             else if (cmp > 0)
             {
                 // Right key is smaller: advance right
+                if (JoinType is JoinType.Right or JoinType.FullOuter)
+                {
+                    yield return NestedLoopJoinNode.CombineWithNullsReversed(leftRows[0], rightRows[rightIdx]);
+                }
                 rightIdx++;
             }
             else
@@ -151,6 +138,28 @@ public sealed class MergeJoinNode : IQueryPlanNode
                     }
                     leftIdx++;
                 }
+            }
+        }
+
+        // Left exhausted, right remaining: emit remaining right rows for Right/FullOuter
+        if (JoinType is JoinType.Right or JoinType.FullOuter)
+        {
+            while (rightIdx < rightRows.Count)
+            {
+                if (leftRows.Count > 0)
+                    yield return NestedLoopJoinNode.CombineWithNullsReversed(leftRows[0], rightRows[rightIdx]);
+                rightIdx++;
+            }
+        }
+
+        // Right exhausted, left remaining: emit remaining left rows for Left/FullOuter
+        if (JoinType is JoinType.Left or JoinType.FullOuter)
+        {
+            while (leftIdx < leftRows.Count)
+            {
+                yield return NestedLoopJoinNode.CombineWithNulls(leftRows[leftIdx],
+                    rightRows.Count > 0 ? rightRows[0] : null);
+                leftIdx++;
             }
         }
     }
@@ -211,31 +220,5 @@ public sealed class MergeJoinNode : IQueryPlanNode
     private static bool IsNumeric(object value)
     {
         return value is int or long or short or byte or decimal or double or float;
-    }
-
-    /// <summary>
-    /// Combines the left row with null values for the right side (LEFT JOIN with no match).
-    /// </summary>
-    private static QueryRow CombineWithNulls(QueryRow left, QueryRow? rightTemplate)
-    {
-        var combined = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var kvp in left.Values)
-        {
-            combined[kvp.Key] = kvp.Value;
-        }
-
-        if (rightTemplate != null)
-        {
-            foreach (var kvp in rightTemplate.Values)
-            {
-                var key = combined.ContainsKey(kvp.Key)
-                    ? rightTemplate.EntityLogicalName + "." + kvp.Key
-                    : kvp.Key;
-                combined[key] = QueryValue.Null;
-            }
-        }
-
-        return new QueryRow(combined, left.EntityLogicalName);
     }
 }
