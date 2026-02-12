@@ -16,6 +16,8 @@
     .\scripts\devcontainer.ps1 down                     # stop container
     .\scripts\devcontainer.ps1 push                      # push container commits via host (prompts for worktree)
     .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host
+    .\scripts\devcontainer.ps1 rebase                     # rebase onto origin/main (prompts for worktree)
+    .\scripts\devcontainer.ps1 rebase query-engine-v3    # rebase worktree onto origin/main
     .\scripts\devcontainer.ps1 send                      # send host files to container (prompts for worktree)
     .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container worktree
     .\scripts\devcontainer.ps1 sync                      # sync origin git state into container
@@ -24,7 +26,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'send', 'push', 'sync', 'reset', 'help')]
+    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'send', 'push', 'rebase', 'sync', 'reset', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)]
@@ -433,7 +435,8 @@ switch ($Command) {
             Write-Step "Branch '$branch' is $ahead commit(s) ahead of origin."
         }
 
-        # Detect history divergence (e.g., branch was rebased on origin)
+        # Check if force push is needed (e.g., after rebasing onto main)
+        $forceNeeded = $false
         if ($remoteSha) {
             $hasRemote = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git cat-file -t $remoteSha 2>/dev/null && echo yes || echo no").Trim()
             if ($hasRemote -eq 'yes') {
@@ -442,46 +445,9 @@ switch ($Command) {
             else {
                 $isFF = 'no'
             }
-
             if ($isFF -eq 'no') {
-                Write-Step "History diverged (origin was rebased) — syncing origin state to container..."
-
-                $containerId = (docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder").Trim()
-
-                # Fetch latest from origin on host, bundle it, and send to container
-                git -C $WorkspaceFolder fetch origin $branch
-                $originBundle = Join-Path $env:TEMP 'ppds-origin.bundle'
-                git -C $WorkspaceFolder bundle create $originBundle "origin/$branch"
-                docker cp $originBundle "${containerId}:/tmp/origin.bundle" | Out-Null
-                Remove-Item $originBundle -ErrorAction SilentlyContinue
-
-                # Container updates its origin ref from the bundle
-                devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git fetch /tmp/origin.bundle 'refs/remotes/origin/${branch}:refs/remotes/origin/${branch}'"
-
-                # Container rebases new work on top of updated origin
-                Write-Step "Rebasing new commits onto updated origin/$branch..."
-                devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rebase origin/$branch"
-                if ($LASTEXITCODE -ne 0) {
-                    devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/origin.bundle
-                    Write-Err "Rebase has conflicts in '$workdir'."
-                    Write-Step 'Launching Claude Code to help resolve conflicts...'
-                    $planInstruction = if ($NoPlanMode) {
-                        'Resolve all conflicts directly.'
-                    } else {
-                        'Start by using plan mode to analyze the conflicts and present a resolution strategy before making changes.'
-                    }
-                    $safeBranch = $branch -replace '[^a-zA-Z0-9_\-/.]', ''
-                    $conflictPrompt = "A git rebase of branch '${safeBranch}' onto origin/${safeBranch} has resulted in merge conflicts. Run git status to see conflicted files. Analyze each conflict, resolve them, git add the resolved files, and run git rebase --continue. If there are multiple conflicting commits, continue resolving until the rebase is complete. ${planInstruction}"
-                    $escapedPrompt = $conflictPrompt.Replace("'", "'\\''")
-                    devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && claude --dangerously-skip-permissions -p '${escapedPrompt}'"
-                    Write-Step "Claude session ended. Re-run 'push' when conflicts are resolved."
-                    exit 1
-                }
-                devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/origin.bundle
-
-                # Update ahead count after rebase
-                $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-list --count origin/${branch}..HEAD").Trim()
-                Write-Ok "Rebased onto origin. $ahead new commit(s) to push."
+                Write-Step "Branch has been rebased — will force push with lease."
+                $forceNeeded = $true
             }
         }
 
@@ -512,10 +478,16 @@ switch ($Command) {
         }
 
         # Push from host using FETCH_HEAD (host has git credentials)
-        Write-Step 'Pushing to origin...'
-        git -C $WorkspaceFolder push origin "FETCH_HEAD:refs/heads/${branch}"
+        if ($forceNeeded) {
+            Write-Step 'Force pushing to origin (with lease)...'
+            git -C $WorkspaceFolder push --force-with-lease="refs/heads/${branch}:${remoteSha}" origin "FETCH_HEAD:refs/heads/${branch}"
+        }
+        else {
+            Write-Step 'Pushing to origin...'
+            git -C $WorkspaceFolder push origin "FETCH_HEAD:refs/heads/${branch}"
+        }
         if ($LASTEXITCODE -ne 0) {
-            Write-Err 'Push failed. You may need to pull/rebase first.'
+            Write-Err 'Push failed. Run rebase to sync with origin first.'
             Remove-Item $tempBundle -ErrorAction SilentlyContinue
             exit 1
         }
@@ -528,7 +500,51 @@ switch ($Command) {
         Write-Step 'Updating container remote refs...'
         devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git fetch origin $branch 2>/dev/null || git update-ref refs/remotes/origin/$branch HEAD"
 
-        Write-Ok "Pushed '$branch' to origin ($ahead commit(s))."
+        $verb = if ($forceNeeded) { 'Force pushed' } else { 'Pushed' }
+        Write-Ok "$verb '$branch' to origin ($ahead commit(s))."
+    }
+
+    'rebase' {
+        # Rebase feature branch onto origin/main (syncs origin refs first)
+        Ensure-ContainerRunning
+        $subdir = Select-WorkingDirectory -Target $Target
+        $workdir = if ($subdir) { $subdir } else { '.' }
+
+        # Get current branch
+        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git branch --show-current").Trim()
+        if (-not $branch) {
+            Write-Err "Could not determine branch (detached HEAD?)."
+            exit 1
+        }
+        if ($branch -eq 'main') {
+            Write-Err "Already on main — use 'sync' to fast-forward main instead."
+            exit 1
+        }
+
+        # Sync origin refs so origin/main is current
+        Sync-ContainerFromOrigin
+
+        # Rebase onto origin/main
+        Write-Step "Rebasing '$branch' onto origin/main..."
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rebase origin/main"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Rebase has conflicts."
+            Write-Step 'Launching Claude Code to help resolve conflicts...'
+            $planInstruction = if ($NoPlanMode) {
+                'Resolve all conflicts directly.'
+            } else {
+                'Start by using plan mode to analyze the conflicts and present a resolution strategy before making changes.'
+            }
+            $safeBranch = $branch -replace '[^a-zA-Z0-9_\-/.]', ''
+            $conflictPrompt = "A git rebase of branch '${safeBranch}' onto origin/main has resulted in merge conflicts. Run git status to see conflicted files. Analyze each conflict, resolve them, git add the resolved files, and run git rebase --continue. If there are multiple conflicting commits, continue resolving until the rebase is complete. ${planInstruction}"
+            $escapedPrompt = $conflictPrompt.Replace("'", "'\\''")
+            devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && claude --dangerously-skip-permissions -p '${escapedPrompt}'"
+            Write-Step "Claude session ended. Verify rebase is complete, then 'push' when ready."
+            exit 1
+        }
+
+        $newBase = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git log --oneline -1 origin/main").Trim()
+        Write-Ok "Rebased '$branch' onto origin/main ($newBase)."
     }
 
     'send' {
@@ -617,6 +633,7 @@ switch ($Command) {
         Write-Host '    down                  Stop the container'
         Write-Host '    status                Check if container is running'
         Write-Host '    push [worktree]       Push container commits to origin via host credentials'
+        Write-Host '    rebase [worktree]     Rebase feature branch onto origin/main (syncs first)'
         Write-Host '    send [worktree]       Send host files to container (preserves .git state)'
         Write-Host '    sync                  Sync origin git state into container (auto-runs on up)'
         Write-Host '    reset                 Nuke container + all volumes + rebuild from scratch'
@@ -631,6 +648,7 @@ switch ($Command) {
         Write-Host '    .\scripts\devcontainer.ps1 ppds query-engine-v3      # TUI from worktree'
         Write-Host '    .\scripts\devcontainer.ps1 shell main               # shell at repo root'
         Write-Host '    .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host'
+        Write-Host '    .\scripts\devcontainer.ps1 rebase query-engine-v3    # rebase worktree onto origin/main'
         Write-Host '    .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container'
         Write-Host '    .\scripts\devcontainer.ps1 sync                      # sync origin refs into container'
         Write-Host ''
