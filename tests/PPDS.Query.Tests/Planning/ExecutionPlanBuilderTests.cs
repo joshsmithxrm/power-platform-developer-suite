@@ -787,6 +787,19 @@ public class ExecutionPlanBuilderTests
             .WithMessage("*remote executor factory*");
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_TwoPartName_DoesNotTriggerCrossEnvironment()
+    {
+        // dbo.account is a 2-part name (SchemaIdentifier=dbo, BaseIdentifier=account)
+        // and must NOT be treated as a cross-environment reference.
+        var fragment = _parser.Parse("SELECT name FROM dbo.account");
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>(
+            "2-part name dbo.account should remain a local FetchXmlScanNode");
+    }
+
     // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
