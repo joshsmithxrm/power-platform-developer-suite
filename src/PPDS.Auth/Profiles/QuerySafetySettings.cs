@@ -56,6 +56,27 @@ public sealed class QuerySafetySettings
     /// <summary>Suppress Power Automate flow triggers on DML. Default: false.</summary>
     [JsonPropertyName("bypass_power_automate_flows")]
     public bool BypassPowerAutomateFlows { get; set; }
+
+    /// <summary>Worker threads for DML (0 = auto). Default: 0.</summary>
+    [JsonPropertyName("max_parallelism")]
+    public int? MaxParallelism { get; set; }
+
+    /// <summary>Route full-table DELETE to async BulkDeleteRequest. Default: false.</summary>
+    [JsonPropertyName("use_bulk_delete")]
+    public bool UseBulkDelete { get; set; }
+
+    /// <summary>DateTime display mode. Default: UTC.</summary>
+    [JsonPropertyName("datetime_mode")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public DateTimeMode DateTimeMode { get; set; } = DateTimeMode.Utc;
+
+    /// <summary>Include FetchXML in EXPLAIN output. Default: true.</summary>
+    [JsonPropertyName("show_fetchxml_in_explain")]
+    public bool ShowFetchXmlInExplain { get; set; } = true;
+
+    /// <summary>Maximum FetchXML pages fetched (0 = unlimited). Default: 200.</summary>
+    [JsonPropertyName("max_page_retrievals")]
+    public int? MaxPageRetrievals { get; set; }
 }
 
 /// <summary>Which plugin types to bypass during DML operations.</summary>
@@ -81,3 +102,6 @@ public enum ProtectionLevel
     /// <summary>Block by default, require explicit confirmation with preview. Production and unknown environments.</summary>
     Production
 }
+
+/// <summary>DateTime display mode for query results.</summary>
+public enum DateTimeMode { Utc, Local, EnvironmentTimezone }

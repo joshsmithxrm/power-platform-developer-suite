@@ -44,6 +44,13 @@ public sealed class EnvironmentConfig
     public QuerySafetySettings? SafetySettings { get; set; }
 
     /// <summary>
+    /// Explicit protection level override. Null means auto-detect from Type.
+    /// </summary>
+    [JsonPropertyName("protection")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ProtectionLevel? Protection { get; set; }
+
+    /// <summary>
     /// Normalizes a URL for use as a lookup key (lowercase, ensures trailing slash).
     /// </summary>
     public static string NormalizeUrl(string url)
