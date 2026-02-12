@@ -621,6 +621,34 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  Derived table (subquery in FROM) planning
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_DerivedTable_ProducesTableSpool()
+    {
+        var sql = "SELECT sub.name FROM (SELECT name FROM account) AS sub";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().NotBeNull();
+        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+            "a derived table should produce a TableSpoolNode in the plan tree");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_DerivedTable_WithWhere_AppliesFilter()
+    {
+        var sql = "SELECT sub.name FROM (SELECT name, revenue FROM account WHERE revenue > 1000) AS sub WHERE sub.name IS NOT NULL";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().NotBeNull();
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
 

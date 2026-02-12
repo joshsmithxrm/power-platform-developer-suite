@@ -175,6 +175,13 @@ public sealed class ExecutionPlanBuilder
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
 
+        // Derived tables (subqueries in FROM) cannot be transpiled to FetchXML —
+        // route to client-side planning which handles them via PlanTableReference.
+        if (ContainsDerivedTable(querySpec.FromClause))
+        {
+            return PlanClientSideJoin(selectStmt, querySpec, options);
+        }
+
         // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
         ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
 
@@ -399,6 +406,9 @@ public sealed class ExecutionPlanBuilder
         if (tableRef is UnqualifiedJoin unqualified)
             return PlanUnqualifiedJoin(unqualified, options);
 
+        if (tableRef is QueryDerivedTable derived)
+            return PlanDerivedTable(derived, options);
+
         if (tableRef is NamedTableReference named)
         {
             var entityName = GetMultiPartName(named.SchemaObject);
@@ -408,6 +418,27 @@ public sealed class ExecutionPlanBuilder
         }
 
         throw new QueryParseException($"Unsupported table reference type in client-side join: {tableRef.GetType().Name}");
+    }
+
+    /// <summary>
+    /// Plans a derived table (subquery in FROM clause).
+    /// The inner SELECT is planned normally via <see cref="PlanQueryExpressionAsSelect"/>,
+    /// then materialized into a <see cref="TableSpoolNode"/> so the outer query can scan it.
+    /// </summary>
+    private (IQueryPlanNode node, string entityName) PlanDerivedTable(
+        QueryDerivedTable derived,
+        QueryPlanOptions options)
+    {
+        // Plan the inner query
+        var innerResult = PlanQueryExpressionAsSelect(derived.QueryExpression, options);
+
+        // Wrap in TableSpoolNode so the outer query can scan it
+        var spool = new TableSpoolNode(innerResult.RootNode);
+
+        // Use the alias as the entity name for column references
+        var alias = derived.Alias?.Value ?? "derived";
+
+        return (spool, alias);
     }
 
     /// <summary>
@@ -461,6 +492,34 @@ public sealed class ExecutionPlanBuilder
         if (tableRef is QualifiedJoin qualified)
             return ContainsUnqualifiedJoinInTableRef(qualified.FirstTableReference)
                 || ContainsUnqualifiedJoinInTableRef(qualified.SecondTableReference);
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a FROM clause contains any <see cref="QueryDerivedTable"/>
+    /// (subquery in FROM, e.g. <c>SELECT * FROM (SELECT ...) AS sub</c>) at any nesting level.
+    /// </summary>
+    private static bool ContainsDerivedTable(FromClause? fromClause)
+    {
+        if (fromClause == null) return false;
+        foreach (var tableRef in fromClause.TableReferences)
+        {
+            if (ContainsDerivedTableInTableRef(tableRef))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool ContainsDerivedTableInTableRef(TableReference tableRef)
+    {
+        if (tableRef is QueryDerivedTable)
+            return true;
+        if (tableRef is QualifiedJoin qualified)
+            return ContainsDerivedTableInTableRef(qualified.FirstTableReference)
+                || ContainsDerivedTableInTableRef(qualified.SecondTableReference);
+        if (tableRef is UnqualifiedJoin unqualified)
+            return ContainsDerivedTableInTableRef(unqualified.FirstTableReference)
+                || ContainsDerivedTableInTableRef(unqualified.SecondTableReference);
         return false;
     }
 
@@ -2195,6 +2254,7 @@ public sealed class ExecutionPlanBuilder
             NamedTableReference named => GetMultiPartName(named.SchemaObject),
             QualifiedJoin join => ExtractEntityNameFromTableReference(join.FirstTableReference),
             UnqualifiedJoin unqualified => ExtractEntityNameFromTableReference(unqualified.FirstTableReference),
+            QueryDerivedTable derived => derived.Alias?.Value ?? "derived",
             _ => null
         };
     }
