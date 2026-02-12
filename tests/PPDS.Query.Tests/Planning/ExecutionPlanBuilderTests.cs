@@ -656,14 +656,17 @@ public class ExecutionPlanBuilderTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Plan_WhereNotInSubquery_ProducesHashSemiJoin()
+    public void Plan_WhereNotInSubquery_SimpleSubquery_RewritesToOuterJoin()
     {
         var sql = "SELECT name FROM account WHERE accountid NOT IN (SELECT parentcustomerid FROM contact)";
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
-            "a WHERE ... NOT IN (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
+        // Simple NOT IN subquery is rewritten as LEFT OUTER JOIN + IS NULL in FetchXML
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeFalse(
+            "simple NOT IN should be rewritten as LEFT OUTER JOIN, not use client-side HashSemiJoinNode");
+        result.FetchXml.Should().Contain("link-type=\"outer\"",
+            "NOT IN should be rewritten as LEFT OUTER JOIN for FetchXML pushdown");
     }
 
     [Fact]

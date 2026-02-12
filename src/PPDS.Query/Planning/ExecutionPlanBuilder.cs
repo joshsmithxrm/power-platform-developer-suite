@@ -400,6 +400,23 @@ public sealed class ExecutionPlanBuilder
         var inPredicates = new List<InPredicate>();
         var cleanedWhere = ExtractInSubqueryPredicates(querySpec.WhereClause?.SearchCondition, inPredicates);
 
+        // 1.5. Attempt anti-join rewrite: simple NOT IN → LEFT OUTER JOIN + IS NULL
+        // This pushes the anti-semi-join to FetchXML instead of running it client-side.
+        var rewritableAntiJoins = new List<(InPredicate Pred, AntiJoinRewriteInfo Info)>();
+        var remainingPredicates = new List<InPredicate>();
+        foreach (var inPred in inPredicates)
+        {
+            if (inPred.NotDefined
+                && TryExtractAntiJoinRewriteInfo(inPred, out var rewriteInfo))
+            {
+                rewritableAntiJoins.Add((inPred, rewriteInfo));
+            }
+            else
+            {
+                remainingPredicates.Add(inPred);
+            }
+        }
+
         // 2. Temporarily modify the WHERE to exclude subquery predicates so FetchXML generation works
         var origWhereClause = querySpec.WhereClause;
         if (cleanedWhere != null)
@@ -424,9 +441,16 @@ public sealed class ExecutionPlanBuilder
             querySpec.WhereClause = origWhereClause;
         }
 
-        // 3. For each IN subquery, plan the inner query and wrap in HashSemiJoinNode
+        // 2.5. Apply anti-join rewrites by injecting link-entity elements into FetchXML
+        var fetchXml = outerResult.FetchXml;
+        foreach (var (_, info) in rewritableAntiJoins)
+        {
+            fetchXml = InjectAntiJoinLinkEntity(fetchXml, info);
+        }
+
+        // 3. For each remaining IN subquery (non-rewritable), plan the inner query and wrap in HashSemiJoinNode
         var currentNode = outerResult.RootNode;
-        foreach (var inPred in inPredicates)
+        foreach (var inPred in remainingPredicates)
         {
             // Get the outer column name from the left-hand side of the IN predicate
             var outerCol = inPred.Expression is ColumnReferenceExpression colRef
@@ -451,10 +475,241 @@ public sealed class ExecutionPlanBuilder
         return new QueryPlanResult
         {
             RootNode = currentNode,
-            FetchXml = outerResult.FetchXml,
+            FetchXml = fetchXml,
             VirtualColumns = outerResult.VirtualColumns,
             EntityLogicalName = outerResult.EntityLogicalName
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  NOT IN → LEFT OUTER JOIN anti-join rewrite
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Information extracted from a simple NOT IN subquery that can be rewritten
+    /// as a LEFT OUTER JOIN + IS NULL in FetchXML.
+    /// </summary>
+    private sealed class AntiJoinRewriteInfo
+    {
+        /// <summary>The outer column name (left side of NOT IN).</summary>
+        public required string OuterColumn { get; init; }
+
+        /// <summary>The inner table name (FROM clause of subquery).</summary>
+        public required string InnerTableName { get; init; }
+
+        /// <summary>The inner column name (SELECT column of subquery).</summary>
+        public required string InnerColumn { get; init; }
+
+        /// <summary>
+        /// Optional WHERE conditions from the subquery, as FetchXML filter elements.
+        /// These become conditions inside the link-entity.
+        /// </summary>
+        public IReadOnlyList<InnerFilterCondition>? InnerFilters { get; init; }
+    }
+
+    /// <summary>
+    /// A simple filter condition from a NOT IN subquery's WHERE clause.
+    /// </summary>
+    private sealed class InnerFilterCondition
+    {
+        public required string Attribute { get; init; }
+        public required string Operator { get; init; }
+        public required string Value { get; init; }
+    }
+
+    /// <summary>
+    /// Determines whether a NOT IN predicate has a simple subquery that can be rewritten
+    /// as a LEFT OUTER JOIN + IS NULL for FetchXML pushdown.
+    /// </summary>
+    /// <remarks>
+    /// A subquery is "simple" when:
+    /// <list type="bullet">
+    ///   <item>It is a <see cref="QuerySpecification"/> (not a UNION/binary query)</item>
+    ///   <item>It selects a single column (no expressions, no *)</item>
+    ///   <item>It references a single table (no JOINs)</item>
+    ///   <item>It has no GROUP BY, HAVING, TOP, DISTINCT, or subqueries in WHERE</item>
+    ///   <item>Its optional WHERE clause contains only simple column-to-literal comparisons</item>
+    /// </list>
+    /// </remarks>
+    private static bool TryExtractAntiJoinRewriteInfo(
+        InPredicate inPred,
+        out AntiJoinRewriteInfo info)
+    {
+        info = null!;
+
+        // Left side must be a column reference
+        if (inPred.Expression is not ColumnReferenceExpression outerColRef)
+            return false;
+
+        var outerCol = outerColRef.MultiPartIdentifier.Identifiers.Last().Value;
+
+        // Must have a subquery
+        if (inPred.Subquery?.QueryExpression is not QuerySpecification innerSpec)
+            return false;
+
+        // No GROUP BY, HAVING, TOP, DISTINCT
+        if (innerSpec.GroupByClause != null) return false;
+        if (innerSpec.HavingClause != null) return false;
+        if (innerSpec.TopRowFilter != null) return false;
+        if (innerSpec.UniqueRowFilter == UniqueRowFilter.Distinct) return false;
+
+        // Single table, no JOINs: FROM clause must have exactly one NamedTableReference
+        if (innerSpec.FromClause?.TableReferences.Count != 1) return false;
+        if (innerSpec.FromClause.TableReferences[0] is not NamedTableReference innerTable)
+            return false;
+
+        var innerTableName = innerTable.SchemaObject.Identifiers.Last().Value;
+
+        // Single column in SELECT (not *, not an expression)
+        if (innerSpec.SelectElements.Count != 1) return false;
+        if (innerSpec.SelectElements[0] is not SelectScalarExpression selectScalar) return false;
+        if (selectScalar.Expression is not ColumnReferenceExpression innerColRef) return false;
+
+        var innerCol = innerColRef.MultiPartIdentifier.Identifiers.Last().Value;
+
+        // Optional WHERE: must be simple column-to-literal comparisons joined by AND
+        List<InnerFilterCondition>? innerFilters = null;
+        if (innerSpec.WhereClause != null)
+        {
+            innerFilters = new List<InnerFilterCondition>();
+            if (!TryExtractSimpleFilters(innerSpec.WhereClause.SearchCondition, innerFilters))
+                return false;
+        }
+
+        info = new AntiJoinRewriteInfo
+        {
+            OuterColumn = outerCol,
+            InnerTableName = innerTableName,
+            InnerColumn = innerCol,
+            InnerFilters = innerFilters
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Recursively extracts simple column = literal conditions from a boolean expression.
+    /// Returns false if any condition is too complex for anti-join rewrite
+    /// (e.g., subqueries, OR, function calls).
+    /// </summary>
+    private static bool TryExtractSimpleFilters(
+        BooleanExpression expr,
+        List<InnerFilterCondition> filters)
+    {
+        switch (expr)
+        {
+            case BooleanComparisonExpression comparison:
+            {
+                // Must be column op literal
+                if (comparison.FirstExpression is not ColumnReferenceExpression col)
+                    return false;
+
+                string? value;
+                if (comparison.SecondExpression is IntegerLiteral intLit)
+                    value = intLit.Value;
+                else if (comparison.SecondExpression is StringLiteral strLit)
+                    value = strLit.Value;
+                else if (comparison.SecondExpression is NumericLiteral numLit)
+                    value = numLit.Value;
+                else
+                    return false; // Not a simple literal
+
+                var op = comparison.ComparisonType switch
+                {
+                    BooleanComparisonType.Equals => "eq",
+                    BooleanComparisonType.NotEqualToBrackets => "ne",
+                    BooleanComparisonType.NotEqualToExclamation => "ne",
+                    BooleanComparisonType.GreaterThan => "gt",
+                    BooleanComparisonType.GreaterThanOrEqualTo => "ge",
+                    BooleanComparisonType.LessThan => "lt",
+                    BooleanComparisonType.LessThanOrEqualTo => "le",
+                    _ => (string?)null
+                };
+
+                if (op == null) return false;
+
+                var attrName = col.MultiPartIdentifier.Identifiers.Last().Value.ToLowerInvariant();
+                filters.Add(new InnerFilterCondition
+                {
+                    Attribute = attrName,
+                    Operator = op,
+                    Value = value
+                });
+                return true;
+            }
+
+            case BooleanBinaryExpression bin
+                when bin.BinaryExpressionType == BooleanBinaryExpressionType.And:
+                return TryExtractSimpleFilters(bin.FirstExpression, filters)
+                    && TryExtractSimpleFilters(bin.SecondExpression, filters);
+
+            case BooleanParenthesisExpression paren:
+                return TryExtractSimpleFilters(paren.Expression, filters);
+
+            default:
+                return false; // OR, NOT, subqueries, etc. — too complex
+        }
+    }
+
+    /// <summary>
+    /// Injects a link-entity element into FetchXML to represent a LEFT OUTER JOIN anti-join.
+    /// The link-entity has link-type="outer" and includes a null condition on the join column
+    /// to filter out matched rows (anti-join semantics).
+    /// </summary>
+    private static string InjectAntiJoinLinkEntity(string fetchXml, AntiJoinRewriteInfo info)
+    {
+        var doc = XDocument.Parse(fetchXml);
+        var entityElement = doc.Root?.Element("entity");
+        if (entityElement == null) return fetchXml;
+
+        var alias = $"__antijoin_{Guid.NewGuid().ToString("N")[..8]}";
+        var innerTable = info.InnerTableName.ToLowerInvariant();
+        var innerCol = info.InnerColumn.ToLowerInvariant();
+        var outerCol = info.OuterColumn.ToLowerInvariant();
+
+        // Build link-entity element
+        var linkEntity = new XElement("link-entity",
+            new XAttribute("name", innerTable),
+            new XAttribute("from", innerCol),
+            new XAttribute("to", outerCol),
+            new XAttribute("link-type", "outer"),
+            new XAttribute("alias", alias));
+
+        // Add inner filter conditions from subquery WHERE (if any)
+        if (info.InnerFilters is { Count: > 0 })
+        {
+            var filterElement = new XElement("filter", new XAttribute("type", "and"));
+            foreach (var f in info.InnerFilters)
+            {
+                filterElement.Add(new XElement("condition",
+                    new XAttribute("attribute", f.Attribute),
+                    new XAttribute("operator", f.Operator),
+                    new XAttribute("value", f.Value)));
+            }
+            linkEntity.Add(filterElement);
+        }
+
+        entityElement.Add(linkEntity);
+
+        // Add outer-level null condition: where the anti-join alias column IS NULL
+        // This is the anti-join semantics: only rows with NO match in the linked entity
+        var outerFilter = entityElement.Element("filter");
+        var nullCondition = new XElement("condition",
+            new XAttribute("entityname", alias),
+            new XAttribute("attribute", innerCol),
+            new XAttribute("operator", "null"));
+
+        if (outerFilter != null)
+        {
+            // Append to existing filter
+            outerFilter.Add(nullCondition);
+        }
+        else
+        {
+            // Create new filter
+            entityElement.Add(new XElement("filter", nullCondition));
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
     }
 
     /// <summary>
