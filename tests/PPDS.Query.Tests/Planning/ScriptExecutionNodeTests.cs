@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentAssertions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using Moq;
 using PPDS.Dataverse.Query;
@@ -10,6 +13,7 @@ using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
 using PPDS.Query.Planning.Nodes;
 using Xunit;
@@ -509,5 +513,517 @@ public class ScriptExecutionNodeTests
         }
 
         Assert.Equal(30L, Convert.ToInt64(scope.Get("@sum")));
+    }
+
+    // ────────────────────────────────────────────
+    //  ExecuteScriptAsync helper (SQL text-based)
+    // ────────────────────────────────────────────
+
+    /// <summary>
+    /// Parses a SQL script string, plans and executes it via ScriptExecutionNode,
+    /// and returns the result rows. Useful for integration-style tests that verify
+    /// end-to-end script behavior from SQL text.
+    /// </summary>
+    private static async Task<List<QueryRow>> ExecuteScriptAsync(string sql)
+    {
+        var (rows, _) = await ExecuteScriptWithScopeAsync(sql);
+        return rows;
+    }
+
+    /// <summary>
+    /// Parses a SQL script string, plans and executes it via ScriptExecutionNode,
+    /// and returns both the result rows and the final variable scope. Useful for
+    /// tests that verify variable state after SELECT @var = expr assignments.
+    /// </summary>
+    private static async Task<(List<QueryRow> rows, VariableScope scope)> ExecuteScriptWithScopeAsync(string sql)
+    {
+        var parser = new QueryParser();
+        var statements = parser.ParseBatch(sql);
+
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+        return (rows, scope);
+    }
+
+    // ────────────────────────────────────────────
+    //  SELECT @var = expr (Variable Assignment)
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task SelectAssignment_SetsVariableFromExpression()
+    {
+        var sql = @"
+            DECLARE @name NVARCHAR(100)
+            SELECT @name = 'Hello World'";
+
+        var (rows, scope) = await ExecuteScriptWithScopeAsync(sql);
+        rows.Should().BeEmpty();
+        scope.Get("@name").Should().Be("Hello World");
+    }
+
+    [Fact]
+    public async Task SelectAssignment_MultipleVariables()
+    {
+        var sql = @"
+            DECLARE @a INT
+            DECLARE @b INT
+            SELECT @a = 10, @b = 20";
+
+        var (rows, scope) = await ExecuteScriptWithScopeAsync(sql);
+        rows.Should().BeEmpty();
+        scope.Get("@a").Should().Be(10);
+        scope.Get("@b").Should().Be(20);
+    }
+
+    [Fact]
+    public async Task SelectAssignment_SetsVariableFromExpression_AST()
+    {
+        // DECLARE @name NVARCHAR; SELECT @name = 'Hello World'
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var selectStmt = new SelectStatement();
+        var querySpec = new QuerySpecification();
+        var setVar = new SelectSetVariable
+        {
+            Variable = new VariableReference { Name = "@name" },
+            Expression = new StringLiteral { Value = "Hello World" }
+        };
+        querySpec.SelectElements.Add(setVar);
+        selectStmt.QueryExpression = querySpec;
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@name", "NVARCHAR"),
+            selectStmt
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        await foreach (var _ in node.ExecuteAsync(ctx)) { }
+
+        Assert.Equal("Hello World", scope.Get("@name"));
+    }
+
+    [Fact]
+    public async Task SelectAssignment_MultipleVariables_AST()
+    {
+        // DECLARE @a INT; DECLARE @b INT; SELECT @a = 10, @b = 20
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var selectStmt = new SelectStatement();
+        var querySpec = new QuerySpecification();
+        querySpec.SelectElements.Add(new SelectSetVariable
+        {
+            Variable = new VariableReference { Name = "@a" },
+            Expression = new IntegerLiteral { Value = "10" }
+        });
+        querySpec.SelectElements.Add(new SelectSetVariable
+        {
+            Variable = new VariableReference { Name = "@b" },
+            Expression = new IntegerLiteral { Value = "20" }
+        });
+        selectStmt.QueryExpression = querySpec;
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@a", "INT"),
+            MakeDeclare("@b", "INT"),
+            selectStmt
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        await foreach (var _ in node.ExecuteAsync(ctx)) { }
+
+        Assert.Equal(10, scope.Get("@a"));
+        Assert.Equal(20, scope.Get("@b"));
+    }
+
+    [Fact]
+    public async Task SelectAssignment_DoesNotProduceRows()
+    {
+        // SELECT @var = expr should NOT produce result rows (it's an assignment, not a query)
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var selectStmt = new SelectStatement();
+        var querySpec = new QuerySpecification();
+        querySpec.SelectElements.Add(new SelectSetVariable
+        {
+            Variable = new VariableReference { Name = "@x" },
+            Expression = new IntegerLiteral { Value = "42" }
+        });
+        selectStmt.QueryExpression = querySpec;
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@x", "INT"),
+            selectStmt
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+
+        Assert.Empty(rows);
+        Assert.Equal(42, scope.Get("@x"));
+    }
+
+    [Fact]
+    public async Task SelectAssignment_ExpressionUsingOtherVariable()
+    {
+        // DECLARE @a INT = 5; DECLARE @b INT; SELECT @b = @a * 2
+        var sql = @"
+            DECLARE @a INT = 5
+            DECLARE @b INT
+            SELECT @b = @a * 2";
+
+        var (rows, scope) = await ExecuteScriptWithScopeAsync(sql);
+        rows.Should().BeEmpty();
+        scope.Get("@b").Should().Be(10L);
+    }
+
+    // ────────────────────────────────────────────
+    //  PRINT
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task Print_RoutesMessageToProgress()
+    {
+        var sql = "PRINT 'Hello from SQL'";
+        // PRINT should not throw and should produce no rows
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Print_RoutesMessageToProgress_AST()
+    {
+        // Build PRINT statement using AST directly
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var printStmt = new PrintStatement
+        {
+            Expression = new StringLiteral { Value = "Hello from AST" }
+        };
+
+        var statements = new TSqlStatement[] { printStmt };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+
+        // Use a mock progress reporter to verify the message is routed
+        var mockProgress = new Mock<IQueryProgressReporter>();
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var ctx = new QueryPlanContext(
+            mockExecutor.Object,
+            progressReporter: mockProgress.Object,
+            variableScope: scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+
+        rows.Should().BeEmpty();
+        mockProgress.Verify(p => p.ReportPhase("PRINT", "Hello from AST"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Print_WithVariableExpression_EvaluatesBeforeReporting()
+    {
+        // PRINT uses the ExpressionCompiler so variable references should work
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@msg", "NVARCHAR"),
+            MakeSetVariable("@msg", new StringLiteral { Value = "world" }),
+            new PrintStatement
+            {
+                Expression = new VariableReference { Name = "@msg" }
+            }
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var mockProgress = new Mock<IQueryProgressReporter>();
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var ctx = new QueryPlanContext(
+            mockExecutor.Object,
+            progressReporter: mockProgress.Object,
+            variableScope: scope);
+
+        await foreach (var _ in node.ExecuteAsync(ctx)) { }
+
+        mockProgress.Verify(p => p.ReportPhase("PRINT", "world"), Times.Once);
+    }
+
+    // ────────────────────────────────────────────
+    //  THROW
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task Throw_ThrowsWithUserMessage()
+    {
+        var sql = "THROW 50001, 'Custom error message', 1";
+        var act = async () => await ExecuteScriptAsync(sql);
+        await act.Should().ThrowAsync<Exception>()
+            .WithMessage("*Custom error message*");
+    }
+
+    [Fact]
+    public async Task Throw_ThrowsWithUserMessage_AST()
+    {
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var throwStmt = new ThrowStatement
+        {
+            ErrorNumber = new IntegerLiteral { Value = "50001" },
+            Message = new StringLiteral { Value = "AST error message" },
+            State = new IntegerLiteral { Value = "1" }
+        };
+
+        var statements = new TSqlStatement[] { throwStmt };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in node.ExecuteAsync(ctx)) { }
+        };
+
+        await act.Should().ThrowAsync<QueryExecutionException>()
+            .WithMessage("*AST error message*");
+    }
+
+    // ────────────────────────────────────────────
+    //  RAISERROR
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task RaiseError_ThrowsWithFormattedMessage()
+    {
+        var sql = "RAISERROR('Error: %s', 16, 1, 'test')";
+        var act = async () => await ExecuteScriptAsync(sql);
+        await act.Should().ThrowAsync<Exception>()
+            .WithMessage("*Error: test*");
+    }
+
+    [Fact]
+    public async Task RaiseError_HighSeverity_ThrowsException_AST()
+    {
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var raiseError = new RaiseErrorStatement
+        {
+            FirstParameter = new StringLiteral { Value = "Formatted: %s and %d" },
+            SecondParameter = new IntegerLiteral { Value = "16" },
+            ThirdParameter = new IntegerLiteral { Value = "1" }
+        };
+        raiseError.OptionalParameters.Add(new StringLiteral { Value = "hello" });
+        raiseError.OptionalParameters.Add(new IntegerLiteral { Value = "42" });
+
+        var statements = new TSqlStatement[] { raiseError };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in node.ExecuteAsync(ctx)) { }
+        };
+
+        await act.Should().ThrowAsync<QueryExecutionException>()
+            .WithMessage("*Formatted: hello and 42*");
+    }
+
+    [Fact]
+    public async Task RaiseError_LowSeverity_DoesNotThrow_AST()
+    {
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var raiseError = new RaiseErrorStatement
+        {
+            FirstParameter = new StringLiteral { Value = "Informational message" },
+            SecondParameter = new IntegerLiteral { Value = "10" },
+            ThirdParameter = new IntegerLiteral { Value = "1" }
+        };
+
+        var statements = new TSqlStatement[] { raiseError };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+
+        var mockProgress = new Mock<IQueryProgressReporter>();
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var ctx = new QueryPlanContext(
+            mockExecutor.Object,
+            progressReporter: mockProgress.Object,
+            variableScope: scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+
+        rows.Should().BeEmpty();
+        mockProgress.Verify(p => p.ReportPhase("RAISERROR", "Informational message"), Times.Once);
+    }
+
+    // ────────────────────────────────────────────
+    //  TRY/CATCH integration with THROW
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task TryCatch_CatchesThrow()
+    {
+        var sql = @"
+            BEGIN TRY
+                THROW 50001, 'Intentional error', 1
+            END TRY
+            BEGIN CATCH
+                SELECT ERROR_MESSAGE() AS msg
+            END CATCH";
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["msg"].Value.Should().Be("Intentional error");
+    }
+
+    [Fact]
+    public async Task TryCatch_CatchesThrow_AST()
+    {
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        // Build TRY { THROW 50001, 'caught', 1 } CATCH { ... }
+        var throwStmt = new ThrowStatement
+        {
+            ErrorNumber = new IntegerLiteral { Value = "50001" },
+            Message = new StringLiteral { Value = "caught" },
+            State = new IntegerLiteral { Value = "1" }
+        };
+
+        var tryStmtList = new StatementList();
+        tryStmtList.Statements.Add(throwStmt);
+
+        // In the CATCH block, we just check that the error was stored in scope
+        var catchStmtList = new StatementList();
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStmtList,
+            CatchStatements = catchStmtList
+        };
+
+        var statements = new TSqlStatement[] { tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        await foreach (var _ in node.ExecuteAsync(ctx)) { }
+
+        // After TRY/CATCH, the error info should be stored in scope
+        scope.IsDeclared("@@ERROR_MESSAGE").Should().BeTrue();
+        scope.Get("@@ERROR_MESSAGE").Should().Be("caught");
+    }
+
+    [Fact]
+    public async Task TryCatch_CatchesRaiseError()
+    {
+        var sql = @"
+            BEGIN TRY
+                RAISERROR('Oops: %s', 16, 1, 'broke')
+            END TRY
+            BEGIN CATCH
+                SELECT ERROR_MESSAGE() AS msg
+            END CATCH";
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["msg"].Value.Should().Be("Oops: broke");
+    }
+
+    [Fact]
+    public async Task TryCatch_RaiseError_LowSeverity_NotCaught()
+    {
+        // RAISERROR with severity < 11 should NOT be caught by TRY/CATCH
+        var sql = @"
+            BEGIN TRY
+                RAISERROR('Info only', 10, 1)
+                SELECT 'reached' AS status
+            END TRY
+            BEGIN CATCH
+                SELECT 'caught' AS status
+            END CATCH";
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["status"].Value.Should().Be("reached");
+    }
+
+    [Fact]
+    public async Task Throw_BareThrow_RethrowsInCatch_AST()
+    {
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        // Inner TRY { THROW 50001, 'original', 1 } CATCH { bare THROW }
+        var innerThrow = new ThrowStatement
+        {
+            ErrorNumber = new IntegerLiteral { Value = "50001" },
+            Message = new StringLiteral { Value = "original error" },
+            State = new IntegerLiteral { Value = "1" }
+        };
+
+        var bareThrow = new ThrowStatement(); // No args = re-throw
+
+        var innerTryList = new StatementList();
+        innerTryList.Statements.Add(innerThrow);
+        var innerCatchList = new StatementList();
+        innerCatchList.Statements.Add(bareThrow);
+
+        var innerTryCatch = new TryCatchStatement
+        {
+            TryStatements = innerTryList,
+            CatchStatements = innerCatchList
+        };
+
+        // Outer TRY { innerTryCatch } CATCH { ... }
+        var outerTryList = new StatementList();
+        outerTryList.Statements.Add(innerTryCatch);
+        var outerCatchList = new StatementList();
+
+        var outerTryCatch = new TryCatchStatement
+        {
+            TryStatements = outerTryList,
+            CatchStatements = outerCatchList
+        };
+
+        var statements = new TSqlStatement[] { outerTryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        await foreach (var _ in node.ExecuteAsync(ctx)) { }
+
+        // The bare THROW re-threw, which was caught by outer CATCH.
+        // The outer CATCH stored the error message in scope.
+        scope.IsDeclared("@@ERROR_MESSAGE").Should().BeTrue();
+        scope.Get("@@ERROR_MESSAGE").Should().Be("original error");
     }
 }

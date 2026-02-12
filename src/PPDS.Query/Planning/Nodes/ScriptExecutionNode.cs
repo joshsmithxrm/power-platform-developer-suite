@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
@@ -133,6 +135,27 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                     {
                         lastResultRows = tryCatchRows;
                     }
+                    break;
+
+                case SelectStatement selectStmt when IsVariableAssignment(selectStmt):
+                    await ExecuteSelectAssignmentAsync(
+                        selectStmt, scope, context, cancellationToken);
+                    break;
+
+                case SelectStatement selectStmt when IsFromlessSelect(selectStmt):
+                    lastResultRows = ExecuteFromlessSelect(selectStmt, scope);
+                    break;
+
+                case PrintStatement printStmt:
+                    ExecutePrint(printStmt, scope, context);
+                    break;
+
+                case ThrowStatement throwStmt:
+                    ExecuteThrow(throwStmt, scope);
+                    break;
+
+                case RaiseErrorStatement raiseError:
+                    ExecuteRaiseError(raiseError, scope, context);
                     break;
 
                 case BreakStatement:
@@ -381,6 +404,232 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         if (!scope.IsDeclared(errorStateVar))
             scope.Declare(errorStateVar, "INT");
         scope.Set(errorStateVar, 1);
+    }
+
+    /// <summary>
+    /// Returns true if the SELECT statement is a variable assignment form
+    /// (e.g., SELECT @var = expr) rather than a normal result-producing SELECT.
+    /// </summary>
+    private static bool IsVariableAssignment(SelectStatement selectStmt)
+    {
+        if (selectStmt.QueryExpression is not QuerySpecification querySpec)
+            return false;
+        return querySpec.SelectElements.Any(e => e is SelectSetVariable);
+    }
+
+    /// <summary>
+    /// Returns true if the SELECT statement has no FROM clause (e.g., SELECT 1+1 AS result,
+    /// SELECT ERROR_MESSAGE() AS msg). These can be evaluated directly without hitting the
+    /// plan builder, which requires a FROM clause for entity resolution.
+    /// </summary>
+    private static bool IsFromlessSelect(SelectStatement selectStmt)
+    {
+        if (selectStmt.QueryExpression is not QuerySpecification querySpec)
+            return false;
+        return querySpec.FromClause == null
+               || querySpec.FromClause.TableReferences.Count == 0;
+    }
+
+    /// <summary>
+    /// Evaluates a FROM-less SELECT (e.g., SELECT ERROR_MESSAGE() AS msg, SELECT 1+1 AS result)
+    /// by compiling each select element as a scalar expression and producing a single result row.
+    /// </summary>
+    private List<QueryRow> ExecuteFromlessSelect(
+        SelectStatement selectStmt,
+        VariableScope scope)
+    {
+        var querySpec = (QuerySpecification)selectStmt.QueryExpression;
+        var emptyRow = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
+
+        var resultValues = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression scalar)
+            {
+                var alias = scalar.ColumnName?.Value
+                    ?? scalar.Expression?.ToString()
+                    ?? "column";
+
+                var compiled = _expressionCompiler.CompileScalar(scalar.Expression);
+                var value = compiled(emptyRow);
+                resultValues[alias] = QueryValue.Simple(value);
+            }
+        }
+
+        return new List<QueryRow> { new QueryRow(resultValues, "(expression)") };
+    }
+
+    /// <summary>
+    /// Executes a SELECT @var = expr statement, assigning expression results
+    /// to variables in scope. Supports both no-FROM (direct expression evaluation)
+    /// and FROM clause (executes query, assigns from last row) forms.
+    /// </summary>
+    private async Task ExecuteSelectAssignmentAsync(
+        SelectStatement selectStmt,
+        VariableScope scope,
+        QueryPlanContext context,
+        CancellationToken cancellationToken)
+    {
+        var querySpec = (QuerySpecification)selectStmt.QueryExpression;
+
+        if (querySpec.FromClause != null)
+        {
+            // Has FROM clause: execute query and assign from last row
+            var rows = await ExecuteDataStatementAsync(
+                selectStmt, scope, context, cancellationToken);
+
+            if (rows.Count > 0)
+            {
+                var lastRow = rows[^1];
+                foreach (var element in querySpec.SelectElements)
+                {
+                    if (element is SelectSetVariable setVar)
+                    {
+                        var compiled = _expressionCompiler.CompileScalar(setVar.Expression);
+                        var value = compiled(lastRow.Values);
+                        var varName = setVar.Variable.Name;
+                        if (!varName.StartsWith("@"))
+                            varName = "@" + varName;
+                        scope.Set(varName, value);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // No FROM clause: evaluate expressions directly
+            var emptyRow = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (var element in querySpec.SelectElements)
+            {
+                if (element is SelectSetVariable setVar)
+                {
+                    var compiled = _expressionCompiler.CompileScalar(setVar.Expression);
+                    var value = compiled(emptyRow);
+                    var varName = setVar.Variable.Name;
+                    if (!varName.StartsWith("@"))
+                        varName = "@" + varName;
+                    scope.Set(varName, value);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Executes a PRINT statement. Evaluates the expression and routes the
+    /// message to the context's progress reporter if available.
+    /// Produces no rows.
+    /// </summary>
+    private void ExecutePrint(
+        PrintStatement printStmt,
+        VariableScope scope,
+        QueryPlanContext context)
+    {
+        var message = EvaluateScalarAsString(printStmt.Expression, scope);
+        context.ProgressReporter?.ReportPhase("PRINT", message);
+    }
+
+    /// <summary>
+    /// Executes a THROW statement. If parameters are provided (error_number, message, state),
+    /// throws a <see cref="QueryExecutionException"/> with the message. A bare THROW (no args)
+    /// re-throws the current error from the CATCH block scope (@@ERROR_MESSAGE).
+    /// </summary>
+    private void ExecuteThrow(ThrowStatement throwStmt, VariableScope scope)
+    {
+        if (throwStmt.Message == null && throwStmt.ErrorNumber == null && throwStmt.State == null)
+        {
+            // Bare THROW — re-throw the current error from the CATCH context
+            string? reThrowMessage = null;
+            if (scope.IsDeclared("@@ERROR_MESSAGE"))
+            {
+                reThrowMessage = scope.Get("@@ERROR_MESSAGE")?.ToString();
+            }
+
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                reThrowMessage ?? "THROW statement executed with no error context.");
+        }
+
+        // THROW with explicit parameters: THROW error_number, 'message', state
+        var message = EvaluateScalarAsString(throwStmt.Message, scope);
+        throw new QueryExecutionException(QueryErrorCode.ExecutionFailed, message);
+    }
+
+    /// <summary>
+    /// Executes a RAISERROR statement. The first parameter is the format string,
+    /// the second is severity, the third is state. Optional parameters after state
+    /// are format arguments that replace %s, %d, %i placeholders.
+    /// Severity &gt;= 11 throws a <see cref="QueryExecutionException"/>;
+    /// severity &lt; 11 is informational (routed to progress reporter like PRINT).
+    /// </summary>
+    private void ExecuteRaiseError(
+        RaiseErrorStatement raiseError,
+        VariableScope scope,
+        QueryPlanContext context)
+    {
+        var formatString = EvaluateScalarAsString(raiseError.FirstParameter, scope);
+
+        var severityValue = EvaluateScalarAsObject(raiseError.SecondParameter, scope);
+        var severity = Convert.ToInt32(severityValue, CultureInfo.InvariantCulture);
+
+        // Evaluate optional parameters for %s/%d/%i substitution
+        var args = new List<object?>();
+        foreach (var param in raiseError.OptionalParameters)
+        {
+            args.Add(EvaluateScalarAsObject(param, scope));
+        }
+
+        var formattedMessage = FormatRaiseErrorMessage(formatString, args);
+
+        if (severity >= 11)
+        {
+            throw new QueryExecutionException(QueryErrorCode.ExecutionFailed, formattedMessage);
+        }
+
+        // Informational (severity < 11) — route to progress reporter like PRINT
+        context.ProgressReporter?.ReportPhase("RAISERROR", formattedMessage);
+    }
+
+    /// <summary>
+    /// Evaluates a ScriptDom <see cref="ScalarExpression"/> and returns the result as a string.
+    /// Uses <see cref="ExpressionCompiler"/> for evaluation with the current variable scope.
+    /// </summary>
+    private string EvaluateScalarAsString(ScalarExpression expression, VariableScope scope)
+    {
+        var result = EvaluateScalarAsObject(expression, scope);
+        return result?.ToString() ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Evaluates a ScriptDom <see cref="ScalarExpression"/> and returns the raw object result.
+    /// </summary>
+    private object? EvaluateScalarAsObject(ScalarExpression expression, VariableScope scope)
+    {
+        var compiled = _expressionCompiler.CompileScalar(expression);
+        return compiled(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Formats a RAISERROR message string by replacing %s, %d, and %i placeholders
+    /// with the corresponding format arguments, in order.
+    /// </summary>
+    private static string FormatRaiseErrorMessage(string format, IReadOnlyList<object?> args)
+    {
+        var argIndex = 0;
+        return Regex.Replace(format, @"%[sdi]", match =>
+        {
+            if (argIndex >= args.Count)
+                return match.Value;
+
+            var arg = args[argIndex++];
+            return match.Value switch
+            {
+                "%s" => arg?.ToString() ?? "(null)",
+                "%d" or "%i" => Convert.ToInt64(arg ?? 0, CultureInfo.InvariantCulture)
+                    .ToString(CultureInfo.InvariantCulture),
+                _ => match.Value
+            };
+        });
     }
 
     private async Task<List<QueryRow>> ExecuteDataStatementAsync(
