@@ -86,6 +86,15 @@ namespace PPDS.Dataverse.BulkOperations
         public AdaptiveBatchSizer? AdaptiveSizer { get; set; }
 
         /// <summary>
+        /// Gets or sets an optional adaptive throttle manager that dynamically adjusts the
+        /// degree of parallelism based on 429 (service protection limit) responses.
+        /// When null, throttle events are handled by the existing retry logic without
+        /// adjusting parallelism. Complementary to <see cref="AdaptiveSizer"/>: that adjusts
+        /// batch SIZE, this adjusts thread COUNT.
+        /// </summary>
+        public AdaptiveThrottleManager? ThrottleManager { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
@@ -740,7 +749,12 @@ namespace PPDS.Dataverse.BulkOperations
                         connectionName = client.ConnectionName;
                     }
 
-                    return await executeBatch(client, batch, cancellationToken);
+                    var result = await executeBatch(client, batch, cancellationToken);
+
+                    // Record successful batch execution for adaptive parallelism recovery
+                    ThrottleManager?.RecordSuccess();
+
+                    return result;
                 }
                 catch (Exception ex) when (TryGetThrottleInfo(ex, out var retryAfter, out var errorCode))
                 {
@@ -748,6 +762,9 @@ namespace PPDS.Dataverse.BulkOperations
                     // PooledClient already recorded the throttle via callback.
                     // GetClientAsync will wait for a non-throttled connection.
                     LogThrottle(connectionName, retryAfter, errorCode);
+
+                    // Adaptively reduce parallelism when throttled
+                    ThrottleManager?.RecordThrottle();
 
                     // Continue to next iteration - pool handles the waiting
                 }
