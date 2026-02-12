@@ -438,6 +438,189 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  Client-side join post-pipeline: projection, ORDER BY, TOP, OFFSET/FETCH
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithSelectColumns_ProducesProjectNode()
+    {
+        // FULL OUTER JOIN with specific columns should produce a ProjectNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, c.fullname FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Should have a ProjectNode filtering to only the requested columns
+        var projectNode = FindNode<ProjectNode>(result.RootNode);
+        projectNode.Should().NotBeNull(
+            "client-side join with specific SELECT columns should produce a ProjectNode");
+        projectNode!.OutputColumns.Should().HaveCount(2);
+        projectNode.OutputColumns[0].OutputName.Should().Be("name");
+        projectNode.OutputColumns[1].OutputName.Should().Be("fullname");
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithSelectStar_NoProjectNode()
+    {
+        // FULL OUTER JOIN with SELECT * should NOT produce a ProjectNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT * FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Root should be a HashJoinNode (no ProjectNode wrapping it)
+        result.RootNode.Should().BeAssignableTo<HashJoinNode>(
+            "client-side join with SELECT * should not add a ProjectNode");
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithOrderBy_ProducesClientSortNode()
+    {
+        // FULL OUTER JOIN with ORDER BY should produce a ClientSortNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, c.fullname FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid ORDER BY a.name";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        var sortNode = FindNode<ClientSortNode>(result.RootNode);
+        sortNode.Should().NotBeNull(
+            "client-side join with ORDER BY should produce a ClientSortNode");
+        sortNode!.OrderByItems.Should().HaveCount(1);
+        sortNode.OrderByItems[0].ColumnName.Should().Be("name");
+        sortNode.OrderByItems[0].Descending.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithOrderByDesc_ProducesDescendingSort()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid ORDER BY a.name DESC";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        var sortNode = FindNode<ClientSortNode>(result.RootNode);
+        sortNode.Should().NotBeNull();
+        sortNode!.OrderByItems[0].Descending.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithTop_ProducesOffsetFetchNode()
+    {
+        // FULL OUTER JOIN with TOP should produce an OffsetFetchNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT TOP 5 a.name FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        var offsetFetchNode = FindNode<OffsetFetchNode>(result.RootNode);
+        offsetFetchNode.Should().NotBeNull(
+            "client-side join with TOP should produce an OffsetFetchNode");
+        offsetFetchNode!.Offset.Should().Be(0);
+        offsetFetchNode.Fetch.Should().Be(5);
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_WithOffsetFetch_ProducesOffsetFetchNode()
+    {
+        // FULL OUTER JOIN with OFFSET/FETCH should produce an OffsetFetchNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid ORDER BY a.name OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        var offsetFetchNode = FindNode<OffsetFetchNode>(result.RootNode);
+        offsetFetchNode.Should().NotBeNull(
+            "client-side join with OFFSET/FETCH should produce an OffsetFetchNode");
+        offsetFetchNode!.Offset.Should().Be(10);
+        offsetFetchNode.Fetch.Should().Be(5);
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_PostPipeline_CorrectNodeOrder()
+    {
+        // Verify the correct ordering of post-pipeline nodes:
+        // HashJoin -> ProjectNode -> ClientSortNode -> OffsetFetchNode (TOP)
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT TOP 3 a.name FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid ORDER BY a.name";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Root should be OffsetFetchNode (TOP) wrapping a ClientSortNode
+        result.RootNode.Should().BeOfType<OffsetFetchNode>(
+            "TOP should be the outermost node");
+
+        // Next should be ClientSortNode
+        var sortNode = result.RootNode.Children[0];
+        sortNode.Should().BeOfType<ClientSortNode>(
+            "ORDER BY sort should wrap the projection");
+
+        // Next should be ProjectNode
+        var projectChild = sortNode.Children[0];
+        projectChild.Should().BeOfType<ProjectNode>(
+            "SELECT list projection should wrap the join");
+
+        // Innermost should be HashJoinNode
+        ContainsNodeOfType<HashJoinNode>(projectChild).Should().BeTrue(
+            "HashJoinNode should be at the base of the plan");
+    }
+
+    [Fact]
+    public void Plan_CrossJoin_WithSelectColumns_ProducesProjectNode()
+    {
+        // CROSS JOIN (UnqualifiedJoin) should also get the post-pipeline
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("CROSS JOIN not supported"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name FROM account a CROSS JOIN contact b";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        var projectNode = FindNode<ProjectNode>(result.RootNode);
+        projectNode.Should().NotBeNull(
+            "CROSS JOIN with specific columns should produce a ProjectNode");
+        projectNode!.OutputColumns.Should().HaveCount(1);
+        projectNode.OutputColumns[0].OutputName.Should().Be("name");
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
 
