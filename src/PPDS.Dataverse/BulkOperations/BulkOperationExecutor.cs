@@ -79,6 +79,13 @@ namespace PPDS.Dataverse.BulkOperations
         private readonly ILogger<BulkOperationExecutor> _logger;
 
         /// <summary>
+        /// Gets or sets an optional adaptive batch sizer that dynamically adjusts batch sizes
+        /// based on observed execution times. When null, the fixed <see cref="BulkOperationOptions.BatchSize"/>
+        /// is used for all batches.
+        /// </summary>
+        public AdaptiveBatchSizer? AdaptiveSizer { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="BulkOperationExecutor"/> class.
         /// </summary>
         /// <param name="connectionPool">The connection pool.</param>
@@ -116,7 +123,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
 
             var stopwatch = Stopwatch.StartNew();
-            var batches = Batch(entityList, options.BatchSize).ToList();
+            var batches = Batch(entityList, GetEffectiveBatchSize(options)).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
             // Determine parallelism: user override or pool's DOP-based recommendation
@@ -181,7 +188,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
 
             var stopwatch = Stopwatch.StartNew();
-            var batches = Batch(entityList, options.BatchSize).ToList();
+            var batches = Batch(entityList, GetEffectiveBatchSize(options)).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
             // Determine parallelism: user override or pool's DOP-based recommendation
@@ -246,7 +253,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
 
             var stopwatch = Stopwatch.StartNew();
-            var batches = Batch(entityList, options.BatchSize).ToList();
+            var batches = Batch(entityList, GetEffectiveBatchSize(options)).ToList();
             var tracker = new ProgressTracker(entityList.Count);
 
             // Determine parallelism: user override or pool's DOP-based recommendation
@@ -311,7 +318,7 @@ namespace PPDS.Dataverse.BulkOperations
             }
 
             var stopwatch = Stopwatch.StartNew();
-            var batches = Batch(idList, options.BatchSize).ToList();
+            var batches = Batch(idList, GetEffectiveBatchSize(options)).ToList();
             var tracker = new ProgressTracker(idList.Count);
 
             // Select the appropriate batch execution function based on table type
@@ -1525,8 +1532,10 @@ namespace PPDS.Dataverse.BulkOperations
         /// <summary>
         /// Executes batches sequentially (one at a time).
         /// Used for single batches or when parallelism is unavailable.
+        /// When an <see cref="AdaptiveSizer"/> is configured, records batch timing
+        /// to allow the sizer to adjust for future operations.
         /// </summary>
-        private static async Task<BulkOperationResult> ExecuteBatchesSequentiallyAsync<T>(
+        private async Task<BulkOperationResult> ExecuteBatchesSequentiallyAsync<T>(
             IReadOnlyList<List<T>> batches,
             Func<List<T>, CancellationToken, Task<BulkOperationResult>> executeBatch,
             ProgressTracker tracker,
@@ -1541,7 +1550,16 @@ namespace PPDS.Dataverse.BulkOperations
 
             foreach (var batch in batches)
             {
+                var batchStopwatch = AdaptiveSizer != null ? Stopwatch.StartNew() : null;
+
                 var batchResult = await executeBatch(batch, cancellationToken).ConfigureAwait(false);
+
+                // Record batch timing for adaptive sizing
+                if (batchStopwatch != null)
+                {
+                    batchStopwatch.Stop();
+                    AdaptiveSizer!.RecordBatchResult(batch.Count, batchStopwatch.Elapsed);
+                }
 
                 successCount += batchResult.SuccessCount;
                 allErrors.AddRange(batchResult.Errors);
@@ -1725,6 +1743,15 @@ namespace PPDS.Dataverse.BulkOperations
                 Errors = errors,
                 Duration = TimeSpan.Zero
             };
+        }
+
+        /// <summary>
+        /// Gets the effective batch size, preferring the adaptive sizer's recommendation
+        /// over the fixed option when an <see cref="AdaptiveSizer"/> is configured.
+        /// </summary>
+        private int GetEffectiveBatchSize(BulkOperationOptions options)
+        {
+            return AdaptiveSizer?.CurrentBatchSize ?? options.BatchSize;
         }
 
         private static IEnumerable<List<T>> Batch<T>(IEnumerable<T> source, int batchSize)
