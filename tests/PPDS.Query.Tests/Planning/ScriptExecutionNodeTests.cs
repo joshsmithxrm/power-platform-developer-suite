@@ -378,4 +378,136 @@ public class ScriptExecutionNodeTests
         Assert.Equal(1, scope.Get("@a"));
         Assert.Equal(2, scope.Get("@b"));
     }
+
+    /// <summary>
+    /// Helper to create a WhileStatement with a predicate and body block.
+    /// </summary>
+    private static WhileStatement MakeWhile(
+        BooleanExpression predicate,
+        params TSqlStatement[] bodyStatements)
+    {
+        var stmt = new WhileStatement();
+        stmt.Predicate = predicate;
+        stmt.Statement = MakeBlock(bodyStatements);
+        return stmt;
+    }
+
+    /// <summary>
+    /// Helper to create a SET @var = @var + value (additive assignment via binary expression).
+    /// </summary>
+    private static SetVariableStatement MakeSetAddition(
+        string varName, string addendVarOrLiteral)
+    {
+        return MakeSetVariable(varName,
+            new BinaryExpression
+            {
+                BinaryExpressionType = BinaryExpressionType.Add,
+                FirstExpression = new VariableReference { Name = varName },
+                SecondExpression = new IntegerLiteral { Value = addendVarOrLiteral }
+            });
+    }
+
+    [Fact]
+    public async Task WhileLoop_Break_ExitsLoop()
+    {
+        // DECLARE @i INT = 0;
+        // WHILE @i < 10
+        // BEGIN
+        //   SET @i = @i + 1;
+        //   IF @i = 3 BREAK
+        // END
+        // -- expect @i = 3
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@i", "INT", 0),
+            MakeWhile(
+                MakeComparison(
+                    new VariableReference { Name = "@i" },
+                    BooleanComparisonType.LessThan,
+                    new IntegerLiteral { Value = "10" }),
+                // SET @i = @i + 1
+                MakeSetAddition("@i", "1"),
+                // IF @i = 3 BREAK
+                MakeIf(
+                    MakeComparison(
+                        new VariableReference { Name = "@i" },
+                        BooleanComparisonType.Equals,
+                        new IntegerLiteral { Value = "3" }),
+                    new BreakStatement()))
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+
+        Assert.Equal(3L, Convert.ToInt64(scope.Get("@i")));
+    }
+
+    [Fact]
+    public async Task WhileLoop_Continue_SkipsIteration()
+    {
+        // DECLARE @i INT = 0;
+        // DECLARE @sum INT = 0;
+        // WHILE @i < 10
+        // BEGIN
+        //   SET @i = @i + 1;
+        //   IF @i % 2 = 1 CONTINUE   -- skip odd numbers
+        //   SET @sum = @sum + @i;     -- only accumulate even: 2+4+6+8+10 = 30
+        // END
+        // -- expect @sum = 30
+        var scope = new VariableScope();
+        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+
+        var statements = new TSqlStatement[]
+        {
+            MakeDeclare("@i", "INT", 0),
+            MakeDeclare("@sum", "INT", 0),
+            MakeWhile(
+                MakeComparison(
+                    new VariableReference { Name = "@i" },
+                    BooleanComparisonType.LessThan,
+                    new IntegerLiteral { Value = "10" }),
+                // SET @i = @i + 1
+                MakeSetAddition("@i", "1"),
+                // IF (@i % 2) = 1 CONTINUE
+                MakeIf(
+                    MakeComparison(
+                        new BinaryExpression
+                        {
+                            BinaryExpressionType = BinaryExpressionType.Modulo,
+                            FirstExpression = new VariableReference { Name = "@i" },
+                            SecondExpression = new IntegerLiteral { Value = "2" }
+                        },
+                        BooleanComparisonType.Equals,
+                        new IntegerLiteral { Value = "1" }),
+                    new ContinueStatement()),
+                // SET @sum = @sum + @i
+                MakeSetVariable("@sum",
+                    new BinaryExpression
+                    {
+                        BinaryExpressionType = BinaryExpressionType.Add,
+                        FirstExpression = new VariableReference { Name = "@sum" },
+                        SecondExpression = new VariableReference { Name = "@i" }
+                    }))
+        };
+
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var ctx = CreateContext(scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(ctx))
+        {
+            rows.Add(row);
+        }
+
+        Assert.Equal(30L, Convert.ToInt64(scope.Get("@sum")));
+    }
 }

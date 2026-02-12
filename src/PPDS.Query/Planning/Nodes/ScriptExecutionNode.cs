@@ -25,6 +25,16 @@ namespace PPDS.Query.Planning.Nodes;
 /// </summary>
 public sealed class ScriptExecutionNode : IQueryPlanNode
 {
+    /// <summary>
+    /// Internal flow-control exception thrown by BREAK statements to exit WHILE loops.
+    /// </summary>
+    private sealed class BreakException : Exception { }
+
+    /// <summary>
+    /// Internal flow-control exception thrown by CONTINUE statements to skip to the next WHILE iteration.
+    /// </summary>
+    private sealed class ContinueException : Exception { }
+
     private readonly IReadOnlyList<TSqlStatement> _statements;
     private readonly ExecutionPlanBuilder _planBuilder;
     private readonly ExpressionCompiler _expressionCompiler;
@@ -124,6 +134,12 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                         lastResultRows = tryCatchRows;
                     }
                     break;
+
+                case BreakStatement:
+                    throw new BreakException();
+
+                case ContinueStatement:
+                    throw new ContinueException();
 
                 case BeginEndBlockStatement block:
                     var blockStatements = block.StatementList.Statements
@@ -243,16 +259,28 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             if (!conditionResult)
                 break;
 
-            var bodyStatements = UnwrapStatement(whileStmt.Statement);
-            var iterRows = await CollectRowsAsync(
-                ExecuteStatementListAsync(
-                    bodyStatements, scope, context, cancellationToken),
-                cancellationToken);
-
-            if (iterRows.Count > 0)
+            try
             {
-                lastRows ??= new List<QueryRow>();
-                lastRows.AddRange(iterRows);
+                var bodyStatements = UnwrapStatement(whileStmt.Statement);
+                var iterRows = await CollectRowsAsync(
+                    ExecuteStatementListAsync(
+                        bodyStatements, scope, context, cancellationToken),
+                    cancellationToken);
+
+                if (iterRows.Count > 0)
+                {
+                    lastRows ??= new List<QueryRow>();
+                    lastRows.AddRange(iterRows);
+                }
+            }
+            catch (BreakException)
+            {
+                break;
+            }
+            catch (ContinueException)
+            {
+                // Skip to next iteration — the for loop will re-evaluate the condition
+                continue;
             }
 
             if (i == maxIterations - 1)
@@ -293,6 +321,14 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         catch (OperationCanceledException)
         {
             throw; // Don't catch cancellation
+        }
+        catch (BreakException)
+        {
+            throw; // Don't catch BREAK — let it propagate to the enclosing WHILE loop
+        }
+        catch (ContinueException)
+        {
+            throw; // Don't catch CONTINUE — let it propagate to the enclosing WHILE loop
         }
         catch (Exception ex)
         {
