@@ -18,16 +18,19 @@
     .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host
     .\scripts\devcontainer.ps1 send                      # send host files to container (prompts for worktree)
     .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container worktree
+    .\scripts\devcontainer.ps1 sync                      # sync origin git state into container
     .\scripts\devcontainer.ps1 reset                    # nuke everything, full clean rebuild
 #>
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'send', 'push', 'reset', 'help')]
+    [ValidateSet('up', 'shell', 'claude', 'ppds', 'down', 'status', 'send', 'push', 'sync', 'reset', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)]
-    [string]$Target
+    [string]$Target,
+
+    [switch]$NoPlanMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,8 +146,114 @@ function Select-WorkingDirectory {
     exit 1
 }
 
+function Sync-ContainerFromOrigin {
+    # Sync origin's git state into the container via bundle (container has no credentials)
+    $containerId = (docker ps -q --filter "label=devcontainer.local_folder=$WorkspaceFolder").Trim()
+    if (-not $containerId) {
+        Write-Err 'Container is not running.'
+        return
+    }
+
+    # Host fetches latest from origin
+    Write-Step 'Fetching from origin...'
+    git -C $WorkspaceFolder fetch origin --prune
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err 'Failed to fetch from origin.'
+        return
+    }
+
+    # Collect all origin refs
+    $originRefs = @(git -C $WorkspaceFolder for-each-ref --format='%(refname)' refs/remotes/origin/)
+    if ($originRefs.Count -eq 0) {
+        Write-Err 'No remote refs found.'
+        return
+    }
+
+    # Bundle all origin refs
+    Write-Step "Bundling $($originRefs.Count) refs from origin..."
+    $bundlePath = Join-Path $env:TEMP 'ppds-sync.bundle'
+    git -C $WorkspaceFolder bundle create $bundlePath @originRefs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err 'Failed to create bundle.'
+        Remove-Item $bundlePath -ErrorAction SilentlyContinue
+        return
+    }
+
+    # Send bundle to container
+    docker cp $bundlePath "${containerId}:/tmp/sync.bundle" | Out-Null
+    Remove-Item $bundlePath -ErrorAction SilentlyContinue
+
+    # Container: clear stale origin refs and fetch fresh ones from bundle
+    # Clearing first ensures pruning — refs deleted on origin get removed
+    devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git for-each-ref --format='delete %(refname)' refs/remotes/origin/ | git update-ref --stdin" 2>$null
+    devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git fetch /tmp/sync.bundle 'refs/remotes/origin/*:refs/remotes/origin/*'" 2>$null
+    $refCount = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git for-each-ref --format='%(refname)' refs/remotes/origin/ | wc -l" 2>$null).Trim()
+    Write-Ok "Updated remote tracking refs ($refCount refs synced)."
+
+    # Fast-forward main if the main checkout is clean and on main
+    $currentBranch = (devcontainer exec --workspace-folder $WorkspaceFolder git branch --show-current 2>$null).Trim()
+    if ($currentBranch -ne 'main') {
+        Write-Step 'Main checkout is not on main — skipping fast-forward.'
+    }
+    else {
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git diff --quiet && git diff --cached --quiet" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Step 'Main checkout has uncommitted changes — skipping fast-forward.'
+        }
+        else {
+            $oldSha = (devcontainer exec --workspace-folder $WorkspaceFolder git rev-parse --short HEAD 2>$null).Trim()
+            devcontainer exec --workspace-folder $WorkspaceFolder git merge --ff-only origin/main 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Err 'main has diverged from origin (local commits?) — resolve manually.'
+            }
+            else {
+                $newSha = (devcontainer exec --workspace-folder $WorkspaceFolder git rev-parse --short HEAD 2>$null).Trim()
+                if ($oldSha -eq $newSha) {
+                    Write-Ok 'main is up-to-date.'
+                }
+                else {
+                    Write-Ok "Fast-forwarded main ($oldSha -> $newSha)."
+                }
+            }
+        }
+    }
+
+    # Report worktree status
+    $worktrees = @(Get-Worktrees)
+    if ($worktrees.Count -gt 0) {
+        Write-Host ''
+        Write-Host '  Worktree status:' -ForegroundColor Yellow
+        foreach ($wt in $worktrees) {
+            $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd .worktrees/$wt && git branch --show-current" 2>$null).Trim()
+            if (-not $branch) {
+                $padWt = $wt.PadRight(20)
+                Write-Host "    $padWt (detached HEAD)" -ForegroundColor DarkYellow
+                continue
+            }
+            devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd .worktrees/$wt && git rev-parse origin/$branch" 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $padWt = $wt.PadRight(20)
+                $padBranch = $branch.PadRight(25)
+                Write-Host "    $padWt $padBranch " -ForegroundColor White -NoNewline
+                Write-Host "branch deleted on origin" -ForegroundColor Red
+                continue
+            }
+            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd .worktrees/$wt && git rev-list --count origin/${branch}..HEAD" 2>$null).Trim()
+            $behind = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd .worktrees/$wt && git rev-list --count HEAD..origin/${branch}" 2>$null).Trim()
+            $padWt = $wt.PadRight(20)
+            $padBranch = $branch.PadRight(25)
+            Write-Host "    $padWt $padBranch ${ahead} ahead, ${behind} behind" -ForegroundColor White
+        }
+        Write-Host ''
+    }
+
+    # Clean up
+    devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/sync.bundle
+}
+
 switch ($Command) {
     'up' {
+        $freshClone = -not (docker volume ls -q --filter "name=^${WorkspaceVolume}$")
         Ensure-WorkspaceVolume
 
         # Ensure cache volumes exist with correct ownership (Docker creates as root)
@@ -159,6 +268,11 @@ switch ($Command) {
         Write-Step 'Building and starting devcontainer...'
         devcontainer up --workspace-folder $WorkspaceFolder
         if ($LASTEXITCODE -eq 0) {
+            # Sync origin state into container (skip on fresh clone — already current)
+            if (-not $freshClone) {
+                Sync-ContainerFromOrigin
+            }
+
             # Repair host worktrees — fix .git files that have container Linux paths
             $hostWtDir = Join-Path $WorkspaceFolder '.worktrees'
             if (Test-Path $hostWtDir) {
@@ -341,9 +455,17 @@ switch ($Command) {
                 Write-Step "Rebasing new commits onto updated origin/$branch..."
                 devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rebase origin/$branch"
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Err "Rebase failed (conflicts). Resolve in container shell, then push again."
-                    devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rebase --abort"
                     devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/origin.bundle
+                    Write-Err "Rebase has conflicts in '$workdir'."
+                    Write-Step 'Launching Claude Code to help resolve conflicts...'
+                    $planInstruction = if ($NoPlanMode) {
+                        'Resolve all conflicts directly.'
+                    } else {
+                        'Start by using plan mode to analyze the conflicts and present a resolution strategy before making changes.'
+                    }
+                    $conflictPrompt = "A git rebase of branch '${branch}' onto origin/${branch} has resulted in merge conflicts. Run git status to see conflicted files. Analyze each conflict, resolve them, git add the resolved files, and run git rebase --continue. If there are multiple conflicting commits, continue resolving until the rebase is complete. ${planInstruction}"
+                    devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && claude --dangerously-skip-permissions -p '${conflictPrompt}'"
+                    Write-Step "Claude session ended. Re-run 'push' when conflicts are resolved."
                     exit 1
                 }
                 devcontainer exec --workspace-folder $WorkspaceFolder rm -f /tmp/origin.bundle
@@ -438,6 +560,11 @@ switch ($Command) {
         else { Write-Err 'Sync failed.'; exit 1 }
     }
 
+    'sync' {
+        Ensure-ContainerRunning
+        Sync-ContainerFromOrigin
+    }
+
     'reset' {
         Write-Step 'Nuking everything for a clean rebuild...'
 
@@ -482,7 +609,11 @@ switch ($Command) {
         Write-Host '    status                Check if container is running'
         Write-Host '    push [worktree]       Push container commits to origin via host credentials'
         Write-Host '    send [worktree]       Send host files to container (preserves .git state)'
+        Write-Host '    sync                  Sync origin git state into container (auto-runs on up)'
         Write-Host '    reset                 Nuke container + all volumes + rebuild from scratch'
+        Write-Host ''
+        Write-Host '  Options:' -ForegroundColor White
+        Write-Host '    -NoPlanMode           Skip plan mode when Claude resolves rebase conflicts'
         Write-Host ''
         Write-Host '  Examples:' -ForegroundColor White
         Write-Host '    .\scripts\devcontainer.ps1 claude                   # prompts for location'
@@ -492,6 +623,7 @@ switch ($Command) {
         Write-Host '    .\scripts\devcontainer.ps1 shell main               # shell at repo root'
         Write-Host '    .\scripts\devcontainer.ps1 push query-engine-v3      # push worktree branch via host'
         Write-Host '    .\scripts\devcontainer.ps1 send query-engine-v3      # send host worktree to container'
+        Write-Host '    .\scripts\devcontainer.ps1 sync                      # sync origin refs into container'
         Write-Host ''
     }
 }
