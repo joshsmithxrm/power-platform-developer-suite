@@ -234,18 +234,6 @@ public class ExecutionPlanBuilderTests
     }
 
     [Fact]
-    public void Plan_WhereExists_ThrowsQueryParseException()
-    {
-        var fragment = _parser.Parse(
-            "SELECT name FROM account WHERE EXISTS (SELECT 1 FROM contact)");
-
-        var act = () => _builder.Plan(fragment);
-
-        act.Should().Throw<QueryParseException>()
-            .WithMessage("*EXISTS*");
-    }
-
-    [Fact]
     public void Plan_WhereInSubquery_ProducesPlan()
     {
         var fragment = _parser.Parse(
@@ -687,6 +675,63 @@ public class ExecutionPlanBuilderTests
 
         ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "IN (subquery) combined with other WHERE conditions should still produce a HashSemiJoinNode");
+    }
+
+    // ────────────────────────────────────────────
+    //  EXISTS / NOT EXISTS
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereExists_ProducesHashSemiJoin()
+    {
+        var sql = @"SELECT name FROM account a
+                    WHERE EXISTS (SELECT 1 FROM contact c WHERE c.parentcustomerid = a.accountid)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "a WHERE EXISTS (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereNotExists_ProducesHashSemiJoin()
+    {
+        var sql = @"SELECT name FROM account a
+                    WHERE NOT EXISTS (SELECT 1 FROM contact c WHERE c.parentcustomerid = a.accountid)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "a WHERE NOT EXISTS (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereExists_WithAdditionalCondition()
+    {
+        var sql = @"SELECT name FROM account a
+                    WHERE statecode = 0 AND EXISTS (SELECT 1 FROM contact c WHERE c.parentcustomerid = a.accountid)";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+            "EXISTS combined with other WHERE conditions should still produce a HashSemiJoinNode");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_WhereExists_WithoutCorrelation_ThrowsQueryParseException()
+    {
+        var sql = @"SELECT name FROM account a
+                    WHERE EXISTS (SELECT 1 FROM contact c WHERE c.statecode = 0)";
+        var fragment = _parser.Parse(sql);
+
+        var act = () => _builder.Plan(fragment);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*correlation*");
     }
 
     // ────────────────────────────────────────────

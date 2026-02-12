@@ -182,6 +182,13 @@ public sealed class ExecutionPlanBuilder
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
 
+        // EXISTS / NOT EXISTS — route to client-side semi-join
+        if (querySpec.WhereClause?.SearchCondition != null
+            && ContainsExistsPredicate(querySpec.WhereClause.SearchCondition))
+        {
+            return PlanExistsSubquery(selectStmt, querySpec, options);
+        }
+
         // IN (subquery) / NOT IN (subquery) — route to client-side semi-join
         if (querySpec.WhereClause?.SearchCondition != null
             && ContainsInSubqueryPredicate(querySpec.WhereClause.SearchCondition))
@@ -505,6 +512,240 @@ public sealed class ExecutionPlanBuilder
         }
 
         return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXISTS / NOT EXISTS subquery planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a SELECT whose WHERE clause contains one or more EXISTS or NOT EXISTS predicates.
+    /// Strips the EXISTS predicates from the WHERE, plans the outer query normally (which may
+    /// generate FetchXML for pushable conditions), then plans each inner subquery separately
+    /// and wraps the outer scan in <see cref="HashSemiJoinNode"/> instances.
+    /// </summary>
+    private QueryPlanResult PlanExistsSubquery(
+        SelectStatement selectStmt,
+        QuerySpecification querySpec,
+        QueryPlanOptions options)
+    {
+        // 1. Extract EXISTS predicates from WHERE, collecting them and building a cleaned expression
+        var existsPredicates = new List<(ExistsPredicate exists, bool isNot)>();
+        var cleanedWhere = ExtractExistsPredicates(querySpec.WhereClause?.SearchCondition, existsPredicates);
+
+        // 2. Temporarily modify the WHERE to exclude EXISTS predicates so FetchXML generation works
+        var origWhereClause = querySpec.WhereClause;
+        if (cleanedWhere != null)
+        {
+            querySpec.WhereClause = new WhereClause { SearchCondition = cleanedWhere };
+        }
+        else
+        {
+            querySpec.WhereClause = null;
+        }
+
+        QueryPlanResult outerResult;
+        try
+        {
+            // Re-enter PlanSelect for the outer query (without EXISTS predicates).
+            // This will generate FetchXML for pushable conditions and apply the normal pipeline.
+            outerResult = PlanSelect(selectStmt, querySpec, options);
+        }
+        finally
+        {
+            // Restore the original AST so callers see no mutation
+            querySpec.WhereClause = origWhereClause;
+        }
+
+        // Resolve outer table alias and entity name for correlation matching
+        var outerEntityName = outerResult.EntityLogicalName;
+        var outerAlias = ExtractOuterTableAlias(querySpec);
+
+        // 3. For each EXISTS, extract correlation and wrap in HashSemiJoinNode
+        var currentNode = outerResult.RootNode;
+        foreach (var (exists, isNot) in existsPredicates)
+        {
+            // Extract correlation columns from inner WHERE
+            var correlation = ExtractCorrelationFromExists(exists, outerEntityName, outerAlias);
+            if (correlation == null)
+            {
+                throw new QueryParseException(
+                    "EXISTS subquery requires a correlation predicate (e.g., WHERE inner.col = outer.col).");
+            }
+
+            // Plan the inner subquery
+            var innerResult = PlanQueryExpressionAsSelect(exists.Subquery.QueryExpression, options);
+
+            // Wrap in HashSemiJoinNode (antiSemiJoin = true for NOT EXISTS)
+            currentNode = new HashSemiJoinNode(
+                currentNode, innerResult.RootNode,
+                correlation.Value.outerCol, correlation.Value.innerCol,
+                antiSemiJoin: isNot);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = currentNode,
+            FetchXml = outerResult.FetchXml,
+            VirtualColumns = outerResult.VirtualColumns,
+            EntityLogicalName = outerEntityName
+        };
+    }
+
+    /// <summary>
+    /// Extracts <see cref="ExistsPredicate"/> nodes from a boolean expression tree,
+    /// collecting them into the provided list along with whether they are negated (NOT EXISTS).
+    /// Returns the remaining boolean expression with EXISTS predicates removed, or null if
+    /// the entire expression was consumed.
+    /// Only extracts from top-level AND conjuncts — EXISTS predicates inside OR/parenthesized
+    /// expressions are left in place.
+    /// </summary>
+    private static BooleanExpression? ExtractExistsPredicates(
+        BooleanExpression? expr,
+        List<(ExistsPredicate exists, bool isNot)> collected)
+    {
+        if (expr is null) return null;
+
+        // Direct ExistsPredicate
+        if (expr is ExistsPredicate exists)
+        {
+            collected.Add((exists, false));
+            return null;
+        }
+
+        // NOT EXISTS (BooleanNotExpression wrapping ExistsPredicate)
+        if (expr is BooleanNotExpression not && not.Expression is ExistsPredicate notExists)
+        {
+            collected.Add((notExists, true));
+            return null;
+        }
+
+        // AND — extract from both sides independently
+        if (expr is BooleanBinaryExpression bin
+            && bin.BinaryExpressionType == BooleanBinaryExpressionType.And)
+        {
+            var left = ExtractExistsPredicates(bin.FirstExpression, collected);
+            var right = ExtractExistsPredicates(bin.SecondExpression, collected);
+
+            if (left == null && right == null) return null;
+            if (left == null) return right;
+            if (right == null) return left;
+
+            // Both sides still have content — reconstruct the AND
+            bin.FirstExpression = left;
+            bin.SecondExpression = right;
+            return bin;
+        }
+
+        // For other expression types (OR, NOT wrapping non-EXISTS, etc.), don't extract
+        return expr;
+    }
+
+    /// <summary>
+    /// Extracts the alias of the primary (leftmost) table in the FROM clause, if present.
+    /// Used to match correlation predicates in EXISTS subqueries (e.g., WHERE c.parentcustomerid = a.accountid
+    /// where "a" is the alias for the outer table).
+    /// </summary>
+    private static string? ExtractOuterTableAlias(QuerySpecification querySpec)
+    {
+        if (querySpec.FromClause?.TableReferences.Count > 0)
+        {
+            return ExtractAliasFromTableReference(querySpec.FromClause.TableReferences[0]);
+        }
+        return null;
+    }
+
+    private static string? ExtractAliasFromTableReference(TableReference tableRef)
+    {
+        return tableRef switch
+        {
+            NamedTableReference named => named.Alias?.Value,
+            QualifiedJoin join => ExtractAliasFromTableReference(join.FirstTableReference),
+            UnqualifiedJoin unqualified => ExtractAliasFromTableReference(unqualified.FirstTableReference),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Extracts the correlation predicate from the inner WHERE clause of an EXISTS subquery.
+    /// Finds a BooleanComparisonExpression with equality where one side references the outer
+    /// table (by entity name or alias) and the other references the inner table.
+    /// </summary>
+    private static (string outerCol, string innerCol)? ExtractCorrelationFromExists(
+        ExistsPredicate exists,
+        string outerEntityName,
+        string? outerAlias)
+    {
+        var innerQuery = exists.Subquery.QueryExpression as QuerySpecification;
+        if (innerQuery?.WhereClause?.SearchCondition == null)
+            return null;
+
+        return FindCorrelationPredicate(innerQuery.WhereClause.SearchCondition, outerEntityName, outerAlias);
+    }
+
+    /// <summary>
+    /// Recursively walks a boolean expression tree looking for a correlation predicate:
+    /// a BooleanComparisonExpression with equality where one ColumnReference references the
+    /// outer table (matched by entity name or alias) and the other references the inner table.
+    /// </summary>
+    private static (string outerCol, string innerCol)? FindCorrelationPredicate(
+        BooleanExpression expr,
+        string outerEntityName,
+        string? outerAlias)
+    {
+        if (expr is BooleanComparisonExpression comp
+            && comp.ComparisonType == BooleanComparisonType.Equals
+            && comp.FirstExpression is ColumnReferenceExpression left
+            && comp.SecondExpression is ColumnReferenceExpression right)
+        {
+            var leftParts = left.MultiPartIdentifier.Identifiers;
+            var rightParts = right.MultiPartIdentifier.Identifiers;
+
+            var leftQualifier = leftParts.Count > 1 ? leftParts[0].Value : null;
+            var rightQualifier = rightParts.Count > 1 ? rightParts[0].Value : null;
+
+            var leftCol = leftParts[leftParts.Count - 1].Value;
+            var rightCol = rightParts[rightParts.Count - 1].Value;
+
+            // Check if left side references the outer table (by alias or entity name)
+            if (IsOuterReference(leftQualifier, outerEntityName, outerAlias))
+                return (leftCol, rightCol);
+
+            // Check if right side references the outer table (by alias or entity name)
+            if (IsOuterReference(rightQualifier, outerEntityName, outerAlias))
+                return (rightCol, leftCol);
+        }
+
+        // Check inside AND conjuncts
+        if (expr is BooleanBinaryExpression bin)
+        {
+            return FindCorrelationPredicate(bin.FirstExpression, outerEntityName, outerAlias)
+                ?? FindCorrelationPredicate(bin.SecondExpression, outerEntityName, outerAlias);
+        }
+
+        // Check inside parenthesized expressions
+        if (expr is BooleanParenthesisExpression paren)
+        {
+            return FindCorrelationPredicate(paren.Expression, outerEntityName, outerAlias);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true if the given qualifier matches the outer table by alias or entity name.
+    /// </summary>
+    private static bool IsOuterReference(string? qualifier, string outerEntityName, string? outerAlias)
+    {
+        if (qualifier == null) return false;
+
+        if (outerAlias != null && qualifier.Equals(outerAlias, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (qualifier.Equals(outerEntityName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     private (IQueryPlanNode node, string entityName) PlanJoinTree(
@@ -2281,13 +2522,8 @@ public sealed class ExecutionPlanBuilder
     {
         if (where is null) return;
 
-        if (ContainsExistsPredicate(where))
-        {
-            throw new QueryParseException(
-                "Unsupported WHERE predicate: EXISTS subqueries are not supported in this execution path.");
-        }
-
         // IN subquery check removed — now handled by PlanInSubquery before this point.
+        // EXISTS check removed — now handled by PlanExistsSubquery before this point.
     }
 
     /// <summary>
