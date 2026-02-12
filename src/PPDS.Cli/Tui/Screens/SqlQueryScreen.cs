@@ -66,6 +66,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private string? _lastErrorMessage;
     private QueryPlanDescription? _lastExecutionPlan;
     private long _lastExecutionTimeMs;
+    private bool _useTdsEndpoint;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -85,6 +86,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             new("History", "Ctrl+Shift+H", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
+            new("", "", () => {}, null, null, Key.Null), // Separator
+            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "Ctrl+T", ToggleTdsEndpoint),
         })
     };
 
@@ -342,6 +345,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         });
         RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
+        RegisterHotkey(registry, Key.CtrlMask | Key.T, "Toggle TDS Endpoint", ToggleTdsEndpoint);
     }
 
     private void SetupKeyboardHandling()
@@ -523,7 +527,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 Sql = sql,
                 PageNumber = null,
                 PagingCookie = null,
-                EnablePrefetch = true
+                EnablePrefetch = true,
+                UseTdsEndpoint = _useTdsEndpoint
             };
 
             IReadOnlyList<Dataverse.Query.QueryColumn>? columns = null;
@@ -793,6 +798,15 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         {
             ErrorService.ReportError("Network error loading results", ex, "LoadMoreResults");
         }
+    }
+
+    private void ToggleTdsEndpoint()
+    {
+        _useTdsEndpoint = !_useTdsEndpoint;
+        _statusLabel.Text = _useTdsEndpoint
+            ? "Mode: TDS Read Replica (read-only, slight delay)"
+            : "Mode: Dataverse (real-time)";
+        NotifyMenuChanged();
     }
 
     private void ShowFilter()
