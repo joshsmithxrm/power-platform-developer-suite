@@ -373,14 +373,14 @@ switch ($Command) {
         $subdir = Select-WorkingDirectory -Target $Target
         $workdir = if ($subdir) { $subdir } else { '.' }
         Write-Step 'Building PPDS CLI...'
-        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && dotnet build src/PPDS.Cli -f net10.0"
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && dotnet build src/PPDS.Cli -f net10.0' -- $workdir
         if ($LASTEXITCODE -ne 0) {
             Write-Err 'Build failed.'
             exit 1
         }
 
         Write-Step 'Launching TUI...'
-        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && PPDS_FORCE_TUI=1 dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll"
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && PPDS_FORCE_TUI=1 dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll' -- $workdir
     }
 
     'down' {
@@ -406,12 +406,12 @@ switch ($Command) {
         $workdir = if ($subdir) { $subdir } else { '.' }
 
         # Get branch name and local HEAD SHA from container
-        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git branch --show-current").Trim()
+        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git branch --show-current' -- $workdir).Trim()
         if (-not $branch) {
             Write-Err "Could not determine branch (detached HEAD?)."
             exit 1
         }
-        $localSha = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-parse HEAD").Trim()
+        $localSha = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git rev-parse HEAD' -- $workdir).Trim()
 
         # Compare against actual remote state (not local tracking refs which may be stale)
         $remoteSha = (git -C $WorkspaceFolder ls-remote origin "refs/heads/${branch}" 2>$null)
@@ -423,11 +423,11 @@ switch ($Command) {
         }
 
         if (-not $remoteSha) {
-            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-list --count HEAD").Trim()
+            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git rev-list --count HEAD' -- $workdir).Trim()
             Write-Step "New branch '$branch' ($ahead commit(s))."
         }
         else {
-            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rev-list --count $remoteSha..HEAD 2>/dev/null").Trim()
+            $ahead = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git rev-list --count "$2..HEAD" 2>/dev/null' -- $workdir $remoteSha).Trim()
             if (-not $ahead -or $ahead -eq '0') {
                 Write-Ok "Branch '$branch' is already up-to-date on origin."
                 return
@@ -438,9 +438,9 @@ switch ($Command) {
         # Check if force push is needed (e.g., after rebasing onto main)
         $forceNeeded = $false
         if ($remoteSha) {
-            $hasRemote = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git cat-file -t $remoteSha 2>/dev/null && echo yes || echo no").Trim()
+            $hasRemote = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git cat-file -t "$2" 2>/dev/null && echo yes || echo no' -- $workdir $remoteSha).Trim()
             if ($hasRemote -eq 'yes') {
-                $isFF = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git merge-base --is-ancestor $remoteSha HEAD 2>/dev/null && echo yes || echo no").Trim()
+                $isFF = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git merge-base --is-ancestor "$2" HEAD 2>/dev/null && echo yes || echo no' -- $workdir $remoteSha).Trim()
             }
             else {
                 $isFF = 'no'
@@ -453,7 +453,7 @@ switch ($Command) {
 
         # Create git bundle in container
         Write-Step 'Bundling commits...'
-        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git bundle create /tmp/push.bundle $branch" | Out-Null
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git bundle create /tmp/push.bundle "$2"' -- $workdir $branch | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Err 'Failed to create git bundle.'
             exit 1
@@ -498,7 +498,7 @@ switch ($Command) {
 
         # Update container's remote tracking ref so git status shows up-to-date
         Write-Step 'Updating container remote refs...'
-        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git fetch origin $branch 2>/dev/null || git update-ref refs/remotes/origin/$branch HEAD"
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git fetch origin "$2" 2>/dev/null || git update-ref "refs/remotes/origin/$2" HEAD' -- $workdir $branch
 
         $verb = if ($forceNeeded) { 'Force pushed' } else { 'Pushed' }
         Write-Ok "$verb '$branch' to origin ($ahead commit(s))."
@@ -511,7 +511,7 @@ switch ($Command) {
         $workdir = if ($subdir) { $subdir } else { '.' }
 
         # Get current branch
-        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git branch --show-current").Trim()
+        $branch = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git branch --show-current' -- $workdir).Trim()
         if (-not $branch) {
             Write-Err "Could not determine branch (detached HEAD?)."
             exit 1
@@ -526,7 +526,7 @@ switch ($Command) {
 
         # Rebase onto origin/main
         Write-Step "Rebasing '$branch' onto origin/main..."
-        devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && git rebase origin/main"
+        devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git rebase origin/main' -- $workdir
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Rebase has conflicts."
             Write-Step 'Launching Claude Code to help resolve conflicts...'
@@ -537,8 +537,7 @@ switch ($Command) {
             }
             $safeBranch = $branch -replace '[^a-zA-Z0-9_\-/.]', ''
             $conflictPrompt = "A git rebase of branch '${safeBranch}' onto origin/main has resulted in merge conflicts. Run git status to see conflicted files. Analyze each conflict, resolve them, git add the resolved files, and run git rebase --continue. If there are multiple conflicting commits, continue resolving until the rebase is complete. ${planInstruction}"
-            $escapedPrompt = $conflictPrompt.Replace("'", "'\\''")
-            devcontainer exec --workspace-folder $WorkspaceFolder bash -c "cd $workdir && claude --dangerously-skip-permissions -p '${escapedPrompt}'"
+            devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && claude --dangerously-skip-permissions -p "$2"' -- $workdir $conflictPrompt
             Write-Step "Claude session ended. Verify rebase is complete, then 'push' when ready."
             exit 1
         }
