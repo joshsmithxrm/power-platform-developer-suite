@@ -162,6 +162,7 @@ public sealed class ExpressionCompiler
             BooleanNotExpression notExpr => CompileBooleanNot(notExpr),
             BooleanParenthesisExpression parenExpr => CompilePredicate(parenExpr.Expression),
             BooleanTernaryExpression between => CompileBetween(between),
+            DistinctPredicate distinct => CompileDistinctPredicate(distinct),
             ExistsPredicate => throw new NotSupportedException(
                 "EXISTS predicates are handled at the plan level, not by the ExpressionCompiler."),
             _ => throw new NotSupportedException(
@@ -662,6 +663,35 @@ public sealed class ExpressionCompiler
             var inRange = cmpLow >= 0 && cmpHigh <= 0;
 
             return isNot ? !inRange : inRange;
+        };
+    }
+
+    private CompiledPredicate CompileDistinctPredicate(DistinctPredicate distinct)
+    {
+        var compiledLeft = CompileScalar(distinct.FirstExpression);
+        var compiledRight = CompileScalar(distinct.SecondExpression);
+        var isNot = distinct.IsNot;
+
+        return row =>
+        {
+            var left = compiledLeft(row);
+            var right = compiledRight(row);
+
+            // IS [NOT] DISTINCT FROM semantics:
+            // a IS NOT DISTINCT FROM b → true when both null OR both non-null and equal
+            // a IS DISTINCT FROM b → true when exactly one is null OR both non-null and not equal
+            bool bothNull = left is null && right is null;
+            bool oneNull = left is null || right is null;
+
+            bool isNotDistinct;
+            if (bothNull)
+                isNotDistinct = true;
+            else if (oneNull)
+                isNotDistinct = false;
+            else
+                isNotDistinct = CompareValues(left!, right!) == 0;
+
+            return isNot ? isNotDistinct : !isNotDistinct;
         };
     }
 
