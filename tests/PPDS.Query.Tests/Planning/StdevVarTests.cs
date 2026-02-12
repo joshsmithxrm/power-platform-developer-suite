@@ -272,6 +272,90 @@ public class StdevVarTests
     }
 
     // ════════════════════════════════════════════
+    //  ClientAggregateNode: STDEVP (population)
+    // ════════════════════════════════════════════
+
+    [Fact]
+    public async Task ClientAggregateNode_StdevP_ComputesPopulationStdDev()
+    {
+        // Values: 2, 4, 4, 4, 5, 5, 7, 9
+        // Mean = 5, Population variance = sum((x-5)^2)/8 = 32/8 = 4.0, Population stdev = 2.0
+        var source = TestSourceNode.Create("account",
+            TestSourceNode.MakeRow("account", ("revenue", 2m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 5m)),
+            TestSourceNode.MakeRow("account", ("revenue", 5m)),
+            TestSourceNode.MakeRow("account", ("revenue", 7m)),
+            TestSourceNode.MakeRow("account", ("revenue", 9m)));
+
+        var aggCols = new List<ClientAggregateColumn>
+        {
+            new("revenue", "stdevp_revenue", ClientAggregateFunction.StdevP)
+        };
+
+        var node = new ClientAggregateNode(source, aggCols);
+        var rows = await TestHelpers.CollectRowsAsync(node);
+
+        rows.Should().HaveCount(1);
+        var stdevp = (decimal)rows[0].Values["stdevp_revenue"].Value!;
+        // Population stdev of [2,4,4,4,5,5,7,9]: sqrt(32/8) = sqrt(4) = 2.0
+        stdevp.Should().Be(2.0m);
+    }
+
+    // ════════════════════════════════════════════
+    //  ClientAggregateNode: VARP (population)
+    // ════════════════════════════════════════════
+
+    [Fact]
+    public async Task ClientAggregateNode_VarP_ComputesPopulationVariance()
+    {
+        // Values: 2, 4, 4, 4, 5, 5, 7, 9
+        // Mean = 5, Population variance = sum((x-5)^2)/8 = 32/8 = 4.0
+        var source = TestSourceNode.Create("account",
+            TestSourceNode.MakeRow("account", ("revenue", 2m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 4m)),
+            TestSourceNode.MakeRow("account", ("revenue", 5m)),
+            TestSourceNode.MakeRow("account", ("revenue", 5m)),
+            TestSourceNode.MakeRow("account", ("revenue", 7m)),
+            TestSourceNode.MakeRow("account", ("revenue", 9m)));
+
+        var aggCols = new List<ClientAggregateColumn>
+        {
+            new("revenue", "varp_revenue", ClientAggregateFunction.VarP)
+        };
+
+        var node = new ClientAggregateNode(source, aggCols);
+        var rows = await TestHelpers.CollectRowsAsync(node);
+
+        rows.Should().HaveCount(1);
+        var varp = (decimal)rows[0].Values["varp_revenue"].Value!;
+        // Population variance of [2,4,4,4,5,5,7,9] = 32/8 = 4.0
+        varp.Should().Be(4.0m);
+    }
+
+    [Fact]
+    public async Task ClientAggregateNode_StdevP_SingleValue_ReturnsZero()
+    {
+        var source = TestSourceNode.Create("account",
+            TestSourceNode.MakeRow("account", ("revenue", 42m)));
+
+        var aggCols = new List<ClientAggregateColumn>
+        {
+            new("revenue", "stdevp_revenue", ClientAggregateFunction.StdevP)
+        };
+
+        var node = new ClientAggregateNode(source, aggCols);
+        var rows = await TestHelpers.CollectRowsAsync(node);
+
+        rows.Should().HaveCount(1);
+        rows[0].Values["stdevp_revenue"].Value.Should().Be(0m);
+    }
+
+    // ════════════════════════════════════════════
     //  MapToMergeFunction includes STDEV/VAR
     // ════════════════════════════════════════════
 

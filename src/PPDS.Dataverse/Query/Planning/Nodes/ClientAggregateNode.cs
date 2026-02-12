@@ -139,6 +139,8 @@ public sealed class ClientAggregateNode : IQueryPlanNode
         {
             ClientAggregateFunction.Stdev => ComputeStdev(numericValues),
             ClientAggregateFunction.Var => ComputeVariance(numericValues),
+            ClientAggregateFunction.StdevP => ComputeStdevP(numericValues),
+            ClientAggregateFunction.VarP => ComputeVarianceP(numericValues),
             ClientAggregateFunction.Count => (long)numericValues.Count,
             ClientAggregateFunction.Sum => numericValues.Count > 0 ? numericValues.Sum() : (object?)null,
             ClientAggregateFunction.Avg => numericValues.Count > 0 ? numericValues.Average() : (object?)null,
@@ -177,6 +179,37 @@ public sealed class ClientAggregateNode : IQueryPlanNode
         var mean = values.Sum() / n;
         var sumOfSquaredDiffs = values.Sum(v => (v - mean) * (v - mean));
         return sumOfSquaredDiffs / (n - 1);
+    }
+
+    /// <summary>
+    /// Computes population standard deviation: sqrt(sum((x - mean)^2) / n).
+    /// </summary>
+    private static object? ComputeStdevP(List<decimal> values)
+    {
+        if (values.Count == 0) return null;
+        if (values.Count == 1) return 0m;
+
+        var variance = ComputeVarianceValueP(values);
+        return (decimal)Math.Sqrt((double)variance);
+    }
+
+    /// <summary>
+    /// Computes population variance: sum((x - mean)^2) / n.
+    /// </summary>
+    private static object? ComputeVarianceP(List<decimal> values)
+    {
+        if (values.Count == 0) return null;
+        if (values.Count == 1) return 0m;
+
+        return ComputeVarianceValueP(values);
+    }
+
+    private static decimal ComputeVarianceValueP(List<decimal> values)
+    {
+        var n = values.Count;
+        var mean = values.Sum() / n;
+        var sumOfSquaredDiffs = values.Sum(v => (v - mean) * (v - mean));
+        return sumOfSquaredDiffs / n;
     }
 }
 
@@ -221,5 +254,9 @@ public enum ClientAggregateFunction
     /// <summary>STDEV (sample standard deviation) aggregate.</summary>
     Stdev,
     /// <summary>VAR (sample variance) aggregate.</summary>
-    Var
+    Var,
+    /// <summary>STDEVP (population standard deviation) aggregate.</summary>
+    StdevP,
+    /// <summary>VARP (population variance) aggregate.</summary>
+    VarP
 }
