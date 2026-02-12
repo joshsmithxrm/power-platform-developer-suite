@@ -54,10 +54,13 @@ public sealed class RemoteScanNode : IQueryPlanNode
             _fetchXml,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        context.Statistics.IncrementPagesFetched();
+
         foreach (var record in result.Records)
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return QueryRow.FromRecord(record, result.EntityLogicalName);
+            context.Statistics.IncrementRowsRead();
         }
     }
 }
