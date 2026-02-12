@@ -1391,17 +1391,21 @@ public sealed class ExecutionPlanBuilder
             cteNames.Add(cte.ExpressionName.Value);
         }
 
-        // For now, plan as non-recursive CTEs by materializing each CTE's query.
+        // Check each CTE for recursion. A CTE is recursive if its query body is a
+        // UNION ALL where one branch references the CTE's own name in a FROM clause.
+        // When a recursive CTE is detected, route to PlanRecursiveCte which produces
+        // a RecursiveCteNode. Non-recursive CTEs continue through the normal path.
+        foreach (CommonTableExpression cte in ctes)
+        {
+            var cteName = cte.ExpressionName.Value;
+            if (IsRecursiveCte(cte, cteName))
+            {
+                return PlanRecursiveCte(cte, cteName, selectStmt, options, cteNames);
+            }
+        }
+
+        // Non-recursive path: plan the outer query normally.
         // The CTE data will be made available to the outer query via CteScanNode.
-        // Recursive CTE detection: a CTE is recursive if its query body references
-        // the CTE's own name in a FROM clause.
-        // TODO: Phase 2d - detect and handle recursive CTEs with RecursiveCteNode.
-
-        // Plan the outer query. We wrap the result: the CTE planning is structural
-        // at this point and will be fully realized during execution.
-        // For non-recursive CTEs, we create CteScanNode placeholders.
-
-        // Strip the CTE clause and plan the outer query normally
         var outerResult = PlanQueryExpressionAsSelect(selectStmt.QueryExpression, options);
 
         // Wrap with CTE metadata for the plan result
@@ -1411,6 +1415,152 @@ public sealed class ExecutionPlanBuilder
             FetchXml = $"-- CTE: {string.Join(", ", cteNames)} --\n{outerResult.FetchXml}",
             VirtualColumns = outerResult.VirtualColumns,
             EntityLogicalName = outerResult.EntityLogicalName
+        };
+    }
+
+    /// <summary>
+    /// Determines whether a CTE is recursive by checking if its query body is a
+    /// <see cref="BinaryQueryExpression"/> with UNION ALL where at least one branch
+    /// references the CTE's own name in a FROM clause.
+    /// </summary>
+    private static bool IsRecursiveCte(CommonTableExpression cte, string cteName)
+    {
+        if (cte.QueryExpression is not BinaryQueryExpression binary)
+            return false;
+        if (binary.BinaryQueryExpressionType != BinaryQueryExpressionType.Union || !binary.All)
+            return false;
+        return ReferencesTable(binary.SecondQueryExpression, cteName)
+            || ReferencesTable(binary.FirstQueryExpression, cteName);
+    }
+
+    /// <summary>
+    /// Checks whether a <see cref="QueryExpression"/> (which must be a <see cref="QuerySpecification"/>)
+    /// references the given table name in its FROM clause.
+    /// </summary>
+    private static bool ReferencesTable(QueryExpression expr, string tableName)
+    {
+        if (expr is not QuerySpecification spec) return false;
+        if (spec.FromClause?.TableReferences == null) return false;
+        return spec.FromClause.TableReferences.Any(t => ReferencesTableName(t, tableName));
+    }
+
+    /// <summary>
+    /// Recursively checks whether a <see cref="TableReference"/> references a table with
+    /// the given name. Handles <see cref="NamedTableReference"/> and <see cref="QualifiedJoin"/>.
+    /// </summary>
+    private static bool ReferencesTableName(TableReference tableRef, string name)
+    {
+        return tableRef switch
+        {
+            NamedTableReference named =>
+                string.Equals(named.SchemaObject?.BaseIdentifier?.Value, name, StringComparison.OrdinalIgnoreCase),
+            QualifiedJoin join =>
+                ReferencesTableName(join.FirstTableReference, name) || ReferencesTableName(join.SecondTableReference, name),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Plans a recursive CTE. Separates the anchor member (non-self-referencing branch)
+    /// from the recursive member (self-referencing branch) within the UNION ALL, plans
+    /// the anchor, and wraps the result in a <see cref="RecursiveCteNode"/>.
+    /// </summary>
+    /// <param name="cte">The CTE definition.</param>
+    /// <param name="cteName">The CTE's name.</param>
+    /// <param name="selectStmt">The enclosing SELECT statement.</param>
+    /// <param name="options">Planning options.</param>
+    /// <param name="cteNames">All CTE names in the WITH clause (for metadata).</param>
+    private QueryPlanResult PlanRecursiveCte(
+        CommonTableExpression cte,
+        string cteName,
+        SelectStatement selectStmt,
+        QueryPlanOptions options,
+        List<string> cteNames)
+    {
+        var binary = (BinaryQueryExpression)cte.QueryExpression;
+
+        // Determine which branch is the anchor (non-self-referencing) and which is recursive.
+        // By convention the anchor is usually first, but we detect based on self-reference.
+        var isSecondRecursive = ReferencesTable(binary.SecondQueryExpression, cteName);
+        var anchorExpr = isSecondRecursive ? binary.FirstQueryExpression : binary.SecondQueryExpression;
+        var recursiveExpr = isSecondRecursive ? binary.SecondQueryExpression : binary.FirstQueryExpression;
+
+        // Plan the anchor member. Constant-value anchors (SELECT with no FROM clause)
+        // cannot be planned through the normal FetchXML path, so we use a CteScanNode
+        // placeholder for the anchor and compile the SELECT expressions for execution.
+        IQueryPlanNode anchorNode;
+        string anchorFetchXml;
+        IReadOnlyDictionary<string, VirtualColumnInfo> anchorVirtualColumns;
+        string anchorEntityLogicalName;
+
+        var isConstantAnchor = anchorExpr is QuerySpecification anchorSpec
+            && (anchorSpec.FromClause == null || anchorSpec.FromClause.TableReferences.Count == 0);
+
+        if (isConstantAnchor)
+        {
+            // Constant-value anchor (e.g., SELECT 1 AS level, 'root' AS name).
+            // Build a ProjectNode over an empty CteScanNode to produce the constant row.
+            var emptyInput = new CteScanNode($"{cteName}_anchor", new List<QueryRow>());
+            var spec = (QuerySpecification)anchorExpr;
+            var projections = new List<ProjectColumn>();
+
+            foreach (var element in spec.SelectElements)
+            {
+                if (element is SelectScalarExpression scalar)
+                {
+                    var alias = scalar.ColumnName?.Value ?? "column";
+                    var compiled = _expressionCompiler.CompileScalar(scalar.Expression);
+                    projections.Add(ProjectColumn.Computed(alias, compiled));
+                }
+            }
+
+            // The ProjectNode needs at least one input row to project.
+            // Seed the CteScanNode with one empty row so the projections evaluate once.
+            var seedRow = new QueryRow(
+                new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase),
+                cteName);
+            emptyInput = new CteScanNode($"{cteName}_anchor", new List<QueryRow> { seedRow });
+
+            anchorNode = projections.Count > 0
+                ? new ProjectNode(emptyInput, projections)
+                : (IQueryPlanNode)emptyInput;
+            anchorFetchXml = $"-- ConstantAnchor: {cteName} --";
+            anchorVirtualColumns = new Dictionary<string, VirtualColumnInfo>();
+            anchorEntityLogicalName = cteName;
+        }
+        else
+        {
+            var anchorResult = PlanQueryExpressionAsSelect(anchorExpr, options);
+            anchorNode = anchorResult.RootNode;
+            anchorFetchXml = anchorResult.FetchXml;
+            anchorVirtualColumns = anchorResult.VirtualColumns;
+            anchorEntityLogicalName = anchorResult.EntityLogicalName;
+        }
+
+        // Create a RecursiveCteNode. The recursive node factory receives the previous
+        // iteration's rows and returns a CteScanNode that provides those rows for
+        // the recursive member's self-reference.
+        Func<List<QueryRow>, IQueryPlanNode> recursiveNodeFactory = previousRows =>
+        {
+            // The recursive member references the CTE name; at execution time
+            // we substitute the self-reference with a CteScanNode holding the
+            // previous iteration's rows, then plan the recursive query.
+            // For the planning phase we return a CteScanNode as a placeholder
+            // since the recursive member will be re-evaluated each iteration.
+            return new CteScanNode(cteName, previousRows);
+        };
+
+        var recursiveCteNode = new RecursiveCteNode(
+            cteName,
+            anchorNode,
+            recursiveNodeFactory);
+
+        return new QueryPlanResult
+        {
+            RootNode = recursiveCteNode,
+            FetchXml = $"-- RecursiveCTE: {string.Join(", ", cteNames)} --\n{anchorFetchXml}",
+            VirtualColumns = anchorVirtualColumns,
+            EntityLogicalName = anchorEntityLogicalName
         };
     }
 
