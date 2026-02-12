@@ -72,4 +72,7 @@ public static class QueryErrorCode
 
     /// <summary>DML operation would affect more rows than the configured cap.</summary>
     public const string DmlRowCapExceeded = "Query.DmlRowCapExceeded";
+
+    /// <summary>Scalar subquery returned more than one row.</summary>
+    public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
 }
