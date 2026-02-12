@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 using PPDS.Query.Parsing;
@@ -484,6 +485,50 @@ public class DmlSafetyGuardTests
         var result = _guard.Check(stmt, new DmlSafetyOptions());
 
         Assert.True(result.IsBlocked, "Single-statement DELETE without WHERE in ELSE should be blocked");
+    }
+
+    #endregion
+
+    // ── Configurable Safety Settings ─────────────────────────────────
+
+    #region Configurable Safety Settings Tests
+
+    [Fact]
+    public void Check_DeleteWithoutWhere_WhenPreventionDisabled_AllowsWithConfirmation()
+    {
+        var settings = new QuerySafetySettings { PreventDeleteWithoutWhere = false };
+        var result = _guard.Check(Parse("DELETE FROM account"), new DmlSafetyOptions(), settings);
+
+        Assert.False(result.IsBlocked);
+        Assert.True(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void Check_UpdateWithoutWhere_WhenPreventionDisabled_AllowsWithConfirmation()
+    {
+        var settings = new QuerySafetySettings { PreventUpdateWithoutWhere = false };
+        var result = _guard.Check(Parse("UPDATE contact SET firstname = 'Test'"), new DmlSafetyOptions(), settings);
+
+        Assert.False(result.IsBlocked);
+        Assert.True(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void Check_Delete_CustomThreshold_AlwaysPrompts()
+    {
+        var settings = new QuerySafetySettings { WarnDeleteThreshold = 0 }; // Always prompt
+        var result = _guard.Check(Parse("DELETE FROM account WHERE statecode = 1"), new DmlSafetyOptions(), settings);
+
+        Assert.True(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void Check_NullSettings_UsesDefaults()
+    {
+        // Null settings should behave identically to no settings (original behavior)
+        var result = _guard.Check(Parse("DELETE FROM account"), new DmlSafetyOptions(), settings: null);
+
+        Assert.True(result.IsBlocked, "DELETE without WHERE should still be blocked with null settings");
     }
 
     #endregion
