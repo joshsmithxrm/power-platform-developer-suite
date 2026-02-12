@@ -533,6 +533,75 @@ public class DmlSafetyGuardTests
 
     #endregion
 
+    // ── Protection Level Enforcement ─────────────────────────────────
+
+    #region Protection Level Tests
+
+    [Fact]
+    public void Check_ProductionEnvironment_RequiresConfirmationAndPreview()
+    {
+        var result = _guard.Check(
+            Parse("UPDATE account SET name = 'x' WHERE accountid = '123'"),
+            new DmlSafetyOptions(),
+            protectionLevel: ProtectionLevel.Production);
+
+        Assert.True(result.RequiresConfirmation);
+        Assert.True(result.RequiresPreview);
+    }
+
+    [Fact]
+    public void Check_DevelopmentEnvironment_UnrestrictedDml()
+    {
+        var settings = new QuerySafetySettings { PreventDeleteWithoutWhere = false };
+        var result = _guard.Check(
+            Parse("DELETE FROM account"),
+            new DmlSafetyOptions { IsConfirmed = true },
+            settings,
+            protectionLevel: ProtectionLevel.Development);
+
+        Assert.False(result.IsBlocked);
+        Assert.False(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void Check_TestEnvironment_UsesThresholds()
+    {
+        var result = _guard.Check(
+            Parse("DELETE FROM account WHERE statecode = 1"),
+            new DmlSafetyOptions(),
+            protectionLevel: ProtectionLevel.Test);
+
+        Assert.False(result.IsBlocked);
+        Assert.True(result.RequiresConfirmation);
+        Assert.False(result.RequiresPreview);
+    }
+
+    [Fact]
+    public void Check_ProductionEnvironment_SelectNotAffected()
+    {
+        var result = _guard.Check(
+            Parse("SELECT * FROM account"),
+            new DmlSafetyOptions(),
+            protectionLevel: ProtectionLevel.Production);
+
+        Assert.False(result.IsBlocked);
+        Assert.False(result.RequiresConfirmation);
+        Assert.False(result.RequiresPreview);
+    }
+
+    [Fact]
+    public void DetectProtectionLevel_Maps_Correctly()
+    {
+        Assert.Equal(ProtectionLevel.Development, DmlSafetyGuard.DetectProtectionLevel("Sandbox"));
+        Assert.Equal(ProtectionLevel.Development, DmlSafetyGuard.DetectProtectionLevel("Developer"));
+        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel("Production"));
+        Assert.Equal(ProtectionLevel.Test, DmlSafetyGuard.DetectProtectionLevel("Trial"));
+        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel(null)); // Fail closed
+        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel("Unknown")); // Fail closed
+    }
+
+    #endregion
+
     // ── ExceedsRowCap default ────────────────────────────────────────
 
     #region ExceedsRowCap Tests

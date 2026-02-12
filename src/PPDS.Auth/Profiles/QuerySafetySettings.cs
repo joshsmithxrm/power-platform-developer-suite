@@ -70,3 +70,14 @@ public enum BypassPluginMode
     /// <summary>Bypass all custom plugins.</summary>
     All
 }
+
+/// <summary>Environment protection level determining DML behavior.</summary>
+public enum ProtectionLevel
+{
+    /// <summary>Unrestricted DML. Sandbox and Developer environments.</summary>
+    Development,
+    /// <summary>Warn per thresholds. Trial environments.</summary>
+    Test,
+    /// <summary>Block by default, require explicit confirmation with preview. Production and unknown environments.</summary>
+    Production
+}

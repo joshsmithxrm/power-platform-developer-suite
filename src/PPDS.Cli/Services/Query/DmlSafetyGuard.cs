@@ -20,7 +20,7 @@ public sealed class DmlSafetyGuard
     /// <param name="options">Safety check options.</param>
     /// <returns>The safety check result.</returns>
     public DmlSafetyResult Check(TSqlStatement statement, DmlSafetyOptions options)
-        => Check(statement, options, settings: null);
+        => Check(statement, options, settings: null, protectionLevel: ProtectionLevel.Production);
 
     /// <summary>
     /// Checks a DML statement against safety rules with environment-specific settings.
@@ -28,12 +28,17 @@ public sealed class DmlSafetyGuard
     /// <param name="statement">The parsed SQL statement (ScriptDom AST).</param>
     /// <param name="options">Safety check options.</param>
     /// <param name="settings">Per-environment safety settings (null = defaults).</param>
+    /// <param name="protectionLevel">Environment protection level.</param>
     /// <returns>The safety check result.</returns>
-    public DmlSafetyResult Check(TSqlStatement statement, DmlSafetyOptions options, QuerySafetySettings? settings)
+    public DmlSafetyResult Check(
+        TSqlStatement statement,
+        DmlSafetyOptions options,
+        QuerySafetySettings? settings = null,
+        ProtectionLevel protectionLevel = ProtectionLevel.Production)
     {
         var s = settings ?? new QuerySafetySettings();
 
-        return statement switch
+        var result = statement switch
         {
             DeleteStatement delete => CheckDelete(delete, options, s),
             UpdateStatement update => CheckUpdate(update, options, s),
@@ -43,6 +48,66 @@ public sealed class DmlSafetyGuard
             IfStatement ifStmt => CheckIf(ifStmt, options, s),
             _ => new DmlSafetyResult { IsBlocked = false }
         };
+
+        return ApplyProtectionLevel(result, statement, options, protectionLevel);
+    }
+
+    /// <summary>
+    /// Maps a Dataverse environment type string to a protection level.
+    /// Unknown types default to Production (fail closed).
+    /// </summary>
+    public static ProtectionLevel DetectProtectionLevel(string? environmentType) => environmentType?.ToLowerInvariant() switch
+    {
+        "sandbox" => ProtectionLevel.Development,
+        "developer" => ProtectionLevel.Development,
+        "production" => ProtectionLevel.Production,
+        "trial" => ProtectionLevel.Test,
+        _ => ProtectionLevel.Production // Fail closed
+    };
+
+    private static DmlSafetyResult ApplyProtectionLevel(
+        DmlSafetyResult result, TSqlStatement statement, DmlSafetyOptions options, ProtectionLevel level)
+    {
+        // No DML detected (read-only or pass-through) — don't apply protection level
+        if (!result.IsBlocked && !result.RequiresConfirmation)
+            return result;
+
+        // If already blocked, protection level doesn't change anything
+        if (result.IsBlocked)
+            return result;
+
+        if (level == ProtectionLevel.Production && !options.IsConfirmed)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = result.IsBlocked,
+                BlockReason = result.BlockReason,
+                ErrorCode = result.ErrorCode,
+                EstimatedAffectedRows = result.EstimatedAffectedRows,
+                RequiresConfirmation = true,
+                RequiresPreview = true,
+                RowCap = result.RowCap,
+                ExceedsRowCap = result.ExceedsRowCap,
+                IsDryRun = result.IsDryRun
+            };
+        }
+
+        if (level == ProtectionLevel.Development && options.IsConfirmed)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = result.IsBlocked,
+                BlockReason = result.BlockReason,
+                ErrorCode = result.ErrorCode,
+                EstimatedAffectedRows = result.EstimatedAffectedRows,
+                RequiresConfirmation = false,
+                RowCap = result.RowCap,
+                ExceedsRowCap = result.ExceedsRowCap,
+                IsDryRun = result.IsDryRun
+            };
+        }
+
+        return result;
     }
 
     private static DmlSafetyResult CheckDelete(DeleteStatement delete, DmlSafetyOptions options, QuerySafetySettings settings)
@@ -171,6 +236,9 @@ public sealed class DmlSafetyResult
 
     /// <summary>Whether confirmation is required.</summary>
     public bool RequiresConfirmation { get; init; }
+
+    /// <summary>Whether the user must preview affected records before confirming (Production environments).</summary>
+    public bool RequiresPreview { get; init; }
 
     /// <summary>Active row cap.</summary>
     public int RowCap { get; init; } = DmlSafetyGuard.DefaultRowCap;
