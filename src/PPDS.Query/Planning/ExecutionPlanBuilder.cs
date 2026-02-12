@@ -309,6 +309,41 @@ public sealed class ExecutionPlanBuilder
             rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
+        // ── Post-join pipeline (mirrors PlanSelect post-scan processing) ──
+
+        // SELECT list projection — client-side joins fetch all-attributes from each table,
+        // so we need to project down to only the requested columns unless SELECT *.
+        // BuildProjectNodeFromScriptDom handles computed columns (CASE/IIF) AND simple columns,
+        // so when computed columns are present it also serves as the projection.
+        if (HasComputedColumnsInQuerySpec(querySpec))
+        {
+            rootNode = BuildProjectNodeFromScriptDom(rootNode, querySpec);
+        }
+        else if (!IsSelectStar(querySpec))
+        {
+            rootNode = BuildSelectListProjection(rootNode, querySpec);
+        }
+
+        // ORDER BY — FetchXML handles sorting server-side, but client-side joins need
+        // an explicit sort node.
+        if (querySpec.OrderByClause?.OrderByElements?.Count > 0)
+        {
+            rootNode = BuildClientSortNode(rootNode, querySpec.OrderByClause);
+        }
+
+        // TOP N — limit the number of rows returned.
+        var top = ExtractTopFromQuerySpec(querySpec);
+        if (top.HasValue)
+        {
+            rootNode = new OffsetFetchNode(rootNode, 0, top.Value);
+        }
+
+        // OFFSET/FETCH paging
+        if (querySpec.OffsetClause != null)
+        {
+            rootNode = BuildOffsetFetchNode(rootNode, querySpec.OffsetClause);
+        }
+
         return new QueryPlanResult
         {
             RootNode = rootNode,
@@ -2367,6 +2402,95 @@ public sealed class ExecutionPlanBuilder
         }
 
         return new ProjectNode(input, projections);
+    }
+
+    /// <summary>
+    /// Checks whether the SELECT list is <c>SELECT *</c> (no column filtering needed).
+    /// </summary>
+    private static bool IsSelectStar(QuerySpecification querySpec)
+    {
+        return querySpec.SelectElements.Count == 1
+            && querySpec.SelectElements[0] is SelectStarExpression;
+    }
+
+    /// <summary>
+    /// Builds a <see cref="ProjectNode"/> that filters the output to only the columns
+    /// specified in the SELECT list. Used by the client-side join path where all-attributes
+    /// are fetched from each table but only specific columns are requested.
+    /// Unlike <see cref="BuildProjectNodeFromScriptDom"/> (which only handles computed columns),
+    /// this method creates a projection for all select elements including simple column references.
+    /// </summary>
+    private IQueryPlanNode BuildSelectListProjection(IQueryPlanNode input, QuerySpecification querySpec)
+    {
+        var projections = new List<ProjectColumn>();
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            switch (element)
+            {
+                case SelectStarExpression:
+                    // SELECT * — no projection needed
+                    return input;
+
+                case SelectScalarExpression { Expression: ColumnReferenceExpression colRef } scalar:
+                {
+                    var sourceName = GetScriptDomColumnName(colRef);
+                    var alias = scalar.ColumnName?.Value;
+                    if (alias != null && !string.Equals(alias, sourceName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        projections.Add(ProjectColumn.Rename(sourceName, alias));
+                    }
+                    else
+                    {
+                        projections.Add(ProjectColumn.PassThrough(alias ?? sourceName));
+                    }
+                    break;
+                }
+
+                case SelectScalarExpression scalar:
+                {
+                    // Computed or aggregate — pass through by alias or "computed"
+                    var alias = scalar.ColumnName?.Value ?? "computed";
+                    projections.Add(ProjectColumn.PassThrough(alias));
+                    break;
+                }
+            }
+        }
+
+        if (projections.Count == 0)
+        {
+            return input;
+        }
+
+        return new ProjectNode(input, projections);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="ClientSortNode"/> from a ScriptDom <see cref="OrderByClause"/>.
+    /// Compiles each ORDER BY element into a <see cref="CompiledOrderByItem"/>.
+    /// </summary>
+    private IQueryPlanNode BuildClientSortNode(IQueryPlanNode input, OrderByClause orderByClause)
+    {
+        var orderItems = new List<CompiledOrderByItem>(orderByClause.OrderByElements.Count);
+
+        foreach (var orderElem in orderByClause.OrderByElements)
+        {
+            string colName;
+            if (orderElem.Expression is ColumnReferenceExpression col)
+            {
+                colName = GetScriptDomColumnName(col);
+            }
+            else
+            {
+                colName = orderElem.Expression.ToString() ?? "expr";
+            }
+
+            var compiled = _expressionCompiler.CompileScalar(orderElem.Expression);
+            var descending = orderElem.SortOrder == SortOrder.Descending;
+            orderItems.Add(new CompiledOrderByItem(colName, compiled, descending));
+        }
+
+        return new ClientSortNode(input, orderItems);
     }
 
     /// <summary>
