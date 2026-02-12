@@ -106,7 +106,7 @@ dotnet restore PPDS.sln
 # (utimensat requires file ownership, not just write permission).
 if [ "$(id -u)" = "0" ]; then
     echo "=== Fixing workspace ownership (running as root) ==="
-    chown -R vscode:vscode "$(pwd)"
+    chown -hR --from=root vscode:vscode ./
 fi
 
 echo "=== Setup complete ==="

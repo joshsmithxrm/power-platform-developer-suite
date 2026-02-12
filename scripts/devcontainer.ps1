@@ -542,7 +542,7 @@ switch ($Command) {
             exit 1
         }
 
-        $newBase = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c "git log --oneline -1 origin/main").Trim()
+        $newBase = (devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git log --oneline -1 origin/main' -- $workdir).Trim()
         Write-Ok "Rebased '$branch' onto origin/main ($newBase)."
     }
 
