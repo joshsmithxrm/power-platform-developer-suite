@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Xml;
@@ -40,8 +41,21 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
     /// <summary>Whether to request total record count from Dataverse.</summary>
     public bool IncludeCount { get; }
 
+    /// <summary>
+    /// Indicates whether the FetchXML query contains link-entity elements.
+    /// When true, pagination may split a parent record's children across page boundaries,
+    /// requiring merge logic to avoid duplicate parents with incomplete child sets.
+    /// </summary>
+    public bool HasLinkedEntity { get; }
+
     /// <summary>The prepared FetchXML for execution (top converted to count for paging compatibility).</summary>
     private readonly string _effectiveFetchXml;
+
+    /// <summary>
+    /// Tracks the primary key of the last parent record on the most recently fetched page.
+    /// Used to detect page boundary splits when linked entities are present.
+    /// </summary>
+    private Guid? _lastParentId;
 
     /// <inheritdoc />
     public string Description => $"FetchXmlScan: {EntityLogicalName}" +
@@ -71,7 +85,36 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         InitialPageNumber = initialPageNumber;
         InitialPagingCookie = initialPagingCookie;
         IncludeCount = includeCount;
+        HasLinkedEntity = DetectLinkedEntities(fetchXml);
         _effectiveFetchXml = PrepareFetchXmlForExecution(fetchXml);
+    }
+
+    /// <summary>
+    /// Records the primary key of the last parent record on the current page.
+    /// Called at the end of each page when <see cref="HasLinkedEntity"/> is true
+    /// to enable boundary split detection on the next page.
+    /// </summary>
+    /// <param name="parentId">The primary key of the last parent record on the current page.</param>
+    public void SetLastParentId(Guid parentId)
+    {
+        _lastParentId = parentId;
+    }
+
+    /// <summary>
+    /// Determines whether the first record on a new page should be merged with the
+    /// last parent from the previous page, rather than treated as a new parent.
+    /// This occurs when a parent record's child rows span a page boundary.
+    /// </summary>
+    /// <param name="firstParentId">The primary key of the first parent record on the new page.</param>
+    /// <returns>
+    /// <c>true</c> if the record is a continuation of a parent from the previous page
+    /// and its child records should be merged; <c>false</c> otherwise.
+    /// </returns>
+    public bool ShouldMergeWithPreviousPage(Guid firstParentId)
+    {
+        return HasLinkedEntity
+            && _lastParentId.HasValue
+            && _lastParentId.Value == firstParentId;
     }
 
     /// <inheritdoc />
@@ -160,6 +203,28 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
             current = current.InnerException;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Detects whether the FetchXML contains link-entity elements.
+    /// Uses a fast string check before falling back to XML parsing for accuracy.
+    /// </summary>
+    private static bool DetectLinkedEntities(string fetchXml)
+    {
+        // Quick string check to avoid XML parsing overhead for simple queries
+        if (!fetchXml.Contains("link-entity", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            return XDocument.Parse(fetchXml)
+                .Descendants("link-entity")
+                .Any();
+        }
+        catch (XmlException)
+        {
+            return false; // If FetchXML is malformed, assume no linked entities
+        }
     }
 
     /// <summary>
