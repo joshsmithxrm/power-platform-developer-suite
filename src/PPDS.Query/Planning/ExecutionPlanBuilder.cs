@@ -2369,8 +2369,10 @@ public sealed class ExecutionPlanBuilder
             "AVG" => AggregateFunction.Avg,
             "MIN" => AggregateFunction.Min,
             "MAX" => AggregateFunction.Max,
-            "STDEV" or "STDEVP" => AggregateFunction.Stdev,
-            "VAR" or "VARP" => AggregateFunction.Var,
+            "STDEV" => AggregateFunction.Stdev,
+            "STDEVP" => AggregateFunction.StdevP,
+            "VAR" => AggregateFunction.Var,
+            "VARP" => AggregateFunction.VarP,
             _ => throw new QueryParseException($"Unsupported aggregate function for partitioning: {funcName}")
         };
     }

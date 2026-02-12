@@ -212,6 +212,8 @@ public sealed class MergeAggregateNode : IQueryPlanNode
                         break;
                     case AggregateFunction.Stdev:
                     case AggregateFunction.Var:
+                    case AggregateFunction.StdevP:
+                    case AggregateFunction.VarP:
                         // Accumulate individual values for variance calculation
                         _counts[col.Alias]++;
                         _sums[col.Alias] += value;
@@ -245,6 +247,8 @@ public sealed class MergeAggregateNode : IQueryPlanNode
                     AggregateFunction.Max => _maxes[col.Alias] == decimal.MinValue ? null : _maxes[col.Alias],
                     AggregateFunction.Stdev => ComputeStdev(col.Alias),
                     AggregateFunction.Var => ComputeVariance(col.Alias),
+                    AggregateFunction.StdevP => ComputeStdevP(col.Alias),
+                    AggregateFunction.VarP => ComputeVarianceP(col.Alias),
                     AggregateFunction.StringAgg => ComputeStringAgg(col),
                     _ => null
                 };
@@ -279,6 +283,35 @@ public sealed class MergeAggregateNode : IQueryPlanNode
             var sum = _sums[alias];
             var sumSq = _sumOfSquares[alias];
             return (sumSq - (sum * sum / n)) / (n - 1);
+        }
+
+        /// <summary>
+        /// Computes population standard deviation using sum, sum of squares, and count.
+        /// Formula: SQRT((SUM(x^2) - SUM(x)^2/n) / n)
+        /// </summary>
+        private object? ComputeStdevP(string alias)
+        {
+            var n = _counts[alias];
+            if (n == 0) return null;
+            if (n == 1) return 0m;
+            var sum = _sums[alias];
+            var sumSq = _sumOfSquares[alias];
+            var variance = (sumSq - (sum * sum / n)) / n;
+            return (decimal)Math.Sqrt((double)variance);
+        }
+
+        /// <summary>
+        /// Computes population variance using sum, sum of squares, and count.
+        /// Formula: (SUM(x^2) - SUM(x)^2/n) / n
+        /// </summary>
+        private object? ComputeVarianceP(string alias)
+        {
+            var n = _counts[alias];
+            if (n == 0) return null;
+            if (n == 1) return 0m;
+            var sum = _sums[alias];
+            var sumSq = _sumOfSquares[alias];
+            return (sumSq - (sum * sum / n)) / n;
         }
 
         /// <summary>
@@ -349,6 +382,12 @@ public enum AggregateFunction
 
     /// <summary>Computes variance (client-side).</summary>
     Var,
+
+    /// <summary>Computes population standard deviation (client-side).</summary>
+    StdevP,
+
+    /// <summary>Computes population variance (client-side).</summary>
+    VarP,
 
     /// <summary>Concatenates values with separator (client-side).</summary>
     StringAgg
