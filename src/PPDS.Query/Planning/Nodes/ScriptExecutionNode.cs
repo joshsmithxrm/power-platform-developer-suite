@@ -137,6 +137,11 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                     }
                     break;
 
+                case SelectStatement selectStmt when HasIntoTempTable(selectStmt):
+                    await ExecuteSelectIntoAsync(
+                        selectStmt, scope, context, cancellationToken);
+                    break;
+
                 case SelectStatement selectStmt when IsVariableAssignment(selectStmt):
                     await ExecuteSelectAssignmentAsync(
                         selectStmt, scope, context, cancellationToken);
@@ -144,6 +149,10 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
 
                 case SelectStatement selectStmt when IsFromlessSelect(selectStmt):
                     lastResultRows = ExecuteFromlessSelect(selectStmt, scope);
+                    break;
+
+                case SelectStatement selectStmt when IsTempTableSelect(selectStmt):
+                    lastResultRows = ExecuteTempTableSelect(selectStmt);
                     break;
 
                 case PrintStatement printStmt:
@@ -428,6 +437,170 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             return false;
         return querySpec.FromClause == null
                || querySpec.FromClause.TableReferences.Count == 0;
+    }
+
+    /// <summary>
+    /// Returns true if the SELECT statement has an INTO clause targeting a temp table
+    /// (e.g., SELECT ... INTO #temp FROM ...). These are handled by executing the SELECT,
+    /// collecting results, and creating a temp table in the session context.
+    /// </summary>
+    private static bool HasIntoTempTable(SelectStatement selectStmt)
+    {
+        return selectStmt.Into != null
+            && selectStmt.Into.BaseIdentifier?.Value?.StartsWith("#") == true;
+    }
+
+    /// <summary>
+    /// Returns true if the SELECT statement reads from a temp table (e.g., SELECT * FROM #temp).
+    /// These are handled by reading directly from the session context rather than going
+    /// through the plan builder and FetchXML generation.
+    /// </summary>
+    private bool IsTempTableSelect(SelectStatement selectStmt)
+    {
+        if (_session == null)
+            return false;
+
+        if (selectStmt.QueryExpression is not QuerySpecification querySpec)
+            return false;
+
+        if (querySpec.FromClause?.TableReferences.Count != 1)
+            return false;
+
+        if (querySpec.FromClause.TableReferences[0] is not NamedTableReference named)
+            return false;
+
+        var tableName = named.SchemaObject?.BaseIdentifier?.Value;
+        return tableName != null && tableName.StartsWith("#") && _session.TempTableExists(tableName);
+    }
+
+    /// <summary>
+    /// Extracts the temp table name from a SELECT statement's FROM clause.
+    /// </summary>
+    private static string? GetTempTableNameFromSelect(SelectStatement selectStmt)
+    {
+        if (selectStmt.QueryExpression is not QuerySpecification querySpec)
+            return null;
+
+        if (querySpec.FromClause?.TableReferences.Count != 1)
+            return null;
+
+        if (querySpec.FromClause.TableReferences[0] is not NamedTableReference named)
+            return null;
+
+        var tableName = named.SchemaObject?.BaseIdentifier?.Value;
+        return tableName != null && tableName.StartsWith("#") ? tableName : null;
+    }
+
+    /// <summary>
+    /// Executes a SELECT ... INTO #temp statement. Runs the SELECT query (without the INTO),
+    /// collects all result rows, creates a temp table in the session context with column names
+    /// derived from the results, and populates it with the rows.
+    /// </summary>
+    private async Task ExecuteSelectIntoAsync(
+        SelectStatement selectStmt,
+        VariableScope scope,
+        QueryPlanContext context,
+        CancellationToken cancellationToken)
+    {
+        var session = _session
+            ?? throw new InvalidOperationException(
+                "SELECT INTO #temp requires a SessionContext.");
+
+        var tempTableName = selectStmt.Into.BaseIdentifier.Value;
+        if (!tempTableName.StartsWith("#"))
+            tempTableName = "#" + tempTableName;
+
+        // Execute the SELECT portion to get the result rows.
+        // For FROM-less SELECTs (e.g., SELECT 1 AS id INTO #temp), evaluate directly.
+        // For SELECTs with FROM, delegate to ExecuteDataStatementAsync (which handles plan building).
+        List<QueryRow> sourceRows;
+        if (IsFromlessSelect(selectStmt))
+        {
+            sourceRows = ExecuteFromlessSelect(selectStmt, scope);
+        }
+        else if (IsTempTableSelect(selectStmt))
+        {
+            sourceRows = ExecuteTempTableSelect(selectStmt);
+        }
+        else
+        {
+            sourceRows = await ExecuteDataStatementAsync(
+                selectStmt, scope, context, cancellationToken);
+        }
+
+        // Derive column names from the first result row (or empty if no rows)
+        var columns = sourceRows.Count > 0
+            ? sourceRows[0].Values.Keys.ToList()
+            : new List<string>();
+
+        // Create the temp table and populate it
+        session.CreateTempTable(tempTableName, columns);
+        if (sourceRows.Count > 0)
+        {
+            session.InsertIntoTempTable(tempTableName, sourceRows);
+        }
+    }
+
+    /// <summary>
+    /// Executes a SELECT from a temp table. Reads rows from the session context
+    /// and optionally applies column projection based on the SELECT list.
+    /// Handles SELECT * and explicit column lists.
+    /// </summary>
+    private List<QueryRow> ExecuteTempTableSelect(SelectStatement selectStmt)
+    {
+        var session = _session
+            ?? throw new InvalidOperationException(
+                "SELECT FROM #temp requires a SessionContext.");
+
+        var tableName = GetTempTableNameFromSelect(selectStmt)
+            ?? throw new InvalidOperationException(
+                "Cannot determine temp table name from SELECT statement.");
+
+        var rows = session.GetTempTableRows(tableName);
+
+        // Check if we need column projection (SELECT col1, col2 vs SELECT *)
+        if (selectStmt.QueryExpression is QuerySpecification querySpec)
+        {
+            var hasStarElement = querySpec.SelectElements.Any(e => e is SelectStarExpression);
+
+            if (!hasStarElement && querySpec.SelectElements.Count > 0)
+            {
+                // Project only the requested columns
+                var projectedRows = new List<QueryRow>();
+                foreach (var row in rows)
+                {
+                    var projected = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var element in querySpec.SelectElements)
+                    {
+                        if (element is SelectScalarExpression scalar)
+                        {
+                            var alias = scalar.ColumnName?.Value;
+                            string? sourceColumn = null;
+
+                            // Get the source column name from the expression
+                            if (scalar.Expression is ColumnReferenceExpression colRef)
+                            {
+                                sourceColumn = colRef.MultiPartIdentifier?.Identifiers
+                                    .LastOrDefault()?.Value;
+                            }
+
+                            var columnName = sourceColumn ?? alias ?? "column";
+                            var outputName = alias ?? columnName;
+
+                            if (row.Values.TryGetValue(columnName, out var value))
+                            {
+                                projected[outputName] = value;
+                            }
+                        }
+                    }
+                    projectedRows.Add(new QueryRow(projected, tableName));
+                }
+                return projectedRows;
+            }
+        }
+
+        // SELECT * — return all columns as-is
+        return rows.ToList();
     }
 
     /// <summary>
