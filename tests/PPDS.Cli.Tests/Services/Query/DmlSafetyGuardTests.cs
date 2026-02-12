@@ -676,4 +676,83 @@ public class DmlSafetyGuardTests
     }
 
     #endregion
+
+    // ── Cross-Environment DML Policy ─────────────────────────────────
+
+    #region Cross-Environment DML Policy Tests
+
+    [Fact]
+    public void CheckCrossEnvDml_ReadOnlyPolicy_BlocksDml()
+    {
+        var settings = new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly };
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("DELETE FROM account WHERE x = 1"), settings, "DEV", "UAT");
+
+        Assert.True(result.IsBlocked);
+        Assert.Contains("read-only", result.BlockReason!);
+        Assert.Contains("DEV", result.BlockReason!);
+        Assert.Contains("UAT", result.BlockReason!);
+    }
+
+    [Fact]
+    public void CheckCrossEnvDml_ReadOnlyPolicy_AllowsSelect()
+    {
+        var settings = new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly };
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("SELECT name FROM account"), settings, "DEV", "UAT");
+
+        Assert.False(result.IsBlocked);
+        Assert.False(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void CheckCrossEnvDml_PromptPolicy_RequiresConfirmation()
+    {
+        var settings = new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Prompt };
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("UPDATE account SET name = 'x' WHERE accountid = '123'"),
+            settings, "DEV", "UAT", ProtectionLevel.Development);
+
+        Assert.False(result.IsBlocked);
+        Assert.True(result.RequiresConfirmation);
+        Assert.Contains("DEV", result.ConfirmationMessage!);
+        Assert.Contains("UAT", result.ConfirmationMessage!);
+    }
+
+    [Fact]
+    public void CheckCrossEnvDml_AllowPolicy_NoConfirmation()
+    {
+        var settings = new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Allow };
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("DELETE FROM account WHERE x = 1"),
+            settings, "DEV", "UAT", ProtectionLevel.Development);
+
+        Assert.False(result.IsBlocked);
+        Assert.False(result.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void CheckCrossEnvDml_ProductionTarget_AlwaysPrompts()
+    {
+        var settings = new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Allow };
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("DELETE FROM account WHERE x = 1"),
+            settings, "DEV", "PROD", ProtectionLevel.Production);
+
+        Assert.True(result.RequiresConfirmation);
+        Assert.Contains("Production", result.ConfirmationMessage!);
+    }
+
+    [Fact]
+    public void CheckCrossEnvDml_DefaultSettings_IsReadOnly()
+    {
+        // Default CrossEnvironmentDmlPolicy should be ReadOnly
+        var result = _guard.CheckCrossEnvironmentDml(
+            Parse("DELETE FROM account WHERE x = 1"), null, "DEV", "UAT");
+
+        Assert.True(result.IsBlocked);
+        Assert.Contains("read-only", result.BlockReason!);
+    }
+
+    #endregion
 }

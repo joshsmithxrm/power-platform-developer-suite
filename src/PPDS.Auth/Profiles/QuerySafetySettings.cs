@@ -77,6 +77,11 @@ public sealed class QuerySafetySettings
     /// <summary>Maximum FetchXML pages fetched (0 = unlimited). Default: 200.</summary>
     [JsonPropertyName("max_page_retrievals")]
     public int? MaxPageRetrievals { get; set; }
+
+    /// <summary>Cross-environment DML policy. Default: ReadOnly.</summary>
+    [JsonPropertyName("cross_env_dml_policy")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public CrossEnvironmentDmlPolicy CrossEnvironmentDmlPolicy { get; set; } = CrossEnvironmentDmlPolicy.ReadOnly;
 }
 
 /// <summary>Which plugin types to bypass during DML operations.</summary>
@@ -105,3 +110,14 @@ public enum ProtectionLevel
 
 /// <summary>DateTime display mode for query results.</summary>
 public enum DateTimeMode { Utc, Local, EnvironmentTimezone }
+
+/// <summary>Cross-environment DML policy.</summary>
+public enum CrossEnvironmentDmlPolicy
+{
+    /// <summary>Cross-env queries are SELECT only (default).</summary>
+    ReadOnly,
+    /// <summary>Confirm each cross-env DML with source/target/count.</summary>
+    Prompt,
+    /// <summary>No additional confirmation beyond standard DML safety.</summary>
+    Allow
+}

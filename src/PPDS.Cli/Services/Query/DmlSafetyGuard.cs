@@ -65,6 +65,60 @@ public sealed class DmlSafetyGuard
         _ => ProtectionLevel.Production // Fail closed
     };
 
+    /// <summary>
+    /// Checks whether a cross-environment DML operation is allowed.
+    /// </summary>
+    /// <param name="statement">The parsed SQL statement.</param>
+    /// <param name="settings">Per-environment safety settings.</param>
+    /// <param name="sourceLabel">The source environment label.</param>
+    /// <param name="targetLabel">The target environment label.</param>
+    /// <param name="targetProtection">The target environment's protection level.</param>
+    /// <returns>The safety check result.</returns>
+    public DmlSafetyResult CheckCrossEnvironmentDml(
+        TSqlStatement statement,
+        QuerySafetySettings? settings,
+        string sourceLabel,
+        string targetLabel,
+        ProtectionLevel targetProtection = ProtectionLevel.Production)
+    {
+        var effectiveSettings = settings ?? new QuerySafetySettings();
+
+        // SELECT statements are always allowed cross-environment
+        if (statement is SelectStatement)
+            return new DmlSafetyResult { IsBlocked = false };
+
+        if (effectiveSettings.CrossEnvironmentDmlPolicy == CrossEnvironmentDmlPolicy.ReadOnly)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = true,
+                BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Change cross_env_dml_policy to 'Prompt' or 'Allow' to enable.",
+                ErrorCode = ErrorCodes.Query.DmlBlocked
+            };
+        }
+
+        // Hard rule: Production target always prompts
+        if (targetProtection == ProtectionLevel.Production)
+        {
+            return new DmlSafetyResult
+            {
+                RequiresConfirmation = true,
+                ConfirmationMessage = $"Cross-environment DML: [{sourceLabel}] → [{targetLabel}] (Production). Confirm?"
+            };
+        }
+
+        if (effectiveSettings.CrossEnvironmentDmlPolicy == CrossEnvironmentDmlPolicy.Prompt)
+        {
+            return new DmlSafetyResult
+            {
+                RequiresConfirmation = true,
+                ConfirmationMessage = $"Cross-environment DML: [{sourceLabel}] → [{targetLabel}]. Confirm?"
+            };
+        }
+
+        return new DmlSafetyResult { IsBlocked = false };
+    }
+
     private static DmlSafetyResult ApplyProtectionLevel(
         DmlSafetyResult result, TSqlStatement statement, DmlSafetyOptions options, ProtectionLevel level)
     {
@@ -236,6 +290,9 @@ public sealed class DmlSafetyResult
 
     /// <summary>Whether confirmation is required.</summary>
     public bool RequiresConfirmation { get; init; }
+
+    /// <summary>Confirmation message shown to the user.</summary>
+    public string? ConfirmationMessage { get; init; }
 
     /// <summary>Whether the user must preview affected records before confirming (Production environments).</summary>
     public bool RequiresPreview { get; init; }
