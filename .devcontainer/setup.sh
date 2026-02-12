@@ -100,4 +100,13 @@ node -e "
 echo "=== Restoring .NET packages ==="
 dotnet restore PPDS.sln
 
+# --- Step 5: Fix workspace ownership ---
+# postCreateCommand may run as root depending on devcontainer CLI version.
+# dotnet restore creates obj/ dirs — if root-owned, MSBuild can't set timestamps
+# (utimensat requires file ownership, not just write permission).
+if [ "$(id -u)" = "0" ]; then
+    echo "=== Fixing workspace ownership (running as root) ==="
+    chown -hR --from=root vscode:vscode ./
+fi
+
 echo "=== Setup complete ==="

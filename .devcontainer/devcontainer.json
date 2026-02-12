@@ -16,6 +16,7 @@
     "source=ppds-auth-cache,target=/home/vscode/.ppds,type=volume",
     "source=ppds-claude-sessions,target=/home/vscode/.claude/projects,type=volume"
   ],
+  "remoteUser": "vscode",
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
