@@ -13,6 +13,7 @@ using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Execution;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
 using PPDS.Query.Planning.Nodes;
@@ -541,8 +542,9 @@ public class ScriptExecutionNodeTests
         var statements = parser.ParseBatch(sql);
 
         var scope = new VariableScope();
+        var session = new SessionContext();
         var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
-        var node = new ScriptExecutionNode(statements, builder, compiler);
+        var node = new ScriptExecutionNode(statements, builder, compiler, session);
         var ctx = CreateContext(scope);
 
         var rows = new List<QueryRow>();
@@ -1025,5 +1027,51 @@ public class ScriptExecutionNodeTests
         // The outer CATCH stored the error message in scope.
         scope.IsDeclared("@@ERROR_MESSAGE").Should().BeTrue();
         scope.Get("@@ERROR_MESSAGE").Should().Be("original error");
+    }
+
+    // ────────────────────────────────────────────
+    //  SELECT INTO #temp
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task SelectInto_FromlessSelect_CreatesTempTableAndCanRead()
+    {
+        // SELECT 1 AS id, 'Alice' AS name INTO #copy
+        // SELECT * FROM #copy
+        var sql = @"
+            SELECT 1 AS id, 'Alice' AS name INTO #copy
+            SELECT * FROM #copy";
+
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["id"].Value.Should().Be(1);
+        rows[0].Values["name"].Value.Should().Be("Alice");
+    }
+
+    [Fact]
+    public async Task SelectInto_MultipleRows_AllRowsCopied()
+    {
+        // Multiple SELECT INTO statements to verify temp table accumulation
+        var sql = @"
+            SELECT 1 AS id, 'Alice' AS name INTO #people
+            SELECT * FROM #people";
+
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["name"].Value.Should().Be("Alice");
+    }
+
+    [Fact]
+    public async Task SelectInto_TempTableCanBeReadMultipleTimes()
+    {
+        var sql = @"
+            SELECT 42 AS val INTO #data
+            SELECT * FROM #data
+            SELECT * FROM #data";
+
+        // The last SELECT produces the rows (script returns last result)
+        var rows = await ExecuteScriptAsync(sql);
+        rows.Should().HaveCount(1);
+        rows[0].Values["val"].Value.Should().Be(42);
     }
 }
