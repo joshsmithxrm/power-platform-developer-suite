@@ -171,8 +171,18 @@ public sealed class ExecutionPlanBuilder
         // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
         ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
 
-        // Generate FetchXML using the injected service
-        var transpileResult = _fetchXmlGenerator.Generate(selectStmt);
+        // Generate FetchXML using the injected service.
+        // If the query contains join types unsupported by FetchXML (RIGHT, FULL OUTER),
+        // fall back to client-side join planning.
+        TranspileResult transpileResult;
+        try
+        {
+            transpileResult = _fetchXmlGenerator.Generate(selectStmt);
+        }
+        catch (NotSupportedException)
+        {
+            return PlanClientSideJoin(selectStmt, querySpec, options);
+        }
 
         // Phase 4: Aggregate partitioning (now fully ScriptDom-based)
         if (HasAggregatesInQuerySpec(querySpec) && options.EstimatedRecordCount.HasValue)
@@ -259,6 +269,106 @@ public sealed class ExecutionPlanBuilder
             VirtualColumns = transpileResult.VirtualColumns,
             EntityLogicalName = entityName
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Client-side JOIN planning (fallback when FetchXML can't handle the join)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a query with joins that cannot be transpiled to FetchXML.
+    /// Each table is scanned independently and joined client-side.
+    /// </summary>
+    private QueryPlanResult PlanClientSideJoin(
+        SelectStatement selectStmt,
+        QuerySpecification querySpec,
+        QueryPlanOptions options)
+    {
+        var fromClause = querySpec.FromClause;
+        if (fromClause?.TableReferences.Count != 1 || fromClause.TableReferences[0] is not QualifiedJoin rootJoin)
+            throw new QueryParseException("Expected a qualified join in FROM clause for client-side join planning.");
+
+        // Recursively build the join tree
+        var (node, entityName) = PlanJoinTree(rootJoin, options);
+
+        IQueryPlanNode rootNode = node;
+
+        // Apply WHERE filter (client-side)
+        if (querySpec.WhereClause?.SearchCondition != null)
+        {
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.WhereClause.SearchCondition);
+            var description = querySpec.WhereClause.SearchCondition.ToString() ?? "WHERE (client)";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = "<!-- client-side join -->",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = entityName
+        };
+    }
+
+    private (IQueryPlanNode node, string entityName) PlanJoinTree(
+        QualifiedJoin join,
+        QueryPlanOptions options)
+    {
+        var leftResult = PlanTableReference(join.FirstTableReference, options);
+        var rightResult = PlanTableReference(join.SecondTableReference, options);
+
+        // Extract join columns from ON condition
+        var (leftCol, rightCol) = ExtractJoinColumns(join.SearchCondition);
+
+        // Map ScriptDom join type to our JoinType
+        var joinType = join.QualifiedJoinType switch
+        {
+            QualifiedJoinType.Inner => JoinType.Inner,
+            QualifiedJoinType.LeftOuter => JoinType.Left,
+            QualifiedJoinType.RightOuter => JoinType.Right,
+            QualifiedJoinType.FullOuter => JoinType.FullOuter,
+            _ => JoinType.Inner
+        };
+
+        // Use HashJoin for best general-purpose performance on unsorted data
+        var joinNode = new HashJoinNode(
+            leftResult.node, rightResult.node,
+            leftCol, rightCol, joinType);
+
+        return (joinNode, leftResult.entityName);
+    }
+
+    private (IQueryPlanNode node, string entityName) PlanTableReference(
+        TableReference tableRef,
+        QueryPlanOptions options)
+    {
+        if (tableRef is QualifiedJoin nestedJoin)
+            return PlanJoinTree(nestedJoin, options);
+
+        if (tableRef is NamedTableReference named)
+        {
+            var entityName = GetMultiPartName(named.SchemaObject);
+            var fetchXml = $"<fetch><entity name=\"{entityName}\"><all-attributes /></entity></fetch>";
+            var scanNode = new FetchXmlScanNode(fetchXml, entityName);
+            return (scanNode, entityName);
+        }
+
+        throw new QueryParseException($"Unsupported table reference type in client-side join: {tableRef.GetType().Name}");
+    }
+
+    private static (string leftCol, string rightCol) ExtractJoinColumns(BooleanExpression searchCondition)
+    {
+        if (searchCondition is BooleanComparisonExpression comp
+            && comp.ComparisonType == BooleanComparisonType.Equals
+            && comp.FirstExpression is ColumnReferenceExpression leftRef
+            && comp.SecondExpression is ColumnReferenceExpression rightRef)
+        {
+            var leftCol = leftRef.MultiPartIdentifier.Identifiers[leftRef.MultiPartIdentifier.Identifiers.Count - 1].Value;
+            var rightCol = rightRef.MultiPartIdentifier.Identifiers[rightRef.MultiPartIdentifier.Identifiers.Count - 1].Value;
+            return (leftCol, rightCol);
+        }
+
+        throw new QueryParseException("Client-side JOIN ON condition must be a simple equality comparison (e.g., a.id = b.id).");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1959,15 +2069,25 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Extracts the entity (table) name from the FROM clause of a <see cref="QuerySpecification"/>.
+    /// For JOINs, drills into the leftmost table reference to find the primary entity.
     /// </summary>
     private static string? ExtractEntityNameFromQuerySpec(QuerySpecification querySpec)
     {
-        if (querySpec.FromClause?.TableReferences.Count > 0
-            && querySpec.FromClause.TableReferences[0] is NamedTableReference named)
+        if (querySpec.FromClause?.TableReferences.Count > 0)
         {
-            return GetMultiPartName(named.SchemaObject);
+            return ExtractEntityNameFromTableReference(querySpec.FromClause.TableReferences[0]);
         }
         return null;
+    }
+
+    private static string? ExtractEntityNameFromTableReference(TableReference tableRef)
+    {
+        return tableRef switch
+        {
+            NamedTableReference named => GetMultiPartName(named.SchemaObject),
+            QualifiedJoin join => ExtractEntityNameFromTableReference(join.FirstTableReference),
+            _ => null
+        };
     }
 
     /// <summary>

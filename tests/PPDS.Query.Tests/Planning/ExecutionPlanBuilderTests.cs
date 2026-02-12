@@ -258,8 +258,92 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  JOIN planning: RIGHT and FULL OUTER fall back to client-side
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_RightJoin_ProducesClientSideHashJoin()
+    {
+        // RIGHT JOIN is not supported by FetchXML — should fall back to client-side HashJoin
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("RIGHT JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, c.fullname FROM account a RIGHT JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
+            "RIGHT JOIN should produce a client-side HashJoinNode");
+    }
+
+    [Fact]
+    public void Plan_FullOuterJoin_ProducesClientSideHashJoin()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("FULL OUTER JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, c.fullname FROM account a FULL OUTER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
+            "FULL OUTER JOIN should produce a client-side HashJoinNode");
+    }
+
+    [Fact]
+    public void Plan_InnerJoin_StillUsesFetchXml()
+    {
+        // INNER JOIN is supported by FetchXML — should NOT fall back to client-side
+        var sql = "SELECT a.name, c.fullname FROM account a INNER JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        // Should use the FetchXML path (FetchXmlScanNode at or near root)
+        result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>();
+    }
+
+    [Fact]
+    public void Plan_LeftJoin_StillUsesFetchXml()
+    {
+        var sql = "SELECT a.name, c.fullname FROM account a LEFT JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>();
+    }
+
+    [Fact]
+    public void Plan_RightJoin_ExtractsCorrectEntityName()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("RIGHT JOIN not supported"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name FROM account a RIGHT JOIN contact c ON a.accountid = c.parentcustomerid";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Primary entity should be the leftmost table (account)
+        result.EntityLogicalName.Should().Be("account");
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
+
+    private static bool ContainsNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
+    {
+        if (node is T) return true;
+        return node.Children.Any(ContainsNodeOfType<T>);
+    }
 
     private static bool FindNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
     {
