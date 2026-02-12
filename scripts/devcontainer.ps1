@@ -197,6 +197,20 @@ switch ($Command) {
                 }
             }
 
+            # Repair container worktrees — fix .git files that have Windows host paths
+            $containerWorktrees = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
+            if ($containerWorktrees) {
+                $containerWorktrees -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') } | Where-Object { $_ } | ForEach-Object {
+                    $wtPath = $_
+                    $wtName = $wtPath -replace '^\.worktrees/',''
+                    $gitdir = devcontainer exec --workspace-folder $WorkspaceFolder sh -c "cat $wtPath/.git 2>/dev/null" 2>$null
+                    if ($gitdir -and $gitdir -match '[A-Z]:[\\/]') {
+                        Write-Step "Repairing container worktree '$wtName' .git file (was Windows host path)..."
+                        devcontainer exec --workspace-folder $WorkspaceFolder sh -c "echo 'gitdir: /workspaces/ppds/.git/worktrees/$wtName' > $wtPath/.git"
+                    }
+                }
+            }
+
             Write-Ok 'Container is running.'
             Write-Host ''
             Write-Host '  Next steps:' -ForegroundColor Yellow
