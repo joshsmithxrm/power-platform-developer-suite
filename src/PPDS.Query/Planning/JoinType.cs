@@ -9,5 +9,14 @@ public enum JoinType
     Inner,
 
     /// <summary>LEFT JOIN: all rows from left side, matching rows from right (or nulls).</summary>
-    Left
+    Left,
+
+    /// <summary>RIGHT JOIN: all rows from right side, matching rows from left (or nulls).</summary>
+    Right,
+
+    /// <summary>FULL OUTER JOIN: all rows from both sides (nulls where no match).</summary>
+    FullOuter,
+
+    /// <summary>CROSS JOIN: Cartesian product of both sides (no predicate).</summary>
+    Cross
 }
