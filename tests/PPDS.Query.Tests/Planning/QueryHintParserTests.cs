@@ -103,4 +103,22 @@ public class QueryHintParserTests
         Assert.Null(overrides.DmlBatchSize);
         Assert.Null(overrides.MaxParallelism);
     }
+
+    [Fact]
+    public void Parse_CommentHint_HashGroup_SetsFlag()
+    {
+        var overrides = QueryHintParser.Parse(
+            _parser.Parse("-- ppds:HASH_GROUP\nSELECT COUNT(*) FROM account GROUP BY name"));
+
+        Assert.True(overrides.ForceClientAggregation);
+    }
+
+    [Fact]
+    public void Parse_CommentHint_HashGroupNoUnderscore_SetsFlag()
+    {
+        var overrides = QueryHintParser.Parse(
+            _parser.Parse("-- ppds:HASHGROUP\nSELECT COUNT(*) FROM account GROUP BY name"));
+
+        Assert.True(overrides.ForceClientAggregation);
+    }
 }

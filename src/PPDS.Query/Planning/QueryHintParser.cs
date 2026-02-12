@@ -109,6 +109,10 @@ public static class QueryHintParser
             case "MAXDOP" when int.TryParse(value, out var maxdop):
                 overrides.MaxParallelism = maxdop;
                 break;
+            case "HASH_GROUP":
+            case "HASHGROUP":
+                overrides.ForceClientAggregation = true;
+                break;
         }
     }
 }
