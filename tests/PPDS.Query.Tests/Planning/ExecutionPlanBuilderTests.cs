@@ -336,6 +336,83 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  CROSS JOIN produces NestedLoopJoinNode
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_CrossJoin_ProducesClientSideNestedLoopJoin()
+    {
+        // CROSS JOIN is not supported by FetchXML — should route to client-side NestedLoopJoinNode
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("CROSS JOIN not supported in FetchXML"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, b.fullname FROM account a CROSS JOIN contact b";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        ContainsNodeOfType<NestedLoopJoinNode>(result.RootNode).Should().BeTrue(
+            "CROSS JOIN should produce a client-side NestedLoopJoinNode");
+    }
+
+    [Fact]
+    public void Plan_CrossJoin_ExtractsCorrectEntityName()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("CROSS JOIN not supported"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name FROM account a CROSS JOIN contact b";
+        var fragment = _parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        // Primary entity should be the leftmost table (account)
+        result.EntityLogicalName.Should().Be("account");
+    }
+
+    // ────────────────────────────────────────────
+    //  CROSS APPLY / OUTER APPLY throws clear error
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_CrossApply_ThrowsNotYetSupported()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("CROSS APPLY not supported"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, s.value FROM account a CROSS APPLY (SELECT value FROM contact WHERE contact.parentcustomerid = a.accountid) s";
+        var fragment = _parser.Parse(sql);
+        var act = () => builder.Plan(fragment);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*CROSS APPLY*not yet supported*");
+    }
+
+    [Fact]
+    public void Plan_OuterApply_ThrowsNotYetSupported()
+    {
+        var mockService = new Mock<IFetchXmlGeneratorService>();
+        mockService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Throws(new NotSupportedException("OUTER APPLY not supported"));
+        var builder = new ExecutionPlanBuilder(mockService.Object);
+
+        var sql = "SELECT a.name, s.value FROM account a OUTER APPLY (SELECT value FROM contact WHERE contact.parentcustomerid = a.accountid) s";
+        var fragment = _parser.Parse(sql);
+        var act = () => builder.Plan(fragment);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*OUTER APPLY*not yet supported*");
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
 

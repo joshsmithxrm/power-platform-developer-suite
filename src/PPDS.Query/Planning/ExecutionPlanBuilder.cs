@@ -168,6 +168,13 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
+        // CROSS JOIN, CROSS APPLY, and OUTER APPLY are represented as UnqualifiedJoin
+        // in ScriptDom. FetchXML does not support these — route directly to client-side join.
+        if (ContainsUnqualifiedJoin(querySpec.FromClause))
+        {
+            return PlanClientSideJoin(selectStmt, querySpec, options);
+        }
+
         // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
         ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
 
@@ -285,11 +292,12 @@ public sealed class ExecutionPlanBuilder
         QueryPlanOptions options)
     {
         var fromClause = querySpec.FromClause;
-        if (fromClause?.TableReferences.Count != 1 || fromClause.TableReferences[0] is not QualifiedJoin rootJoin)
-            throw new QueryParseException("Expected a qualified join in FROM clause for client-side join planning.");
+        if (fromClause?.TableReferences.Count != 1)
+            throw new QueryParseException("Expected exactly one table reference in FROM clause for client-side join planning.");
 
-        // Recursively build the join tree
-        var (node, entityName) = PlanJoinTree(rootJoin, options);
+        // Recursively build the join tree (handles QualifiedJoin, UnqualifiedJoin, and NamedTableReference)
+        var tableRef = fromClause.TableReferences[0];
+        var (node, entityName) = PlanTableReference(tableRef, options);
 
         IQueryPlanNode rootNode = node;
 
@@ -345,6 +353,9 @@ public sealed class ExecutionPlanBuilder
         if (tableRef is QualifiedJoin nestedJoin)
             return PlanJoinTree(nestedJoin, options);
 
+        if (tableRef is UnqualifiedJoin unqualified)
+            return PlanUnqualifiedJoin(unqualified, options);
+
         if (tableRef is NamedTableReference named)
         {
             var entityName = GetMultiPartName(named.SchemaObject);
@@ -354,6 +365,60 @@ public sealed class ExecutionPlanBuilder
         }
 
         throw new QueryParseException($"Unsupported table reference type in client-side join: {tableRef.GetType().Name}");
+    }
+
+    /// <summary>
+    /// Plans an unqualified join (CROSS JOIN, CROSS APPLY, OUTER APPLY).
+    /// CROSS JOIN produces a NestedLoopJoinNode with JoinType.Cross.
+    /// CROSS APPLY and OUTER APPLY require correlated subquery infrastructure (Task 7)
+    /// and throw a clear error for now.
+    /// </summary>
+    private (IQueryPlanNode node, string entityName) PlanUnqualifiedJoin(
+        UnqualifiedJoin join,
+        QueryPlanOptions options)
+    {
+        if (join.UnqualifiedJoinType is UnqualifiedJoinType.CrossApply)
+            throw new QueryParseException("CROSS APPLY is not yet supported in this execution path.");
+        if (join.UnqualifiedJoinType is UnqualifiedJoinType.OuterApply)
+            throw new QueryParseException("OUTER APPLY is not yet supported in this execution path.");
+
+        var leftResult = PlanTableReference(join.FirstTableReference, options);
+        var rightResult = PlanTableReference(join.SecondTableReference, options);
+
+        IQueryPlanNode joinNode = join.UnqualifiedJoinType switch
+        {
+            UnqualifiedJoinType.CrossJoin => new NestedLoopJoinNode(
+                leftResult.node, rightResult.node, null, null, JoinType.Cross),
+
+            _ => throw new QueryParseException($"Unsupported unqualified join type: {join.UnqualifiedJoinType}")
+        };
+
+        return (joinNode, leftResult.entityName);
+    }
+
+    /// <summary>
+    /// Checks whether a FROM clause contains any <see cref="UnqualifiedJoin"/>
+    /// (CROSS JOIN, CROSS APPLY, OUTER APPLY) at any nesting level.
+    /// </summary>
+    private static bool ContainsUnqualifiedJoin(FromClause? fromClause)
+    {
+        if (fromClause == null) return false;
+        foreach (var tableRef in fromClause.TableReferences)
+        {
+            if (ContainsUnqualifiedJoinInTableRef(tableRef))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool ContainsUnqualifiedJoinInTableRef(TableReference tableRef)
+    {
+        if (tableRef is UnqualifiedJoin)
+            return true;
+        if (tableRef is QualifiedJoin qualified)
+            return ContainsUnqualifiedJoinInTableRef(qualified.FirstTableReference)
+                || ContainsUnqualifiedJoinInTableRef(qualified.SecondTableReference);
+        return false;
     }
 
     private static (string leftCol, string rightCol) ExtractJoinColumns(BooleanExpression searchCondition)
@@ -2086,6 +2151,7 @@ public sealed class ExecutionPlanBuilder
         {
             NamedTableReference named => GetMultiPartName(named.SchemaObject),
             QualifiedJoin join => ExtractEntityNameFromTableReference(join.FirstTableReference),
+            UnqualifiedJoin unqualified => ExtractEntityNameFromTableReference(unqualified.FirstTableReference),
             _ => null
         };
     }
