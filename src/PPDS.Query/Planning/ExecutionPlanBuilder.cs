@@ -2339,6 +2339,8 @@ public sealed class ExecutionPlanBuilder
 
     /// <summary>
     /// Extracts GROUP BY column names from a ScriptDom <see cref="QuerySpecification"/>.
+    /// Handles simple column references, date function calls (YEAR, MONTH, DAY, etc.),
+    /// and other expressions by matching against SELECT aliases.
     /// </summary>
     private static List<string> ExtractGroupByColumnNames(QuerySpecification querySpec)
     {
@@ -2348,13 +2350,109 @@ public sealed class ExecutionPlanBuilder
 
         foreach (var groupSpec in querySpec.GroupByClause.GroupingSpecifications)
         {
-            if (groupSpec is ExpressionGroupingSpecification exprGroup
-                && exprGroup.Expression is ColumnReferenceExpression colRef)
+            if (groupSpec is not ExpressionGroupingSpecification exprGroup)
+                continue;
+
+            switch (exprGroup.Expression)
             {
-                names.Add(GetScriptDomColumnName(colRef));
+                case ColumnReferenceExpression colRef:
+                    names.Add(GetScriptDomColumnName(colRef));
+                    break;
+
+                case FunctionCall funcCall:
+                {
+                    // First check if there's a matching SELECT alias for this expression
+                    var selectAlias = FindSelectAliasForExpression(querySpec, exprGroup.Expression);
+                    if (selectAlias != null)
+                    {
+                        names.Add(selectAlias);
+                    }
+                    else
+                    {
+                        // Generate synthetic name matching FetchXml convention: {funcname}_{columnname}
+                        var funcName = funcCall.FunctionName?.Value?.ToLowerInvariant();
+                        var columnName = GetExpressionColumnName(
+                            funcCall.Parameters?.Count == 1 ? funcCall.Parameters[0] : null);
+                        if (funcName != null && columnName != null)
+                        {
+                            names.Add($"{funcName}_{columnName}");
+                        }
+                        else
+                        {
+                            names.Add(exprGroup.Expression.ToString() ?? "expr");
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                {
+                    // Other expression types: try to match SELECT alias as fallback
+                    var selectAlias = FindSelectAliasForExpression(querySpec, exprGroup.Expression);
+                    names.Add(selectAlias ?? exprGroup.Expression.ToString() ?? "expr");
+                    break;
+                }
             }
         }
         return names;
+    }
+
+    /// <summary>
+    /// Finds a SELECT alias that matches the given expression by comparing SQL text representations.
+    /// Uses <see cref="Sql160ScriptGenerator"/> to produce canonical SQL text for comparison,
+    /// since ScriptDom's <c>ToString()</c> returns the type name rather than SQL text.
+    /// </summary>
+    private static string? FindSelectAliasForExpression(QuerySpecification querySpec, ScalarExpression targetExpr)
+    {
+        var targetText = ScriptDomToSql(targetExpr);
+        if (string.IsNullOrEmpty(targetText))
+            return null;
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is not SelectScalarExpression scalar || scalar.ColumnName == null)
+                continue;
+
+            if (scalar.Expression == null)
+                continue;
+
+            var selectExprText = ScriptDomToSql(scalar.Expression);
+            if (string.Equals(targetText, selectExprText, StringComparison.OrdinalIgnoreCase))
+            {
+                return scalar.ColumnName.Value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts the column name from a scalar expression.
+    /// For <see cref="ColumnReferenceExpression"/>, returns the last identifier.
+    /// For other expressions, returns the generated SQL text.
+    /// </summary>
+    private static string? GetExpressionColumnName(ScalarExpression? expr)
+    {
+        if (expr == null)
+            return null;
+
+        if (expr is ColumnReferenceExpression colRef)
+        {
+            return GetScriptDomColumnName(colRef);
+        }
+
+        return ScriptDomToSql(expr);
+    }
+
+    /// <summary>
+    /// Generates canonical SQL text from a ScriptDom fragment using <see cref="Sql160ScriptGenerator"/>.
+    /// ScriptDom's <c>ToString()</c> returns the type name, not SQL text.
+    /// </summary>
+    private static string ScriptDomToSql(TSqlFragment fragment)
+    {
+        var generator = new Sql160ScriptGenerator();
+        generator.GenerateScript(fragment, out var sql);
+        return sql.Trim();
     }
 
     /// <summary>
