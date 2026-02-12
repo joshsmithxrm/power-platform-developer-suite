@@ -182,6 +182,13 @@ public sealed class ExecutionPlanBuilder
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
 
+        // IN (subquery) / NOT IN (subquery) — route to client-side semi-join
+        if (querySpec.WhereClause?.SearchCondition != null
+            && ContainsInSubqueryPredicate(querySpec.WhereClause.SearchCondition))
+        {
+            return PlanInSubquery(selectStmt, querySpec, options);
+        }
+
         // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
         ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
 
@@ -358,6 +365,146 @@ public sealed class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  IN (subquery) / NOT IN (subquery) planning
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Plans a SELECT whose WHERE clause contains one or more IN (subquery) or NOT IN (subquery)
+    /// predicates. Strips the IN predicates from the WHERE, plans the outer query normally
+    /// (which may generate FetchXML for pushable conditions), then plans each inner subquery
+    /// separately and wraps the outer scan in <see cref="HashSemiJoinNode"/> instances.
+    /// </summary>
+    private QueryPlanResult PlanInSubquery(
+        SelectStatement selectStmt,
+        QuerySpecification querySpec,
+        QueryPlanOptions options)
+    {
+        // 1. Extract IN subquery predicates from WHERE, collecting them and building a cleaned expression
+        var inPredicates = new List<InPredicate>();
+        var cleanedWhere = ExtractInSubqueryPredicates(querySpec.WhereClause?.SearchCondition, inPredicates);
+
+        // 2. Temporarily modify the WHERE to exclude subquery predicates so FetchXML generation works
+        var origWhereClause = querySpec.WhereClause;
+        if (cleanedWhere != null)
+        {
+            querySpec.WhereClause = new WhereClause { SearchCondition = cleanedWhere };
+        }
+        else
+        {
+            querySpec.WhereClause = null;
+        }
+
+        QueryPlanResult outerResult;
+        try
+        {
+            // Re-enter PlanSelect for the outer query (without IN subquery predicates).
+            // This will generate FetchXML for pushable conditions and apply the normal pipeline.
+            outerResult = PlanSelect(selectStmt, querySpec, options);
+        }
+        finally
+        {
+            // Restore the original AST so callers see no mutation
+            querySpec.WhereClause = origWhereClause;
+        }
+
+        // 3. For each IN subquery, plan the inner query and wrap in HashSemiJoinNode
+        var currentNode = outerResult.RootNode;
+        foreach (var inPred in inPredicates)
+        {
+            // Get the outer column name from the left-hand side of the IN predicate
+            var outerCol = inPred.Expression is ColumnReferenceExpression colRef
+                ? colRef.MultiPartIdentifier.Identifiers.Last().Value
+                : throw new QueryParseException("IN subquery requires a column reference on the left side.");
+
+            // Plan the inner subquery
+            var innerResult = PlanQueryExpressionAsSelect(inPred.Subquery.QueryExpression, options);
+
+            // Get the inner column name (first column in subquery SELECT)
+            var innerQuery = inPred.Subquery.QueryExpression as QuerySpecification;
+            var innerCol = ExtractFirstSelectColumnName(innerQuery)
+                ?? throw new QueryParseException("Cannot determine column name from IN subquery SELECT list.");
+
+            // Wrap in HashSemiJoinNode (antiSemiJoin = true for NOT IN)
+            currentNode = new HashSemiJoinNode(
+                currentNode, innerResult.RootNode,
+                outerCol, innerCol,
+                antiSemiJoin: inPred.NotDefined);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = currentNode,
+            FetchXml = outerResult.FetchXml,
+            VirtualColumns = outerResult.VirtualColumns,
+            EntityLogicalName = outerResult.EntityLogicalName
+        };
+    }
+
+    /// <summary>
+    /// Extracts <see cref="InPredicate"/> nodes with subqueries from a boolean expression tree,
+    /// collecting them into the provided list. Returns the remaining boolean expression
+    /// with IN subquery predicates removed, or null if the entire expression was consumed.
+    /// Only extracts from top-level AND conjuncts — IN predicates inside OR/NOT/parenthesized
+    /// expressions are left in place (they would require more complex rewrite).
+    /// </summary>
+    private static BooleanExpression? ExtractInSubqueryPredicates(
+        BooleanExpression? expr,
+        List<InPredicate> collected)
+    {
+        if (expr is null) return null;
+
+        // Direct IN (subquery) — consume it entirely
+        if (expr is InPredicate inPred && inPred.Subquery != null)
+        {
+            collected.Add(inPred);
+            return null;
+        }
+
+        // AND — extract from both sides independently
+        if (expr is BooleanBinaryExpression bin
+            && bin.BinaryExpressionType == BooleanBinaryExpressionType.And)
+        {
+            var left = ExtractInSubqueryPredicates(bin.FirstExpression, collected);
+            var right = ExtractInSubqueryPredicates(bin.SecondExpression, collected);
+
+            if (left == null && right == null) return null;
+            if (left == null) return right;
+            if (right == null) return left;
+
+            // Both sides still have content — reconstruct the AND
+            bin.FirstExpression = left;
+            bin.SecondExpression = right;
+            return bin;
+        }
+
+        // For other expression types (OR, NOT, parenthesized, etc.), don't extract —
+        // leave them as-is in the WHERE clause.
+        return expr;
+    }
+
+    /// <summary>
+    /// Extracts the column name from the first element in a SELECT list.
+    /// Used to determine the key column for IN subquery semi-joins.
+    /// </summary>
+    private static string? ExtractFirstSelectColumnName(QuerySpecification? querySpec)
+    {
+        if (querySpec?.SelectElements == null || querySpec.SelectElements.Count == 0) return null;
+
+        var firstElement = querySpec.SelectElements[0];
+        if (firstElement is SelectScalarExpression scalar)
+        {
+            // If aliased, use the alias
+            if (scalar.ColumnName?.Value != null) return scalar.ColumnName.Value;
+
+            // If a column reference, use the last identifier (column name)
+            if (scalar.Expression is ColumnReferenceExpression colRef)
+                return colRef.MultiPartIdentifier.Identifiers.Last().Value;
+        }
+
+        return null;
     }
 
     private (IQueryPlanNode node, string entityName) PlanJoinTree(
@@ -2140,11 +2287,7 @@ public sealed class ExecutionPlanBuilder
                 "Unsupported WHERE predicate: EXISTS subqueries are not supported in this execution path.");
         }
 
-        if (ContainsInSubqueryPredicate(where))
-        {
-            throw new QueryParseException(
-                "Unsupported WHERE predicate: IN (SELECT ...) subqueries are not supported in this execution path.");
-        }
+        // IN subquery check removed — now handled by PlanInSubquery before this point.
     }
 
     /// <summary>
