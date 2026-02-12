@@ -801,6 +801,59 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  GROUP BY on expressions (date functions)
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_GroupByYearWithSelectAlias_UsesAliasAsGroupKey()
+    {
+        // YEAR(createdon) AS yr should produce group key "yr"
+        var sql = "SELECT YEAR(createdon) AS yr, COUNT(*) AS cnt FROM account GROUP BY YEAR(createdon)";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            PoolCapacity = 4,
+            EstimatedRecordCount = 200_000,
+            MinDate = new System.DateTime(2020, 1, 1),
+            MaxDate = new System.DateTime(2025, 12, 31),
+        };
+
+        var result = _builder.Plan(fragment, options);
+
+        var mergeNode = FindNode<MergeAggregateNode>(result.RootNode);
+        mergeNode.Should().NotBeNull("partitioned aggregate should produce MergeAggregateNode");
+        mergeNode!.GroupByColumns.Should().Contain("yr",
+            "GROUP BY YEAR(createdon) with SELECT alias 'yr' should use the alias as group key");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_GroupByMonthWithoutAlias_GeneratesSyntheticName()
+    {
+        // MONTH(createdon) without SELECT alias should generate "month_createdon"
+        var sql = "SELECT MONTH(createdon), COUNT(*) AS cnt FROM account GROUP BY MONTH(createdon)";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            PoolCapacity = 4,
+            EstimatedRecordCount = 200_000,
+            MinDate = new System.DateTime(2020, 1, 1),
+            MaxDate = new System.DateTime(2025, 12, 31),
+        };
+
+        var result = _builder.Plan(fragment, options);
+
+        var mergeNode = FindNode<MergeAggregateNode>(result.RootNode);
+        mergeNode.Should().NotBeNull("partitioned aggregate should produce MergeAggregateNode");
+
+        mergeNode!.GroupByColumns.Should().Contain("month_createdon",
+            "GROUP BY MONTH(createdon) without alias should generate synthetic name 'month_createdon'");
+    }
+
+    // ────────────────────────────────────────────
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
 
