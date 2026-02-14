@@ -847,6 +847,24 @@ public class ExecutionPlanBuilderTests
             .WithMessage("*STAGING*");
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_TwoPartName_CrossEnvJoin_ProducesRemoteScanNodes()
+    {
+        // JOIN between local and 2-part cross-env reference
+        var sql = "SELECT a.name FROM account a JOIN [UAT].contact c ON a.accountid = c.parentcustomerid";
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => label == "UAT" ? mockRemoteExecutor : null
+        };
+
+        var result = _builder.Plan(_parser.Parse(sql), options);
+
+        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+            "2-part [UAT].contact in JOIN should produce RemoteScanNode");
+    }
+
     // ────────────────────────────────────────────
     //  GROUP BY on expressions (date functions)
     // ────────────────────────────────────────────
