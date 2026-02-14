@@ -18,6 +18,11 @@ public sealed class ProfileResolutionService
         {
             if (!string.IsNullOrEmpty(config.Label))
             {
+                if (string.Equals(config.Label, "dbo", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException(
+                        $"'{config.Label}' cannot be used as an environment label (reserved for SQL schema convention).",
+                        nameof(configs));
+
                 _labelIndex[config.Label] = config;
             }
         }
