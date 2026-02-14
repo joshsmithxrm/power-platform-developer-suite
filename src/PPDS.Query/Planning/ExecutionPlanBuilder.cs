@@ -184,7 +184,7 @@ public sealed class ExecutionPlanBuilder
 
         // Cross-environment references ([LABEL].dbo.entity) cannot be transpiled to FetchXML —
         // route to client-side planning which resolves the remote executor via PlanTableReference.
-        if (ContainsCrossEnvironmentReference(querySpec.FromClause))
+        if (ContainsCrossEnvironmentReference(querySpec.FromClause, options))
         {
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
@@ -1072,6 +1072,17 @@ public sealed class ExecutionPlanBuilder
                 return PlanRemoteTableReference(named, profileLabel, options);
             }
 
+            // Smart label detection for 2-part names: [LABEL].entity is parsed as
+            // SchemaIdentifier=LABEL, BaseIdentifier=entity. If schema is not "dbo"
+            // and a RemoteExecutorFactory is configured, check if it matches a profile label.
+            var schemaId = named.SchemaObject.SchemaIdentifier?.Value;
+            if (schemaId != null
+                && !string.Equals(schemaId, "dbo", StringComparison.OrdinalIgnoreCase)
+                && options.RemoteExecutorFactory != null)
+            {
+                return PlanRemoteTableReference(named, schemaId, options);
+            }
+
             var entityName = GetMultiPartName(named.SchemaObject);
             var fetchXml = $"<fetch><entity name=\"{entityName}\"><all-attributes /></entity></fetch>";
             var scanNode = new FetchXmlScanNode(fetchXml, entityName);
@@ -1215,28 +1226,39 @@ public sealed class ExecutionPlanBuilder
     /// Checks whether a FROM clause contains any cross-environment reference
     /// (bracket-delimited server identifier, e.g. <c>[UAT].dbo.account</c>) at any nesting level.
     /// </summary>
-    private static bool ContainsCrossEnvironmentReference(FromClause? fromClause)
+    private static bool ContainsCrossEnvironmentReference(FromClause? fromClause, QueryPlanOptions options)
     {
         if (fromClause == null) return false;
         foreach (var tableRef in fromClause.TableReferences)
         {
-            if (ContainsCrossEnvironmentReferenceInTableRef(tableRef))
+            if (ContainsCrossEnvironmentReferenceInTableRef(tableRef, options))
                 return true;
         }
         return false;
     }
 
-    private static bool ContainsCrossEnvironmentReferenceInTableRef(TableReference tableRef)
+    private static bool ContainsCrossEnvironmentReferenceInTableRef(TableReference tableRef, QueryPlanOptions options)
     {
-        if (tableRef is NamedTableReference named
-            && (named.SchemaObject.ServerIdentifier != null || named.SchemaObject.DatabaseIdentifier != null))
-            return true;
+        if (tableRef is NamedTableReference named)
+        {
+            // 3/4-part names: [LABEL].dbo.entity or [SERVER].[DB].dbo.entity
+            if (named.SchemaObject.ServerIdentifier != null || named.SchemaObject.DatabaseIdentifier != null)
+                return true;
+
+            // 2-part names: [LABEL].entity where schema is not "dbo"
+            // and a RemoteExecutorFactory is configured
+            var schemaId = named.SchemaObject.SchemaIdentifier?.Value;
+            if (schemaId != null
+                && !string.Equals(schemaId, "dbo", StringComparison.OrdinalIgnoreCase)
+                && options.RemoteExecutorFactory != null)
+                return true;
+        }
         if (tableRef is QualifiedJoin qualified)
-            return ContainsCrossEnvironmentReferenceInTableRef(qualified.FirstTableReference)
-                || ContainsCrossEnvironmentReferenceInTableRef(qualified.SecondTableReference);
+            return ContainsCrossEnvironmentReferenceInTableRef(qualified.FirstTableReference, options)
+                || ContainsCrossEnvironmentReferenceInTableRef(qualified.SecondTableReference, options);
         if (tableRef is UnqualifiedJoin unqualified)
-            return ContainsCrossEnvironmentReferenceInTableRef(unqualified.FirstTableReference)
-                || ContainsCrossEnvironmentReferenceInTableRef(unqualified.SecondTableReference);
+            return ContainsCrossEnvironmentReferenceInTableRef(unqualified.FirstTableReference, options)
+                || ContainsCrossEnvironmentReferenceInTableRef(unqualified.SecondTableReference, options);
         return false;
     }
 
