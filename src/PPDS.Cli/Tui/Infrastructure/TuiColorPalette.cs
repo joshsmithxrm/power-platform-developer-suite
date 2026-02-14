@@ -62,12 +62,12 @@ public static class TuiColorPalette
 
     /// <summary>
     /// Color scheme for text input fields (TextField).
-    /// No background change on focus - block cursor provides visibility.
+    /// DarkGray background on focus for visible cursor indication.
     /// </summary>
     public static ColorScheme TextInput => _textInput ??= new()
     {
         Normal = MakeAttr(Color.White, Color.Black),
-        Focus = MakeAttr(Color.White, Color.Black),
+        Focus = MakeAttr(Color.White, Color.DarkGray),
         HotNormal = MakeAttr(Color.Cyan, Color.Black),
         HotFocus = MakeAttr(Color.White, Color.Black),
         Disabled = MakeAttr(Color.DarkGray, Color.Black)

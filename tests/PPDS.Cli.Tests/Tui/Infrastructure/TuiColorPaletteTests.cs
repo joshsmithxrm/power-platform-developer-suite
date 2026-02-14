@@ -160,4 +160,11 @@ public class TuiColorPaletteTests
     }
 
     #endregion
+
+    [Fact]
+    public void TextInput_FocusBackground_DiffersFromNormalBackground()
+    {
+        var scheme = TuiColorPalette.TextInput;
+        Assert.NotEqual(scheme.Normal.Background, scheme.Focus.Background);
+    }
 }
