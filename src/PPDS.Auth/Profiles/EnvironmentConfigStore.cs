@@ -99,11 +99,10 @@ public sealed class EnvironmentConfigStore : IDisposable
 
     /// <summary>
     /// Saves or updates config for a specific environment. Merges non-null fields.
-    /// Empty string clears a field back to null.
     /// </summary>
     public async Task<EnvironmentConfig> SaveConfigAsync(
-        string url, string? label = null, string? type = null, EnvironmentColor? color = null,
-        bool clearColor = false,
+        string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null,
+        bool clearColor = false, string? discoveredType = null,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -116,9 +115,10 @@ public sealed class EnvironmentConfigStore : IDisposable
         if (existing != null)
         {
             if (label != null) existing.Label = label == "" ? null : label;
-            if (type != null) existing.Type = type == "" ? null : type;
+            if (type != null) existing.Type = type;
             if (color != null) existing.Color = color;
             else if (clearColor) existing.Color = null;
+            if (discoveredType != null) existing.DiscoveredType = discoveredType;
         }
         else
         {
@@ -127,7 +127,8 @@ public sealed class EnvironmentConfigStore : IDisposable
                 Url = normalized,
                 Label = label,
                 Type = type,
-                Color = color
+                Color = color,
+                DiscoveredType = discoveredType
             };
             collection.Environments.Add(existing);
         }

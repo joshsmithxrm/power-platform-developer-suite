@@ -1,4 +1,5 @@
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -85,7 +86,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             Width = Dim.Fill() - 3,
             ColorScheme = TuiColorPalette.TextInput
         };
-        var typeHint = new Label("(e.g., Production, Sandbox, Dev, UAT)")
+        var typeHint = new Label("(Production, Sandbox, Development, Test, Trial)")
         {
             X = 10,
             Y = 6,
@@ -156,7 +157,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
                 if (config.Label != null)
                     _labelField.Text = config.Label;
                 if (config.Type != null)
-                    _typeField.Text = config.Type;
+                    _typeField.Text = config.Type.Value.ToString();
                 if (config.Color != null)
                 {
                     var idx = Array.IndexOf(_colorValues, (EnvironmentColor?)config.Color.Value);
@@ -167,7 +168,9 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             else if (_suggestedType != null)
             {
                 // Pre-fill type from Discovery API when no existing config
-                _typeField.Text = NormalizeDiscoveryType(_suggestedType);
+                var parsed = EnvironmentConfigService.ParseDiscoveryType(_suggestedType);
+                if (parsed != EnvironmentType.Unknown)
+                    _typeField.Text = parsed.ToString();
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
@@ -180,8 +183,22 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     private void OnSaveClicked()
     {
         var label = _labelField.Text?.ToString()?.Trim();
-        var type = _typeField.Text?.ToString()?.Trim();
+        var typeText = _typeField.Text?.ToString()?.Trim();
+        EnvironmentType? type = null;
         EnvironmentColor? color = null;
+
+        if (!string.IsNullOrEmpty(typeText))
+        {
+            // Try to parse as EnvironmentType enum; also try Discovery API string mapping
+            if (Enum.TryParse<EnvironmentType>(typeText, ignoreCase: true, out var parsed) && parsed != EnvironmentType.Unknown)
+                type = parsed;
+            else
+            {
+                var discoveryParsed = EnvironmentConfigService.ParseDiscoveryType(typeText);
+                if (discoveryParsed != EnvironmentType.Unknown)
+                    type = discoveryParsed;
+            }
+        }
 
         if (_colorList.SelectedItem >= 0 && _colorList.SelectedItem < _colorValues.Length)
         {
@@ -189,7 +206,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         }
 
         // Only save if at least one field is populated
-        if (string.IsNullOrEmpty(label) && string.IsNullOrEmpty(type) && color == null)
+        if (string.IsNullOrEmpty(label) && type == null && color == null)
         {
             Application.RequestStop();
             return;
@@ -201,7 +218,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             _session.EnvironmentConfigService.SaveConfigAsync(
                 _environmentUrl,
                 label: string.IsNullOrEmpty(label) ? null : label,
-                type: string.IsNullOrEmpty(type) ? null : type,
+                type: type,
                 color: color,
                 clearColor: color == null && _colorList.SelectedItem == 0).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
@@ -216,18 +233,6 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
 
         Application.RequestStop();
     }
-
-    /// <summary>
-    /// Maps Discovery API type names to canonical type names.
-    /// </summary>
-    private static string NormalizeDiscoveryType(string discoveryType) => discoveryType.ToLowerInvariant() switch
-    {
-        "developer" => "Development",
-        "sandbox" => "Sandbox",
-        "production" => "Production",
-        "trial" => "Trial",
-        _ => discoveryType
-    };
 
     /// <inheritdoc />
     public EnvironmentConfigDialogState CaptureState()

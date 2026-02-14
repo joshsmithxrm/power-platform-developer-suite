@@ -22,11 +22,20 @@ public sealed class EnvironmentConfig
     public string? Label { get; set; }
 
     /// <summary>
-    /// Environment type classification (e.g., "Production", "Sandbox", "UAT", "Gold").
-    /// Free-text string — built-in types have default colors, custom types use typeDefaults.
+    /// User-configured environment type override.
+    /// Drives protection levels and default color theming.
+    /// Null means auto-detect from DiscoveredType or URL heuristics.
     /// </summary>
     [JsonPropertyName("type")]
-    public string? Type { get; set; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public EnvironmentType? Type { get; set; }
+
+    /// <summary>
+    /// Raw environment type from the Discovery API (e.g., "Sandbox", "Developer", "Production").
+    /// Stored separately from user Type override. Not user-editable.
+    /// </summary>
+    [JsonPropertyName("discovered_type")]
+    public string? DiscoveredType { get; set; }
 
     /// <summary>
     /// Explicit color override for this specific environment.

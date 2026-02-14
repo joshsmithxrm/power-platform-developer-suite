@@ -13,8 +13,8 @@ public class ProfileResolutionServiceTests
     {
         var configs = new List<EnvironmentConfig>
         {
-            new() { Url = "https://uat.crm.dynamics.com/", Label = "UAT", Type = "Sandbox" },
-            new() { Url = "https://prod.crm.dynamics.com/", Label = "PROD", Type = "Production" }
+            new() { Url = "https://uat.crm.dynamics.com/", Label = "UAT", Type = EnvironmentType.Sandbox },
+            new() { Url = "https://prod.crm.dynamics.com/", Label = "PROD", Type = EnvironmentType.Production }
         };
 
         var service = new ProfileResolutionService(configs);

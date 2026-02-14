@@ -16,11 +16,12 @@ public sealed class EnvironmentConfigCollection
 
     /// <summary>
     /// Custom type definitions with default colors.
-    /// Key is the type name (e.g., "UAT", "Gold"), value is the default color.
-    /// Built-in types (Production, Sandbox, Development, Test, Trial) do not need entries here.
+    /// Key is the EnvironmentType enum value, value is the default color.
+    /// Built-in types (Production, Sandbox, Development, Test, Trial) do not need entries here
+    /// unless overriding the built-in color.
     /// </summary>
     [JsonPropertyName("typeDefaults")]
-    public Dictionary<string, EnvironmentColor> TypeDefaults { get; set; } = new();
+    public Dictionary<EnvironmentType, EnvironmentColor> TypeDefaults { get; set; } = new();
 
     /// <summary>
     /// Per-environment configurations keyed by normalized URL.

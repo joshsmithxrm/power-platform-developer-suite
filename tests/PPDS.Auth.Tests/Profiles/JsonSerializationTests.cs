@@ -126,7 +126,7 @@ public class JsonSerializationTests
         {
             Url = "https://test.crm.dynamics.com/",
             Label = "Test Environment",
-            Type = "Production",
+            Type = EnvironmentType.Production,
             Color = EnvironmentColor.Red,
             Protection = ProtectionLevel.Production,
             SafetySettings = new QuerySafetySettings
@@ -145,7 +145,7 @@ public class JsonSerializationTests
         deserialized.Should().NotBeNull();
         deserialized!.Url.Should().Be("https://test.crm.dynamics.com/");
         deserialized.Label.Should().Be("Test Environment");
-        deserialized.Type.Should().Be("Production");
+        deserialized.Type.Should().Be(EnvironmentType.Production);
         deserialized.Color.Should().Be(EnvironmentColor.Red);
         deserialized.Protection.Should().Be(ProtectionLevel.Production);
         deserialized.SafetySettings.Should().NotBeNull();

@@ -494,7 +494,8 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
 #pragma warning restore PPDS012
 
                 var labelText = !string.IsNullOrWhiteSpace(resolvedLabel) ? resolvedLabel : "(not set)";
-                _previewType.Text = $"Type: {resolvedType ?? "(not set)"}  |  Label: {labelText}";
+                var typeDisplay = resolvedType != EnvironmentType.Unknown ? resolvedType.ToString() : "(not set)";
+                _previewType.Text = $"Type: {typeDisplay}  |  Label: {labelText}";
                 _previewColor.Text = $"Color: {resolvedColor}  |  Region: {env.Region ?? "(unknown)"}";
                 _previewStatus.Text = config != null ? "Configured" : "Not configured \u2014 use Configure to set up";
             }
@@ -526,8 +527,9 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         try
         {
 #pragma warning disable PPDS012 // Sync-over-async: Terminal.Gui event handler (cached store)
-            return _configService.ResolveTypeAsync(env.Url, env.Type).GetAwaiter().GetResult();
+            var resolved = _configService.ResolveTypeAsync(env.Url, env.Type).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
+            return resolved != EnvironmentType.Unknown ? resolved.ToString() : env.Type;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
@@ -537,17 +539,5 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
     }
 
     private static EnvironmentType DetectEnvironmentType(string? type)
-    {
-        if (string.IsNullOrEmpty(type))
-            return EnvironmentType.Unknown;
-
-        return type.ToLowerInvariant() switch
-        {
-            "production" => EnvironmentType.Production,
-            "sandbox" => EnvironmentType.Sandbox,
-            "developer" or "development" => EnvironmentType.Development,
-            "trial" => EnvironmentType.Trial,
-            _ => EnvironmentType.Unknown
-        };
-    }
+        => EnvironmentConfigService.ParseDiscoveryType(type);
 }
