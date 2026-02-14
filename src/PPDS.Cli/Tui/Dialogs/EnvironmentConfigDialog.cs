@@ -16,7 +16,8 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     private readonly string _environmentUrl;
     private readonly string? _suggestedType;
     private readonly TextField _labelField;
-    private readonly TextField _typeField;
+    private readonly ListView _typeList;
+    private readonly EnvironmentType?[] _typeValues;
     private readonly ListView _colorList;
     private readonly EnvironmentColor?[] _colorValues;
 
@@ -43,7 +44,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         _suggestedType = suggestedType;
 
         Width = 60;
-        Height = 18;
+        Height = 20;
 
         // URL display (read-only)
         var urlLabel = new Label("URL:")
@@ -73,32 +74,37 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             ColorScheme = TuiColorPalette.TextInput
         };
 
-        // Type field (free text with hint)
+        // Type selection (constrained to known types)
         var typeLabel = new Label("Type:")
         {
             X = 2,
             Y = 5
         };
-        _typeField = new TextField
+
+        _typeValues = new EnvironmentType?[] { null }
+            .Concat(Enum.GetValues<EnvironmentType>()
+                .Where(t => t != EnvironmentType.Unknown)
+                .Cast<EnvironmentType?>())
+            .ToArray();
+        var typeNames = _typeValues
+            .Select(t => t?.ToString() ?? "(Auto-detect)")
+            .ToList();
+
+        _typeList = new ListView(typeNames)
         {
             X = 10,
             Y = 5,
             Width = Dim.Fill() - 3,
-            ColorScheme = TuiColorPalette.TextInput
-        };
-        var typeHint = new Label("(Production, Sandbox, Development, Test, Trial)")
-        {
-            X = 10,
-            Y = 6,
-            Width = Dim.Fill() - 3,
-            ColorScheme = TuiColorPalette.Default
+            Height = 4,
+            AllowsMarking = false,
+            AllowsMultipleSelection = false
         };
 
         // Color selection
         var colorLabel = new Label("Color:")
         {
             X = 2,
-            Y = 8
+            Y = 10
         };
 
         _colorValues = new EnvironmentColor?[] { null }
@@ -111,7 +117,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         _colorList = new ListView(colorNames)
         {
             X = 10,
-            Y = 8,
+            Y = 10,
             Width = Dim.Fill() - 3,
             Height = 5,
             AllowsMarking = false,
@@ -134,7 +140,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         cancelButton.Clicked += () => Application.RequestStop();
 
         Add(urlLabel, urlValue, labelLabel, _labelField,
-            typeLabel, _typeField, typeHint,
+            typeLabel, _typeList,
             colorLabel, _colorList,
             saveButton, cancelButton);
 
@@ -157,7 +163,11 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
                 if (config.Label != null)
                     _labelField.Text = config.Label;
                 if (config.Type != null)
-                    _typeField.Text = config.Type.Value.ToString();
+                {
+                    var idx = Array.IndexOf(_typeValues, config.Type);
+                    if (idx >= 0)
+                        _typeList.SelectedItem = idx;
+                }
                 if (config.Color != null)
                 {
                     var idx = Array.IndexOf(_colorValues, (EnvironmentColor?)config.Color.Value);
@@ -170,7 +180,11 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
                 // Pre-fill type from Discovery API when no existing config
                 var parsed = EnvironmentConfigService.ParseDiscoveryType(_suggestedType);
                 if (parsed != EnvironmentType.Unknown)
-                    _typeField.Text = parsed.ToString();
+                {
+                    var idx = Array.IndexOf(_typeValues, (EnvironmentType?)parsed);
+                    if (idx >= 0)
+                        _typeList.SelectedItem = idx;
+                }
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
@@ -183,21 +197,12 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     private void OnSaveClicked()
     {
         var label = _labelField.Text?.ToString()?.Trim();
-        var typeText = _typeField.Text?.ToString()?.Trim();
         EnvironmentType? type = null;
         EnvironmentColor? color = null;
 
-        if (!string.IsNullOrEmpty(typeText))
+        if (_typeList.SelectedItem >= 0 && _typeList.SelectedItem < _typeValues.Length)
         {
-            // Try to parse as EnvironmentType enum; also try Discovery API string mapping
-            if (Enum.TryParse<EnvironmentType>(typeText, ignoreCase: true, out var parsed) && parsed != EnvironmentType.Unknown)
-                type = parsed;
-            else
-            {
-                var discoveryParsed = EnvironmentConfigService.ParseDiscoveryType(typeText);
-                if (discoveryParsed != EnvironmentType.Unknown)
-                    type = discoveryParsed;
-            }
+            type = _typeValues[_typeList.SelectedItem];
         }
 
         if (_colorList.SelectedItem >= 0 && _colorList.SelectedItem < _colorValues.Length)
@@ -237,6 +242,10 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
     /// <inheritdoc />
     public EnvironmentConfigDialogState CaptureState()
     {
+        var selectedType = _typeList.SelectedItem >= 0 && _typeList.SelectedItem < _typeValues.Length
+            ? _typeValues[_typeList.SelectedItem]
+            : null;
+
         var selectedColor = _colorList.SelectedItem >= 0 && _colorList.SelectedItem < _colorValues.Length
             ? _colorValues[_colorList.SelectedItem]
             : null;
@@ -245,7 +254,7 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
             Title: Title?.ToString() ?? string.Empty,
             Url: _environmentUrl,
             Label: _labelField.Text?.ToString() ?? string.Empty,
-            Type: _typeField.Text?.ToString() ?? string.Empty,
+            Type: selectedType,
             SelectedColorIndex: _colorList.SelectedItem,
             SelectedColor: selectedColor,
             ConfigChanged: ConfigChanged,
