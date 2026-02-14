@@ -1,4 +1,3 @@
-using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -89,7 +88,7 @@ internal sealed class FetchXmlPreviewDialog : TuiDialog, ITuiStateCapture<FetchX
             return;
         }
 
-        if (ClipboardHelper.CopyToClipboard(_fetchXml))
+        if (Clipboard.TrySetClipboardData(_fetchXml))
         {
             _statusLabel.Text = "Copied to clipboard!";
         }

@@ -1,4 +1,3 @@
-using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -111,7 +110,7 @@ internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeD
 
     private void CopyToClipboard(string text, string successMessage)
     {
-        if (ClipboardHelper.CopyToClipboard(text))
+        if (Clipboard.TrySetClipboardData(text))
         {
             _statusLabel.Text = $"({successMessage})";
             _statusLabel.ColorScheme = TuiColorPalette.Success;

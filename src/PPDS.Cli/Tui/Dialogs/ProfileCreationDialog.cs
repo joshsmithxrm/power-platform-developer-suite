@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
-using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Profile;
@@ -503,7 +502,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         {
             Application.MainLoop?.Invoke(() =>
             {
-                var copied = ClipboardHelper.CopyToClipboard(info.UserCode);
+                var copied = Clipboard.TrySetClipboardData(info.UserCode);
 
                 using var dialog = new DeviceCodeDialog(
                     info.UserCode,

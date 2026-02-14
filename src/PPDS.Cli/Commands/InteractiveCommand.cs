@@ -1,9 +1,9 @@
 using System.CommandLine;
-using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
 using TuiApp = Terminal.Gui.Application;
+using Clipboard = Terminal.Gui.Clipboard;
 using MessageBox = Terminal.Gui.MessageBox;
 
 namespace PPDS.Cli.Commands;
@@ -64,7 +64,7 @@ public static class InteractiveCommand
                     TuiDebugLog.Log($"Device code auth requested: {info.UserCode}");
 
                     // Auto-copy code to clipboard for convenience
-                    var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
+                    var copied = Clipboard.TrySetClipboardData(info.UserCode) ? " (copied!)" : "";
 
                     // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
                     MessageBox.Query(

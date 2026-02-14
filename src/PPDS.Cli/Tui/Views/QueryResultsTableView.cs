@@ -466,7 +466,7 @@ internal sealed class QueryResultsTableView : FrameView
         var url = GetCurrentRecordUrl();
         if (url != null)
         {
-            if (ClipboardHelper.CopyToClipboard(url))
+            if (Clipboard.TrySetClipboardData(url))
             {
                 ShowTemporaryStatus("URL copied to clipboard");
             }

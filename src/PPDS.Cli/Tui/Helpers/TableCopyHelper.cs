@@ -1,6 +1,5 @@
 using System.Data;
 using System.Text;
-using PPDS.Cli.Infrastructure;
 using Terminal.Gui;
 
 namespace PPDS.Cli.Tui.Helpers;
@@ -76,7 +75,7 @@ internal static class TableCopyHelper
             hint = $"Copied: {displayValue} (Ctrl+Shift+C to include header)";
         }
 
-        var success = ClipboardHelper.CopyToClipboard(text);
+        var success = Clipboard.TrySetClipboardData(text);
         return new CopyResult(success, success ? hint : $"Copy failed. Value: {value}");
     }
 
@@ -119,7 +118,7 @@ internal static class TableCopyHelper
         }
 
         var text = sb.ToString().TrimEnd();
-        var success = ClipboardHelper.CopyToClipboard(text);
+        var success = Clipboard.TrySetClipboardData(text);
 
         var rowCount = rowIndices.Count;
         var sizeDesc = colCount < sourceTable.Columns.Count
