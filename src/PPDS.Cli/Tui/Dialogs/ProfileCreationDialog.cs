@@ -64,6 +64,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
 
     private ProfileSummary? _createdProfile;
     private bool _isAuthenticating;
+    private CancellationTokenSource? _authCompleteCts;
 
     /// <summary>
     /// Gets the created profile, or null if cancelled.
@@ -493,21 +494,23 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         // Build request
         var request = BuildCreateRequest();
 
+        // Dispose previous CTS if re-authenticating
+        _authCompleteCts?.Dispose();
+        _authCompleteCts = new CancellationTokenSource();
+
         // Always provide device code callback (needed for Browser's device code fallback too)
         var deviceCallback = _deviceCodeCallback ?? (info =>
         {
             Application.MainLoop?.Invoke(() =>
             {
-                // Auto-copy code to clipboard for convenience
-                var copied = ClipboardHelper.CopyToClipboard(info.UserCode) ? " (copied!)" : "";
+                var copied = ClipboardHelper.CopyToClipboard(info.UserCode);
 
-                // MessageBox is safe from MainLoop.Invoke - doesn't start nested event loop
-                MessageBox.Query(
-                    "Authentication Required",
-                    $"Visit: {info.VerificationUrl}\n\n" +
-                    $"Enter code: {info.UserCode}{copied}\n\n" +
-                    "Complete authentication in browser, then press OK.",
-                    "OK");
+                using var dialog = new DeviceCodeDialog(
+                    info.UserCode,
+                    info.VerificationUrl,
+                    clipboardCopied: copied,
+                    authComplete: _authCompleteCts?.Token ?? CancellationToken.None);
+                Application.Run(dialog);
             });
         });
 
@@ -563,6 +566,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
             Application.MainLoop?.Invoke(() =>
             {
                 _createdProfile = profile;
+                _authCompleteCts?.Cancel();
 
                 // Immediately show environment selector after successful auth (no success message)
                 var envDialog = new EnvironmentSelectorDialog(_environmentService, _deviceCodeCallback, _session);
@@ -585,6 +589,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         }
         catch (OperationCanceledException)
         {
+            _authCompleteCts?.Cancel();
             Application.MainLoop?.Invoke(() =>
             {
                 _statusLabel.Text = "Authentication was cancelled";
@@ -593,6 +598,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
         }
         catch (Exception ex)
         {
+            _authCompleteCts?.Cancel();
             Application.MainLoop?.Invoke(() =>
             {
                 var message = ex is PpdsException ppdsEx ? ppdsEx.UserMessage : ex.Message ?? "Unknown error";
@@ -655,6 +661,7 @@ internal sealed class ProfileCreationDialog : TuiDialog, ITuiStateCapture<Profil
             _disposed = true;
             _cts.Cancel();
             _cts.Dispose();
+            _authCompleteCts?.Dispose();
         }
         base.Dispose(disposing);
     }
