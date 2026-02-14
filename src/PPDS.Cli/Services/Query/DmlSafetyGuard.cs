@@ -53,16 +53,13 @@ public sealed class DmlSafetyGuard
     }
 
     /// <summary>
-    /// Maps a Dataverse environment type string to a protection level.
-    /// Unknown types default to Production (fail closed).
+    /// Maps a Dataverse environment type to a protection level.
+    /// Only Production environments are locked down; everything else is unrestricted.
     /// </summary>
-    public static ProtectionLevel DetectProtectionLevel(string? environmentType) => environmentType?.ToLowerInvariant() switch
+    public static ProtectionLevel DetectProtectionLevel(EnvironmentType environmentType) => environmentType switch
     {
-        "sandbox" => ProtectionLevel.Development,
-        "developer" => ProtectionLevel.Development,
-        "production" => ProtectionLevel.Production,
-        "trial" => ProtectionLevel.Test,
-        _ => ProtectionLevel.Production // Fail closed
+        EnvironmentType.Production => ProtectionLevel.Production,
+        _ => ProtectionLevel.Development
     };
 
     /// <summary>

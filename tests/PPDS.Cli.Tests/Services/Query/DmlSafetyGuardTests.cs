@@ -589,15 +589,16 @@ public class DmlSafetyGuardTests
         Assert.False(result.RequiresPreview);
     }
 
-    [Fact]
-    public void DetectProtectionLevel_Maps_Correctly()
+    [Theory]
+    [InlineData(EnvironmentType.Production, ProtectionLevel.Production)]
+    [InlineData(EnvironmentType.Sandbox, ProtectionLevel.Development)]
+    [InlineData(EnvironmentType.Development, ProtectionLevel.Development)]
+    [InlineData(EnvironmentType.Test, ProtectionLevel.Development)]
+    [InlineData(EnvironmentType.Trial, ProtectionLevel.Development)]
+    [InlineData(EnvironmentType.Unknown, ProtectionLevel.Development)]
+    public void DetectProtectionLevel_MapsEnvironmentType_Correctly(EnvironmentType envType, ProtectionLevel expected)
     {
-        Assert.Equal(ProtectionLevel.Development, DmlSafetyGuard.DetectProtectionLevel("Sandbox"));
-        Assert.Equal(ProtectionLevel.Development, DmlSafetyGuard.DetectProtectionLevel("Developer"));
-        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel("Production"));
-        Assert.Equal(ProtectionLevel.Test, DmlSafetyGuard.DetectProtectionLevel("Trial"));
-        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel(null)); // Fail closed
-        Assert.Equal(ProtectionLevel.Production, DmlSafetyGuard.DetectProtectionLevel("Unknown")); // Fail closed
+        Assert.Equal(expected, DmlSafetyGuard.DetectProtectionLevel(envType));
     }
 
     #endregion
