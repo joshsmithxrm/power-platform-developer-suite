@@ -792,12 +792,17 @@ public class ExecutionPlanBuilderTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Plan_TwoPartName_DoesNotTriggerCrossEnvironment()
+    public void Plan_TwoPartName_Dbo_DoesNotTriggerCrossEnvironment()
     {
-        // dbo.account is a 2-part name (SchemaIdentifier=dbo, BaseIdentifier=account)
-        // and must NOT be treated as a cross-environment reference.
+        // dbo.account is a 2-part name (SchemaIdentifier=dbo, BaseIdentifier=account).
+        // "dbo" is reserved and must NEVER be treated as a cross-environment label,
+        // even when a RemoteExecutorFactory is configured.
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => label == "dbo" ? Mock.Of<IQueryExecutor>() : null
+        };
         var fragment = _parser.Parse("SELECT name FROM dbo.account");
-        var result = _builder.Plan(fragment);
+        var result = _builder.Plan(fragment, options);
 
         result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>(
             "2-part name dbo.account should remain a local FetchXmlScanNode");
