@@ -808,6 +808,45 @@ public class ExecutionPlanBuilderTests
             "2-part name dbo.account should remain a local FetchXmlScanNode");
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_TwoPartName_MatchesLabel_ProducesRemoteScanNode()
+    {
+        // [UAT].account is a 2-part name (SchemaIdentifier=UAT, BaseIdentifier=account).
+        // When "UAT" matches a configured profile label, it should be treated as cross-env.
+        var sql = "SELECT name FROM [UAT].account";
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => label == "UAT" ? mockRemoteExecutor : null
+        };
+
+        var result = _builder.Plan(_parser.Parse(sql), options);
+
+        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+            "2-part name [UAT].account should produce RemoteScanNode when UAT matches a profile label");
+        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+            "remote scan should be wrapped in TableSpoolNode");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_TwoPartName_UnknownLabel_ThrowsDescriptiveError()
+    {
+        // [STAGING].account where STAGING doesn't match any profile label.
+        // Must fail loudly — never silently query the local environment.
+        var sql = "SELECT name FROM [STAGING].account";
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => null  // No matching profile
+        };
+
+        var act = () => _builder.Plan(_parser.Parse(sql), options);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*STAGING*");
+    }
+
     // ────────────────────────────────────────────
     //  GROUP BY on expressions (date functions)
     // ────────────────────────────────────────────
