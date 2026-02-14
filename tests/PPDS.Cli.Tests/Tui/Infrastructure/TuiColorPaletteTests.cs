@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 using Xunit;
