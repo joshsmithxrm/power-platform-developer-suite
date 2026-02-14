@@ -48,4 +48,32 @@ public class ProfileResolutionServiceTests
         var service = new ProfileResolutionService(configs);
         service.ResolveByLabel("STAGING").Should().BeNull();
     }
+
+    [Fact]
+    public void Constructor_RejectsReservedDboLabel()
+    {
+        var configs = new List<EnvironmentConfig>
+        {
+            new() { Url = "https://dbo.crm.dynamics.com/", Label = "dbo" }
+        };
+
+        var act = () => new ProfileResolutionService(configs);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*dbo*reserved*");
+    }
+
+    [Fact]
+    public void Constructor_RejectsReservedDboLabel_CaseInsensitive()
+    {
+        var configs = new List<EnvironmentConfig>
+        {
+            new() { Url = "https://dbo.crm.dynamics.com/", Label = "DBO" }
+        };
+
+        var act = () => new ProfileResolutionService(configs);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*DBO*reserved*");
+    }
 }
