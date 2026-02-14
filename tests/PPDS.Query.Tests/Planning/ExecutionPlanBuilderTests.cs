@@ -849,6 +849,21 @@ public class ExecutionPlanBuilderTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public void Plan_TwoPartName_UnknownLabel_NoFactory_ThrowsDescriptiveError()
+    {
+        // [STAGING].account with no RemoteExecutorFactory configured at all.
+        // Must still fail — never silently query local with corrupted entity name.
+        var sql = "SELECT name FROM [STAGING].account";
+        var options = new QueryPlanOptions();  // No RemoteExecutorFactory
+
+        var act = () => _builder.Plan(_parser.Parse(sql), options);
+
+        act.Should().Throw<QueryParseException>()
+            .WithMessage("*STAGING*");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public void Plan_TwoPartName_CrossEnvJoin_ProducesRemoteScanNodes()
     {
         // JOIN between local and 2-part cross-env reference
