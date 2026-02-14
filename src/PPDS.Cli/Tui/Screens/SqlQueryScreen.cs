@@ -81,9 +81,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         new MenuBarItem("_Query", new MenuItem[]
         {
             new("Execute", "F5", () => _ = ExecuteQueryAsync()),
-            new("Show FetchXML", "Ctrl+Shift+F", ShowFetchXmlDialog),
-            new("Show Execution Plan", "Ctrl+Shift+E", ShowExecutionPlanDialog),
-            new("History", "Ctrl+Shift+H", ShowHistoryDialog),
+            new("Show FetchXML", "Ctrl+Shift+F / F9", ShowFetchXmlDialog),
+            new("Show Execution Plan", "Ctrl+Shift+E / F7", ShowExecutionPlanDialog),
+            new("History", "Ctrl+Shift+H / F8", ShowHistoryDialog),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
             new("", "", () => {}, null, null, Key.Null), // Separator
@@ -346,6 +346,10 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
         RegisterHotkey(registry, Key.CtrlMask | Key.T, "Toggle TDS Endpoint", ToggleTdsEndpoint);
+        // F-key alternatives for Linux compatibility (Ctrl+Shift combos don't work on Linux terminals)
+        RegisterHotkey(registry, Key.F7, "Show execution plan", ShowExecutionPlanDialog);
+        RegisterHotkey(registry, Key.F8, "Query history", ShowHistoryDialog);
+        RegisterHotkey(registry, Key.F9, "Show FetchXML", ShowFetchXmlDialog);
     }
 
     private void SetupKeyboardHandling()
