@@ -1,3 +1,4 @@
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tui.Testing;
 using PPDS.Cli.Tui.Testing.States;
@@ -7,21 +8,22 @@ namespace PPDS.Cli.Tui.Dialogs;
 
 /// <summary>
 /// Dialog for displaying device code authentication info.
-/// Shows the code in a selectable TextField and auto-closes when auth completes.
+/// Shows the code prominently with a Copy button and auto-closes when auth completes.
 /// </summary>
 internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeDialogState>
 {
     private readonly string _userCode;
     private readonly string _verificationUrl;
     private readonly bool _clipboardCopied;
+    private readonly Label _statusLabel;
     private CancellationTokenRegistration? _autoCloseRegistration;
 
     /// <summary>
-    /// Creates a device code dialog with selectable code display.
+    /// Creates a device code dialog with prominent code display and copy button.
     /// </summary>
     /// <param name="userCode">The device code to display.</param>
     /// <param name="verificationUrl">The URL where the user enters the code.</param>
-    /// <param name="clipboardCopied">Whether the code was auto-copied to clipboard.</param>
+    /// <param name="clipboardCopied">Whether the code was auto-copied to clipboard on dialog creation.</param>
     /// <param name="authComplete">Optional token that fires when auth succeeds — auto-closes the dialog.</param>
     /// <param name="session">Optional session for hotkey registry integration.</param>
     public DeviceCodeDialog(
@@ -37,7 +39,7 @@ internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeD
         _clipboardCopied = clipboardCopied;
 
         Width = 60;
-        Height = 12;
+        Height = 14;
 
         var urlLabel = new Label($"Visit: {verificationUrl}")
         {
@@ -53,33 +55,49 @@ internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeD
             TextAlignment = TextAlignment.Centered
         };
 
-        // Selectable TextField so user can select + Ctrl+C the code
-        var codeField = new TextField(userCode)
+        // Code displayed as a prominent label (not editable TextField)
+        var codeDisplay = new Label($"  {userCode}  ")
         {
             X = Pos.Center(),
             Y = 5,
-            Width = userCode.Length + 4,
-            ReadOnly = true,
-            ColorScheme = TuiColorPalette.Focused
+            TextAlignment = TextAlignment.Centered,
+            ColorScheme = TuiColorPalette.Selected
         };
 
-        var clipboardLabel = new Label(clipboardCopied ? "(copied to clipboard!)" : "(select code above and Ctrl+C to copy)")
+        // Copy Code button
+        var copyCodeButton = new Button("Copy _Code")
+        {
+            X = Pos.Center() - 14,
+            Y = 7
+        };
+        copyCodeButton.Clicked += () => CopyToClipboard(_userCode, "Code copied!");
+
+        // Copy URL button
+        var copyUrlButton = new Button("Copy _URL")
+        {
+            X = Pos.Center() + 2,
+            Y = 7
+        };
+        copyUrlButton.Clicked += () => CopyToClipboard(_verificationUrl, "URL copied!");
+
+        // Status label for clipboard feedback
+        _statusLabel = new Label(clipboardCopied ? "(code copied to clipboard!)" : "")
         {
             X = Pos.Center(),
-            Y = 7,
+            Y = 9,
+            Width = 50,
             TextAlignment = TextAlignment.Centered,
-            ColorScheme = clipboardCopied ? TuiColorPalette.Success : TuiColorPalette.Default
+            ColorScheme = TuiColorPalette.Success
         };
 
         var okButton = new Button("_OK")
         {
             X = Pos.Center(),
-            Y = Pos.AnchorEnd(1),
-            IsDefault = true
+            Y = Pos.AnchorEnd(1)
         };
         okButton.Clicked += () => Application.RequestStop();
 
-        Add(urlLabel, codeLabel, codeField, clipboardLabel, okButton);
+        Add(urlLabel, codeLabel, codeDisplay, copyCodeButton, copyUrlButton, _statusLabel, okButton);
 
         // Auto-close when authentication completes
         if (authComplete.CanBeCanceled)
@@ -89,6 +107,21 @@ internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeD
                 Application.MainLoop?.Invoke(() => Application.RequestStop());
             });
         }
+    }
+
+    private void CopyToClipboard(string text, string successMessage)
+    {
+        if (ClipboardHelper.CopyToClipboard(text))
+        {
+            _statusLabel.Text = $"({successMessage})";
+            _statusLabel.ColorScheme = TuiColorPalette.Success;
+        }
+        else
+        {
+            _statusLabel.Text = $"Copy failed - code: {_userCode}";
+            _statusLabel.ColorScheme = TuiColorPalette.Error;
+        }
+        _statusLabel.SetNeedsDisplay();
     }
 
     /// <inheritdoc />
