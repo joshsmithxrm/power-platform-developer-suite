@@ -532,7 +532,12 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 PageNumber = null,
                 PagingCookie = null,
                 EnablePrefetch = true,
-                UseTdsEndpoint = _useTdsEndpoint
+                UseTdsEndpoint = _useTdsEndpoint,
+                DmlSafety = new DmlSafetyOptions
+                {
+                    IsConfirmed = false,
+                    IsDryRun = false
+                }
             };
 
             IReadOnlyList<Dataverse.Query.QueryColumn>? columns = null;

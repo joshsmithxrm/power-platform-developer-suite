@@ -337,6 +337,18 @@ internal sealed class InteractiveSession : IAsyncDisposable
 #pragma warning restore PPDS012
                 return remoteProvider.GetRequiredService<IQueryExecutor>();
             };
+
+            // Wire environment-specific DML safety settings
+            concrete.ProfileResolver = _profileResolutionService;
+            var envConfig = await _envConfigStore.GetConfigAsync(environmentUrl, cancellationToken)
+                .ConfigureAwait(false);
+            if (envConfig != null)
+            {
+                concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
+                var envType = envConfig.Type ?? EnvironmentType.Unknown;
+                concrete.EnvironmentProtectionLevel = envConfig.Protection
+                    ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+            }
         }
 
         return service;

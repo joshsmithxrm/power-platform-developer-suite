@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
@@ -36,6 +37,21 @@ public sealed class SqlQueryService : ISqlQueryService
     /// like <c>SELECT * FROM [QA].account</c>.
     /// </summary>
     public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; set; }
+
+    /// <summary>
+    /// Safety settings for the current environment. When null, uses defaults.
+    /// </summary>
+    public QuerySafetySettings? EnvironmentSafetySettings { get; set; }
+
+    /// <summary>
+    /// Protection level for the current environment. Defaults to Production (safest).
+    /// </summary>
+    public ProtectionLevel EnvironmentProtectionLevel { get; set; } = ProtectionLevel.Production;
+
+    /// <summary>
+    /// Optional profile resolution service for cross-environment DML checks.
+    /// </summary>
+    public ProfileResolutionService? ProfileResolver { get; set; }
 
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
@@ -135,7 +151,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             var firstStatement = ExtractFirstStatement(fragment);
 
-            safetyResult = _dmlSafetyGuard.Check(firstStatement, request.DmlSafety);
+            safetyResult = _dmlSafetyGuard.Check(
+                firstStatement, request.DmlSafety,
+                EnvironmentSafetySettings, EnvironmentProtectionLevel);
 
             if (safetyResult.IsBlocked)
             {
@@ -191,6 +209,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
+
+        // Check cross-environment DML policy after planning (needs plan to detect RemoteScanNode)
+        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -300,7 +321,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             var firstStatement = ExtractFirstStatement(fragment);
 
-            var safetyResult = _dmlSafetyGuard.Check(firstStatement, request.DmlSafety);
+            var safetyResult = _dmlSafetyGuard.Check(
+                firstStatement, request.DmlSafety,
+                EnvironmentSafetySettings, EnvironmentProtectionLevel);
 
             if (safetyResult.IsBlocked)
             {
@@ -351,6 +374,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
+
+        // Check cross-environment DML policy after planning (needs plan to detect RemoteScanNode)
+        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
         // Execute the plan with streaming
         var context = new QueryPlanContext(
@@ -591,6 +617,68 @@ public sealed class SqlQueryService : ISqlQueryService
             chunkResult, virtualColumns, isAggregate);
 
         return (expanded.Records.ToList(), expanded.Columns);
+    }
+
+    /// <summary>
+    /// Detects if a DML statement targets a remote environment by checking for RemoteScanNode in the plan.
+    /// Returns the remote label if found, null otherwise (SELECT or local-only DML).
+    /// </summary>
+    private static string? DetectCrossEnvironmentDmlTarget(TSqlFragment fragment, QueryPlanResult planResult)
+    {
+        var stmt = ExtractFirstStatement(fragment);
+        if (stmt is SelectStatement) return null;
+
+        return FindRemoteLabel(planResult.RootNode);
+    }
+
+    private static string? FindRemoteLabel(IQueryPlanNode node)
+    {
+        if (node is RemoteScanNode remote) return remote.RemoteLabel;
+        foreach (var child in node.Children)
+        {
+            var label = FindRemoteLabel(child);
+            if (label != null) return label;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Checks cross-environment DML policy after planning. Throws if blocked or requires unconfirmed confirmation.
+    /// </summary>
+    private void CheckCrossEnvironmentDmlPolicy(
+        TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyOptions? dmlSafety)
+    {
+        if (dmlSafety == null) return;
+
+        var targetLabel = DetectCrossEnvironmentDmlTarget(fragment, planResult);
+        if (targetLabel == null) return;
+
+        var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
+        var targetType = targetConfig?.Type ?? EnvironmentType.Production;
+        var targetProtection = targetConfig?.Protection
+            ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
+
+        var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
+            ExtractFirstStatement(fragment),
+            targetConfig?.SafetySettings,
+            "local",
+            targetLabel,
+            targetProtection);
+
+        if (crossEnvResult.IsBlocked)
+        {
+            throw new PpdsException(
+                crossEnvResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
+        }
+
+        if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.DmlBlocked,
+                crossEnvResult.ConfirmationMessage
+                    ?? "Cross-environment DML requires confirmation.");
+        }
     }
 
     private static int? ExtractPoolCapacity(IQueryPlanNode node)
