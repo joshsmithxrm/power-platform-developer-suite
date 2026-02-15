@@ -674,4 +674,68 @@ public class SqlQueryServiceTests
     }
 
     #endregion
+
+    #region Helpers
+
+    private static bool ContainsNodeType(
+        PPDS.Dataverse.Query.Planning.QueryPlanDescription node, string nodeType)
+    {
+        if (node.NodeType == nodeType) return true;
+        foreach (var child in node.Children)
+        {
+            if (ContainsNodeType(child, nodeType)) return true;
+        }
+        return false;
+    }
+
+    #endregion
+
+    #region Cross-Environment Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_CrossEnvQuery_UsesRemoteExecutorFactory()
+    {
+        // Arrange: service with RemoteExecutorFactory set
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        var factoryCalled = false;
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        service.RemoteExecutorFactory = label =>
+        {
+            if (label == "UAT")
+            {
+                factoryCalled = true;
+                return mockRemoteExecutor;
+            }
+            return null;
+        };
+
+        // Act: EXPLAIN a cross-env query
+        var plan = await service.ExplainAsync("SELECT name FROM [UAT].account");
+
+        // Assert: factory was called and plan tree contains RemoteScanNode
+        Assert.True(factoryCalled, "RemoteExecutorFactory should be called with label 'UAT'");
+        Assert.True(ContainsNodeType(plan, "RemoteScanNode"),
+            "Plan should contain a RemoteScanNode for cross-env query");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_CrossEnvQuery_NoFactory_ThrowsDescriptiveError()
+    {
+        // Arrange: service WITHOUT RemoteExecutorFactory
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+        // RemoteExecutorFactory is null (default)
+
+        // Act & Assert: cross-env query fails with actionable error
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => service.ExplainAsync("SELECT name FROM [UAT].account"));
+
+        Assert.Contains("UAT", ex.Message);
+    }
+
+    #endregion
 }
