@@ -6,12 +6,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tui.Infrastructure;
+using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 
@@ -48,6 +50,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private bool _disposed;
     private readonly EnvironmentConfigStore _envConfigStore;
     private readonly EnvironmentConfigService _envConfigService;
+    private ProfileResolutionService? _profileResolutionService;
     private readonly Lazy<ITuiErrorService> _errorService;
     private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
     private readonly Lazy<IProfileService> _profileService;
@@ -142,7 +145,10 @@ internal sealed class InteractiveSession : IAsyncDisposable
         TuiDebugLog.Log($"Initializing session with profile filter: '{_profileName}'");
 
         // Pre-load environment config so sync-over-async calls in UI thread are cache hits
-        await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var envConfigs = await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+
+        // Build label resolver for cross-environment queries ([LABEL].entity syntax)
+        _profileResolutionService = new ProfileResolutionService(envConfigs.Environments);
 
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
@@ -317,7 +323,23 @@ internal sealed class InteractiveSession : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var provider = await GetServiceProviderAsync(environmentUrl, cancellationToken).ConfigureAwait(false);
-        return provider.GetRequiredService<ISqlQueryService>();
+        var service = provider.GetRequiredService<ISqlQueryService>();
+
+        // Wire cross-environment support: [LABEL].entity resolves via profile labels
+        if (service is SqlQueryService concrete && _profileResolutionService != null)
+        {
+            concrete.RemoteExecutorFactory = label =>
+            {
+                var config = _profileResolutionService.ResolveByLabel(label);
+                if (config?.Url == null) return null;
+#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
+                var remoteProvider = GetServiceProviderAsync(config.Url).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                return remoteProvider.GetRequiredService<IQueryExecutor>();
+            };
+        }
+
+        return service;
     }
 
     /// <summary>

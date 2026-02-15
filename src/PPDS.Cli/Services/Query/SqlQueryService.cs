@@ -31,6 +31,13 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly PPDS.Query.Transpilation.FetchXmlGeneratorService _fetchXmlGeneratorService = new();
 
     /// <summary>
+    /// Optional factory that resolves a profile label to a remote <see cref="IQueryExecutor"/>.
+    /// Set by the TUI's <c>InteractiveSession</c> to enable cross-environment queries
+    /// like <c>SELECT * FROM [QA].account</c>.
+    /// </summary>
+    public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; set; }
+
+    /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
     /// </summary>
     /// <param name="queryExecutor">The query executor for FetchXML execution.</param>
@@ -171,7 +178,8 @@ public sealed class SqlQueryService : ISqlQueryService
             PoolCapacity = _poolCapacity,
             EstimatedRecordCount = estimatedRecordCount,
             MinDate = minDate,
-            MaxDate = maxDate
+            MaxDate = maxDate,
+            RemoteExecutorFactory = RemoteExecutorFactory
         };
 
         QueryPlanResult planResult;
@@ -240,10 +248,15 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
+        var planOptions = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = RemoteExecutorFactory
+        };
+
         QueryPlanResult planResult;
         try
         {
-            planResult = _planBuilder.Plan(fragment);
+            planResult = _planBuilder.Plan(fragment, planOptions);
         }
         catch (QueryParseException ex)
         {
@@ -325,7 +338,8 @@ public sealed class SqlQueryService : ISqlQueryService
             PoolCapacity = _poolCapacity,
             EstimatedRecordCount = estimatedRecordCount,
             MinDate = minDate,
-            MaxDate = maxDate
+            MaxDate = maxDate,
+            RemoteExecutorFactory = RemoteExecutorFactory
         };
 
         QueryPlanResult planResult;
