@@ -1,8 +1,10 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
@@ -158,6 +160,7 @@ public static class SqlCommand
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var remoteProviders = new List<ServiceProvider>();
 
         try
         {
@@ -174,6 +177,32 @@ public static class SqlCommand
                 cancellationToken: cancellationToken);
 
             var sqlQueryService = serviceProvider.GetRequiredService<ISqlQueryService>();
+
+            // Wire cross-environment support: [LABEL].entity resolves via profile labels
+            if (sqlQueryService is SqlQueryService concreteSqlService)
+            {
+                var envConfigStore = serviceProvider.GetRequiredService<EnvironmentConfigStore>();
+                var envConfigs = await envConfigStore.LoadAsync(cancellationToken);
+                var resolver = new ProfileResolutionService(envConfigs.Environments);
+
+                concreteSqlService.RemoteExecutorFactory = label =>
+                {
+                    var config = resolver.ResolveByLabel(label);
+                    if (config?.Url == null) return null;
+
+#pragma warning disable PPDS012 // Planner is synchronous; single CLI invocation
+                    var remoteProvider = ProfileServiceFactory.CreateFromProfileAsync(
+                        profile, config.Url,
+                        globalOptions.Verbose, globalOptions.Debug,
+                        ProfileServiceFactory.DefaultDeviceCodeCallback,
+                        cancellationToken: CancellationToken.None)
+                        .GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+
+                    remoteProviders.Add(remoteProvider);
+                    return remoteProvider.GetRequiredService<IQueryExecutor>();
+                };
+            }
 
             // If --explain, show execution plan without executing
             if (explain)
@@ -289,6 +318,11 @@ public static class SqlCommand
             var error = ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
+        }
+        finally
+        {
+            foreach (var rp in remoteProviders)
+                await rp.DisposeAsync();
         }
     }
 
