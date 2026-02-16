@@ -27,6 +27,7 @@ public sealed class ScalarSubqueryNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { _inner };
 
+    /// <summary>Creates a scalar subquery node that wraps an inner query expected to return a single value.</summary>
     public ScalarSubqueryNode(IQueryPlanNode inner)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));

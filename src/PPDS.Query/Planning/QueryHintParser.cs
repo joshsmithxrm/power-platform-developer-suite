@@ -123,12 +123,20 @@ public static class QueryHintParser
 /// </summary>
 public sealed class QueryHintOverrides
 {
+    /// <summary>Override to force or disable TDS endpoint usage.</summary>
     public bool? UseTdsEndpoint { get; set; }
+    /// <summary>Override batch size for DML operations.</summary>
     public int? DmlBatchSize { get; set; }
+    /// <summary>Override maximum degree of parallelism.</summary>
     public int? MaxParallelism { get; set; }
+    /// <summary>Override maximum number of result rows.</summary>
     public int? MaxResultRows { get; set; }
+    /// <summary>Override to bypass synchronous plugins.</summary>
     public bool? BypassPlugins { get; set; }
+    /// <summary>Override to bypass Power Automate flows.</summary>
     public bool? BypassFlows { get; set; }
+    /// <summary>Override to use no-lock reads.</summary>
     public bool? NoLock { get; set; }
+    /// <summary>Override to force client-side aggregation.</summary>
     public bool? ForceClientAggregation { get; set; }
 }

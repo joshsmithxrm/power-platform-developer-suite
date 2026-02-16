@@ -109,7 +109,15 @@ public enum ProtectionLevel
 }
 
 /// <summary>DateTime display mode for query results.</summary>
-public enum DateTimeMode { Utc, Local, EnvironmentTimezone }
+public enum DateTimeMode
+{
+    /// <summary>Display all DateTimes in UTC.</summary>
+    Utc,
+    /// <summary>Display all DateTimes in the local machine timezone.</summary>
+    Local,
+    /// <summary>Display all DateTimes in the connected environment's timezone.</summary>
+    EnvironmentTimezone
+}
 
 /// <summary>Cross-environment DML policy.</summary>
 public enum CrossEnvironmentDmlPolicy

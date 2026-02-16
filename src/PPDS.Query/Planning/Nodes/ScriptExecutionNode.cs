@@ -624,7 +624,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                     ?? scalar.Expression?.ToString()
                     ?? "column";
 
-                var compiled = _expressionCompiler.CompileScalar(scalar.Expression);
+                var compiled = _expressionCompiler.CompileScalar(scalar.Expression!);
                 var value = compiled(emptyRow);
                 resultValues[alias] = QueryValue.Simple(value);
             }
@@ -724,7 +724,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         }
 
         // THROW with explicit parameters: THROW error_number, 'message', state
-        var message = EvaluateScalarAsString(throwStmt.Message, scope);
+        var message = EvaluateScalarAsString(throwStmt.Message!, scope);
         throw new QueryExecutionException(QueryErrorCode.ExecutionFailed, message);
     }
 

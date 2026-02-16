@@ -20,14 +20,18 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
     private readonly string _innerKeyColumn;
     private readonly bool _antiSemiJoin;
 
+    /// <inheritdoc />
     public string Description => _antiSemiJoin
         ? $"HashAntiSemiJoin: {_outerKeyColumn} NOT IN ({_inner.Description})"
         : $"HashSemiJoin: {_outerKeyColumn} IN ({_inner.Description})";
 
+    /// <inheritdoc />
     public long EstimatedRows => _outer.EstimatedRows;
 
+    /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { _outer, _inner };
 
+    /// <summary>Creates a hash semi-join (or anti-semi-join) between outer and inner sources.</summary>
     public HashSemiJoinNode(
         IQueryPlanNode outer,
         IQueryPlanNode inner,
@@ -42,6 +46,7 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
         _antiSemiJoin = antiSemiJoin;
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<QueryRow> ExecuteAsync(
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
