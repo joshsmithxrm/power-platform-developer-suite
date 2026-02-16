@@ -154,7 +154,15 @@ public sealed class ExecutionPlanBuilder
             return PlanMetadataQuery(querySpec, entityName);
         }
 
-        // Phase 3.5: TDS Endpoint routing
+        // Cross-environment references ([LABEL].dbo.entity) must ALWAYS route to client-side
+        // planning — TDS and FetchXML only target the current environment's connection.
+        if (ContainsCrossEnvironmentReference(querySpec.FromClause))
+        {
+            return PlanClientSideJoin(selectStmt, querySpec, options);
+        }
+
+        // TDS Endpoint routing — only when explicitly requested (Ctrl+T, profile setting,
+        // or OPTION(USE_TDS) hint). TDS is read-only; DML is rejected by compatibility check.
         if (options.UseTdsEndpoint
             && options.TdsQueryExecutor != null
             && !string.IsNullOrEmpty(options.OriginalSql))
@@ -178,13 +186,6 @@ public sealed class ExecutionPlanBuilder
         // Derived tables (subqueries in FROM) cannot be transpiled to FetchXML —
         // route to client-side planning which handles them via PlanTableReference.
         if (ContainsDerivedTable(querySpec.FromClause))
-        {
-            return PlanClientSideJoin(selectStmt, querySpec, options);
-        }
-
-        // Cross-environment references ([LABEL].dbo.entity) cannot be transpiled to FetchXML —
-        // route to client-side planning which resolves the remote executor via PlanTableReference.
-        if (ContainsCrossEnvironmentReference(querySpec.FromClause))
         {
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }

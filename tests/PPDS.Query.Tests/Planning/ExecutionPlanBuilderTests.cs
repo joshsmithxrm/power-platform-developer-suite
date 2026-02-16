@@ -763,6 +763,31 @@ public class ExecutionPlanBuilderTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public void Plan_CrossEnvironment_BypassesTdsEvenWhenEnabled()
+    {
+        // Regression: TDS routing must never swallow cross-env queries.
+        // Even when UseTdsEndpoint is true, [QA].account must produce a RemoteScanNode
+        // against the remote environment, NOT a TdsScanNode against the current one.
+        var sql = "SELECT name FROM [QA].account";
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var options = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
+            UseTdsEndpoint = true,
+            TdsQueryExecutor = Mock.Of<ITdsQueryExecutor>(),
+            OriginalSql = sql
+        };
+
+        var result = _builder.Plan(_parser.Parse(sql), options);
+
+        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+            "cross-env [QA].account must route to RemoteScanNode, not TDS");
+        ContainsNodeOfType<TdsScanNode>(result.RootNode).Should().BeFalse(
+            "TDS must never handle cross-environment queries");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public void Plan_CrossEnvironment_UnknownLabel_ThrowsDescriptiveError()
     {
         var sql = "SELECT name FROM [STAGING].dbo.account";
