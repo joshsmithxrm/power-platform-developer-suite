@@ -123,7 +123,7 @@ public static class ExecuteCommand
                         profile, config.Url,
                         globalOptions.Verbose, globalOptions.Debug,
                         ProfileServiceFactory.DefaultDeviceCodeCallback,
-                        cancellationToken: CancellationToken.None)
+                        cancellationToken: cancellationToken)
                         .GetAwaiter().GetResult();
 #pragma warning restore PPDS012
 

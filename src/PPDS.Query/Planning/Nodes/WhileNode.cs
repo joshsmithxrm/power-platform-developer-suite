@@ -53,7 +53,11 @@ public sealed class WhileNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Evaluate the loop condition against an empty row context
+            // Evaluate the loop condition against an empty row context.
+            // WHILE conditions in SQL scripts reference session variables (e.g., @counter),
+            // which are resolved through the ExpressionCompiler's variable-scope accessor
+            // closure — not through the row dictionary. Column references in WHILE conditions
+            // are not supported and would always evaluate to null.
             var emptyValues = new Dictionary<string, Dataverse.Query.QueryValue>();
             if (!_condition(emptyValues))
             {

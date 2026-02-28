@@ -14,6 +14,19 @@ namespace PPDS.Query.Execution;
 /// Temp tables (names starting with #) are stored in memory and persist across
 /// statements within the same session.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Thread safety:</b> This class is designed for single-threaded script execution
+/// and is NOT thread-safe. Each session (PpdsDbConnection, ScriptExecutionNode) must
+/// use its own SessionContext instance. Do not share instances across concurrent
+/// operations or parallel partitions (see <see cref="DynamicParallel"/>).
+/// </para>
+/// <para>
+/// Properties such as <see cref="FetchStatus"/>, <see cref="ErrorNumber"/>, and
+/// <see cref="ErrorMessage"/> are plain auto-properties without volatile semantics,
+/// which is correct for the single-threaded execution model.
+/// </para>
+/// </remarks>
 public sealed class SessionContext
 {
     private readonly Dictionary<string, TempTable> _tempTables = new(StringComparer.OrdinalIgnoreCase);

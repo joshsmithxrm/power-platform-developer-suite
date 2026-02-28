@@ -26,11 +26,16 @@ public sealed class RecursiveCteNode : IQueryPlanNode
     /// <summary>The CTE name for diagnostic output.</summary>
     public string CteName { get; }
 
-    /// <summary>Maximum recursion depth (default 100, matching SQL Server's MAXRECURSION).</summary>
+    /// <summary>
+    /// Maximum recursion depth (default 100, matching SQL Server's MAXRECURSION).
+    /// 0 means unlimited (matching SQL Server's OPTION(MAXRECURSION 0)).
+    /// </summary>
     public int MaxRecursion { get; }
 
     /// <inheritdoc />
-    public string Description => $"RecursiveCte: {CteName} (max {MaxRecursion})";
+    public string Description => MaxRecursion == 0
+        ? $"RecursiveCte: {CteName} (unlimited)"
+        : $"RecursiveCte: {CteName} (max {MaxRecursion})";
 
     /// <inheritdoc />
     public long EstimatedRows => -1; // Unknown for recursive queries
@@ -47,7 +52,10 @@ public sealed class RecursiveCteNode : IQueryPlanNode
     /// Factory that creates the recursive plan node for each iteration.
     /// Receives the previous iteration's rows and returns a node that produces new rows.
     /// </param>
-    /// <param name="maxRecursion">Maximum recursion depth. Default is 100.</param>
+    /// <param name="maxRecursion">
+    /// Maximum recursion depth. Default is 100 (matching SQL Server).
+    /// Set to 0 for unlimited recursion (matching SQL Server's OPTION(MAXRECURSION 0)).
+    /// </param>
     public RecursiveCteNode(
         string cteName,
         IQueryPlanNode anchorNode,
@@ -77,10 +85,12 @@ public sealed class RecursiveCteNode : IQueryPlanNode
             yield return row;
         }
 
-        // Phase 2: Iterate recursive member until no new rows or max depth
+        // Phase 2: Iterate recursive member until no new rows or max depth.
+        // MaxRecursion == 0 means unlimited (SQL Server OPTION(MAXRECURSION 0)).
         var reachedMaxDepth = false;
+        var effectiveMax = MaxRecursion == 0 ? int.MaxValue : MaxRecursion;
 
-        for (var depth = 0; depth < MaxRecursion; depth++)
+        for (var depth = 0; depth < effectiveMax; depth++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -104,7 +114,7 @@ public sealed class RecursiveCteNode : IQueryPlanNode
             currentIterationRows = newRows;
 
             // If this was the last allowed iteration and we still got rows, flag overflow
-            if (depth == MaxRecursion - 1)
+            if (depth == effectiveMax - 1)
             {
                 reachedMaxDepth = true;
             }

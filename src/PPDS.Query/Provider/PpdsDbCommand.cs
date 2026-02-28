@@ -116,7 +116,9 @@ public sealed class PpdsDbCommand : DbCommand
     /// <inheritdoc />
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
     {
-        return ExecuteDbDataReaderAsync(behavior, CancellationToken.None).GetAwaiter().GetResult();
+        // Wrap in Task.Run to avoid deadlocks when called from threads with a
+        // SynchronizationContext (WPF, WinForms, ASP.NET pre-Core).
+        return Task.Run(() => ExecuteDbDataReaderAsync(behavior, CancellationToken.None)).GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
@@ -145,7 +147,9 @@ public sealed class PpdsDbCommand : DbCommand
     /// <inheritdoc />
     public override int ExecuteNonQuery()
     {
-        return ExecuteNonQueryAsync(CancellationToken.None).GetAwaiter().GetResult();
+        // Wrap in Task.Run to avoid deadlocks when called from threads with a
+        // SynchronizationContext (WPF, WinForms, ASP.NET pre-Core).
+        return Task.Run(() => ExecuteNonQueryAsync(CancellationToken.None)).GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />

@@ -26,7 +26,8 @@ namespace PPDS.Query.Parsing
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            var fragment = _parser.Parse(new StringReader(sql), out IList<ParseError> errors);
+            using var reader = new StringReader(sql);
+            var fragment = _parser.Parse(reader, out IList<ParseError> errors);
 
             if (errors.Count > 0)
                 throw new QueryParseException(errors, sql);
@@ -47,7 +48,8 @@ namespace PPDS.Query.Parsing
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            fragment = _parser.Parse(new StringReader(sql), out errors);
+            using var reader = new StringReader(sql);
+            fragment = _parser.Parse(reader, out errors);
 
             if (errors.Count > 0)
             {
