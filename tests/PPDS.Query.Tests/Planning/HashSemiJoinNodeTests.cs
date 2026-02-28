@@ -1,4 +1,7 @@
+using System.Collections.Generic;
 using FluentAssertions;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Planning.Nodes;
 using Xunit;
 
@@ -118,5 +121,41 @@ public class HashSemiJoinNodeTests
 
         rows.Should().HaveCount(1);
         rows[0].Values["name"].Value.Should().Be("Contoso");
+    }
+
+    [Fact]
+    public async Task SemiJoin_CaseInsensitiveColumnLookup_StillMatches()
+    {
+        // Simulate a case-sensitive dictionary (as might come from external data sources)
+        // where the column is "AccountId" but the key reference is "accountid"
+        var outerRow1 = new QueryRow(
+            new Dictionary<string, QueryValue>(StringComparer.Ordinal)
+            {
+                ["AccountId"] = QueryValue.Simple("1"),
+                ["name"] = QueryValue.Simple("Contoso")
+            }, "account");
+        var outerRow2 = new QueryRow(
+            new Dictionary<string, QueryValue>(StringComparer.Ordinal)
+            {
+                ["AccountId"] = QueryValue.Simple("2"),
+                ["name"] = QueryValue.Simple("Fabrikam")
+            }, "account");
+        var innerRow = new QueryRow(
+            new Dictionary<string, QueryValue>(StringComparer.Ordinal)
+            {
+                ["ParentCustomerId"] = QueryValue.Simple("1")
+            }, "contact");
+
+        var outer = TestSourceNode.Create("account", outerRow1, outerRow2);
+        var inner = TestSourceNode.Create("contact", innerRow);
+
+        var node = new HashSemiJoinNode(outer, inner,
+            outerKeyColumn: "accountid",       // lowercase — doesn't match "AccountId" exactly
+            innerKeyColumn: "parentcustomerid", // lowercase — doesn't match "ParentCustomerId" exactly
+            antiSemiJoin: false);
+        var rows = await TestHelpers.CollectRowsAsync(node);
+
+        rows.Should().HaveCount(1,
+            because: "case-insensitive fallback should find AccountId when looking for accountid");
     }
 }

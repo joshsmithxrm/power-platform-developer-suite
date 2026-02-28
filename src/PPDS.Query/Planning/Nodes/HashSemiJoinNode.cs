@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query.Planning;
@@ -56,9 +57,12 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
         bool innerHasNull = false;
         await foreach (var innerRow in _inner.ExecuteAsync(context, cancellationToken))
         {
-            if (innerRow.Values.TryGetValue(_innerKeyColumn, out var val) && val.Value != null)
+            var innerVal = innerRow.Values.TryGetValue(_innerKeyColumn, out var val)
+                ? val
+                : innerRow.Values.FirstOrDefault(kvp => string.Equals(kvp.Key, _innerKeyColumn, StringComparison.OrdinalIgnoreCase)).Value;
+            if (innerVal?.Value != null)
             {
-                innerKeys.Add(val.Value.ToString()!);
+                innerKeys.Add(innerVal.Value.ToString()!);
             }
             else
             {
@@ -75,9 +79,10 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var outerKeyValue = outerRow.Values.TryGetValue(_outerKeyColumn, out var outerVal)
-                ? outerVal.Value?.ToString()
-                : null;
+            var outerQv = outerRow.Values.TryGetValue(_outerKeyColumn, out var outerVal2)
+                ? outerVal2
+                : outerRow.Values.FirstOrDefault(kvp => string.Equals(kvp.Key, _outerKeyColumn, StringComparison.OrdinalIgnoreCase)).Value;
+            var outerKeyValue = outerQv?.Value?.ToString();
 
             // NULL keys never match (SQL NULL semantics)
             if (outerKeyValue == null)
