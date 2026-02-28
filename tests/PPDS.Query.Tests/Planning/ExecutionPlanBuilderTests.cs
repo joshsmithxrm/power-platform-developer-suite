@@ -74,7 +74,7 @@ public class ExecutionPlanBuilderTests
         var result = _builder.Plan(fragment);
 
         // Either the root is a ClientWindowNode or a ProjectNode wrapping a ClientWindowNode
-        var hasWindowNode = FindNodeOfType<ClientWindowNode>(result.RootNode);
+        var hasWindowNode = TestHelpers.ContainsNodeOfType<ClientWindowNode>(result.RootNode);
         hasWindowNode.Should().BeTrue(
             "a SELECT with ROW_NUMBER() should produce a ClientWindowNode somewhere in the plan tree");
     }
@@ -243,7 +243,7 @@ public class ExecutionPlanBuilderTests
         var result = _builder.Plan(fragment);
 
         result.RootNode.Should().NotBeNull();
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "IN (subquery) should now produce a HashSemiJoinNode instead of throwing");
     }
 
@@ -265,7 +265,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
             "RIGHT JOIN should produce a client-side HashJoinNode");
     }
 
@@ -282,7 +282,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashJoinNode>(result.RootNode).Should().BeTrue(
             "FULL OUTER JOIN should produce a client-side HashJoinNode");
     }
 
@@ -344,7 +344,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        ContainsNodeOfType<NestedLoopJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<NestedLoopJoinNode>(result.RootNode).Should().BeTrue(
             "CROSS JOIN should produce a client-side NestedLoopJoinNode");
     }
 
@@ -421,7 +421,7 @@ public class ExecutionPlanBuilderTests
         var result = builder.Plan(fragment);
 
         // Should produce a client-side HashJoinNode with LEFT type (swapped from RIGHT)
-        var hashJoin = FindNode<HashJoinNode>(result.RootNode);
+        var hashJoin = TestHelpers.FindNode<HashJoinNode>(result.RootNode);
         hashJoin.Should().NotBeNull("RIGHT JOIN should produce a client-side HashJoinNode");
         hashJoin!.JoinType.Should().Be(JoinType.Left,
             "planner should swap RIGHT JOIN to LEFT JOIN by swapping children");
@@ -446,7 +446,7 @@ public class ExecutionPlanBuilderTests
         var result = builder.Plan(fragment);
 
         // Should have a ProjectNode filtering to only the requested columns
-        var projectNode = FindNode<ProjectNode>(result.RootNode);
+        var projectNode = TestHelpers.FindNode<ProjectNode>(result.RootNode);
         projectNode.Should().NotBeNull(
             "client-side join with specific SELECT columns should produce a ProjectNode");
         projectNode!.OutputColumns.Should().HaveCount(2);
@@ -487,7 +487,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        var sortNode = FindNode<ClientSortNode>(result.RootNode);
+        var sortNode = TestHelpers.FindNode<ClientSortNode>(result.RootNode);
         sortNode.Should().NotBeNull(
             "client-side join with ORDER BY should produce a ClientSortNode");
         sortNode!.OrderByItems.Should().HaveCount(1);
@@ -508,7 +508,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        var sortNode = FindNode<ClientSortNode>(result.RootNode);
+        var sortNode = TestHelpers.FindNode<ClientSortNode>(result.RootNode);
         sortNode.Should().NotBeNull();
         sortNode!.OrderByItems[0].Descending.Should().BeTrue();
     }
@@ -527,7 +527,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        var offsetFetchNode = FindNode<OffsetFetchNode>(result.RootNode);
+        var offsetFetchNode = TestHelpers.FindNode<OffsetFetchNode>(result.RootNode);
         offsetFetchNode.Should().NotBeNull(
             "client-side join with TOP should produce an OffsetFetchNode");
         offsetFetchNode!.Offset.Should().Be(0);
@@ -548,7 +548,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        var offsetFetchNode = FindNode<OffsetFetchNode>(result.RootNode);
+        var offsetFetchNode = TestHelpers.FindNode<OffsetFetchNode>(result.RootNode);
         offsetFetchNode.Should().NotBeNull(
             "client-side join with OFFSET/FETCH should produce an OffsetFetchNode");
         offsetFetchNode!.Offset.Should().Be(10);
@@ -585,7 +585,7 @@ public class ExecutionPlanBuilderTests
             "SELECT list projection should wrap the join");
 
         // Innermost should be HashJoinNode
-        ContainsNodeOfType<HashJoinNode>(projectChild).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashJoinNode>(projectChild).Should().BeTrue(
             "HashJoinNode should be at the base of the plan");
     }
 
@@ -603,7 +603,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = builder.Plan(fragment);
 
-        var projectNode = FindNode<ProjectNode>(result.RootNode);
+        var projectNode = TestHelpers.FindNode<ProjectNode>(result.RootNode);
         projectNode.Should().NotBeNull(
             "CROSS JOIN with specific columns should produce a ProjectNode");
         projectNode!.OutputColumns.Should().HaveCount(1);
@@ -623,7 +623,7 @@ public class ExecutionPlanBuilderTests
         var result = _builder.Plan(fragment);
 
         result.RootNode.Should().NotBeNull();
-        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
             "a derived table should produce a TableSpoolNode in the plan tree");
     }
 
@@ -650,7 +650,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "a WHERE ... IN (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
     }
 
@@ -663,7 +663,7 @@ public class ExecutionPlanBuilderTests
         var result = _builder.Plan(fragment);
 
         // Simple NOT IN subquery is rewritten as LEFT OUTER JOIN + IS NULL in FetchXML
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeFalse(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeFalse(
             "simple NOT IN should be rewritten as LEFT OUTER JOIN, not use client-side HashSemiJoinNode");
         result.FetchXml.Should().Contain("link-type=\"outer\"",
             "NOT IN should be rewritten as LEFT OUTER JOIN for FetchXML pushdown");
@@ -677,7 +677,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "IN (subquery) combined with other WHERE conditions should still produce a HashSemiJoinNode");
     }
 
@@ -694,7 +694,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "a WHERE EXISTS (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
     }
 
@@ -707,7 +707,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "a WHERE NOT EXISTS (SELECT ...) should produce a HashSemiJoinNode in the plan tree");
     }
 
@@ -720,7 +720,7 @@ public class ExecutionPlanBuilderTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<HashSemiJoinNode>(result.RootNode).Should().BeTrue(
             "EXISTS combined with other WHERE conditions should still produce a HashSemiJoinNode");
     }
 
@@ -755,9 +755,9 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(_parser.Parse(sql), options);
 
-        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
             "cross-environment [UAT].dbo.account should produce RemoteScanNode");
-        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
             "remote scan should be wrapped in TableSpoolNode for materialization");
     }
 
@@ -780,9 +780,9 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(_parser.Parse(sql), options);
 
-        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
             "cross-env [QA].account must route to RemoteScanNode, not TDS");
-        ContainsNodeOfType<TdsScanNode>(result.RootNode).Should().BeFalse(
+        TestHelpers.ContainsNodeOfType<TdsScanNode>(result.RootNode).Should().BeFalse(
             "TDS must never handle cross-environment queries");
     }
 
@@ -848,9 +848,9 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(_parser.Parse(sql), options);
 
-        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
             "2-part name [UAT].account should produce RemoteScanNode when UAT matches a profile label");
-        ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<TableSpoolNode>(result.RootNode).Should().BeTrue(
             "remote scan should be wrapped in TableSpoolNode");
     }
 
@@ -901,7 +901,7 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(_parser.Parse(sql), options);
 
-        ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
+        TestHelpers.ContainsNodeOfType<RemoteScanNode>(result.RootNode).Should().BeTrue(
             "2-part [UAT].contact in JOIN should produce RemoteScanNode");
     }
 
@@ -927,7 +927,7 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(fragment, options);
 
-        var mergeNode = FindNode<MergeAggregateNode>(result.RootNode);
+        var mergeNode = TestHelpers.FindNode<MergeAggregateNode>(result.RootNode);
         mergeNode.Should().NotBeNull("partitioned aggregate should produce MergeAggregateNode");
         mergeNode!.GroupByColumns.Should().Contain("yr",
             "GROUP BY YEAR(createdon) with SELECT alias 'yr' should use the alias as group key");
@@ -951,62 +951,13 @@ public class ExecutionPlanBuilderTests
 
         var result = _builder.Plan(fragment, options);
 
-        var mergeNode = FindNode<MergeAggregateNode>(result.RootNode);
+        var mergeNode = TestHelpers.FindNode<MergeAggregateNode>(result.RootNode);
         mergeNode.Should().NotBeNull("partitioned aggregate should produce MergeAggregateNode");
 
         mergeNode!.GroupByColumns.Should().Contain("month_createdon",
             "GROUP BY MONTH(createdon) without alias should generate synthetic name 'month_createdon'");
     }
 
-    // ────────────────────────────────────────────
-    //  Helper: find node type in plan tree
-    // ────────────────────────────────────────────
-
-    private static T? FindNode<T>(IQueryPlanNode node) where T : class, IQueryPlanNode
-    {
-        if (node is T match) return match;
-        foreach (var child in node.Children)
-        {
-            var found = FindNode<T>(child);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    private static bool ContainsNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
-    {
-        if (node is T) return true;
-        return node.Children.Any(ContainsNodeOfType<T>);
-    }
-
-    private static bool FindNodeOfType<T>(IQueryPlanNode node) where T : IQueryPlanNode
-    {
-        if (node is T)
-            return true;
-
-        // Check if the node exposes child nodes through known wrapper types
-        if (node is ProjectNode projectNode)
-            return FindNodeOfType<T>(GetInput(projectNode));
-
-        if (node is ClientWindowNode windowNode)
-            return FindNodeOfType<T>(GetInput(windowNode));
-
-        return false;
-    }
-
-    private static IQueryPlanNode GetInput(ProjectNode node)
-    {
-        // ProjectNode takes an input node in constructor; access it via reflection
-        var field = typeof(ProjectNode).GetField("_input",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return (IQueryPlanNode)(field?.GetValue(node)
-            ?? throw new InvalidOperationException("Could not access _input field"));
-    }
-
-    private static IQueryPlanNode GetInput(ClientWindowNode node)
-    {
-        return node.Input;
-    }
 
     // ────────────────────────────────────────────
     //  dbo schema stripping

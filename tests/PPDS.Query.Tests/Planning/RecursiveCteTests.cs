@@ -50,7 +50,7 @@ public class RecursiveCteTests
         var result = _builder.Plan(fragment);
 
         // Should contain a RecursiveCteNode somewhere in the plan tree
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().NotBeNull("Recursive CTE should produce a RecursiveCteNode");
     }
 
@@ -71,7 +71,7 @@ public class RecursiveCteTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().NotBeNull();
         recursiveNode!.CteName.Should().Be("hierarchy",
             "RecursiveCteNode should carry the CTE name");
@@ -94,7 +94,7 @@ public class RecursiveCteTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().NotBeNull();
         recursiveNode!.MaxRecursion.Should().Be(100,
             "Default max recursion should be 100 (matching SQL Server)");
@@ -117,7 +117,7 @@ public class RecursiveCteTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().BeNull("Non-recursive CTE should not produce RecursiveCteNode");
     }
 
@@ -137,7 +137,7 @@ public class RecursiveCteTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().BeNull(
             "CTE with UNION ALL but no self-reference should not produce RecursiveCteNode");
     }
@@ -162,7 +162,7 @@ public class RecursiveCteTests
         var fragment = _parser.Parse(sql);
         var result = _builder.Plan(fragment);
 
-        var recursiveNode = FindNode<RecursiveCteNode>(result.RootNode);
+        var recursiveNode = TestHelpers.FindNode<RecursiveCteNode>(result.RootNode);
         recursiveNode.Should().NotBeNull(
             "Recursive CTE with self-reference in first branch should still produce RecursiveCteNode");
     }
@@ -196,18 +196,4 @@ public class RecursiveCteTests
             because: "recursive CTE should produce rows 1..5 and the recursive member must apply WHERE filter");
     }
 
-    // ────────────────────────────────────────────
-    //  Helper: find node type in plan tree
-    // ────────────────────────────────────────────
-
-    private static T? FindNode<T>(IQueryPlanNode node) where T : class, IQueryPlanNode
-    {
-        if (node is T match) return match;
-        foreach (var child in node.Children)
-        {
-            var found = FindNode<T>(child);
-            if (found != null) return found;
-        }
-        return null;
-    }
 }

@@ -26,26 +26,6 @@ namespace PPDS.Query.Tests.Planning;
 public class ScriptExecutionNodeTests
 {
     /// <summary>
-    /// Creates an ExecutionPlanBuilder and ExpressionCompiler with a variable scope accessor.
-    /// </summary>
-    private static (ExecutionPlanBuilder builder, ExpressionCompiler compiler) CreatePlanBuilderAndCompiler(
-        VariableScope scope)
-    {
-        var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
-        mockFetchXmlService
-            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
-            .Returns(TranspileResult.Simple(
-                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
-
-        var builder = new ExecutionPlanBuilder(mockFetchXmlService.Object);
-
-        var compiler = new ExpressionCompiler(
-            variableScopeAccessor: () => scope);
-
-        return (builder, compiler);
-    }
-
-    /// <summary>
     /// Creates a context with a mock executor.
     /// </summary>
     private static QueryPlanContext CreateContext(VariableScope? scope = null)
@@ -79,42 +59,6 @@ public class ScriptExecutionNodeTests
         return new QueryPlanContext(
             mockExecutor.Object,
             variableScope: scope);
-    }
-
-    /// <summary>
-    /// Helper to create a ScriptDom DeclareVariableStatement.
-    /// </summary>
-    private static DeclareVariableStatement MakeDeclare(string varName, string typeName, int? initialValue = null)
-    {
-        var decl = new DeclareVariableElement();
-        decl.VariableName = new Identifier { Value = varName.TrimStart('@') };
-        decl.DataType = new SqlDataTypeReference
-        {
-            SqlDataTypeOption = typeName.ToUpperInvariant() switch
-            {
-                "INT" => SqlDataTypeOption.Int,
-                "NVARCHAR" => SqlDataTypeOption.NVarChar,
-                _ => SqlDataTypeOption.VarChar
-            }
-        };
-        if (initialValue.HasValue)
-        {
-            decl.Value = new IntegerLiteral { Value = initialValue.Value.ToString() };
-        }
-        var stmt = new DeclareVariableStatement();
-        stmt.Declarations.Add(decl);
-        return stmt;
-    }
-
-    /// <summary>
-    /// Helper to create a ScriptDom SetVariableStatement.
-    /// </summary>
-    private static SetVariableStatement MakeSetVariable(string varName, ScalarExpression expression)
-    {
-        var stmt = new SetVariableStatement();
-        stmt.Variable = new VariableReference { Name = varName };
-        stmt.Expression = expression;
-        return stmt;
     }
 
     /// <summary>
@@ -165,17 +109,17 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @x INT = 1; IF @x = 1 BEGIN DECLARE @y INT = 99 END
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT", 1),
+            TestHelpers.MakeDeclare("@x", "INT", 1),
             MakeIf(
                 MakeComparison(
                     new VariableReference { Name = "@x" },
                     BooleanComparisonType.Equals,
                     new IntegerLiteral { Value = "1" }),
-                MakeBlock(MakeDeclare("@y", "INT", 99)))
+                MakeBlock(TestHelpers.MakeDeclare("@y", "INT", 99)))
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -196,18 +140,18 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @x INT = 0; IF @x = 1 BEGIN DECLARE @y INT = 99 END ELSE BEGIN DECLARE @y INT = -1 END
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT", 0),
+            TestHelpers.MakeDeclare("@x", "INT", 0),
             MakeIf(
                 MakeComparison(
                     new VariableReference { Name = "@x" },
                     BooleanComparisonType.Equals,
                     new IntegerLiteral { Value = "1" }),
-                MakeBlock(MakeDeclare("@y", "INT", 99)),
-                MakeBlock(MakeDeclare("@y", "INT", -1)))
+                MakeBlock(TestHelpers.MakeDeclare("@y", "INT", 99)),
+                MakeBlock(TestHelpers.MakeDeclare("@y", "INT", -1)))
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -228,17 +172,17 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @x INT = 0; IF @x = 1 BEGIN DECLARE @y INT = 99 END (no ELSE)
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT", 0),
+            TestHelpers.MakeDeclare("@x", "INT", 0),
             MakeIf(
                 MakeComparison(
                     new VariableReference { Name = "@x" },
                     BooleanComparisonType.Equals,
                     new IntegerLiteral { Value = "1" }),
-                MakeBlock(MakeDeclare("@y", "INT", 99)))
+                MakeBlock(TestHelpers.MakeDeclare("@y", "INT", 99)))
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -259,12 +203,12 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @x INT = 10; SET @x = 20
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT", 10),
-            MakeSetVariable("@x", new IntegerLiteral { Value = "20" }),
+            TestHelpers.MakeDeclare("@x", "INT", 10),
+            TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "20" }),
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -283,12 +227,12 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @x INT = 10; SET @x = 20;
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT", 10),
-            MakeSetVariable("@x", new IntegerLiteral { Value = "20" }),
+            TestHelpers.MakeDeclare("@x", "INT", 10),
+            TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "20" }),
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -308,12 +252,12 @@ public class ScriptExecutionNodeTests
     public void Description_IncludesStatementCount()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT"),
-            MakeSetVariable("@x", new IntegerLiteral { Value = "1" }),
+            TestHelpers.MakeDeclare("@x", "INT"),
+            TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "1" }),
         };
 
         var node = new ScriptExecutionNode(statements, builder, compiler);
@@ -325,7 +269,7 @@ public class ScriptExecutionNodeTests
     public void Constructor_ThrowsOnNullStatements()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         Assert.Throws<ArgumentNullException>(
             () => new ScriptExecutionNode(null!, builder, compiler));
@@ -335,8 +279,8 @@ public class ScriptExecutionNodeTests
     public void Constructor_ThrowsOnNullPlanBuilder()
     {
         var scope = new VariableScope();
-        var (_, compiler) = CreatePlanBuilderAndCompiler(scope);
-        var statements = new TSqlStatement[] { MakeDeclare("@x", "INT") };
+        var (_, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
+        var statements = new TSqlStatement[] { TestHelpers.MakeDeclare("@x", "INT") };
 
         Assert.Throws<ArgumentNullException>(
             () => new ScriptExecutionNode(statements, null!, compiler));
@@ -346,8 +290,8 @@ public class ScriptExecutionNodeTests
     public void Constructor_ThrowsOnNullCompiler()
     {
         var scope = new VariableScope();
-        var (builder, _) = CreatePlanBuilderAndCompiler(scope);
-        var statements = new TSqlStatement[] { MakeDeclare("@x", "INT") };
+        var (builder, _) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
+        var statements = new TSqlStatement[] { TestHelpers.MakeDeclare("@x", "INT") };
 
         Assert.Throws<ArgumentNullException>(
             () => new ScriptExecutionNode(statements, builder, null!));
@@ -358,7 +302,7 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @a INT = 1, @b INT = 2
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var declA = new DeclareVariableElement();
         declA.VariableName = new Identifier { Value = "a" };
@@ -403,7 +347,7 @@ public class ScriptExecutionNodeTests
     private static SetVariableStatement MakeSetAddition(
         string varName, string addendVarOrLiteral)
     {
-        return MakeSetVariable(varName,
+        return TestHelpers.MakeSetVariable(varName,
             new BinaryExpression
             {
                 BinaryExpressionType = BinaryExpressionType.Add,
@@ -423,11 +367,11 @@ public class ScriptExecutionNodeTests
         // END
         // -- expect @i = 3
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@i", "INT", 0),
+            TestHelpers.MakeDeclare("@i", "INT", 0),
             MakeWhile(
                 MakeComparison(
                     new VariableReference { Name = "@i" },
@@ -469,12 +413,12 @@ public class ScriptExecutionNodeTests
         // END
         // -- expect @sum = 30
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@i", "INT", 0),
-            MakeDeclare("@sum", "INT", 0),
+            TestHelpers.MakeDeclare("@i", "INT", 0),
+            TestHelpers.MakeDeclare("@sum", "INT", 0),
             MakeWhile(
                 MakeComparison(
                     new VariableReference { Name = "@i" },
@@ -495,7 +439,7 @@ public class ScriptExecutionNodeTests
                         new IntegerLiteral { Value = "1" }),
                     new ContinueStatement()),
                 // SET @sum = @sum + @i
-                MakeSetVariable("@sum",
+                TestHelpers.MakeSetVariable("@sum",
                     new BinaryExpression
                     {
                         BinaryExpressionType = BinaryExpressionType.Add,
@@ -543,7 +487,7 @@ public class ScriptExecutionNodeTests
 
         var scope = new VariableScope();
         var session = new SessionContext();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
         var node = new ScriptExecutionNode(statements, builder, compiler, session);
         var ctx = CreateContext(scope);
 
@@ -590,7 +534,7 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @name NVARCHAR; SELECT @name = 'Hello World'
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var selectStmt = new SelectStatement();
         var querySpec = new QuerySpecification();
@@ -604,7 +548,7 @@ public class ScriptExecutionNodeTests
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@name", "NVARCHAR"),
+            TestHelpers.MakeDeclare("@name", "NVARCHAR"),
             selectStmt
         };
 
@@ -621,7 +565,7 @@ public class ScriptExecutionNodeTests
     {
         // DECLARE @a INT; DECLARE @b INT; SELECT @a = 10, @b = 20
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var selectStmt = new SelectStatement();
         var querySpec = new QuerySpecification();
@@ -639,8 +583,8 @@ public class ScriptExecutionNodeTests
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@a", "INT"),
-            MakeDeclare("@b", "INT"),
+            TestHelpers.MakeDeclare("@a", "INT"),
+            TestHelpers.MakeDeclare("@b", "INT"),
             selectStmt
         };
 
@@ -658,7 +602,7 @@ public class ScriptExecutionNodeTests
     {
         // SELECT @var = expr should NOT produce result rows (it's an assignment, not a query)
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var selectStmt = new SelectStatement();
         var querySpec = new QuerySpecification();
@@ -671,7 +615,7 @@ public class ScriptExecutionNodeTests
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@x", "INT"),
+            TestHelpers.MakeDeclare("@x", "INT"),
             selectStmt
         };
 
@@ -720,7 +664,7 @@ public class ScriptExecutionNodeTests
     {
         // Build PRINT statement using AST directly
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var printStmt = new PrintStatement
         {
@@ -753,12 +697,12 @@ public class ScriptExecutionNodeTests
     {
         // PRINT uses the ExpressionCompiler so variable references should work
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var statements = new TSqlStatement[]
         {
-            MakeDeclare("@msg", "NVARCHAR"),
-            MakeSetVariable("@msg", new StringLiteral { Value = "world" }),
+            TestHelpers.MakeDeclare("@msg", "NVARCHAR"),
+            TestHelpers.MakeSetVariable("@msg", new StringLiteral { Value = "world" }),
             new PrintStatement
             {
                 Expression = new VariableReference { Name = "@msg" }
@@ -795,7 +739,7 @@ public class ScriptExecutionNodeTests
     public async Task Throw_ThrowsWithUserMessage_AST()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var throwStmt = new ThrowStatement
         {
@@ -834,7 +778,7 @@ public class ScriptExecutionNodeTests
     public async Task RaiseError_HighSeverity_ThrowsException_AST()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var raiseError = new RaiseErrorStatement
         {
@@ -862,7 +806,7 @@ public class ScriptExecutionNodeTests
     public async Task RaiseError_LowSeverity_DoesNotThrow_AST()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         var raiseError = new RaiseErrorStatement
         {
@@ -914,7 +858,7 @@ public class ScriptExecutionNodeTests
     public async Task TryCatch_CatchesThrow_AST()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         // Build TRY { THROW 50001, 'caught', 1 } CATCH { ... }
         var throwStmt = new ThrowStatement
@@ -983,7 +927,7 @@ public class ScriptExecutionNodeTests
     public async Task Throw_BareThrow_RethrowsInCatch_AST()
     {
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
         // Inner TRY { THROW 50001, 'original', 1 } CATCH { bare THROW }
         var innerThrow = new ThrowStatement

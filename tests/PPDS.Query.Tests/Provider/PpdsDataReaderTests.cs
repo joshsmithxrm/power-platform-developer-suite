@@ -294,6 +294,46 @@ public class PpdsDataReaderTests
         reader.GetDouble(2).Should().Be(1000.0);
     }
 
+    [Fact]
+    public void GetFloat_ReturnsConvertedValue()
+    {
+        using var reader = CreateTestReader();
+        reader.Read();
+
+        // revenue column (index 2) is decimal 1000.0, convert to float
+        reader.GetFloat(2).Should().Be(1000.0f);
+    }
+
+    [Fact]
+    public void GetInt64_ReturnsConvertedValue()
+    {
+        using var reader = CreateTestReader();
+        reader.Read();
+
+        // employeecount column (index 3) is int 50, convert to long
+        reader.GetInt64(3).Should().Be(50L);
+    }
+
+    [Fact]
+    public void GetInt16_ReturnsConvertedValue()
+    {
+        using var reader = CreateTestReader();
+        reader.Read();
+
+        // employeecount column (index 3) is int 50, convert to short
+        reader.GetInt16(3).Should().Be((short)50);
+    }
+
+    [Fact]
+    public void GetByte_ReturnsConvertedValue()
+    {
+        using var reader = CreateTestReader();
+        reader.Read();
+
+        // employeecount column (index 3) is int 50, convert to byte
+        reader.GetByte(3).Should().Be((byte)50);
+    }
+
     // ────────────────────────────────────────────
     //  Value / DBNull
     // ────────────────────────────────────────────

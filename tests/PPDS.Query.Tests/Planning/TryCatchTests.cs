@@ -38,15 +38,15 @@ public class TryCatchTests
         // END CATCH
 
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
-        var declare = MakeDeclare("@x", "INT", 10);
+        var declare = TestHelpers.MakeDeclare("@x", "INT", 10);
 
-        var setInTry = MakeSetVariable("@x", new IntegerLiteral { Value = "20" });
+        var setInTry = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "20" });
         var tryStatements = new StatementList();
         tryStatements.Statements.Add(setInTry);
 
-        var setInCatch = MakeSetVariable("@x", new IntegerLiteral { Value = "-1" });
+        var setInCatch = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "-1" });
         var catchStatements = new StatementList();
         catchStatements.Statements.Add(setInCatch);
 
@@ -88,9 +88,9 @@ public class TryCatchTests
         // END CATCH
 
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
-        var declare = MakeDeclare("@x", "INT", 10);
+        var declare = TestHelpers.MakeDeclare("@x", "INT", 10);
 
         // 1 / 0 will throw DivideByZeroException
         var divByZero = new BinaryExpression
@@ -99,11 +99,11 @@ public class TryCatchTests
             BinaryExpressionType = BinaryExpressionType.Divide,
             SecondExpression = new IntegerLiteral { Value = "0" }
         };
-        var setInTry = MakeSetVariable("@x", divByZero);
+        var setInTry = TestHelpers.MakeSetVariable("@x", divByZero);
         var tryStatements = new StatementList();
         tryStatements.Statements.Add(setInTry);
 
-        var setInCatch = MakeSetVariable("@x", new IntegerLiteral { Value = "-99" });
+        var setInCatch = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "-99" });
         var catchStatements = new StatementList();
         catchStatements.Statements.Add(setInCatch);
 
@@ -144,10 +144,10 @@ public class TryCatchTests
         // END CATCH
 
         var scope = new VariableScope();
-        var (builder, compiler) = CreatePlanBuilderAndCompiler(scope);
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
 
-        var declareX = MakeDeclare("@x", "INT");
-        var declareMsg = MakeDeclare("@msg", "NVARCHAR");
+        var declareX = TestHelpers.MakeDeclare("@x", "INT");
+        var declareMsg = TestHelpers.MakeDeclare("@msg", "NVARCHAR");
 
         var divByZero = new BinaryExpression
         {
@@ -155,14 +155,14 @@ public class TryCatchTests
             BinaryExpressionType = BinaryExpressionType.Divide,
             SecondExpression = new IntegerLiteral { Value = "0" }
         };
-        var setInTry = MakeSetVariable("@x", divByZero);
+        var setInTry = TestHelpers.MakeSetVariable("@x", divByZero);
         var tryStatements = new StatementList();
         tryStatements.Statements.Add(setInTry);
 
         // ERROR_MESSAGE() call
         var errorMsgFunc = new FunctionCall();
         errorMsgFunc.FunctionName = new Identifier { Value = "ERROR_MESSAGE" };
-        var setInCatch = MakeSetVariable("@msg", errorMsgFunc);
+        var setInCatch = TestHelpers.MakeSetVariable("@msg", errorMsgFunc);
         var catchStatements = new StatementList();
         catchStatements.Statements.Add(setInCatch);
 
@@ -221,57 +221,4 @@ public class TryCatchTests
         result.RootNode.Should().BeOfType<ScriptExecutionNode>();
     }
 
-    // ────────────────────────────────────────────
-    //  Helpers
-    // ────────────────────────────────────────────
-
-    private static DeclareVariableStatement MakeDeclare(string varName, string typeName, int? initialValue = null)
-    {
-        var decl = new DeclareVariableElement();
-        decl.VariableName = new Identifier { Value = varName.TrimStart('@') };
-        decl.DataType = new SqlDataTypeReference
-        {
-            SqlDataTypeOption = typeName.ToUpperInvariant() switch
-            {
-                "INT" => SqlDataTypeOption.Int,
-                "NVARCHAR" => SqlDataTypeOption.NVarChar,
-                _ => SqlDataTypeOption.VarChar
-            }
-        };
-        if (initialValue.HasValue)
-        {
-            decl.Value = new IntegerLiteral { Value = initialValue.Value.ToString() };
-        }
-        var stmt = new DeclareVariableStatement();
-        stmt.Declarations.Add(decl);
-        return stmt;
-    }
-
-    private static SetVariableStatement MakeSetVariable(string varName, ScalarExpression expression)
-    {
-        var stmt = new SetVariableStatement();
-        stmt.Variable = new VariableReference { Name = varName };
-        stmt.Expression = expression;
-        return stmt;
-    }
-
-    /// <summary>
-    /// Creates an ExecutionPlanBuilder and ExpressionCompiler with a variable scope accessor.
-    /// </summary>
-    private static (ExecutionPlanBuilder builder, ExpressionCompiler compiler) CreatePlanBuilderAndCompiler(
-        VariableScope scope)
-    {
-        var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
-        mockFetchXmlService
-            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
-            .Returns(TranspileResult.Simple(
-                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
-
-        var builder = new ExecutionPlanBuilder(mockFetchXmlService.Object);
-
-        var compiler = new ExpressionCompiler(
-            variableScopeAccessor: () => scope);
-
-        return (builder, compiler);
-    }
 }
