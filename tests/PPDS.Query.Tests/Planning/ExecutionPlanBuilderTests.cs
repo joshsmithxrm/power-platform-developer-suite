@@ -1007,4 +1007,18 @@ public class ExecutionPlanBuilderTests
     {
         return node.Input;
     }
+
+    // ────────────────────────────────────────────
+    //  dbo schema stripping
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_DboSchema_StrippedFromEntityName()
+    {
+        var fragment = _parser.Parse("SELECT name FROM dbo.account");
+        var result = _builder.Plan(fragment);
+
+        result.EntityLogicalName.Should().Be("account",
+            because: "dbo is the default SQL schema and should not appear in Dataverse entity names");
+    }
 }

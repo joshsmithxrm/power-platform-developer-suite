@@ -3720,17 +3720,17 @@ public sealed class ExecutionPlanBuilder
 
     private static string GetMultiPartName(SchemaObjectName schemaObject)
     {
-        var parts = new List<string>();
-        if (schemaObject.SchemaIdentifier != null)
+        var schema = schemaObject.SchemaIdentifier?.Value;
+        var baseName = schemaObject.BaseIdentifier?.Value ?? "unknown";
+
+        // Preserve meaningful schemas (e.g., "metadata.entity") but strip "dbo"
+        // which is just the default SQL Server schema and not a Dataverse concept.
+        if (schema != null && !schema.Equals("dbo", StringComparison.OrdinalIgnoreCase))
         {
-            parts.Add(schemaObject.SchemaIdentifier.Value);
-        }
-        if (schemaObject.BaseIdentifier != null)
-        {
-            parts.Add(schemaObject.BaseIdentifier.Value);
+            return $"{schema}.{baseName}";
         }
 
-        return parts.Count > 0 ? string.Join(".", parts) : "unknown";
+        return baseName;
     }
 
     private static void FlattenUnion(
