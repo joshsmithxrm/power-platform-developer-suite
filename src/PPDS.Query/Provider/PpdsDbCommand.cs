@@ -4,6 +4,7 @@ using System.Data;
 using System.Data.Common;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
@@ -26,6 +27,7 @@ public sealed class PpdsDbCommand : DbCommand
     private PpdsDbConnection? _connection;
     private readonly PpdsDbParameterCollection _parameters = new();
     private int _commandTimeout = 30;
+    private CancellationTokenSource? _activeCts;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PpdsDbCommand"/> class.
@@ -114,33 +116,28 @@ public sealed class PpdsDbCommand : DbCommand
     /// <inheritdoc />
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
     {
+        return ExecuteDbDataReaderAsync(behavior, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(
+        CommandBehavior behavior, CancellationToken cancellationToken)
+    {
         EnsureConnectionOpen();
 
-        var sql = ApplyParameters(_commandText);
-        var parser = new QueryParser();
-        var fragment = parser.Parse(sql);
+        using var timeoutCts = CreateTimeoutCts(cancellationToken);
+        var ct = timeoutCts?.Token ?? cancellationToken;
 
-        // Build execution plan
-        var fetchXmlGenerator = new FetchXmlGeneratorService();
-        var planBuilder = new ExecutionPlanBuilder(fetchXmlGenerator);
-        var options = BuildPlanOptions(sql);
+        var (planResult, executor) = BuildAndPlan();
 
-        var planResult = planBuilder.Plan(fragment, options);
-
-        // Execute the plan if we have a query executor
-        var executor = _connection!.QueryExecutor;
         if (executor != null)
         {
-            var context = new QueryPlanContext(
-                executor,
-                CancellationToken.None);
-
+            var context = new QueryPlanContext(executor, ct);
             var planExecutor = new PlanExecutor();
-            var result = planExecutor.ExecuteAsync(planResult, context).GetAwaiter().GetResult();
+            var result = await planExecutor.ExecuteAsync(planResult, context);
             return PpdsDataReader.FromQueryResult(result);
         }
 
-        // No executor: return empty reader with column metadata from plan
         var emptyResult = QueryResult.Empty(planResult.EntityLogicalName);
         return PpdsDataReader.FromQueryResult(emptyResult);
     }
@@ -148,28 +145,24 @@ public sealed class PpdsDbCommand : DbCommand
     /// <inheritdoc />
     public override int ExecuteNonQuery()
     {
+        return ExecuteNonQueryAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+    {
         EnsureConnectionOpen();
 
-        var sql = ApplyParameters(_commandText);
-        var parser = new QueryParser();
-        var fragment = parser.Parse(sql);
+        using var timeoutCts = CreateTimeoutCts(cancellationToken);
+        var ct = timeoutCts?.Token ?? cancellationToken;
 
-        var fetchXmlGenerator = new FetchXmlGeneratorService();
-        var planBuilder = new ExecutionPlanBuilder(fetchXmlGenerator);
-        var options = BuildPlanOptions(sql);
+        var (planResult, executor) = BuildAndPlan();
 
-        var planResult = planBuilder.Plan(fragment, options);
-
-        // Execute if we have an executor
-        var executor = _connection!.QueryExecutor;
         if (executor != null)
         {
-            var context = new QueryPlanContext(
-                executor,
-                CancellationToken.None);
-
+            var context = new QueryPlanContext(executor, ct);
             var planExecutor = new PlanExecutor();
-            var result = planExecutor.ExecuteAsync(planResult, context).GetAwaiter().GetResult();
+            var result = await planExecutor.ExecuteAsync(planResult, context);
             return result.Count;
         }
 
@@ -203,7 +196,8 @@ public sealed class PpdsDbCommand : DbCommand
     /// <inheritdoc />
     public override void Cancel()
     {
-        // No-op: cancellation is managed via CancellationToken in async paths
+        try { _activeCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     /// <inheritdoc />
@@ -224,6 +218,37 @@ public sealed class PpdsDbCommand : DbCommand
     // ═══════════════════════════════════════════════════════════════════
     //  Internal helpers
     // ═══════════════════════════════════════════════════════════════════
+
+    private (QueryPlanResult planResult, IQueryExecutor? executor) BuildAndPlan()
+    {
+        var sql = ApplyParameters(_commandText);
+        var parser = new QueryParser();
+        var fragment = parser.Parse(sql);
+
+        var fetchXmlGenerator = new FetchXmlGeneratorService();
+        var planBuilder = new ExecutionPlanBuilder(fetchXmlGenerator);
+        var options = BuildPlanOptions(sql);
+
+        var planResult = planBuilder.Plan(fragment, options);
+        var executor = _connection!.QueryExecutor;
+        return (planResult, executor);
+    }
+
+    private CancellationTokenSource? CreateTimeoutCts(CancellationToken cancellationToken)
+    {
+        if (_commandTimeout <= 0)
+        {
+            _activeCts = cancellationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : null;
+            return _activeCts;
+        }
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(_commandTimeout));
+        _activeCts = cts;
+        return cts;
+    }
 
     private void EnsureConnectionOpen()
     {
