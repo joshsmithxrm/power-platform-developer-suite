@@ -323,7 +323,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
 
             if (i == maxIterations - 1)
             {
-                throw new InvalidOperationException(
+                throw new QueryExecutionException(QueryErrorCode.ExecutionFailed,
                     $"WHILE loop exceeded maximum iteration count of {maxIterations}.");
             }
         }

@@ -331,11 +331,11 @@ public sealed class ExecutionPlanBuilder
 
         // Guard: GROUP BY, HAVING, and aggregate functions are not supported in client-side joins
         if (querySpec.GroupByClause?.GroupingSpecifications?.Count > 0)
-            throw new NotSupportedException("GROUP BY is not supported in client-side join queries.");
+            throw new QueryParseException("GROUP BY is not supported in client-side join queries.");
         if (querySpec.HavingClause != null)
-            throw new NotSupportedException("HAVING is not supported in client-side join queries.");
+            throw new QueryParseException("HAVING is not supported in client-side join queries.");
         if (HasAggregateSelectElements(querySpec))
-            throw new NotSupportedException("Aggregate functions are not supported in client-side join queries.");
+            throw new QueryParseException("Aggregate functions are not supported in client-side join queries.");
 
         // Recursively build the join tree (handles QualifiedJoin, UnqualifiedJoin, and NamedTableReference)
         var tableRef = fromClause.TableReferences[0];

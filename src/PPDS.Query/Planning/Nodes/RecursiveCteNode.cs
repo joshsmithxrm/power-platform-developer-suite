@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -112,7 +113,7 @@ public sealed class RecursiveCteNode : IQueryPlanNode
         // SQL Server behavior: throw when max recursion is exhausted with rows still being produced
         if (reachedMaxDepth)
         {
-            throw new InvalidOperationException(
+            throw new QueryExecutionException(QueryErrorCode.ExecutionFailed,
                 $"The maximum recursion {MaxRecursion} has been exhausted before statement completion " +
                 $"for CTE '{CteName}'.");
         }

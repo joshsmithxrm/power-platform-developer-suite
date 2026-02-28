@@ -68,7 +68,7 @@ public sealed class WhileNode : IQueryPlanNode
             }
         }
 
-        throw new InvalidOperationException(
+        throw new QueryExecutionException(QueryErrorCode.ExecutionFailed,
             $"WHILE loop exceeded maximum iteration count of {MaxIterations}.");
     }
 }

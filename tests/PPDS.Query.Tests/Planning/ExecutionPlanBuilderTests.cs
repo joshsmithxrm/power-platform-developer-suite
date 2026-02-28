@@ -1042,26 +1042,26 @@ public class ExecutionPlanBuilderTests
     // ────────────────────────────────────────────
 
     [Fact]
-    public void Plan_ClientSideJoin_GroupBy_ThrowsNotSupportedException()
+    public void Plan_ClientSideJoin_GroupBy_ThrowsQueryParseException()
     {
         var sql = "SELECT a.name, COUNT(c.contactid) FROM account a CROSS JOIN contact c GROUP BY a.name";
         var fragment = _parser.Parse(sql);
 
         var act = () => _builder.Plan(fragment);
 
-        act.Should().Throw<NotSupportedException>()
+        act.Should().Throw<QueryParseException>()
             .WithMessage("*GROUP BY*not supported*client-side*");
     }
 
     [Fact]
-    public void Plan_ClientSideJoin_AggregateFunction_ThrowsNotSupportedException()
+    public void Plan_ClientSideJoin_AggregateFunction_ThrowsQueryParseException()
     {
         var sql = "SELECT COUNT(a.accountid) FROM account a CROSS JOIN contact c";
         var fragment = _parser.Parse(sql);
 
         var act = () => _builder.Plan(fragment);
 
-        act.Should().Throw<NotSupportedException>()
+        act.Should().Throw<QueryParseException>()
             .WithMessage("*Aggregate*not supported*client-side*");
     }
 }
