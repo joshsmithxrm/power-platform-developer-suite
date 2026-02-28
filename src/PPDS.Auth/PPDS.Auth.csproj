@@ -43,6 +43,7 @@
     <PackageReference Include="Azure.Identity" />
 
     <!-- MSAL for device code and token caching -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Identity.Client" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
 
