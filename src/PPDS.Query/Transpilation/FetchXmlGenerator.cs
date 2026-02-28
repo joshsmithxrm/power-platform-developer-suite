@@ -56,7 +56,6 @@ public sealed class FetchXmlGenerator
         // Resolve the primary entity from the FROM clause
         var fromTable = ResolveFromTable(querySpec.FromClause);
         _primaryEntityName = NormalizeName(fromTable.tableName);
-        var fromAlias = fromTable.alias;
 
         // Collect joined tables for column routing
         var joins = CollectJoins(querySpec.FromClause);
@@ -588,7 +587,7 @@ public sealed class FetchXmlGenerator
                 "DAY" => "day",
                 "QUARTER" => "quarter",
                 "WEEK" => "week",
-                _ => (string?)null
+                _ => null
             };
 
             if (dategrouping is null) continue;
@@ -858,7 +857,7 @@ public sealed class FetchXmlGenerator
                 "DAY" => "day",
                 "QUARTER" => "quarter",
                 "WEEK" => "week",
-                _ => (string?)null
+                _ => null
             };
 
             if (dategrouping is null) continue;

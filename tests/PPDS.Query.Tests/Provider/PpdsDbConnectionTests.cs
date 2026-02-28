@@ -222,7 +222,7 @@ public class PpdsDbConnectionTests
     [Fact]
     public void Dispose_ClosesConnection()
     {
-        var conn = new PpdsDbConnection(ValidConnectionString);
+        using var conn = new PpdsDbConnection(ValidConnectionString);
         conn.Open();
 
         conn.Dispose();

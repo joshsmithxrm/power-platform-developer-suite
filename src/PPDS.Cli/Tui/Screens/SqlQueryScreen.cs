@@ -984,6 +984,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         dialog.Add(textView, closeButton);
         closeButton.SetFocus();
         Application.Run(dialog);
+        dialog.Dispose();
     }
 
     private void DeleteWordBackward()

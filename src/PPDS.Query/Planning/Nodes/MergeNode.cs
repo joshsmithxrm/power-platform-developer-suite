@@ -74,7 +74,7 @@ public sealed class MergeNode : IQueryPlanNode
         // For each source row, check match conditions
         // In a real implementation, the target rows would be fetched from Dataverse.
         // For now, produce a plan summary showing what WOULD be done.
-        foreach (var sourceRow in sourceRows)
+        foreach (var _ in sourceRows)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

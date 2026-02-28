@@ -68,6 +68,7 @@ public class TryCatchTests
             rows.Add(row);
         }
 
+        rows.Should().BeEmpty();
         // After TRY block (no error), @x should be 20
         scope.Get("@x").Should().Be(20);
     }
@@ -125,6 +126,7 @@ public class TryCatchTests
             rows.Add(row);
         }
 
+        rows.Should().BeEmpty();
         // After CATCH block (error occurred), @x should be -99
         scope.Get("@x").Should().Be(-99);
     }
@@ -184,6 +186,7 @@ public class TryCatchTests
             rows.Add(row);
         }
 
+        rows.Should().BeEmpty();
         // ERROR_MESSAGE() should have captured the division by zero message
         var msg = scope.Get("@msg");
         msg.Should().NotBeNull();

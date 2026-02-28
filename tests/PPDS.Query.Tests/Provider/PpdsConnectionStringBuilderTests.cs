@@ -96,6 +96,7 @@ public class PpdsConnectionStringBuilderTests
         var builder = new PpdsConnectionStringBuilder();
 
         builder.Url.Should().BeEmpty();
+        builder.AuthType.Should().BeEmpty();
         builder.ConnectionString.Should().BeEmpty();
     }
 

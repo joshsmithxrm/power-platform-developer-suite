@@ -59,7 +59,7 @@ public class IsNotDistinctFromTests
         var pred = ParsePredicate("a IS NOT DISTINCT FROM b");
         var compiled = _compiler.CompilePredicate(pred);
 
-        var row = MakeRow(("a", 42), ("b", (object?)null));
+        var row = MakeRow(("a", 42), ("b", null));
         compiled(row).Should().BeFalse();
     }
 

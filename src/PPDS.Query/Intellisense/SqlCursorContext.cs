@@ -67,7 +67,8 @@ public static class SqlCursorContext
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-            var fragment = parser.Parse(new StringReader(sql), out IList<ParseError> errors);
+            using var reader = new StringReader(sql);
+            var fragment = parser.Parse(reader, out IList<ParseError> errors);
 
             if (errors.Count == 0 && fragment is TSqlScript script)
             {
@@ -812,7 +813,8 @@ public static class SqlCursorContext
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-            var tokens = parser.GetTokenStream(new StringReader(sql), out IList<ParseError> _);
+            using var tokenReader = new StringReader(sql);
+            var tokens = parser.GetTokenStream(tokenReader, out IList<ParseError> _);
 
             if (tokens == null)
                 return Array.Empty<TSqlParserToken>();

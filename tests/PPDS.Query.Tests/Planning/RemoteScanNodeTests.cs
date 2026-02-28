@@ -224,7 +224,8 @@ public class RemoteScanNodeTests
         // Act
         var rows = await TestHelpers.CollectRowsAsync(node, context);
 
-        // Assert: remote was called, context was NOT called
+        // Assert: empty result, remote was called, context was NOT called
+        rows.Should().BeEmpty();
         remoteExecutor.Verify(
             e => e.ExecuteFetchXmlAsync(
                 It.IsAny<string>(),

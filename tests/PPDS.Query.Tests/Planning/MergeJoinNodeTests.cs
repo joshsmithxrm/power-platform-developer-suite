@@ -227,10 +227,10 @@ public class MergeJoinNodeTests
         // MergeJoin requires sorted input. NULLs sort last.
         var left = TestSourceNode.Create("a",
             TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")),
-            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")));
+            TestSourceNode.MakeRow("a", ("id", null), ("name", "NullLeft")));
         var right = TestSourceNode.Create("b",
             TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")),
-            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")));
+            TestSourceNode.MakeRow("b", ("id", null), ("val", "NullRight")));
 
         var join = new MergeJoinNode(left, right, "id", "id", JoinType.Inner);
         var rows = await TestHelpers.CollectRowsAsync(join);
@@ -245,10 +245,10 @@ public class MergeJoinNodeTests
     {
         var left = TestSourceNode.Create("a",
             TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")),
-            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")));
+            TestSourceNode.MakeRow("a", ("id", null), ("name", "NullLeft")));
         var right = TestSourceNode.Create("b",
             TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")),
-            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")));
+            TestSourceNode.MakeRow("b", ("id", null), ("val", "NullRight")));
 
         var join = new MergeJoinNode(left, right, "id", "id", JoinType.Left);
         var rows = await TestHelpers.CollectRowsAsync(join);

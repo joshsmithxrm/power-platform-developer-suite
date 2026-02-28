@@ -343,7 +343,7 @@ public sealed partial class ExecutionPlanBuilder
                     BooleanComparisonType.GreaterThanOrEqualTo => "ge",
                     BooleanComparisonType.LessThan => "lt",
                     BooleanComparisonType.LessThanOrEqualTo => "le",
-                    _ => (string?)null
+                    _ => null
                 };
 
                 if (op == null) return false;

@@ -92,6 +92,7 @@ public class PpdsDbParameterCollectionTests
     public void Contains_ByName_ReturnsFalseForMissing()
     {
         var collection = new PpdsDbParameterCollection();
+        collection.AddWithValue("@other", "value");
 
         collection.Contains("@name").Should().BeFalse();
     }
@@ -114,6 +115,7 @@ public class PpdsDbParameterCollectionTests
     public void IndexOf_ByName_NotFound_ReturnsNegativeOne()
     {
         var collection = new PpdsDbParameterCollection();
+        collection.AddWithValue("@other", "value");
 
         collection.IndexOf("@missing").Should().Be(-1);
     }
@@ -122,7 +124,7 @@ public class PpdsDbParameterCollectionTests
     public void IndexOf_ByObject_ReturnsCorrectIndex()
     {
         var collection = new PpdsDbParameterCollection();
-        var param1 = collection.AddWithValue("@first", 1);
+        collection.AddWithValue("@first", 1);
         var param2 = collection.AddWithValue("@second", 2);
 
         collection.IndexOf((object)param2).Should().Be(1);

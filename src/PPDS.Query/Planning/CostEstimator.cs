@@ -116,7 +116,7 @@ public sealed class CostEstimator
 
         if (leftCard < 0 || rightCard < 0) return -1;
 
-        return Math.Max(1, (long)(leftCard * rightCard * DefaultJoinSelectivity));
+        return Math.Max(1, (long)((double)leftCard * rightCard * DefaultJoinSelectivity));
     }
 
     private long EstimateParallel(ParallelPartitionNode parallel, CostContext context)

@@ -144,7 +144,8 @@ public sealed class SqlSourceTokenizer : ISourceTokenizer
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
             IList<ParseError> errors;
-            var scriptDomTokens = parser.GetTokenStream(new StringReader(text), out errors);
+            using var reader = new StringReader(text);
+            var scriptDomTokens = parser.GetTokenStream(reader, out errors);
 
             if (scriptDomTokens == null || scriptDomTokens.Count == 0)
                 return new[] { new SourceToken(0, text.Length, SourceTokenType.Error) };

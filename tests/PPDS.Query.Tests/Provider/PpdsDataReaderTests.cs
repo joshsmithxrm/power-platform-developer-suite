@@ -33,7 +33,7 @@ public class PpdsDataReaderTests
             {
                 ["accountid"] = QueryValue.Simple(Guid.Parse($"00000000-0000-0000-0000-{i:D12}")),
                 ["name"] = QueryValue.Simple($"Account {i}"),
-                ["revenue"] = QueryValue.Simple((decimal)(1000.0 + i * 100)),
+                ["revenue"] = QueryValue.Simple(1000.0m + i * 100m),
                 ["employeecount"] = QueryValue.Simple(50 + i),
                 ["isactive"] = QueryValue.Simple(i % 2 == 0),
                 ["createdon"] = QueryValue.Simple(new DateTime(2024, 1, 1).AddDays(i))

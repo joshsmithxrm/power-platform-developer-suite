@@ -250,10 +250,10 @@ public class HashJoinNodeTests
     public async Task InnerJoin_NullKeys_DoNotMatch()
     {
         var left = TestSourceNode.Create("a",
-            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")),
+            TestSourceNode.MakeRow("a", ("id", null), ("name", "NullLeft")),
             TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")));
         var right = TestSourceNode.Create("b",
-            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")),
+            TestSourceNode.MakeRow("b", ("id", null), ("val", "NullRight")),
             TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")));
 
         var join = new HashJoinNode(left, right, "id", "id", JoinType.Inner);
@@ -268,10 +268,10 @@ public class HashJoinNodeTests
     public async Task LeftJoin_NullKeys_EmitsUnmatchedLeft()
     {
         var left = TestSourceNode.Create("a",
-            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")),
+            TestSourceNode.MakeRow("a", ("id", null), ("name", "NullLeft")),
             TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")));
         var right = TestSourceNode.Create("b",
-            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")),
+            TestSourceNode.MakeRow("b", ("id", null), ("val", "NullRight")),
             TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")));
 
         var join = new HashJoinNode(left, right, "id", "id", JoinType.Left);

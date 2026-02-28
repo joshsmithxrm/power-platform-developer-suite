@@ -63,7 +63,8 @@ public sealed class SqlValidator
 
         try
         {
-            fragment = _parser.Parse(new StringReader(sql), out parseErrors);
+            using var reader = new StringReader(sql);
+            fragment = _parser.Parse(reader, out parseErrors);
         }
         catch (Exception ex)
         {
@@ -250,7 +251,6 @@ public sealed class SqlValidator
                 var tableName = GetTableName(namedTable);
                 if (tableName != null)
                 {
-                    var alias = namedTable.Alias?.Value ?? tableName;
                     var isValid = await ValidateEntityNameAsync(tableName, namedTable, sql, diagnostics, ct);
                     if (isValid)
                     {
@@ -381,7 +381,7 @@ public sealed class SqlValidator
 
         switch (expression)
         {
-            case ColumnReferenceExpression colRef:
+            case ColumnReferenceExpression:
             {
                 // Queue async validation (we fire-and-forget here since the visitor
                 // pattern in ScriptDom doesn't lend itself to async easily).

@@ -309,7 +309,6 @@ public sealed partial class ExecutionPlanBuilder
         {
             // Constant-value anchor (e.g., SELECT 1 AS level, 'root' AS name).
             // Build a ProjectNode over an empty CteScanNode to produce the constant row.
-            var emptyInput = new CteScanNode($"{cteName}_anchor", new List<QueryRow>());
             var spec = (QuerySpecification)anchorExpr;
             var projections = new List<ProjectColumn>();
 
@@ -328,7 +327,7 @@ public sealed partial class ExecutionPlanBuilder
             var seedRow = new QueryRow(
                 new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase),
                 cteName);
-            emptyInput = new CteScanNode($"{cteName}_anchor", new List<QueryRow> { seedRow });
+            var emptyInput = new CteScanNode($"{cteName}_anchor", new List<QueryRow> { seedRow });
 
             anchorNode = projections.Count > 0
                 ? new ProjectNode(emptyInput, projections)

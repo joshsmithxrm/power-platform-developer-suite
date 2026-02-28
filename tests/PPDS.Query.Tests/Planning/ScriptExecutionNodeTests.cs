@@ -131,6 +131,7 @@ public class ScriptExecutionNodeTests
             rows.Add(row);
         }
 
+        Assert.Empty(rows);
         // The THEN block should have declared @y with value 99
         Assert.Equal(99, scope.Get("@y"));
     }
@@ -163,6 +164,7 @@ public class ScriptExecutionNodeTests
             rows.Add(row);
         }
 
+        Assert.Empty(rows);
         // The ELSE block should have declared @y with value -1
         Assert.Equal(-1, scope.Get("@y"));
     }
@@ -397,6 +399,7 @@ public class ScriptExecutionNodeTests
             rows.Add(row);
         }
 
+        Assert.Empty(rows);
         Assert.Equal(3L, Convert.ToInt64(scope.Get("@i")));
     }
 
@@ -457,6 +460,7 @@ public class ScriptExecutionNodeTests
             rows.Add(row);
         }
 
+        Assert.Empty(rows);
         Assert.Equal(30L, Convert.ToInt64(scope.Get("@sum")));
     }
 

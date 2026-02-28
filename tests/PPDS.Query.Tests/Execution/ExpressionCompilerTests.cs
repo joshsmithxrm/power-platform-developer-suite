@@ -383,7 +383,7 @@ public class ExpressionCompilerTests
     {
         var expr = ParseExpression("ISNULL(name, 'Unknown')");
         var compiled = _compiler.CompileScalar(expr);
-        compiled(MakeRow(("name", (object?)null))).Should().Be("Unknown");
+        compiled(MakeRow(("name", null))).Should().Be("Unknown");
     }
 
     [Fact]
@@ -408,8 +408,8 @@ public class ExpressionCompilerTests
         var expr = ParseExpression("COALESCE(phone1, phone2, 'N/A')");
         var compiled = _compiler.CompileScalar(expr);
 
-        compiled(MakeRow(("phone1", (object?)null), ("phone2", "555-1234"))).Should().Be("555-1234");
-        compiled(MakeRow(("phone1", (object?)null), ("phone2", (object?)null))).Should().Be("N/A");
+        compiled(MakeRow(("phone1", null), ("phone2", "555-1234"))).Should().Be("555-1234");
+        compiled(MakeRow(("phone1", null), ("phone2", null))).Should().Be("N/A");
         compiled(MakeRow(("phone1", "555-0000"), ("phone2", "555-1234"))).Should().Be("555-0000");
     }
 
@@ -466,7 +466,7 @@ public class ExpressionCompilerTests
 
         compiled(MakeRow(("name", "Contoso"))).Should().Be("Contoso");
         compiled(MakeRow(("name", ""))).Should().Be("Unnamed");
-        compiled(MakeRow(("name", (object?)null))).Should().Be("Unnamed");
+        compiled(MakeRow(("name", null))).Should().Be("Unnamed");
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -537,7 +537,7 @@ public class ExpressionCompilerTests
         var pred = ParsePredicate("name IS NULL");
         var compiled = _compiler.CompilePredicate(pred);
 
-        var rowWithNull = MakeRow(("name", (object?)null));
+        var rowWithNull = MakeRow(("name", null));
         var rowWithValue = MakeRow(("name", "Contoso"));
 
         compiled(rowWithNull).Should().BeTrue();
@@ -603,7 +603,7 @@ public class ExpressionCompilerTests
         var pred = ParsePredicate("name LIKE '%test%'");
         var compiled = _compiler.CompilePredicate(pred);
 
-        var nullRow = MakeRow(("name", (object?)null));
+        var nullRow = MakeRow(("name", null));
         compiled(nullRow).Should().BeFalse();
     }
 
@@ -670,7 +670,7 @@ public class ExpressionCompilerTests
         var pred = ParsePredicate("status IN (1, 2, 3)");
         var compiled = _compiler.CompilePredicate(pred);
 
-        var nullRow = MakeRow(("status", (object?)null));
+        var nullRow = MakeRow(("status", null));
         compiled(nullRow).Should().BeFalse();
     }
 
@@ -740,7 +740,7 @@ public class ExpressionCompilerTests
 
         var row1 = MakeRow(("status", 1), ("name", "Test"));
         var row2 = MakeRow(("status", 3), ("name", "Test"));
-        var row3 = MakeRow(("status", 1), ("name", (object?)null));
+        var row3 = MakeRow(("status", 1), ("name", null));
 
         compiled(row1).Should().BeTrue();
         compiled(row2).Should().BeFalse();
@@ -1065,7 +1065,7 @@ public class ExpressionCompilerTests
         var result = ExpressionCompiler.ParseNumber(input);
 
         // For decimals, use approximate comparison
-        if (expected is double d)
+        if (expected is double)
             result.Should().Be(decimal.Parse(input, CultureInfo.InvariantCulture));
         else
             result.Should().Be(expected);
@@ -1257,7 +1257,7 @@ public class ExpressionCompilerTests
 
         var row1 = MakeRow(("status", 1), ("name", "Active"));
         var row2 = MakeRow(("status", 3), ("name", "Active"));
-        var row3 = MakeRow(("status", 1), ("name", (object?)null));
+        var row3 = MakeRow(("status", 1), ("name", null));
 
         compiled(row1).Should().BeTrue();
         compiled(row2).Should().BeFalse();
@@ -1417,25 +1417,22 @@ public class ExpressionCompilerTests
     [Fact]
     public void GetAggregateSignature_CountStar()
     {
-        var funcCall = ParseExpression("COUNT(*)") as FunctionCall;
-        funcCall.Should().NotBeNull();
-        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("COUNT(*)");
+        var funcCall = (FunctionCall)ParseExpression("COUNT(*)");
+        ExpressionCompiler.GetAggregateSignature(funcCall).Should().Be("COUNT(*)");
     }
 
     [Fact]
     public void GetAggregateSignature_SumColumn()
     {
-        var funcCall = ParseExpression("SUM(revenue)") as FunctionCall;
-        funcCall.Should().NotBeNull();
-        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("SUM(REVENUE)");
+        var funcCall = (FunctionCall)ParseExpression("SUM(revenue)");
+        ExpressionCompiler.GetAggregateSignature(funcCall).Should().Be("SUM(REVENUE)");
     }
 
     [Fact]
     public void GetAggregateSignature_AvgDistinctColumn()
     {
-        var funcCall = ParseExpression("AVG(DISTINCT price)") as FunctionCall;
-        funcCall.Should().NotBeNull();
-        ExpressionCompiler.GetAggregateSignature(funcCall!).Should().Be("AVG(DISTINCT PRICE)");
+        var funcCall = (FunctionCall)ParseExpression("AVG(DISTINCT price)");
+        ExpressionCompiler.GetAggregateSignature(funcCall).Should().Be("AVG(DISTINCT PRICE)");
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -1498,7 +1495,7 @@ public class ExpressionCompilerTests
 
         compiled(MakeRow(("revenue", 3000))).Should().BeTrue();
         compiled(MakeRow(("revenue", 10000))).Should().BeFalse();
-        compiled(MakeRow(("revenue", (object?)null))).Should().BeFalse();
+        compiled(MakeRow(("revenue", null))).Should().BeFalse();
     }
 
     [Fact]
@@ -1516,6 +1513,6 @@ public class ExpressionCompilerTests
     {
         var pred = ParsePredicate("revenue NOT BETWEEN 1000 AND 5000");
         var compiled = _compiler.CompilePredicate(pred);
-        compiled(MakeRow(("revenue", (object?)null))).Should().BeFalse();
+        compiled(MakeRow(("revenue", null))).Should().BeFalse();
     }
 }

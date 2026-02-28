@@ -244,10 +244,9 @@ public class PpdsDbCommandTests
     public void SetDbConnection_WrongType_ThrowsArgumentException()
     {
         var cmd = new PpdsDbCommand();
-        IDbCommand iCmd = cmd;
 
         // System.Data.Common.DbCommand.Connection setter validates type
-        var act = () => ((System.Data.Common.DbCommand)cmd).Connection = null;
+        var act = () => cmd.Connection = null;
 
         act.Should().NotThrow(); // null is acceptable
     }

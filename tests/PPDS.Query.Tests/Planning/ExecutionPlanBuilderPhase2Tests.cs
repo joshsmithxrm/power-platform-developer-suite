@@ -214,8 +214,10 @@ public class ExecutionPlanBuilderPhase2Tests
     [Fact]
     public void Plan_WhileStatement_Succeeds()
     {
+        // Verify multi-statement batch parses without error
         var fragment = _parser.Parse(
             "DECLARE @x INT = 0\nWHILE @x < 10 BEGIN SET @x = @x + 1 END");
+        fragment.Should().NotBeNull();
 
         // Multi-statement, so we need to handle the batch
         // The first statement will be DECLARE, not WHILE

@@ -275,7 +275,6 @@ public class CursorNodeTests
     public async Task FullCursorLifecycle_DeclareOpenFetchCloseDeallocate()
     {
         var session = new SessionContext();
-        var context = TestHelpers.CreateTestContext();
 
         // DECLARE
         var queryNode = TestSourceNode.Create("account",
