@@ -216,4 +216,46 @@ public class MergeJoinNodeTests
         var unmatchedRight = rows.Single(r => "Z".Equals(r.Values["val"].Value));
         unmatchedRight.Values["name"].Value.Should().BeNull();
     }
+
+    // ────────────────────────────────────────────
+    //  NULL key semantics
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task InnerJoin_NullKeys_DoNotMatch()
+    {
+        // MergeJoin requires sorted input. NULLs sort last.
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")),
+            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")),
+            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")));
+
+        var join = new MergeJoinNode(left, right, "id", "id", JoinType.Inner);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        // NULL=NULL must NOT match per SQL semantics, only id=1 matches
+        rows.Should().HaveCount(1);
+        rows[0].Values["name"].Value.Should().Be("One");
+    }
+
+    [Fact]
+    public async Task LeftJoin_NullKeys_EmitsUnmatchedLeft()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")),
+            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")),
+            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")));
+
+        var join = new MergeJoinNode(left, right, "id", "id", JoinType.Left);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        // NULL left row should be emitted as unmatched
+        rows.Should().HaveCount(2);
+        var nullRow = rows.Single(r => "NullLeft".Equals(r.Values["name"].Value));
+        nullRow.Values["val"].Value.Should().BeNull();
+    }
 }

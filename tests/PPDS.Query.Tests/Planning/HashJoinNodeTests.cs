@@ -241,4 +241,45 @@ public class HashJoinNodeTests
         var unmatchedRight = rows.Single(r => "Z".Equals(r.Values["val"].Value));
         unmatchedRight.Values["name"].Value.Should().BeNull();
     }
+
+    // ────────────────────────────────────────────
+    //  NULL key semantics
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task InnerJoin_NullKeys_DoNotMatch()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")),
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")),
+            TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")));
+
+        var join = new HashJoinNode(left, right, "id", "id", JoinType.Inner);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        // NULL=NULL must NOT match per SQL semantics, only id=1 matches
+        rows.Should().HaveCount(1);
+        rows[0].Values["name"].Value.Should().Be("One");
+    }
+
+    [Fact]
+    public async Task LeftJoin_NullKeys_EmitsUnmatchedLeft()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", (object?)null), ("name", "NullLeft")),
+            TestSourceNode.MakeRow("a", ("id", 1), ("name", "One")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("id", (object?)null), ("val", "NullRight")),
+            TestSourceNode.MakeRow("b", ("id", 1), ("val", "OneR")));
+
+        var join = new HashJoinNode(left, right, "id", "id", JoinType.Left);
+        var rows = await TestHelpers.CollectRowsAsync(join);
+
+        // NULL left row should be emitted as unmatched (with null right-side values)
+        rows.Should().HaveCount(2);
+        var nullRow = rows.Single(r => "NullLeft".Equals(r.Values["name"].Value));
+        nullRow.Values["val"].Value.Should().BeNull();
+    }
 }

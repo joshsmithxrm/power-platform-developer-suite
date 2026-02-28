@@ -227,7 +227,6 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
 
     private static bool KeysMatch(object? left, object? right)
     {
-        if (left is null && right is null) return true;
         if (left is null || right is null) return false;
 
         // Numeric comparison

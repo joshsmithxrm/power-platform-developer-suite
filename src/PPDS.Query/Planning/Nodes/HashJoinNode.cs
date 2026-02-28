@@ -72,6 +72,7 @@ public sealed class HashJoinNode : IQueryPlanNode
     {
         // Phase 1: Build hash table from the right (build) side
         var hashTable = new Dictionary<string, List<(QueryRow row, int index)>>(StringComparer.OrdinalIgnoreCase);
+        var nullKeyBuildRows = new List<(QueryRow row, int index)>();
         QueryRow? rightTemplate = null;
         var buildRowCount = 0;
 
@@ -81,6 +82,14 @@ public sealed class HashJoinNode : IQueryPlanNode
             rightTemplate ??= row;
 
             var key = NormalizeKey(GetColumnValue(row, RightKeyColumn));
+
+            if (key is null)
+            {
+                // NULL keys never match — track separately for RIGHT/FULL OUTER emission
+                nullKeyBuildRows.Add((row, buildRowCount));
+                buildRowCount++;
+                continue;
+            }
 
             if (!hashTable.TryGetValue(key, out var bucket))
             {
@@ -110,7 +119,8 @@ public sealed class HashJoinNode : IQueryPlanNode
             var probeKey = NormalizeKey(GetColumnValue(leftRow, LeftKeyColumn));
             var matched = false;
 
-            if (hashTable.TryGetValue(probeKey, out var bucket))
+            // NULL probe keys never match (SQL NULL semantics)
+            if (probeKey != null && hashTable.TryGetValue(probeKey, out var bucket))
             {
                 matched = true;
                 foreach (var (buildRow, buildIndex) in bucket)
@@ -140,6 +150,12 @@ public sealed class HashJoinNode : IQueryPlanNode
                     }
                 }
             }
+
+            // Emit null-keyed build rows (never matched)
+            foreach (var (buildRow, _) in nullKeyBuildRows)
+            {
+                yield return NestedLoopJoinNode.CombineWithNullsReversed(leftTemplate, buildRow);
+            }
         }
     }
 
@@ -165,9 +181,9 @@ public sealed class HashJoinNode : IQueryPlanNode
     /// <summary>
     /// Normalizes a key value to a consistent string representation for hashing.
     /// </summary>
-    private static string NormalizeKey(object? value)
+    private static string? NormalizeKey(object? value)
     {
-        if (value is null) return "\x00NULL\x00";
+        if (value is null) return null;
 
         if (value is Guid g) return g.ToString("D");
 
@@ -177,8 +193,7 @@ public sealed class HashJoinNode : IQueryPlanNode
                 .ToString(CultureInfo.InvariantCulture);
         }
 
-        return Convert.ToString(value, CultureInfo.InvariantCulture)?.ToUpperInvariant()
-            ?? "\x00NULL\x00";
+        return Convert.ToString(value, CultureInfo.InvariantCulture)?.ToUpperInvariant();
     }
 
     private static bool IsNumeric(object value)

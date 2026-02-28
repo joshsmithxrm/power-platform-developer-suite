@@ -187,7 +187,7 @@ public sealed class MergeJoinNode : IQueryPlanNode
     /// </summary>
     private static int CompareKeys(object? a, object? b)
     {
-        if (a is null && b is null) return 0;
+        if (a is null && b is null) return -1; // NULLs never match per SQL semantics
         if (a is null) return 1;
         if (b is null) return -1;
 
