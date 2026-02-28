@@ -252,6 +252,22 @@ public class PpdsDbCommandTests
         act.Should().NotThrow(); // null is acceptable
     }
 
+    // ────────────────────────────────────────────
+    //  FetchXML generation (not NullFetchXmlGeneratorService)
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void ExecuteReader_UsesFetchXmlGeneratorService_NotNull()
+    {
+        // The NullFetchXmlGeneratorService inner class should not exist —
+        // PpdsDbCommand must use the real FetchXmlGeneratorService.
+        var nullType = typeof(PpdsDbCommand).GetNestedType(
+            "NullFetchXmlGeneratorService", BindingFlags.NonPublic);
+
+        nullType.Should().BeNull(
+            because: "PpdsDbCommand should use FetchXmlGeneratorService, not the null stub");
+    }
+
     private static string InvokeApplyParameters(PpdsDbCommand command, string sql)
     {
         var method = typeof(PpdsDbCommand).GetMethod(

@@ -11,6 +11,7 @@ using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Parsing;
 using PPDS.Query.Planning;
+using PPDS.Query.Transpilation;
 
 namespace PPDS.Query.Provider;
 
@@ -120,7 +121,7 @@ public sealed class PpdsDbCommand : DbCommand
         var fragment = parser.Parse(sql);
 
         // Build execution plan
-        var fetchXmlGenerator = new NullFetchXmlGeneratorService();
+        var fetchXmlGenerator = new FetchXmlGeneratorService();
         var planBuilder = new ExecutionPlanBuilder(fetchXmlGenerator);
         var options = BuildPlanOptions(sql);
 
@@ -153,7 +154,7 @@ public sealed class PpdsDbCommand : DbCommand
         var parser = new QueryParser();
         var fragment = parser.Parse(sql);
 
-        var fetchXmlGenerator = new NullFetchXmlGeneratorService();
+        var fetchXmlGenerator = new FetchXmlGeneratorService();
         var planBuilder = new ExecutionPlanBuilder(fetchXmlGenerator);
         var options = BuildPlanOptions(sql);
 
@@ -461,22 +462,6 @@ public sealed class PpdsDbCommand : DbCommand
             PoolCapacity = _connection?.MaxDegreeOfParallelism ?? 5
         };
         return options;
-    }
-
-    /// <summary>
-    /// A no-op FetchXML generator for cases where we only need to parse and build plans
-    /// without actually generating FetchXML (used when no executor is available).
-    /// </summary>
-    private sealed class NullFetchXmlGeneratorService : IFetchXmlGeneratorService
-    {
-        public TranspileResult Generate(TSqlFragment statement)
-        {
-            return new TranspileResult
-            {
-                FetchXml = "<fetch><entity name='unknown'/></fetch>",
-                VirtualColumns = new Dictionary<string, VirtualColumnInfo>()
-            };
-        }
     }
 
 }
