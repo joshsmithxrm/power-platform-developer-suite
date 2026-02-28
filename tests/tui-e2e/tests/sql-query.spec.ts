@@ -22,8 +22,8 @@ async function navigateToSqlQuery(terminal: any) {
   await expect(terminal.getByText('SQL Query', { full: true })).toBeVisible();
   terminal.write('\r');  // Enter to select
 
-  // Wait for SQL Query screen to load (title includes Ctrl+Space, Alt+arrows, F6 hints)
-  await expect(terminal.getByText('Ctrl+Enter to execute')).toBeVisible();
+  // Wait for SQL Query screen to load (title includes F5, Ctrl+Space, Alt+arrows, F6 hints)
+  await expect(terminal.getByText('F5 to execute')).toBeVisible();
 }
 
 test.describe('SQL Query Screen', () => {
@@ -55,7 +55,7 @@ test.describe('SQL Query Screen', () => {
     terminal.write('\x1b');  // Escape
 
     // Verify we're still on SQL Query screen
-    await expect(terminal.getByText('Ctrl+Enter to execute')).toBeVisible();
+    await expect(terminal.getByText('F5 to execute')).toBeVisible();
   });
 
   test('Ctrl+E without results shows error message', async ({ terminal }) => {
