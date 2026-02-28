@@ -28,7 +28,7 @@ jobs:
         fetch-depth: 0
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: |
           8.0.x
@@ -60,7 +60,7 @@ jobs:
         PPDS_FORCE_TUI: '1'
 
     - name: Upload test results
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: tui-e2e-results
@@ -70,7 +70,7 @@ jobs:
         retention-days: 7
 
     - name: Upload snapshots on failure
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: failure()
       with:
         name: tui-e2e-snapshot-diff
