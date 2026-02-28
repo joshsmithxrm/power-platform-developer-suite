@@ -282,4 +282,21 @@ public class HashJoinNodeTests
         var nullRow = rows.Single(r => "NullLeft".Equals(r.Values["name"].Value));
         nullRow.Values["val"].Value.Should().BeNull();
     }
+
+    [Fact]
+    public async Task ExecuteAsync_MultiColumnKey_InnerJoin_MatchesCorrectly()
+    {
+        var left = TestSourceNode.Create("a",
+            TestSourceNode.MakeRow("a", ("id", 1), ("type", "A"), ("name", "x")),
+            TestSourceNode.MakeRow("a", ("id", 1), ("type", "B"), ("name", "y")));
+        var right = TestSourceNode.Create("b",
+            TestSourceNode.MakeRow("b", ("id", 1), ("type", "A"), ("val", 100)));
+
+        var join = new HashJoinNode(left, right,
+            new[] { "id", "type" }, new[] { "id", "type" }, JoinType.Inner);
+
+        var rows = await TestHelpers.CollectRowsAsync(join);
+        rows.Should().ContainSingle();
+        rows[0].Values["name"].Value.Should().Be("x");
+    }
 }

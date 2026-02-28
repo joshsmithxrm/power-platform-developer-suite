@@ -1029,8 +1029,10 @@ public sealed class ExecutionPlanBuilder
         var leftResult = PlanTableReference(join.FirstTableReference, options);
         var rightResult = PlanTableReference(join.SecondTableReference, options);
 
-        // Extract join columns from ON condition
-        var (leftCol, rightCol) = ExtractJoinColumns(join.SearchCondition);
+        // Extract join columns from ON condition (supports multi-column keys)
+        var joinColumns = ExtractJoinColumns(join.SearchCondition);
+        var leftCols = joinColumns.Select(c => c.leftCol).ToArray();
+        var rightCols = joinColumns.Select(c => c.rightCol).ToArray();
 
         // Map ScriptDom join type to our JoinType
         var joinType = join.QualifiedJoinType switch
@@ -1046,14 +1048,14 @@ public sealed class ExecutionPlanBuilder
         if (joinType == JoinType.Right)
         {
             (leftResult, rightResult) = (rightResult, leftResult);
-            (leftCol, rightCol) = (rightCol, leftCol);
+            (leftCols, rightCols) = (rightCols, leftCols);
             joinType = JoinType.Left;
         }
 
         // Use HashJoin for best general-purpose performance on unsorted data
         var joinNode = new HashJoinNode(
             leftResult.node, rightResult.node,
-            leftCol, rightCol, joinType);
+            leftCols, rightCols, joinType);
 
         return (joinNode, leftResult.entityName);
     }
@@ -1277,19 +1279,37 @@ public sealed class ExecutionPlanBuilder
         return false;
     }
 
-    private static (string leftCol, string rightCol) ExtractJoinColumns(BooleanExpression searchCondition)
+    private static IReadOnlyList<(string leftCol, string rightCol)> ExtractJoinColumns(BooleanExpression searchCondition)
     {
-        if (searchCondition is BooleanComparisonExpression comp
+        var result = new List<(string leftCol, string rightCol)>();
+        ExtractJoinColumnsRecursive(searchCondition, result);
+        if (result.Count == 0)
+            throw new QueryParseException("Client-side JOIN ON condition must be equality comparisons (e.g., a.id = b.id).");
+        return result;
+    }
+
+    private static void ExtractJoinColumnsRecursive(BooleanExpression expr, List<(string leftCol, string rightCol)> result)
+    {
+        if (expr is BooleanComparisonExpression comp
             && comp.ComparisonType == BooleanComparisonType.Equals
             && comp.FirstExpression is ColumnReferenceExpression leftRef
             && comp.SecondExpression is ColumnReferenceExpression rightRef)
         {
             var leftCol = leftRef.MultiPartIdentifier.Identifiers[leftRef.MultiPartIdentifier.Identifiers.Count - 1].Value;
             var rightCol = rightRef.MultiPartIdentifier.Identifiers[rightRef.MultiPartIdentifier.Identifiers.Count - 1].Value;
-            return (leftCol, rightCol);
+            result.Add((leftCol, rightCol));
+            return;
         }
 
-        throw new QueryParseException("Client-side JOIN ON condition must be a simple equality comparison (e.g., a.id = b.id).");
+        if (expr is BooleanBinaryExpression bin
+            && bin.BinaryExpressionType == BooleanBinaryExpressionType.And)
+        {
+            ExtractJoinColumnsRecursive(bin.FirstExpression, result);
+            ExtractJoinColumnsRecursive(bin.SecondExpression, result);
+            return;
+        }
+
+        throw new QueryParseException("Client-side JOIN ON condition must be equality comparisons joined with AND (e.g., a.id = b.id AND a.type = b.type).");
     }
 
     // ═══════════════════════════════════════════════════════════════════

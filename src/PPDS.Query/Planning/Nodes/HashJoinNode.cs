@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
@@ -18,17 +19,25 @@ public sealed class HashJoinNode : IQueryPlanNode
     private readonly IQueryPlanNode _left;
     private readonly IQueryPlanNode _right;
 
-    /// <summary>The left (probe) side join key column name.</summary>
-    public string LeftKeyColumn { get; }
+    /// <summary>The left (probe) side join key column names.</summary>
+    public IReadOnlyList<string> LeftKeyColumns { get; }
 
-    /// <summary>The right (build) side join key column name.</summary>
-    public string RightKeyColumn { get; }
+    /// <summary>The right (build) side join key column names.</summary>
+    public IReadOnlyList<string> RightKeyColumns { get; }
 
     /// <summary>The join type (Inner or Left).</summary>
     public JoinType JoinType { get; }
 
     /// <inheritdoc />
-    public string Description => $"HashJoin: {JoinType} ON {LeftKeyColumn} = {RightKeyColumn}";
+    public string Description
+    {
+        get
+        {
+            var pairs = string.Join(" AND ",
+                LeftKeyColumns.Zip(RightKeyColumns, (l, r) => $"{l} = {r}"));
+            return $"HashJoin: {JoinType} ON {pairs}";
+        }
+    }
 
     /// <inheritdoc />
     public long EstimatedRows
@@ -45,23 +54,31 @@ public sealed class HashJoinNode : IQueryPlanNode
     /// <inheritdoc />
     public IReadOnlyList<IQueryPlanNode> Children => new[] { _left, _right };
 
-    /// <summary>Initializes a new instance of the <see cref="HashJoinNode"/> class.</summary>
-    /// <param name="left">The probe-side input node (streamed).</param>
-    /// <param name="right">The build-side input node (materialized into hash table).</param>
-    /// <param name="leftKeyColumn">Column name on the left side for the equijoin condition.</param>
-    /// <param name="rightKeyColumn">Column name on the right side for the equijoin condition.</param>
-    /// <param name="joinType">The join type (Inner or Left).</param>
+    /// <summary>Initializes a new instance for a single-column join key.</summary>
     public HashJoinNode(
         IQueryPlanNode left,
         IQueryPlanNode right,
         string leftKeyColumn,
         string rightKeyColumn,
         JoinType joinType = JoinType.Inner)
+        : this(left, right, new[] { leftKeyColumn }, new[] { rightKeyColumn }, joinType)
+    {
+    }
+
+    /// <summary>Initializes a new instance for multi-column join keys.</summary>
+    public HashJoinNode(
+        IQueryPlanNode left,
+        IQueryPlanNode right,
+        IReadOnlyList<string> leftKeyColumns,
+        IReadOnlyList<string> rightKeyColumns,
+        JoinType joinType = JoinType.Inner)
     {
         _left = left ?? throw new ArgumentNullException(nameof(left));
         _right = right ?? throw new ArgumentNullException(nameof(right));
-        LeftKeyColumn = leftKeyColumn ?? throw new ArgumentNullException(nameof(leftKeyColumn));
-        RightKeyColumn = rightKeyColumn ?? throw new ArgumentNullException(nameof(rightKeyColumn));
+        LeftKeyColumns = leftKeyColumns ?? throw new ArgumentNullException(nameof(leftKeyColumns));
+        RightKeyColumns = rightKeyColumns ?? throw new ArgumentNullException(nameof(rightKeyColumns));
+        if (leftKeyColumns.Count != rightKeyColumns.Count || leftKeyColumns.Count == 0)
+            throw new ArgumentException("Left and right key column lists must have the same non-zero length.");
         JoinType = joinType;
     }
 
@@ -81,11 +98,10 @@ public sealed class HashJoinNode : IQueryPlanNode
             cancellationToken.ThrowIfCancellationRequested();
             rightTemplate ??= row;
 
-            var key = NormalizeKey(QueryValueHelper.GetColumnValue(row, RightKeyColumn));
+            var key = BuildCompositeKey(row, RightKeyColumns);
 
             if (key is null)
             {
-                // NULL keys never match — track separately for RIGHT/FULL OUTER emission
                 nullKeyBuildRows.Add((row, buildRowCount));
                 buildRowCount++;
                 continue;
@@ -103,7 +119,6 @@ public sealed class HashJoinNode : IQueryPlanNode
         if (buildRowCount == 0 && JoinType == JoinType.Inner)
             yield break;
 
-        // Track matched build-side rows (for Right and FullOuter)
         var buildMatched = (JoinType is JoinType.Right or JoinType.FullOuter)
             ? new bool[buildRowCount]
             : null;
@@ -116,10 +131,9 @@ public sealed class HashJoinNode : IQueryPlanNode
             cancellationToken.ThrowIfCancellationRequested();
             leftTemplate ??= leftRow;
 
-            var probeKey = NormalizeKey(QueryValueHelper.GetColumnValue(leftRow, LeftKeyColumn));
+            var probeKey = BuildCompositeKey(leftRow, LeftKeyColumns);
             var matched = false;
 
-            // NULL probe keys never match (SQL NULL semantics)
             if (probeKey != null && hashTable.TryGetValue(probeKey, out var bucket))
             {
                 matched = true;
@@ -130,14 +144,12 @@ public sealed class HashJoinNode : IQueryPlanNode
                 }
             }
 
-            // LEFT or FULL OUTER: emit unmatched probe row with nulls
             if (!matched && JoinType is JoinType.Left or JoinType.FullOuter)
             {
                 yield return NestedLoopJoinNode.CombineWithNulls(leftRow, rightTemplate);
             }
         }
 
-        // RIGHT or FULL OUTER: emit unmatched build-side rows
         if (buildMatched != null && leftTemplate != null)
         {
             foreach (var bucket in hashTable.Values)
@@ -151,12 +163,29 @@ public sealed class HashJoinNode : IQueryPlanNode
                 }
             }
 
-            // Emit null-keyed build rows (never matched)
             foreach (var (buildRow, _) in nullKeyBuildRows)
             {
                 yield return NestedLoopJoinNode.CombineWithNullsReversed(leftTemplate, buildRow);
             }
         }
+    }
+
+    /// <summary>
+    /// Builds a composite hash key from multiple columns. Returns null if any column is null.
+    /// </summary>
+    private static string? BuildCompositeKey(QueryRow row, IReadOnlyList<string> columns)
+    {
+        if (columns.Count == 1)
+            return NormalizeKey(QueryValueHelper.GetColumnValue(row, columns[0]));
+
+        var parts = new string?[columns.Count];
+        for (var i = 0; i < columns.Count; i++)
+        {
+            var part = NormalizeKey(QueryValueHelper.GetColumnValue(row, columns[i]));
+            if (part is null) return null;
+            parts[i] = part;
+        }
+        return string.Join("\0", parts);
     }
 
     /// <summary>

@@ -1054,6 +1054,19 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  Multi-column client-side join
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_ClientSideJoin_MultiColumnKey_ProducesPlan()
+    {
+        var sql = "SELECT * FROM a CROSS JOIN b WHERE a.id = b.id AND a.type = b.type";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+        result.RootNode.Should().NotBeNull();
+    }
+
+    // ────────────────────────────────────────────
     //  Client-side join guards
     // ────────────────────────────────────────────
 
