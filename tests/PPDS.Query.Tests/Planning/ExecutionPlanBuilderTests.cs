@@ -1021,4 +1021,19 @@ public class ExecutionPlanBuilderTests
         result.EntityLogicalName.Should().Be("account",
             because: "dbo is the default SQL schema and should not appear in Dataverse entity names");
     }
+
+    // ────────────────────────────────────────────
+    //  Multi-statement batches
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_MultiStatementBatch_ProducesScriptExecutionNode()
+    {
+        var sql = "SELECT name FROM account; SELECT accountid FROM account";
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        result.RootNode.Should().BeOfType<ScriptExecutionNode>(
+            because: "multi-statement batches should be wrapped in a ScriptExecutionNode, not drop statements");
+    }
 }

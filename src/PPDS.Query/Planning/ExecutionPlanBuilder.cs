@@ -3561,12 +3561,13 @@ public sealed class ExecutionPlanBuilder
             {
                 if (batch.Statements.Count > 0)
                 {
-                    // If the batch has multiple statements, treat as a script
                     if (batch.Statements.Count > 1)
                     {
-                        // Return a synthetic block for multi-statement batches
-                        // For now, return the first statement
-                        return batch.Statements[0];
+                        var block = new BeginEndBlockStatement();
+                        block.StatementList = new StatementList();
+                        foreach (var s in batch.Statements)
+                            block.StatementList.Statements.Add(s);
+                        return block;
                     }
                     return batch.Statements[0];
                 }
