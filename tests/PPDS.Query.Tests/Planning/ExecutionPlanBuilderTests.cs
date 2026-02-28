@@ -1036,4 +1036,32 @@ public class ExecutionPlanBuilderTests
         result.RootNode.Should().BeOfType<ScriptExecutionNode>(
             because: "multi-statement batches should be wrapped in a ScriptExecutionNode, not drop statements");
     }
+
+    // ────────────────────────────────────────────
+    //  Client-side join guards
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_ClientSideJoin_GroupBy_ThrowsNotSupportedException()
+    {
+        var sql = "SELECT a.name, COUNT(c.contactid) FROM account a CROSS JOIN contact c GROUP BY a.name";
+        var fragment = _parser.Parse(sql);
+
+        var act = () => _builder.Plan(fragment);
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*GROUP BY*not supported*client-side*");
+    }
+
+    [Fact]
+    public void Plan_ClientSideJoin_AggregateFunction_ThrowsNotSupportedException()
+    {
+        var sql = "SELECT COUNT(a.accountid) FROM account a CROSS JOIN contact c";
+        var fragment = _parser.Parse(sql);
+
+        var act = () => _builder.Plan(fragment);
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*Aggregate*not supported*client-side*");
+    }
 }

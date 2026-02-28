@@ -324,6 +324,14 @@ public sealed class ExecutionPlanBuilder
         if (fromClause?.TableReferences.Count != 1)
             throw new QueryParseException("Expected exactly one table reference in FROM clause for client-side join planning.");
 
+        // Guard: GROUP BY, HAVING, and aggregate functions are not supported in client-side joins
+        if (querySpec.GroupByClause?.GroupingSpecifications?.Count > 0)
+            throw new NotSupportedException("GROUP BY is not supported in client-side join queries.");
+        if (querySpec.HavingClause != null)
+            throw new NotSupportedException("HAVING is not supported in client-side join queries.");
+        if (HasAggregateSelectElements(querySpec))
+            throw new NotSupportedException("Aggregate functions are not supported in client-side join queries.");
+
         // Recursively build the join tree (handles QualifiedJoin, UnqualifiedJoin, and NamedTableReference)
         var tableRef = fromClause.TableReferences[0];
         var (node, entityName) = PlanTableReference(tableRef, options);
@@ -3276,6 +3284,20 @@ public sealed class ExecutionPlanBuilder
     {
         return expr is FunctionCall func
             && (func.OverClause != null || IsAggregateFunctionName(func.FunctionName?.Value));
+    }
+
+    private static bool HasAggregateSelectElements(QuerySpecification querySpec)
+    {
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is SelectScalarExpression scalar
+                && scalar.Expression is FunctionCall fc
+                && IsAggregateFunctionName(fc.FunctionName?.Value))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
