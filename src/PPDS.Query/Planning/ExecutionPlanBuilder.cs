@@ -757,10 +757,13 @@ public sealed class ExecutionPlanBuilder
             if (left == null) return right;
             if (right == null) return left;
 
-            // Both sides still have content — reconstruct the AND
-            bin.FirstExpression = left;
-            bin.SecondExpression = right;
-            return bin;
+            // Both sides still have content — create new AND node (avoid mutating shared AST)
+            return new BooleanBinaryExpression
+            {
+                BinaryExpressionType = BooleanBinaryExpressionType.And,
+                FirstExpression = left,
+                SecondExpression = right
+            };
         }
 
         // For other expression types (OR, NOT, parenthesized, etc.), don't extract —
@@ -907,10 +910,13 @@ public sealed class ExecutionPlanBuilder
             if (left == null) return right;
             if (right == null) return left;
 
-            // Both sides still have content — reconstruct the AND
-            bin.FirstExpression = left;
-            bin.SecondExpression = right;
-            return bin;
+            // Both sides still have content — create new AND node (avoid mutating shared AST)
+            return new BooleanBinaryExpression
+            {
+                BinaryExpressionType = BooleanBinaryExpressionType.And,
+                FirstExpression = left,
+                SecondExpression = right
+            };
         }
 
         // For other expression types (OR, NOT wrapping non-EXISTS, etc.), don't extract

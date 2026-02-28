@@ -1038,6 +1038,22 @@ public class ExecutionPlanBuilderTests
     }
 
     // ────────────────────────────────────────────
+    //  AST mutation safety
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_InSubquery_PlanTwice_ProducesSameResult()
+    {
+        var sql = "SELECT * FROM account WHERE name = 'test' AND accountid IN (SELECT accountid FROM contact)";
+        var fragment = _parser.Parse(sql);
+
+        var result1 = _builder.Plan(fragment);
+        var result2 = _builder.Plan(fragment);
+
+        result1.FetchXml.Should().Be(result2.FetchXml);
+    }
+
+    // ────────────────────────────────────────────
     //  Client-side join guards
     // ────────────────────────────────────────────
 
