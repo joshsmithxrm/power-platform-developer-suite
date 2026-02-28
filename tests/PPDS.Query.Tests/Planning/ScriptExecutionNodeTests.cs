@@ -22,7 +22,7 @@ using ExpressionCompiler = PPDS.Query.Execution.ExpressionCompiler;
 
 namespace PPDS.Query.Tests.Planning;
 
-[Trait("Category", "PlanUnit")]
+[Trait("Category", "Unit")]
 public class ScriptExecutionNodeTests
 {
     /// <summary>
@@ -1073,5 +1073,26 @@ public class ScriptExecutionNodeTests
         var rows = await ExecuteScriptAsync(sql);
         rows.Should().HaveCount(1);
         rows[0].Values["val"].Value.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task TryCatch_BreakInsideTry_PropagatesOutOfTryCatch()
+    {
+        var sql = @"
+            DECLARE @x INT = 0;
+            WHILE @x < 10
+            BEGIN
+                BEGIN TRY
+                    SET @x = @x + 1;
+                    IF @x = 3 BREAK;
+                END TRY
+                BEGIN CATCH
+                END CATCH
+            END
+            SELECT @x AS result";
+
+        var (rows, _) = await ExecuteScriptWithScopeAsync(sql);
+        rows.Should().ContainSingle();
+        rows[0].Values["result"].Value.Should().Be(3);
     }
 }

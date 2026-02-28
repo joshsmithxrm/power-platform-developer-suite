@@ -212,9 +212,6 @@ public sealed class ExecutionPlanBuilder
             return PlanInSubquery(selectStmt, querySpec, options);
         }
 
-        // Prevent unsupported subquery predicates from silently dropping during FetchXML emission.
-        ThrowIfUnsupportedWhereSubqueryPredicate(querySpec.WhereClause?.SearchCondition);
-
         // Generate FetchXML using the injected service.
         // If the query contains join types unsupported by FetchXML (RIGHT, FULL OUTER),
         // fall back to client-side join planning.
@@ -3167,17 +3164,6 @@ public sealed class ExecutionPlanBuilder
         };
     }
 
-    /// <summary>
-    /// Throws when WHERE contains subquery predicate forms that this execution path cannot
-    /// evaluate safely and would otherwise risk predicate loss during transpilation.
-    /// </summary>
-    private static void ThrowIfUnsupportedWhereSubqueryPredicate(BooleanExpression? where)
-    {
-        if (where is null) return;
-
-        // IN subquery check removed — now handled by PlanInSubquery before this point.
-        // EXISTS check removed — now handled by PlanExistsSubquery before this point.
-    }
 
     /// <summary>
     /// Returns true if the boolean expression tree contains an EXISTS predicate.

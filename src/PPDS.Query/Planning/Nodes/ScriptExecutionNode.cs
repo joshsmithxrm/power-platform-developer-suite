@@ -28,14 +28,20 @@ namespace PPDS.Query.Planning.Nodes;
 public sealed class ScriptExecutionNode : IQueryPlanNode
 {
     /// <summary>
+    /// Base class for internal flow-control exceptions that must not be caught by
+    /// generic catch (Exception) blocks inside TRY/CATCH statements.
+    /// </summary>
+    private abstract class FlowControlException : Exception { protected FlowControlException() { } }
+
+    /// <summary>
     /// Internal flow-control exception thrown by BREAK statements to exit WHILE loops.
     /// </summary>
-    private sealed class BreakException : Exception { }
+    private sealed class BreakException : FlowControlException { }
 
     /// <summary>
     /// Internal flow-control exception thrown by CONTINUE statements to skip to the next WHILE iteration.
     /// </summary>
-    private sealed class ContinueException : Exception { }
+    private sealed class ContinueException : FlowControlException { }
 
     private readonly IReadOnlyList<TSqlStatement> _statements;
     private readonly ExecutionPlanBuilder _planBuilder;

@@ -76,4 +76,16 @@ public class ProfileResolutionServiceTests
         act.Should().Throw<ArgumentException>()
             .WithMessage("*DBO*reserved*");
     }
+
+    [Fact]
+    public void Constructor_DuplicateLabels_ThrowsArgumentException()
+    {
+        var configs = new[]
+        {
+            new EnvironmentConfig { Label = "UAT", Url = "https://uat.crm.dynamics.com/" },
+            new EnvironmentConfig { Label = "uat", Url = "https://uat2.crm.dynamics.com/" }
+        };
+        var act = () => new ProfileResolutionService(configs);
+        act.Should().Throw<ArgumentException>().WithMessage("*Duplicate*uat*");
+    }
 }

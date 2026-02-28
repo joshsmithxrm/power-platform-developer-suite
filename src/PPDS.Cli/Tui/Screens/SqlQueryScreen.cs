@@ -87,7 +87,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
             new("", "", () => {}, null, null, Key.Null), // Separator
-            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "Ctrl+T", ToggleTdsEndpoint),
+            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "Ctrl+Shift+T", ToggleTdsEndpoint),
         })
     };
 
@@ -345,7 +345,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         });
         RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
-        RegisterHotkey(registry, Key.CtrlMask | Key.T, "Toggle TDS Endpoint", ToggleTdsEndpoint);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.T, "Toggle TDS Endpoint", ToggleTdsEndpoint);
         // F-key alternatives for Linux compatibility (Ctrl+Shift combos don't work on Linux terminals)
         RegisterHotkey(registry, Key.F7, "Show execution plan", ShowExecutionPlanDialog);
         RegisterHotkey(registry, Key.F8, "Query history", ShowHistoryDialog);

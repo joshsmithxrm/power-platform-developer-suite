@@ -23,6 +23,11 @@ public sealed class ProfileResolutionService
                         $"'{config.Label}' cannot be used as an environment label (reserved for SQL schema convention).",
                         nameof(configs));
 
+                if (_labelIndex.ContainsKey(config.Label))
+                    throw new ArgumentException(
+                        $"Duplicate environment label '{config.Label}'. Each environment must have a unique label.",
+                        nameof(configs));
+
                 _labelIndex[config.Label] = config;
             }
         }
