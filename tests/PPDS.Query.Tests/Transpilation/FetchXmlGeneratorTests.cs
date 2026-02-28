@@ -483,4 +483,21 @@ public class FetchXmlGeneratorTests
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*FULL OUTER*client-side*");
     }
+
+    // ────────────────────────────────────────────
+    //  Aggregate: STDEV, STDEVP, VAR, VARP, COUNT_BIG
+    // ────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("STDEV", "stdev")]
+    [InlineData("VARP", "varp")]
+    [InlineData("COUNT_BIG", "count")]
+    public void Generate_ExtendedAggregate_RecognizedAsAggregate(string sqlFunc, string expectedAttr)
+    {
+        var fetchXml = GenerateFetchXml(
+            $"SELECT {sqlFunc}(revenue) AS agg_result FROM account");
+
+        fetchXml.Should().Contain("aggregate=\"true\"",
+            because: $"{sqlFunc} should be recognized as an aggregate function");
+    }
 }

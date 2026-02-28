@@ -531,7 +531,12 @@ public sealed class FetchXmlGenerator
             || functionName.Equals("SUM", StringComparison.OrdinalIgnoreCase)
             || functionName.Equals("AVG", StringComparison.OrdinalIgnoreCase)
             || functionName.Equals("MIN", StringComparison.OrdinalIgnoreCase)
-            || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+            || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("COUNT_BIG", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("STDEV", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("STDEVP", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("VAR", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("VARP", StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion
