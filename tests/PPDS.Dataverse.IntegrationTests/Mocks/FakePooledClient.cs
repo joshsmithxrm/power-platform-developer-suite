@@ -13,6 +13,7 @@ namespace PPDS.Dataverse.IntegrationTests.Mocks;
 public class FakePooledClient : IPooledClient
 {
     private readonly IOrganizationService _service;
+    private readonly object _serviceLock;
     private readonly string _connectionName;
     private readonly Action? _onDispose;
     private bool _isDisposed;
@@ -20,9 +21,11 @@ public class FakePooledClient : IPooledClient
     public FakePooledClient(
         IOrganizationService service,
         string connectionName = "fake-connection",
+        object? serviceLock = null,
         Action? onDispose = null)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _serviceLock = serviceLock ?? new object();
         _connectionName = connectionName;
         _onDispose = onDispose;
         ConnectionId = Guid.NewGuid();
@@ -59,55 +62,57 @@ public class FakePooledClient : IPooledClient
     public int MaxRetryCount { get; set; } = 3;
     public TimeSpan RetryPauseTime { get; set; } = TimeSpan.FromSeconds(2);
 
-    public IDataverseClient Clone() => new FakePooledClient(_service, _connectionName);
+    public IDataverseClient Clone() => new FakePooledClient(_service, _connectionName, _serviceLock);
 
     // IOrganizationService implementation - delegate to FakeXrmEasy
+    // All operations are serialized via _serviceLock because FakeXrmEasy's
+    // in-memory store is not thread-safe for concurrent mutations.
     public Guid Create(Entity entity)
     {
         LastUsedAt = DateTime.UtcNow;
-        return _service.Create(entity);
+        lock (_serviceLock) { return _service.Create(entity); }
     }
 
     public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet)
     {
         LastUsedAt = DateTime.UtcNow;
-        return _service.Retrieve(entityName, id, columnSet);
+        lock (_serviceLock) { return _service.Retrieve(entityName, id, columnSet); }
     }
 
     public void Update(Entity entity)
     {
         LastUsedAt = DateTime.UtcNow;
-        _service.Update(entity);
+        lock (_serviceLock) { _service.Update(entity); }
     }
 
     public void Delete(string entityName, Guid id)
     {
         LastUsedAt = DateTime.UtcNow;
-        _service.Delete(entityName, id);
+        lock (_serviceLock) { _service.Delete(entityName, id); }
     }
 
     public OrganizationResponse Execute(OrganizationRequest request)
     {
         LastUsedAt = DateTime.UtcNow;
-        return _service.Execute(request);
+        lock (_serviceLock) { return _service.Execute(request); }
     }
 
     public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
     {
         LastUsedAt = DateTime.UtcNow;
-        _service.Associate(entityName, entityId, relationship, relatedEntities);
+        lock (_serviceLock) { _service.Associate(entityName, entityId, relationship, relatedEntities); }
     }
 
     public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
     {
         LastUsedAt = DateTime.UtcNow;
-        _service.Disassociate(entityName, entityId, relationship, relatedEntities);
+        lock (_serviceLock) { _service.Disassociate(entityName, entityId, relationship, relatedEntities); }
     }
 
     public EntityCollection RetrieveMultiple(QueryBase query)
     {
         LastUsedAt = DateTime.UtcNow;
-        return _service.RetrieveMultiple(query);
+        lock (_serviceLock) { return _service.RetrieveMultiple(query); }
     }
 
     // IOrganizationServiceAsync2 implementation - wrap sync operations

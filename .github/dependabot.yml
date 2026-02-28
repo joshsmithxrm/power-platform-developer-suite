@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 20
     labels:
       - "dependencies"
       - "nuget"
@@ -35,8 +35,6 @@ updates:
         applies-to: version-updates
         update-types:
           - "major"
-    # Widen version constraints when needed (e.g., 1.1.* -> 1.2.*)
-    versioning-strategy: increase
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

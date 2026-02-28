@@ -12,6 +12,7 @@ namespace PPDS.Dataverse.IntegrationTests.Mocks;
 public class FakeConnectionPool : IDataverseConnectionPool
 {
     private readonly IOrganizationService _service;
+    private readonly object _serviceLock = new();
     private readonly string _connectionName;
     private readonly int _recommendedParallelism;
     private int _activeConnections;
@@ -70,6 +71,7 @@ public class FakeConnectionPool : IDataverseConnectionPool
         var client = new FakePooledClient(
             _service,
             _connectionName,
+            serviceLock: _serviceLock,
             onDispose: () => Interlocked.Decrement(ref _activeConnections));
         return Task.FromResult<IPooledClient>(client);
     }
@@ -80,6 +82,7 @@ public class FakeConnectionPool : IDataverseConnectionPool
         return new FakePooledClient(
             _service,
             _connectionName,
+            serviceLock: _serviceLock,
             onDispose: () => Interlocked.Decrement(ref _activeConnections));
     }
 
@@ -90,7 +93,10 @@ public class FakeConnectionPool : IDataverseConnectionPool
 
     public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_service.Execute(request));
+        lock (_serviceLock)
+        {
+            return Task.FromResult(_service.Execute(request));
+        }
     }
 
     public int GetTotalRecommendedParallelism() => _recommendedParallelism;

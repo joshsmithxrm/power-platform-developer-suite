@@ -52,7 +52,8 @@
     <!-- Logging -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
 
-    <!-- Dependency injection abstractions for AddAuthServices registration -->
+    <!-- Dependency injection for AddAuthServices registration -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
 
     <!-- JSON serialization -->
