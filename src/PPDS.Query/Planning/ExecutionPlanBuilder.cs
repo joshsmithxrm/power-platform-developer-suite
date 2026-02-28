@@ -148,6 +148,12 @@ public sealed class ExecutionPlanBuilder
             ?? throw new QueryParseException("Cannot determine entity name from SELECT statement.");
         var top = ExtractTopFromQuerySpec(querySpec);
 
+        // CTE self-reference: use bound node instead of FetchXML
+        if (options.CteBindings?.TryGetValue(entityName, out var cteNode) == true)
+        {
+            return PlanCteSelfReference(querySpec, cteNode, entityName, options);
+        }
+
         // Phase 6: Metadata virtual table routing
         if (entityName.StartsWith("metadata.", StringComparison.OrdinalIgnoreCase))
         {
@@ -1827,16 +1833,25 @@ public sealed class ExecutionPlanBuilder
         }
 
         // Create a RecursiveCteNode. The recursive node factory receives the previous
-        // iteration's rows and returns a CteScanNode that provides those rows for
-        // the recursive member's self-reference.
+        // iteration's rows and re-plans the recursive member with a fresh CteScanNode
+        // bound to the CTE name, so the self-reference resolves correctly.
         Func<List<QueryRow>, IQueryPlanNode> recursiveNodeFactory = previousRows =>
         {
-            // The recursive member references the CTE name; at execution time
-            // we substitute the self-reference with a CteScanNode holding the
-            // previous iteration's rows, then plan the recursive query.
-            // For the planning phase we return a CteScanNode as a placeholder
-            // since the recursive member will be re-evaluated each iteration.
-            return new CteScanNode(cteName, previousRows);
+            var cteScanNode = new CteScanNode(cteName, previousRows);
+            var recursiveOptions = new QueryPlanOptions
+            {
+                PoolCapacity = options.PoolCapacity,
+                UseTdsEndpoint = options.UseTdsEndpoint,
+                OriginalSql = options.OriginalSql,
+                VariableScope = options.VariableScope,
+                RemoteExecutorFactory = options.RemoteExecutorFactory,
+                CteBindings = new Dictionary<string, IQueryPlanNode>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [cteName] = cteScanNode
+                }
+            };
+            var result = PlanQueryExpressionAsSelect(recursiveExpr, recursiveOptions);
+            return result.RootNode;
         };
 
         var recursiveCteNode = new RecursiveCteNode(
@@ -1850,6 +1865,46 @@ public sealed class ExecutionPlanBuilder
             FetchXml = $"-- RecursiveCTE: {string.Join(", ", cteNames)} --\n{anchorFetchXml}",
             VirtualColumns = anchorVirtualColumns,
             EntityLogicalName = anchorEntityLogicalName
+        };
+    }
+
+    /// <summary>
+    /// Plans a CTE self-reference within a recursive member. The source node is a
+    /// <see cref="CteScanNode"/> holding the previous iteration's rows, with optional
+    /// WHERE filtering and SELECT projection applied client-side.
+    /// </summary>
+    private QueryPlanResult PlanCteSelfReference(
+        QuerySpecification querySpec,
+        IQueryPlanNode cteNode,
+        string entityName,
+        QueryPlanOptions options)
+    {
+        IQueryPlanNode rootNode = cteNode;
+
+        // Apply WHERE filter client-side
+        if (querySpec.WhereClause?.SearchCondition != null)
+        {
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.WhereClause.SearchCondition);
+            var description = querySpec.WhereClause.SearchCondition.ToString() ?? "WHERE (cte)";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
+        }
+
+        // Apply SELECT list projection
+        if (HasComputedColumnsInQuerySpec(querySpec))
+        {
+            rootNode = BuildProjectNodeFromScriptDom(rootNode, querySpec);
+        }
+        else if (!IsSelectStar(querySpec))
+        {
+            rootNode = BuildSelectListProjection(rootNode, querySpec);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = $"-- CteSelfReference: {entityName} --",
+            VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
+            EntityLogicalName = entityName
         };
     }
 

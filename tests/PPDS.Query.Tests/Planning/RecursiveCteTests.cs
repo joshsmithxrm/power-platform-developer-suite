@@ -171,6 +171,35 @@ public class RecursiveCteTests
     //  Helper: find node type in plan tree
     // ────────────────────────────────────────────
 
+    // ────────────────────────────────────────────
+    //  Recursive CTE execution
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Execute_RecursiveCte_ProducesCorrectRows()
+    {
+        var sql = @"
+            WITH cte AS (
+                SELECT 1 AS n
+                UNION ALL
+                SELECT n + 1 AS n FROM cte WHERE n < 5
+            )
+            SELECT * FROM cte";
+
+        var fragment = _parser.Parse(sql);
+        var result = _builder.Plan(fragment);
+
+        var rows = await TestHelpers.CollectRowsAsync(result.RootNode);
+
+        rows.Should().HaveCount(5,
+            because: "recursive CTE should produce rows 1..5 and the recursive member must apply WHERE filter");
+    }
+
+    // ────────────────────────────────────────────
+    //  Helper: find node type in plan tree
+    // ────────────────────────────────────────────
+
     private static T? FindNode<T>(IQueryPlanNode node) where T : class, IQueryPlanNode
     {
         if (node is T match) return match;

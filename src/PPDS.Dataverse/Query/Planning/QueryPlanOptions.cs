@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 
@@ -100,4 +101,11 @@ public sealed class QueryPlanOptions
     /// Combines profile resolution and executor creation. Set by the caller.
     /// </summary>
     public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; init; }
+
+    /// <summary>
+    /// CTE name-to-node bindings for recursive CTE planning. When the planner
+    /// encounters a table matching a CTE name in this dictionary, it returns
+    /// the bound node instead of generating FetchXML.
+    /// </summary>
+    public Dictionary<string, IQueryPlanNode>? CteBindings { get; init; }
 }
