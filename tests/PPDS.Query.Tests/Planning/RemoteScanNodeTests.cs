@@ -242,4 +242,67 @@ public class RemoteScanNodeTests
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_AutoPages_WhenMoreRecords()
+    {
+        var remoteExecutor = new Mock<IQueryExecutor>();
+        const string fetchXml = "<fetch><entity name='account'><all-attributes /></entity></fetch>";
+
+        // Page 1: MoreRecords = true
+        var page1Records = new List<IReadOnlyDictionary<string, QueryValue>>
+        {
+            new Dictionary<string, QueryValue> { ["name"] = QueryValue.Simple("Page1Row") }
+        };
+        var page1 = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn>(),
+            Records = page1Records,
+            Count = 1,
+            MoreRecords = true,
+            PagingCookie = "<cookie page=\"1\" />"
+        };
+
+        // Page 2: MoreRecords = false
+        var page2Records = new List<IReadOnlyDictionary<string, QueryValue>>
+        {
+            new Dictionary<string, QueryValue> { ["name"] = QueryValue.Simple("Page2Row") }
+        };
+        var page2 = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn>(),
+            Records = page2Records,
+            Count = 1,
+            MoreRecords = false
+        };
+
+        var callCount = 0;
+        remoteExecutor
+            .Setup(e => e.ExecuteFetchXmlAsync(
+                fetchXml,
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++callCount == 1 ? page1 : page2);
+
+        var node = new RemoteScanNode(fetchXml, "account", "UAT", remoteExecutor.Object);
+        var rows = await TestHelpers.CollectRowsAsync(node);
+
+        rows.Should().HaveCount(2,
+            because: "auto-paging should fetch both pages");
+        rows[0].Values["name"].Value.Should().Be("Page1Row");
+        rows[1].Values["name"].Value.Should().Be("Page2Row");
+
+        remoteExecutor.Verify(
+            e => e.ExecuteFetchXmlAsync(
+                fetchXml,
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
 }

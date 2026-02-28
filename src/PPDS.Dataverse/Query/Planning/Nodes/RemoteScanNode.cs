@@ -48,19 +48,29 @@ public sealed class RemoteScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // Execute FetchXML against the REMOTE executor (not context.QueryExecutor).
-        // No auto-paging: single page execution for cross-environment scan.
-        var result = await _remoteExecutor.ExecuteFetchXmlAsync(
-            _fetchXml,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        context.Statistics.IncrementPagesFetched();
-
-        foreach (var record in result.Records)
+        // Execute FetchXML against the REMOTE executor (not context.QueryExecutor)
+        // with auto-paging to retrieve all pages.
+        string? pagingCookie = null;
+        var pageNumber = 1;
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return QueryRow.FromRecord(record, result.EntityLogicalName);
-            context.Statistics.IncrementRowsRead();
+            var result = await _remoteExecutor.ExecuteFetchXmlAsync(
+                _fetchXml, pageNumber, pagingCookie,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            context.Statistics.IncrementPagesFetched();
+
+            foreach (var record in result.Records)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return QueryRow.FromRecord(record, result.EntityLogicalName);
+                context.Statistics.IncrementRowsRead();
+            }
+
+            if (!result.MoreRecords) yield break;
+            pagingCookie = result.PagingCookie;
+            pageNumber++;
         }
     }
 }
