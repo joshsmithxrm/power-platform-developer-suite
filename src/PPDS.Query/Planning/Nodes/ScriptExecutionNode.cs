@@ -47,6 +47,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     private readonly ExecutionPlanBuilder _planBuilder;
     private readonly ExpressionCompiler _expressionCompiler;
     private readonly SessionContext? _session;
+    private readonly QueryPlanOptions? _baseOptions;
 
     /// <inheritdoc />
     public string Description => $"ScriptExecution: {_statements.Count} statements";
@@ -64,16 +65,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     /// <param name="planBuilder">Plan builder used to plan inner SELECT/DML statements.</param>
     /// <param name="expressionCompiler">Compiler for scalar expressions and predicates.</param>
     /// <param name="session">Optional session context for @@ERROR tracking.</param>
+    /// <param name="baseOptions">Optional base planning options to carry forward to inner statements.</param>
     public ScriptExecutionNode(
         IReadOnlyList<TSqlStatement> statements,
         ExecutionPlanBuilder planBuilder,
         ExpressionCompiler expressionCompiler,
-        SessionContext? session = null)
+        SessionContext? session = null,
+        QueryPlanOptions? baseOptions = null)
     {
         _statements = statements ?? throw new ArgumentNullException(nameof(statements));
         _planBuilder = planBuilder ?? throw new ArgumentNullException(nameof(planBuilder));
         _expressionCompiler = expressionCompiler ?? throw new ArgumentNullException(nameof(expressionCompiler));
         _session = session;
+        _baseOptions = baseOptions;
     }
 
     /// <inheritdoc />
@@ -819,7 +823,14 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     {
         var options = new QueryPlanOptions
         {
-            VariableScope = scope
+            VariableScope = scope,
+            DmlRowCap = _baseOptions?.DmlRowCap,
+            RemoteExecutorFactory = _baseOptions?.RemoteExecutorFactory,
+            UseTdsEndpoint = _baseOptions?.UseTdsEndpoint ?? false,
+            TdsQueryExecutor = _baseOptions?.TdsQueryExecutor,
+            OriginalSql = _baseOptions?.OriginalSql,
+            PoolCapacity = _baseOptions?.PoolCapacity ?? 0,
+            CteBindings = _baseOptions?.CteBindings,
         };
 
         var planResult = _planBuilder.PlanStatement(statement, options);

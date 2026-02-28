@@ -1994,7 +1994,7 @@ public sealed class ExecutionPlanBuilder
     private QueryPlanResult PlanScript(
         IReadOnlyList<TSqlStatement> statements, QueryPlanOptions options)
     {
-        var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler, _sessionContext);
+        var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler, _sessionContext, options);
 
         return new QueryPlanResult
         {
