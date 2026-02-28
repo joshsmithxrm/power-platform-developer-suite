@@ -214,7 +214,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             if (!varName.StartsWith("@"))
                 varName = "@" + varName;
 
-            var typeName = FormatDataTypeReference(decl.DataType);
+            var typeName = QueryValueHelper.FormatDataType(decl.DataType);
 
             object? initialValue = null;
             if (decl.Value != null)
@@ -853,21 +853,4 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         return rows;
     }
 
-    /// <summary>
-    /// Formats a ScriptDom DataTypeReference to a string for VariableScope.
-    /// </summary>
-    private static string FormatDataTypeReference(DataTypeReference dataType)
-    {
-        if (dataType is SqlDataTypeReference sqlType)
-        {
-            var name = sqlType.SqlDataTypeOption.ToString().ToUpperInvariant();
-            if (sqlType.Parameters.Count > 0)
-            {
-                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
-                return $"{name}({parms})";
-            }
-            return name;
-        }
-        return "NVARCHAR";
-    }
 }

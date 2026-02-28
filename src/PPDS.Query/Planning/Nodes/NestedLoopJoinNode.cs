@@ -201,36 +201,18 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
 
     private bool KeysMatchForRow(QueryRow outerRow, QueryRow innerRow)
     {
-        var outerKey = GetColumnValue(outerRow, LeftKeyColumn!);
-        var innerKey = GetColumnValue(innerRow, RightKeyColumn!);
+        var outerKey = QueryValueHelper.GetColumnValue(outerRow, LeftKeyColumn!);
+        var innerKey = QueryValueHelper.GetColumnValue(innerRow, RightKeyColumn!);
         return KeysMatch(outerKey, innerKey);
     }
 
-    private static object? GetColumnValue(QueryRow row, string columnName)
-    {
-        if (row.Values.TryGetValue(columnName, out var qv))
-        {
-            return qv.Value;
-        }
-
-        // Case-insensitive fallback
-        foreach (var kvp in row.Values)
-        {
-            if (string.Equals(kvp.Key, columnName, StringComparison.OrdinalIgnoreCase))
-            {
-                return kvp.Value.Value;
-            }
-        }
-
-        return null;
-    }
 
     private static bool KeysMatch(object? left, object? right)
     {
         if (left is null || right is null) return false;
 
         // Numeric comparison
-        if (IsNumeric(left) && IsNumeric(right))
+        if (QueryValueHelper.IsNumeric(left) && QueryValueHelper.IsNumeric(right))
         {
             var dl = Convert.ToDecimal(left, CultureInfo.InvariantCulture);
             var dr = Convert.ToDecimal(right, CultureInfo.InvariantCulture);
@@ -249,10 +231,6 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
         return string.Equals(sl, sr, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsNumeric(object value)
-    {
-        return value is int or long or short or byte or decimal or double or float;
-    }
 
     /// <summary>
     /// Combines columns from both rows into a single row.

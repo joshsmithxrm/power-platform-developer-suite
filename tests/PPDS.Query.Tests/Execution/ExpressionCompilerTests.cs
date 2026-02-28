@@ -6,6 +6,7 @@ using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Execution.Functions;
 using PPDS.Query.Execution;
 using PPDS.Query.Parsing;
+using PPDS.Query.Planning.Nodes;
 using Xunit;
 
 namespace PPDS.Query.Tests.Execution;
@@ -1073,19 +1074,19 @@ public class ExpressionCompilerTests
     [Fact]
     public void IsNumeric_TrueForNumericTypes()
     {
-        ExpressionCompiler.IsNumeric(42).Should().BeTrue();
-        ExpressionCompiler.IsNumeric(42L).Should().BeTrue();
-        ExpressionCompiler.IsNumeric(42.0m).Should().BeTrue();
-        ExpressionCompiler.IsNumeric(42.0).Should().BeTrue();
-        ExpressionCompiler.IsNumeric(42.0f).Should().BeTrue();
+        QueryValueHelper.IsNumeric(42).Should().BeTrue();
+        QueryValueHelper.IsNumeric(42L).Should().BeTrue();
+        QueryValueHelper.IsNumeric(42.0m).Should().BeTrue();
+        QueryValueHelper.IsNumeric(42.0).Should().BeTrue();
+        QueryValueHelper.IsNumeric(42.0f).Should().BeTrue();
     }
 
     [Fact]
     public void IsNumeric_FalseForNonNumeric()
     {
-        ExpressionCompiler.IsNumeric("42").Should().BeFalse();
-        ExpressionCompiler.IsNumeric(true).Should().BeFalse();
-        ExpressionCompiler.IsNumeric(DateTime.Now).Should().BeFalse();
+        QueryValueHelper.IsNumeric("42").Should().BeFalse();
+        QueryValueHelper.IsNumeric(true).Should().BeFalse();
+        QueryValueHelper.IsNumeric(DateTime.Now).Should().BeFalse();
     }
 
     [Fact]

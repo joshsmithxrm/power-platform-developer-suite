@@ -81,7 +81,7 @@ public sealed class HashJoinNode : IQueryPlanNode
             cancellationToken.ThrowIfCancellationRequested();
             rightTemplate ??= row;
 
-            var key = NormalizeKey(GetColumnValue(row, RightKeyColumn));
+            var key = NormalizeKey(QueryValueHelper.GetColumnValue(row, RightKeyColumn));
 
             if (key is null)
             {
@@ -116,7 +116,7 @@ public sealed class HashJoinNode : IQueryPlanNode
             cancellationToken.ThrowIfCancellationRequested();
             leftTemplate ??= leftRow;
 
-            var probeKey = NormalizeKey(GetColumnValue(leftRow, LeftKeyColumn));
+            var probeKey = NormalizeKey(QueryValueHelper.GetColumnValue(leftRow, LeftKeyColumn));
             var matched = false;
 
             // NULL probe keys never match (SQL NULL semantics)
@@ -159,25 +159,6 @@ public sealed class HashJoinNode : IQueryPlanNode
         }
     }
 
-    private static object? GetColumnValue(QueryRow row, string columnName)
-    {
-        if (row.Values.TryGetValue(columnName, out var qv))
-        {
-            return qv.Value;
-        }
-
-        // Case-insensitive fallback
-        foreach (var kvp in row.Values)
-        {
-            if (string.Equals(kvp.Key, columnName, StringComparison.OrdinalIgnoreCase))
-            {
-                return kvp.Value.Value;
-            }
-        }
-
-        return null;
-    }
-
     /// <summary>
     /// Normalizes a key value to a consistent string representation for hashing.
     /// </summary>
@@ -187,18 +168,13 @@ public sealed class HashJoinNode : IQueryPlanNode
 
         if (value is Guid g) return g.ToString("D");
 
-        if (IsNumeric(value))
+        if (QueryValueHelper.IsNumeric(value))
         {
             return Convert.ToDecimal(value, CultureInfo.InvariantCulture)
                 .ToString(CultureInfo.InvariantCulture);
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture)?.ToUpperInvariant();
-    }
-
-    private static bool IsNumeric(object value)
-    {
-        return value is int or long or short or byte or decimal or double or float;
     }
 
 }

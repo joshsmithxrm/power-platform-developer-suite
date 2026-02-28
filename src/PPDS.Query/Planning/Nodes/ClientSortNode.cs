@@ -85,8 +85,8 @@ public sealed class ClientSortNode : IQueryPlanNode
         foreach (var item in orderBy)
         {
             var colName = item.ColumnName;
-            var valA = GetColumnValue(a, colName);
-            var valB = GetColumnValue(b, colName);
+            var valA = QueryValueHelper.GetColumnValue(a, colName);
+            var valB = QueryValueHelper.GetColumnValue(b, colName);
 
             var cmp = CompareValues(valA, valB);
             if (cmp != 0)
@@ -97,23 +97,6 @@ public sealed class ClientSortNode : IQueryPlanNode
         return 0;
     }
 
-    private static object? GetColumnValue(QueryRow row, string columnName)
-    {
-        if (row.Values.TryGetValue(columnName, out var qv))
-        {
-            return qv.Value;
-        }
-
-        foreach (var kvp in row.Values)
-        {
-            if (string.Equals(kvp.Key, columnName, StringComparison.OrdinalIgnoreCase))
-            {
-                return kvp.Value.Value;
-            }
-        }
-
-        return null;
-    }
 
     /// <summary>
     /// Compares two values for ordering. Nulls sort last.
@@ -124,7 +107,7 @@ public sealed class ClientSortNode : IQueryPlanNode
         if (a is null) return 1;  // nulls last
         if (b is null) return -1;
 
-        if (IsNumeric(a) && IsNumeric(b))
+        if (QueryValueHelper.IsNumeric(a) && QueryValueHelper.IsNumeric(b))
         {
             var da = Convert.ToDecimal(a, CultureInfo.InvariantCulture);
             var db = Convert.ToDecimal(b, CultureInfo.InvariantCulture);
@@ -141,8 +124,4 @@ public sealed class ClientSortNode : IQueryPlanNode
         return string.Compare(sa, sb, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsNumeric(object value)
-    {
-        return value is int or long or short or byte or decimal or double or float;
-    }
 }

@@ -95,8 +95,8 @@ public sealed class MergeJoinNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var leftKey = GetColumnValue(leftRows[leftIdx], LeftKeyColumn);
-            var rightKey = GetColumnValue(rightRows[rightIdx], RightKeyColumn);
+            var leftKey = QueryValueHelper.GetColumnValue(leftRows[leftIdx], LeftKeyColumn);
+            var rightKey = QueryValueHelper.GetColumnValue(rightRows[rightIdx], RightKeyColumn);
             var cmp = CompareKeys(leftKey, rightKey);
 
             if (cmp < 0)
@@ -123,14 +123,14 @@ public sealed class MergeJoinNode : IQueryPlanNode
                 // Find the range of equal keys on the right side
                 var rightStart = rightIdx;
                 while (rightIdx < rightRows.Count &&
-                       CompareKeys(GetColumnValue(rightRows[rightIdx], RightKeyColumn), leftKey) == 0)
+                       CompareKeys(QueryValueHelper.GetColumnValue(rightRows[rightIdx], RightKeyColumn), leftKey) == 0)
                 {
                     rightIdx++;
                 }
 
                 // For each left row with this key value, emit a row for each matching right row
                 while (leftIdx < leftRows.Count &&
-                       CompareKeys(GetColumnValue(leftRows[leftIdx], LeftKeyColumn), leftKey) == 0)
+                       CompareKeys(QueryValueHelper.GetColumnValue(leftRows[leftIdx], LeftKeyColumn), leftKey) == 0)
                 {
                     for (var ri = rightStart; ri < rightIdx; ri++)
                     {
@@ -164,23 +164,6 @@ public sealed class MergeJoinNode : IQueryPlanNode
         }
     }
 
-    private static object? GetColumnValue(QueryRow row, string columnName)
-    {
-        if (row.Values.TryGetValue(columnName, out var qv))
-        {
-            return qv.Value;
-        }
-
-        foreach (var kvp in row.Values)
-        {
-            if (string.Equals(kvp.Key, columnName, StringComparison.OrdinalIgnoreCase))
-            {
-                return kvp.Value.Value;
-            }
-        }
-
-        return null;
-    }
 
     /// <summary>
     /// Compares two join key values. Nulls sort last (after all non-null values).
@@ -192,7 +175,7 @@ public sealed class MergeJoinNode : IQueryPlanNode
         if (b is null) return -1;
 
         // Numeric comparison
-        if (IsNumeric(a) && IsNumeric(b))
+        if (QueryValueHelper.IsNumeric(a) && QueryValueHelper.IsNumeric(b))
         {
             var da = Convert.ToDecimal(a, CultureInfo.InvariantCulture);
             var db = Convert.ToDecimal(b, CultureInfo.InvariantCulture);
@@ -217,8 +200,4 @@ public sealed class MergeJoinNode : IQueryPlanNode
         return string.Compare(sa, sb, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsNumeric(object value)
-    {
-        return value is int or long or short or byte or decimal or double or float;
-    }
 }

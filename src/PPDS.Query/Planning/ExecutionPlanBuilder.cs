@@ -24,6 +24,8 @@ namespace PPDS.Query.Planning;
 /// </summary>
 public sealed class ExecutionPlanBuilder
 {
+    private static readonly Sql160ScriptGenerator s_scriptGenerator = new();
+
     private readonly IFetchXmlGeneratorService _fetchXmlGenerator;
     private readonly SessionContext? _sessionContext;
     private readonly ExpressionCompiler _expressionCompiler;
@@ -1314,7 +1316,7 @@ public sealed class ExecutionPlanBuilder
         if (selectSource != null)
         {
             // INSERT SELECT: render the source SELECT as SQL, parse, and plan via ScriptDom path
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(selectSource, out var selectSql);
             var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
 
@@ -1412,7 +1414,7 @@ public sealed class ExecutionPlanBuilder
         // otherwise use the target table directly.
         if (update.UpdateSpecification.FromClause != null)
         {
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(update.UpdateSpecification.FromClause, out var fromSql);
             sb.Append(' ').Append(fromSql);
         }
@@ -1424,7 +1426,7 @@ public sealed class ExecutionPlanBuilder
         // Render WHERE clause from ScriptDom
         if (update.UpdateSpecification.WhereClause != null)
         {
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(update.UpdateSpecification.WhereClause, out var whereSql);
             sb.Append(' ').Append(whereSql);
         }
@@ -1471,7 +1473,7 @@ public sealed class ExecutionPlanBuilder
         // otherwise use the target table directly.
         if (delete.DeleteSpecification.FromClause != null)
         {
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(delete.DeleteSpecification.FromClause, out var fromSql);
             sb.Append(' ').Append(fromSql);
         }
@@ -1483,7 +1485,7 @@ public sealed class ExecutionPlanBuilder
         // Render WHERE clause from ScriptDom
         if (delete.DeleteSpecification.WhereClause != null)
         {
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(delete.DeleteSpecification.WhereClause, out var whereSql);
             sb.Append(' ').Append(whereSql);
         }
@@ -2505,7 +2507,7 @@ public sealed class ExecutionPlanBuilder
             && derivedTable.QueryExpression is QuerySpecification querySpec)
         {
             // USING (SELECT ...) AS alias — render to SQL, parse, and plan via ScriptDom
-            var generator = new Sql160ScriptGenerator();
+            var generator = s_scriptGenerator;
             generator.GenerateScript(querySpec, out var selectSql);
             var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
             sourceNode = sourceResult.RootNode;
@@ -2944,7 +2946,7 @@ public sealed class ExecutionPlanBuilder
     /// </summary>
     private static string ScriptDomToSql(TSqlFragment fragment)
     {
-        var generator = new Sql160ScriptGenerator();
+        var generator = s_scriptGenerator;
         generator.GenerateScript(fragment, out var sql);
         return sql.Trim();
     }
@@ -3051,23 +3053,6 @@ public sealed class ExecutionPlanBuilder
         return tableName != null && tableName.StartsWith("#");
     }
 
-    /// <summary>
-    /// Formats a DataTypeReference to a string for legacy DECLARE statements.
-    /// </summary>
-    private static string FormatDataTypeReference(DataTypeReference dataType)
-    {
-        if (dataType is SqlDataTypeReference sqlType)
-        {
-            var name = sqlType.SqlDataTypeOption.ToString().ToUpperInvariant();
-            if (sqlType.Parameters.Count > 0)
-            {
-                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
-                return $"{name}({parms})";
-            }
-            return name;
-        }
-        return "NVARCHAR";
-    }
 
     /// <summary>
     /// Extracts the portion of a ScriptDom WHERE clause that requires client-side evaluation.

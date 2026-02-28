@@ -6,6 +6,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Execution.Functions;
+using PPDS.Query.Planning.Nodes;
 
 namespace PPDS.Query.Execution;
 
@@ -441,7 +442,7 @@ public sealed class ExpressionCompiler
     private CompiledScalarExpression CompileCastCall(CastCall castCall)
     {
         var compiledInner = CompileScalar(castCall.Parameter);
-        var targetType = FormatDataType(castCall.DataType);
+        var targetType = QueryValueHelper.FormatDataType(castCall.DataType);
 
         return row =>
         {
@@ -455,7 +456,7 @@ public sealed class ExpressionCompiler
     private CompiledScalarExpression CompileConvertCall(ConvertCall convertCall)
     {
         var compiledInner = CompileScalar(convertCall.Parameter);
-        var targetType = FormatDataType(convertCall.DataType);
+        var targetType = QueryValueHelper.FormatDataType(convertCall.DataType);
 
         // Style is optional — usually an IntegerLiteral
         int? style = null;
@@ -476,7 +477,7 @@ public sealed class ExpressionCompiler
     private CompiledScalarExpression CompileTryCast(TryCastCall tryCast)
     {
         var compiledInner = CompileScalar(tryCast.Parameter);
-        var targetType = FormatDataType(tryCast.DataType);
+        var targetType = QueryValueHelper.FormatDataType(tryCast.DataType);
 
         return row =>
         {
@@ -490,7 +491,7 @@ public sealed class ExpressionCompiler
     private CompiledScalarExpression CompileTryConvert(TryConvertCall tryConvert)
     {
         var compiledInner = CompileScalar(tryConvert.Parameter);
-        var targetType = FormatDataType(tryConvert.DataType);
+        var targetType = QueryValueHelper.FormatDataType(tryConvert.DataType);
 
         // Style is optional — usually an IntegerLiteral
         int? style = null;
@@ -710,7 +711,7 @@ public sealed class ExpressionCompiler
             return string.Compare(ls, rs, StringComparison.OrdinalIgnoreCase);
 
         // Numeric comparison with type promotion
-        if (IsNumeric(left) && IsNumeric(right))
+        if (QueryValueHelper.IsNumeric(left) && QueryValueHelper.IsNumeric(right))
         {
             var ld = Convert.ToDecimal(left, CultureInfo.InvariantCulture);
             var rd = Convert.ToDecimal(right, CultureInfo.InvariantCulture);
@@ -718,7 +719,7 @@ public sealed class ExpressionCompiler
         }
 
         // String vs number: try to parse string as number
-        if (IsNumeric(left) && right is string rightStr)
+        if (QueryValueHelper.IsNumeric(left) && right is string rightStr)
         {
             if (decimal.TryParse(rightStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var rd))
             {
@@ -727,7 +728,7 @@ public sealed class ExpressionCompiler
             }
         }
 
-        if (left is string leftStr && IsNumeric(right))
+        if (left is string leftStr && QueryValueHelper.IsNumeric(right))
         {
             if (decimal.TryParse(leftStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var ld))
             {
@@ -916,42 +917,7 @@ public sealed class ExpressionCompiler
         return patternIdx == pattern.Length;
     }
 
-    /// <summary>
-    /// Returns true if the value is a numeric type.
-    /// </summary>
-    internal static bool IsNumeric(object value)
-    {
-        return value is int or long or short or byte or decimal or double or float;
-    }
-
     // ═══════════════════════════════════════════════════════════════════
     //  Private helpers
     // ═══════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Formats a ScriptDom DataTypeReference as a string for CastConverter.
-    /// E.g., SqlDataTypeOption.Int → "int", SqlDataTypeOption.NVarChar with param 100 → "nvarchar(100)".
-    /// </summary>
-    private static string FormatDataType(DataTypeReference dataType)
-    {
-        if (dataType is SqlDataTypeReference sqlType)
-        {
-            var name = sqlType.SqlDataTypeOption.ToString().ToLowerInvariant();
-            if (sqlType.Parameters.Count > 0)
-            {
-                var parms = string.Join(", ", sqlType.Parameters.Select(p => p.Value));
-                return $"{name}({parms})";
-            }
-            return name;
-        }
-
-        if (dataType is XmlDataTypeReference)
-            return "xml";
-
-        // Generic fallback
-        if (dataType.Name?.Identifiers != null && dataType.Name.Identifiers.Count > 0)
-            return string.Join(".", dataType.Name.Identifiers.Select(i => i.Value));
-
-        return "varchar";
-    }
 }
