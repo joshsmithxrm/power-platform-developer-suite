@@ -424,7 +424,7 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         if (a is null) return 1;
         if (b is null) return -1;
 
-        if (IsNumeric(a) && IsNumeric(b))
+        if (QueryValueHelper.IsNumeric(a) && QueryValueHelper.IsNumeric(b))
         {
             var da = Convert.ToDecimal(a, CultureInfo.InvariantCulture);
             var db = Convert.ToDecimal(b, CultureInfo.InvariantCulture);
@@ -437,9 +437,6 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         var sb = Convert.ToString(b, CultureInfo.InvariantCulture) ?? "";
         return string.Compare(sa, sb, StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool IsNumeric(object value) =>
-        value is int or long or short or byte or decimal or double or float;
 
     #endregion
 
