@@ -21,13 +21,17 @@ public sealed class TableSpoolNode : IQueryPlanNode
         _materializedRows ?? (IReadOnlyList<QueryRow>)Array.Empty<QueryRow>();
 
     /// <inheritdoc />
-    public string Description => $"TableSpool: {_source.Description} ({MaterializedRows.Count} rows)";
+    public string Description => _source != null
+        ? $"TableSpool: {_source.Description} ({MaterializedRows.Count} rows)"
+        : $"TableSpool: (materialized, {MaterializedRows.Count} rows)";
 
     /// <inheritdoc />
-    public long EstimatedRows => _source.EstimatedRows;
+    public long EstimatedRows => _source?.EstimatedRows ?? _materializedRows?.Count ?? 0;
 
     /// <inheritdoc />
-    public IReadOnlyList<IQueryPlanNode> Children => new[] { _source };
+    public IReadOnlyList<IQueryPlanNode> Children => _source != null
+        ? new[] { _source }
+        : Array.Empty<IQueryPlanNode>();
 
     /// <summary>
     /// Initializes a new instance wrapping a child node whose rows will be materialized
