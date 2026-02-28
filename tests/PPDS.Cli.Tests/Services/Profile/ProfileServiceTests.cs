@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using PPDS.Auth.Cloud;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Profile;
@@ -23,7 +24,10 @@ public class ProfileServiceTests : IDisposable
         _tempFilePath = Path.Combine(Path.GetTempPath(), $"ppds-test-profiles-{Guid.NewGuid():N}.json");
         _store = new ProfileStore(_tempFilePath);
         _mockLogger = new Mock<ILogger<ProfileService>>();
-        _service = new ProfileService(_store, _mockLogger.Object);
+        _service = new ProfileService(
+            _store,
+            _mockLogger.Object,
+            credentialStoreFactory: () => new Mock<ISecureCredentialStore>().Object);
     }
 
     public void Dispose()

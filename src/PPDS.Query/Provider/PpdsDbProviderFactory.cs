@@ -4,7 +4,7 @@ namespace PPDS.Query.Provider;
 
 /// <summary>
 /// ADO.NET provider factory for creating PPDS query engine data access objects.
-/// Register with <see cref="DbProviderFactories.RegisterFactory"/> to enable
+/// Register with <see cref="DbProviderFactories.RegisterFactory(string, DbProviderFactory)"/> to enable
 /// discovery by tools like Entity Framework and Dapper.
 /// </summary>
 /// <example>

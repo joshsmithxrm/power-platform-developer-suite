@@ -23,14 +23,26 @@ public sealed class ProfileService : IProfileService
 
     private readonly ProfileStore _store;
     private readonly ILogger<ProfileService> _logger;
+    private readonly Func<ISecureCredentialStore> _credentialStoreFactory;
 
     /// <summary>
     /// Creates a new profile service.
     /// </summary>
-    public ProfileService(ProfileStore store, ILogger<ProfileService> logger)
+    /// <param name="store">The profile store for reading/writing profiles.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="credentialStoreFactory">
+    /// Optional factory for creating credential stores. When null, creates
+    /// <see cref="NativeCredentialStore"/> directly (production default).
+    /// Pass a custom factory in tests to avoid requiring a configured GCM credential store.
+    /// </param>
+    public ProfileService(
+        ProfileStore store,
+        ILogger<ProfileService> logger,
+        Func<ISecureCredentialStore>? credentialStoreFactory = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _credentialStoreFactory = credentialStoreFactory ?? (() => new NativeCredentialStore());
     }
 
     /// <inheritdoc />
@@ -132,16 +144,23 @@ public sealed class ProfileService : IProfileService
         // Update environment if specified
         if (!string.IsNullOrWhiteSpace(newEnvironment))
         {
-            using var credentialStore = new NativeCredentialStore();
-            using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
-            var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
-
-            if (!result.Success)
+            var credentialStore = _credentialStoreFactory();
+            try
             {
-                throw new PpdsException(ErrorCodes.Connection.EnvironmentNotFound, result.ErrorMessage ?? "Environment not found.");
-            }
+                using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
+                var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
-            profile.Environment = result.Environment;
+                if (!result.Success)
+                {
+                    throw new PpdsException(ErrorCodes.Connection.EnvironmentNotFound, result.ErrorMessage ?? "Environment not found.");
+                }
+
+                profile.Environment = result.Environment;
+            }
+            finally
+            {
+                (credentialStore as IDisposable)?.Dispose();
+            }
         }
 
         await _store.SaveAsync(collection, cancellationToken);
@@ -166,8 +185,15 @@ public sealed class ProfileService : IProfileService
         await TokenCacheManager.ClearAllCachesAsync(tokenCachePath);
 
         // Clear secure credential store
-        using var credentialStore = new NativeCredentialStore();
-        await credentialStore.ClearAsync(cancellationToken);
+        var credentialStore = _credentialStoreFactory();
+        try
+        {
+            await credentialStore.ClearAsync(cancellationToken);
+        }
+        finally
+        {
+            (credentialStore as IDisposable)?.Dispose();
+        }
 
         _logger.LogInformation("Cleared all profiles and credentials");
     }
