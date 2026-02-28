@@ -301,7 +301,7 @@ public class ExportServiceTests
         await _service.ExportCsvAsync(table, stream, new ExportOptions { IncludeHeaders = false });
 
         var result = GetStreamContent(stream);
-        Assert.Equal("\r\n", result); // Just a newline for the empty value
+        Assert.Equal(System.Environment.NewLine, result); // Just a newline for the empty value
     }
 
     #endregion
