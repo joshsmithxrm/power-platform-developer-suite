@@ -46,19 +46,6 @@ public sealed class ExpressionCompiler
         _variableScopeAccessor = variableScopeAccessor;
     }
 
-    /// <summary>
-    /// Sets a mapping from aggregate function signatures (e.g. "COUNT(*)", "SUM(revenue)")
-    /// to their output column aliases. When set, <see cref="CompileFunctionCall"/> resolves
-    /// known aggregates as column references instead of invoking them via FunctionRegistry.
-    /// </summary>
-    /// <param name="map">
-    /// Dictionary keyed by normalized aggregate signature (case-insensitive).
-    /// Null or empty clears the mapping.
-    /// </param>
-    public void SetAggregateAliasMap(Dictionary<string, string>? map)
-    {
-        _aggregateAliasMap = map is { Count: > 0 } ? map : null;
-    }
 
     /// <summary>
     /// Builds a normalized signature string for an aggregate function call AST node.
@@ -112,9 +99,19 @@ public sealed class ExpressionCompiler
     /// Compiles a ScriptDom <see cref="ScalarExpression"/> into an executable delegate.
     /// </summary>
     /// <param name="expression">The ScriptDom scalar expression AST node.</param>
+    /// <param name="aggregateAliasMap">
+    /// Optional mapping from aggregate function signatures to output column aliases.
+    /// </param>
     /// <returns>A delegate that evaluates the expression against a row.</returns>
-    public CompiledScalarExpression CompileScalar(ScalarExpression expression)
+    public CompiledScalarExpression CompileScalar(
+        ScalarExpression expression,
+        Dictionary<string, string>? aggregateAliasMap = null)
     {
+        var saved = _aggregateAliasMap;
+        if (aggregateAliasMap is { Count: > 0 })
+            _aggregateAliasMap = aggregateAliasMap;
+        try
+        {
         return expression switch
         {
             IntegerLiteral intLit => CompileIntegerLiteral(intLit),
@@ -140,6 +137,11 @@ public sealed class ExpressionCompiler
             _ => throw new NotSupportedException(
                 $"ScriptDom expression type {expression.GetType().Name} is not yet supported by ExpressionCompiler.")
         };
+        }
+        finally
+        {
+            _aggregateAliasMap = saved;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -150,25 +152,40 @@ public sealed class ExpressionCompiler
     /// Compiles a ScriptDom <see cref="BooleanExpression"/> into an executable predicate delegate.
     /// </summary>
     /// <param name="predicate">The ScriptDom boolean expression AST node.</param>
+    /// <param name="aggregateAliasMap">
+    /// Optional mapping from aggregate function signatures (e.g. "COUNT(*)", "SUM(revenue)")
+    /// to their output column aliases. When set, aggregate calls resolve as column references.
+    /// </param>
     /// <returns>A delegate that evaluates the predicate against a row.</returns>
-    public CompiledPredicate CompilePredicate(BooleanExpression predicate)
+    public CompiledPredicate CompilePredicate(
+        BooleanExpression predicate,
+        Dictionary<string, string>? aggregateAliasMap = null)
     {
-        return predicate switch
+        var saved = _aggregateAliasMap;
+        _aggregateAliasMap = aggregateAliasMap is { Count: > 0 } ? aggregateAliasMap : saved;
+        try
         {
-            BooleanComparisonExpression comp => CompileBooleanComparison(comp),
-            BooleanIsNullExpression isNull => CompileBooleanIsNull(isNull),
-            LikePredicate like => CompileLikePredicate(like),
-            InPredicate inPred => CompileInPredicate(inPred),
-            BooleanBinaryExpression boolBin => CompileBooleanBinary(boolBin),
-            BooleanNotExpression notExpr => CompileBooleanNot(notExpr),
-            BooleanParenthesisExpression parenExpr => CompilePredicate(parenExpr.Expression),
-            BooleanTernaryExpression between => CompileBetween(between),
-            DistinctPredicate distinct => CompileDistinctPredicate(distinct),
-            ExistsPredicate => throw new NotSupportedException(
-                "EXISTS predicates are handled at the plan level, not by the ExpressionCompiler."),
-            _ => throw new NotSupportedException(
-                $"ScriptDom predicate type {predicate.GetType().Name} is not yet supported by ExpressionCompiler.")
-        };
+            return predicate switch
+            {
+                BooleanComparisonExpression comp => CompileBooleanComparison(comp),
+                BooleanIsNullExpression isNull => CompileBooleanIsNull(isNull),
+                LikePredicate like => CompileLikePredicate(like),
+                InPredicate inPred => CompileInPredicate(inPred),
+                BooleanBinaryExpression boolBin => CompileBooleanBinary(boolBin),
+                BooleanNotExpression notExpr => CompileBooleanNot(notExpr),
+                BooleanParenthesisExpression parenExpr => CompilePredicate(parenExpr.Expression),
+                BooleanTernaryExpression between => CompileBetween(between),
+                DistinctPredicate distinct => CompileDistinctPredicate(distinct),
+                ExistsPredicate => throw new NotSupportedException(
+                    "EXISTS predicates are handled at the plan level, not by the ExpressionCompiler."),
+                _ => throw new NotSupportedException(
+                    $"ScriptDom predicate type {predicate.GetType().Name} is not yet supported by ExpressionCompiler.")
+            };
+        }
+        finally
+        {
+            _aggregateAliasMap = saved;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -356,7 +373,7 @@ public sealed class ExpressionCompiler
 
     private CompiledScalarExpression CompileCoalesce(CoalesceExpression coalesce)
     {
-        var compiledExprs = coalesce.Expressions.Select(CompileScalar).ToArray();
+        var compiledExprs = coalesce.Expressions.Select(e => CompileScalar(e)).ToArray();
 
         return row =>
         {
@@ -425,7 +442,7 @@ public sealed class ExpressionCompiler
             }
         }
 
-        var compiledArgs = funcCall.Parameters?.Select(CompileScalar).ToArray()
+        var compiledArgs = funcCall.Parameters?.Select(e => CompileScalar(e)).ToArray()
                            ?? Array.Empty<CompiledScalarExpression>();
 
         return row =>
@@ -599,7 +616,7 @@ public sealed class ExpressionCompiler
     private CompiledPredicate CompileInPredicate(InPredicate inPred)
     {
         var compiledExpr = CompileScalar(inPred.Expression);
-        var compiledValues = inPred.Values.Select(CompileScalar).ToArray();
+        var compiledValues = inPred.Values.Select(e => CompileScalar(e)).ToArray();
         var notDefined = inPred.NotDefined;
 
         return row =>

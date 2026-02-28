@@ -1353,13 +1353,10 @@ public class ExpressionCompilerTests
         {
             ["COUNT(*)"] = "cnt"
         };
-        _compiler.SetAggregateAliasMap(aggMap);
 
         var expr = ParseExpression("COUNT(*)");
-        var compiled = _compiler.CompileScalar(expr);
+        var compiled = _compiler.CompileScalar(expr, aggMap);
         compiled(MakeRow(("cnt", 42))).Should().Be(42);
-
-        _compiler.SetAggregateAliasMap(null);
     }
 
     [Fact]
@@ -1369,13 +1366,10 @@ public class ExpressionCompilerTests
         {
             ["SUM(REVENUE)"] = "total_revenue"
         };
-        _compiler.SetAggregateAliasMap(aggMap);
 
         var expr = ParseExpression("SUM(revenue)");
-        var compiled = _compiler.CompileScalar(expr);
+        var compiled = _compiler.CompileScalar(expr, aggMap);
         compiled(MakeRow(("total_revenue", 99999m))).Should().Be(99999m);
-
-        _compiler.SetAggregateAliasMap(null);
     }
 
     [Fact]
@@ -1385,16 +1379,13 @@ public class ExpressionCompilerTests
         {
             ["COUNT(*)"] = "cnt"
         };
-        _compiler.SetAggregateAliasMap(aggMap);
 
         var pred = ParsePredicate("COUNT(*) > 1");
-        var compiled = _compiler.CompilePredicate(pred);
+        var compiled = _compiler.CompilePredicate(pred, aggMap);
 
         compiled(MakeRow(("cnt", 5))).Should().BeTrue();
         compiled(MakeRow(("cnt", 1))).Should().BeFalse();
         compiled(MakeRow(("cnt", 0))).Should().BeFalse();
-
-        _compiler.SetAggregateAliasMap(null);
     }
 
     [Fact]
@@ -1404,16 +1395,13 @@ public class ExpressionCompilerTests
         {
             ["SUM(AMOUNT)"] = "total_amount"
         };
-        _compiler.SetAggregateAliasMap(aggMap);
 
         var pred = ParsePredicate("SUM(amount) BETWEEN 100 AND 1000");
-        var compiled = _compiler.CompilePredicate(pred);
+        var compiled = _compiler.CompilePredicate(pred, aggMap);
 
         compiled(MakeRow(("total_amount", 500))).Should().BeTrue();
         compiled(MakeRow(("total_amount", 50))).Should().BeFalse();
         compiled(MakeRow(("total_amount", 1500))).Should().BeFalse();
-
-        _compiler.SetAggregateAliasMap(null);
     }
 
     [Fact]

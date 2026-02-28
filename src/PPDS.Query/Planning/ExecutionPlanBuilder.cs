@@ -272,17 +272,9 @@ public sealed class ExecutionPlanBuilder
         if (querySpec.HavingClause?.SearchCondition != null)
         {
             var aggMap = BuildAggregateAliasMap(querySpec);
-            _expressionCompiler.SetAggregateAliasMap(aggMap);
-            try
-            {
-                var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
-                var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
-                rootNode = new ClientFilterNode(rootNode, predicate, description);
-            }
-            finally
-            {
-                _expressionCompiler.SetAggregateAliasMap(null);
-            }
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition, aggMap);
+            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         // Window functions (compiled directly from ScriptDom)
@@ -2748,17 +2740,9 @@ public sealed class ExecutionPlanBuilder
         if (querySpec.HavingClause?.SearchCondition != null)
         {
             var aggMap = BuildAggregateAliasMap(querySpec);
-            _expressionCompiler.SetAggregateAliasMap(aggMap);
-            try
-            {
-                var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition);
-                var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
-                rootNode = new ClientFilterNode(rootNode, predicate, description);
-            }
-            finally
-            {
-                _expressionCompiler.SetAggregateAliasMap(null);
-            }
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition, aggMap);
+            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
         }
 
         return new QueryPlanResult
