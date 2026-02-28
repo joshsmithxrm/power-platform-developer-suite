@@ -43,7 +43,6 @@
     <PackageReference Include="Azure.Identity" />
 
     <!-- MSAL for device code and token caching -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Identity.Client" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
 
@@ -53,7 +52,8 @@
     <!-- Logging -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
 
-    <!-- Dependency injection abstractions for AddAuthServices registration -->
+    <!-- Dependency injection for AddAuthServices registration -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
 
     <!-- JSON serialization -->
