@@ -513,8 +513,9 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         CancellationToken cancellationToken)
     {
         var session = _session
-            ?? throw new InvalidOperationException(
-                "SELECT INTO #temp requires a SessionContext.");
+            ?? throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                "SELECT INTO #temp requires a SessionContext. Wrap in a script block (multiple statements) to enable temp table support.");
 
         var tempTableName = selectStmt.Into.BaseIdentifier.Value;
         if (!tempTableName.StartsWith("#"))
@@ -559,11 +560,13 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     private List<QueryRow> ExecuteTempTableSelect(SelectStatement selectStmt)
     {
         var session = _session
-            ?? throw new InvalidOperationException(
-                "SELECT FROM #temp requires a SessionContext.");
+            ?? throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                "SELECT FROM #temp requires a SessionContext. Wrap in a script block (multiple statements) to enable temp table support.");
 
         var tableName = GetTempTableNameFromSelect(selectStmt)
-            ?? throw new InvalidOperationException(
+            ?? throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
                 "Cannot determine temp table name from SELECT statement.");
 
         var rows = session.GetTempTableRows(tableName);
