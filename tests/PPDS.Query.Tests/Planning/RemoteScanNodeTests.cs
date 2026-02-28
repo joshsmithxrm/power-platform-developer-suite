@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Moq;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using Xunit;
@@ -304,5 +305,39 @@ public class RemoteScanNodeTests
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ExceedsMaxPages_ThrowsQueryExecutionException()
+    {
+        var remoteExecutor = new Mock<IQueryExecutor>();
+        const string fetchXml = "<fetch><entity name='account' /></fetch>";
+
+        // Every page returns MoreRecords = true (infinite pages)
+        remoteExecutor
+            .Setup(e => e.ExecuteFetchXmlAsync(
+                fetchXml,
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn>(),
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>
+                {
+                    new Dictionary<string, QueryValue> { ["name"] = QueryValue.Simple("Row") }
+                },
+                Count = 1,
+                MoreRecords = true,
+                PagingCookie = "<cookie />"
+            });
+
+        var node = new RemoteScanNode(fetchXml, "account", "UAT", remoteExecutor.Object, maxPages: 3);
+
+        var act = async () => await TestHelpers.CollectRowsAsync(node);
+        await act.Should().ThrowAsync<QueryExecutionException>()
+            .WithMessage("*exceeded maximum page limit*");
     }
 }

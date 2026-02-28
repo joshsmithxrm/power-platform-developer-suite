@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -59,11 +60,20 @@ public sealed class ClientSortNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Materialize all rows (sorting requires full dataset)
+        var maxRows = context.MaxMaterializationRows;
         var rows = new List<QueryRow>();
         await foreach (var row in _input.ExecuteAsync(context, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             rows.Add(row);
+
+            if (maxRows > 0 && rows.Count > maxRows)
+            {
+                throw new QueryExecutionException(
+                    QueryErrorCode.ExecutionFailed,
+                    $"Client-side sort exceeded materialization limit ({maxRows:N0} rows). " +
+                    "Add a WHERE clause or use server-side ORDER BY to reduce the result set.");
+            }
         }
 
         // Sort using stable sort (preserves original order for equal elements)

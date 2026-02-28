@@ -35,6 +35,12 @@ public sealed class QueryPlanContext
     /// <summary>Optional variable scope for resolving @variable references in expressions.</summary>
     public VariableScope? VariableScope { get; }
 
+    /// <summary>
+    /// Maximum rows a node may materialize in memory (e.g., for sorting or aggregation).
+    /// Default is 500,000. Set to 0 for unlimited.
+    /// </summary>
+    public int MaxMaterializationRows { get; }
+
     /// <summary>Initializes a new instance of the <see cref="QueryPlanContext"/> class.</summary>
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
@@ -44,7 +50,8 @@ public sealed class QueryPlanContext
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IMetadataQueryExecutor? metadataQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
-        VariableScope? variableScope = null)
+        VariableScope? variableScope = null,
+        int maxMaterializationRows = 500_000)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         CancellationToken = cancellationToken;
@@ -54,5 +61,6 @@ public sealed class QueryPlanContext
         MetadataQueryExecutor = metadataQueryExecutor;
         BulkOperationExecutor = bulkOperationExecutor;
         VariableScope = variableScope;
+        MaxMaterializationRows = maxMaterializationRows;
     }
 }

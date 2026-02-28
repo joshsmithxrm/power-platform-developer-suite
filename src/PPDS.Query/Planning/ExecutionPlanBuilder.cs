@@ -2536,36 +2536,25 @@ public sealed class ExecutionPlanBuilder
         // ON condition: extract match columns
         var matchColumns = ExtractMergeMatchColumns(spec.SearchCondition);
 
-        // WHEN clauses
-        MergeWhenMatched? whenMatched = null;
+        // WHEN clauses — reject WHEN MATCHED early before parsing details
         MergeWhenNotMatched? whenNotMatched = null;
 
         if (spec.ActionClauses != null)
         {
             foreach (MergeActionClause clause in spec.ActionClauses)
             {
-                if (clause.Condition == MergeCondition.Matched && clause.Action is UpdateMergeAction updateAction)
+                if (clause.Condition == MergeCondition.Matched)
                 {
-                    var setClauses = new List<CompiledSetClause>();
-                    foreach (var setClause in updateAction.SetClauses)
-                    {
-                        if (setClause is AssignmentSetClause assignment)
-                        {
-                            var colName = assignment.Column?.MultiPartIdentifier?.Identifiers?.Count > 0
-                                ? assignment.Column.MultiPartIdentifier.Identifiers[
-                                    assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
-                                : "unknown";
-                            var compiled = _expressionCompiler.CompileScalar(assignment.NewValue);
-                            setClauses.Add(new CompiledSetClause(colName, compiled));
-                        }
-                    }
-                    whenMatched = MergeWhenMatched.Update(setClauses);
+                    throw new QueryParseException(
+                        "MERGE WHEN MATCHED (UPDATE/DELETE) is not yet supported. " +
+                        "Target row lookup from Dataverse is required. " +
+                        "Use WHEN NOT MATCHED (INSERT) only, or use separate UPDATE/DELETE statements.");
                 }
-                else if (clause.Condition == MergeCondition.Matched && clause.Action is DeleteMergeAction)
-                {
-                    whenMatched = MergeWhenMatched.Delete();
-                }
-                else if (clause.Condition == MergeCondition.NotMatched && clause.Action is InsertMergeAction insertAction)
+            }
+
+            foreach (MergeActionClause clause in spec.ActionClauses)
+            {
+                if (clause.Condition == MergeCondition.NotMatched && clause.Action is InsertMergeAction insertAction)
                 {
                     var columns = new List<string>();
                     if (insertAction.Columns != null)
@@ -2595,15 +2584,7 @@ public sealed class ExecutionPlanBuilder
             }
         }
 
-        if (whenMatched != null)
-        {
-            throw new NotSupportedException(
-                "MERGE WHEN MATCHED (UPDATE/DELETE) is not yet supported. " +
-                "Target row lookup from Dataverse is required. " +
-                "Use WHEN NOT MATCHED (INSERT) only, or use separate UPDATE/DELETE statements.");
-        }
-
-        var mergeNode = new MergeNode(sourceNode, targetEntity, matchColumns, whenMatched, whenNotMatched);
+        var mergeNode = new MergeNode(sourceNode, targetEntity, matchColumns, null, whenNotMatched);
 
         return new QueryPlanResult
         {

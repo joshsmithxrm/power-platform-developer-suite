@@ -577,6 +577,19 @@ public class DmlSafetyGuardTests
     }
 
     [Fact]
+    public void Check_TestEnvironment_WithConfirm_Allows()
+    {
+        var result = _guard.Check(
+            Parse("DELETE FROM account WHERE statecode = 1"),
+            new DmlSafetyOptions { IsConfirmed = true },
+            protectionLevel: ProtectionLevel.Test);
+
+        Assert.False(result.IsBlocked);
+        Assert.False(result.RequiresConfirmation);
+        Assert.False(result.RequiresPreview);
+    }
+
+    [Fact]
     public void Check_ProductionEnvironment_SelectNotAffected()
     {
         var result = _guard.Check(

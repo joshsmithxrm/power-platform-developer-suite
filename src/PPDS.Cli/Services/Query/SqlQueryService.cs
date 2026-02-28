@@ -130,88 +130,8 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
-
-        TSqlFragment fragment;
-        try
-        {
-            fragment = _queryParser.Parse(request.Sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
-        }
-
-        // DML safety check: validate DELETE/UPDATE/INSERT before execution.
-        int? dmlRowCap = null;
-        DmlSafetyResult? safetyResult = null;
-
-        if (request.DmlSafety != null)
-        {
-            var firstStatement = ExtractFirstStatement(fragment);
-
-            safetyResult = _dmlSafetyGuard.Check(
-                firstStatement, request.DmlSafety,
-                EnvironmentSafetySettings, EnvironmentProtectionLevel);
-
-            if (safetyResult.IsBlocked)
-            {
-                throw new PpdsException(
-                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
-            }
-
-            // Don't return yet for dry-run — we need to run the planner first
-            // so the user sees the execution plan. The dry-run check moves
-            // to after planning.
-
-            if (safetyResult.RequiresConfirmation)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
-                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
-            }
-
-            dmlRowCap = safetyResult.RowCap;
-        }
-
-        // For aggregate queries, fetch metadata needed for partitioning decisions.
-        // This enables the planner to partition large aggregates across the pool.
-        var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
-
-        // Build execution plan via ExecutionPlanBuilder
-        var planOptions = new QueryPlanOptions
-        {
-            MaxRows = request.TopOverride,
-            PageNumber = request.PageNumber,
-            PagingCookie = request.PagingCookie,
-            IncludeCount = request.IncludeCount,
-            UseTdsEndpoint = request.UseTdsEndpoint,
-            OriginalSql = request.Sql,
-            TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap,
-            EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
-            EstimatedRecordCount = estimatedRecordCount,
-            MinDate = minDate,
-            MaxDate = maxDate,
-            RemoteExecutorFactory = RemoteExecutorFactory
-        };
-
-        QueryPlanResult planResult;
-        try
-        {
-            planResult = _planBuilder.Plan(fragment, planOptions);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
-        }
-
-        // Check cross-environment DML policy after planning (needs plan to detect RemoteScanNode)
-        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
+        var (fragment, planResult, safetyResult) =
+            await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -299,84 +219,25 @@ public sealed class SqlQueryService : ISqlQueryService
         int chunkSize = 100,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
-
         if (chunkSize <= 0) chunkSize = 100;
 
-        TSqlFragment fragment;
-        try
+        var (fragment, planResult, safetyResult) =
+            await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
+
+        // Dry-run: yield empty completion chunk
+        if (safetyResult?.IsDryRun == true)
         {
-            fragment = _queryParser.Parse(request.Sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
-        }
-
-        // DML safety check
-        int? dmlRowCap = null;
-
-        if (request.DmlSafety != null)
-        {
-            var firstStatement = ExtractFirstStatement(fragment);
-
-            var safetyResult = _dmlSafetyGuard.Check(
-                firstStatement, request.DmlSafety,
-                EnvironmentSafetySettings, EnvironmentProtectionLevel);
-
-            if (safetyResult.IsBlocked)
+            yield return new SqlQueryStreamChunk
             {
-                throw new PpdsException(
-                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
-            }
-
-            if (safetyResult.RequiresConfirmation)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
-                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
-            }
-
-            dmlRowCap = safetyResult.RowCap;
+                Rows = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Columns = Array.Empty<QueryColumn>(),
+                EntityLogicalName = planResult.EntityLogicalName,
+                TotalRowsSoFar = 0,
+                IsComplete = true,
+                TranspiledFetchXml = planResult.FetchXml
+            };
+            yield break;
         }
-
-        // For aggregate queries, fetch metadata needed for partitioning decisions.
-        var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
-
-        // Build execution plan via ExecutionPlanBuilder
-        var planOptions = new QueryPlanOptions
-        {
-            MaxRows = request.TopOverride,
-            PageNumber = request.PageNumber,
-            PagingCookie = request.PagingCookie,
-            IncludeCount = request.IncludeCount,
-            UseTdsEndpoint = request.UseTdsEndpoint,
-            OriginalSql = request.Sql,
-            TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap,
-            EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
-            EstimatedRecordCount = estimatedRecordCount,
-            MinDate = minDate,
-            MaxDate = maxDate,
-            RemoteExecutorFactory = RemoteExecutorFactory
-        };
-
-        QueryPlanResult planResult;
-        try
-        {
-            planResult = _planBuilder.Plan(fragment, planOptions);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
-        }
-
-        // Check cross-environment DML policy after planning (needs plan to detect RemoteScanNode)
-        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
         // Execute the plan with streaming
         var context = new QueryPlanContext(
@@ -436,6 +297,98 @@ public sealed class SqlQueryService : ISqlQueryService
             IsComplete = true,
             TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Shared execution pipeline
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
+    /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
+    /// </summary>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult)>
+        PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
+
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(request.Sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // DML safety check
+        int? dmlRowCap = null;
+        DmlSafetyResult? safetyResult = null;
+
+        if (request.DmlSafety != null)
+        {
+            var firstStatement = ExtractFirstStatement(fragment);
+
+            safetyResult = _dmlSafetyGuard.Check(
+                firstStatement, request.DmlSafety,
+                EnvironmentSafetySettings, EnvironmentProtectionLevel);
+
+            if (safetyResult.IsBlocked)
+            {
+                throw new PpdsException(
+                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
+            }
+
+            if (safetyResult.RequiresConfirmation)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
+            }
+
+            dmlRowCap = safetyResult.RowCap;
+        }
+
+        // For aggregate queries, fetch metadata needed for partitioning decisions.
+        var (estimatedRecordCount, minDate, maxDate) =
+            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
+
+        // Build execution plan
+        var planOptions = new QueryPlanOptions
+        {
+            MaxRows = request.TopOverride,
+            PageNumber = request.PageNumber,
+            PagingCookie = request.PagingCookie,
+            IncludeCount = request.IncludeCount,
+            UseTdsEndpoint = request.UseTdsEndpoint,
+            OriginalSql = request.Sql,
+            TdsQueryExecutor = _tdsQueryExecutor,
+            DmlRowCap = dmlRowCap,
+            EnablePrefetch = request.EnablePrefetch,
+            PoolCapacity = _poolCapacity,
+            EstimatedRecordCount = estimatedRecordCount,
+            MinDate = minDate,
+            MaxDate = maxDate,
+            RemoteExecutorFactory = RemoteExecutorFactory
+        };
+
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment, planOptions);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // Check cross-environment DML policy after planning
+        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
+
+        return (fragment, planResult, safetyResult);
     }
 
     // ═══════════════════════════════════════════════════════════════════

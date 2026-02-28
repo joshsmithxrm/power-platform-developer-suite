@@ -194,7 +194,7 @@ public class MergeNodeTests
     // ────────────────────────────────────────────
 
     [Fact]
-    public void Plan_MergeWithWhenMatched_ThrowsNotSupportedException()
+    public void Plan_MergeWithWhenMatched_ThrowsQueryParseException()
     {
         var parser = new QueryParser();
         var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
@@ -214,7 +214,7 @@ public class MergeNodeTests
 
         var fragment = parser.Parse(sql);
         var act = () => builder.Plan(fragment);
-        act.Should().Throw<NotSupportedException>()
+        act.Should().Throw<QueryParseException>()
             .WithMessage("*WHEN MATCHED*not yet supported*");
     }
 

@@ -143,6 +143,21 @@ public sealed class DmlSafetyGuard
             };
         }
 
+        if (level == ProtectionLevel.Test && !options.IsConfirmed)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = result.IsBlocked,
+                BlockReason = result.BlockReason,
+                ErrorCode = result.ErrorCode,
+                EstimatedAffectedRows = result.EstimatedAffectedRows,
+                RequiresConfirmation = true,
+                RowCap = result.RowCap,
+                ExceedsRowCap = result.ExceedsRowCap,
+                IsDryRun = result.IsDryRun
+            };
+        }
+
         if (level == ProtectionLevel.Development && options.IsConfirmed)
         {
             return new DmlSafetyResult

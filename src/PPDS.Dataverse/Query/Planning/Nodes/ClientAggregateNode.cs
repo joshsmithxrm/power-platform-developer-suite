@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -57,11 +58,22 @@ public sealed class ClientAggregateNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Collect all input rows
+        var maxRows = context.MaxMaterializationRows;
+        var totalRows = 0;
         var groups = new Dictionary<string, List<QueryRow>>(StringComparer.Ordinal);
 
         await foreach (var row in Input.ExecuteAsync(context, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            totalRows++;
+
+            if (maxRows > 0 && totalRows > maxRows)
+            {
+                throw new QueryExecutionException(
+                    QueryErrorCode.ExecutionFailed,
+                    $"Client-side aggregate exceeded materialization limit ({maxRows:N0} rows). " +
+                    "Add a WHERE clause to reduce the input set.");
+            }
 
             var groupKey = BuildGroupKey(row);
             if (!groups.TryGetValue(groupKey, out var list))
