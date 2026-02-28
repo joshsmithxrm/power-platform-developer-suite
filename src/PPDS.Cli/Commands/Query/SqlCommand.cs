@@ -202,6 +202,19 @@ public static class SqlCommand
                     remoteProviders.Add(remoteProvider);
                     return remoteProvider.GetRequiredService<IQueryExecutor>();
                 };
+
+                // Wire environment-specific DML safety settings (mirrors InteractiveSession)
+                concreteSqlService.ProfileResolver = resolver;
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                var envConfig = await envConfigStore.GetConfigAsync(
+                    connectionInfo.EnvironmentUrl, cancellationToken);
+                if (envConfig != null)
+                {
+                    concreteSqlService.EnvironmentSafetySettings = envConfig.SafetySettings;
+                    var envType = envConfig.Type ?? EnvironmentType.Unknown;
+                    concreteSqlService.EnvironmentProtectionLevel = envConfig.Protection
+                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                }
             }
 
             // If --explain, show execution plan without executing
