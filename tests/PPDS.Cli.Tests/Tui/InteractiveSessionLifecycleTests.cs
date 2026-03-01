@@ -33,7 +33,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     {
         _tempStore.Dispose();
         _envConfigStore.Dispose();
-        try { File.Delete(_envConfigPath); } catch { }
+        try { File.Delete(_envConfigPath); } catch (IOException) { /* Best-effort temp file cleanup */ }
     }
 
     #region Initialization Tests
