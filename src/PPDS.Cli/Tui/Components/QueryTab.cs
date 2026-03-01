@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Threading;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 
@@ -98,7 +99,7 @@ internal sealed class QueryTab
 
     public QueryTab(string initialQueryText = "")
     {
-        TabId = _nextTabNumber++;
+        TabId = Interlocked.Increment(ref _nextTabNumber);
         _queryText = initialQueryText;
         _savedQueryText = initialQueryText;
         Title = GenerateTitle(initialQueryText);
