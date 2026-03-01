@@ -33,6 +33,6 @@ query-filters:
         # SQL engine uses exact zero guard for divide-by-zero (intentional)
         - cs/equality-on-floats
         # Test assertions on default-constructed objects (false positive)
-        - cs/container-contents-never-initialized
+        - cs/empty-collection
         # Test methods have multi-step scenarios by design
-        - cs/too-many-statements-in-block
+        - cs/complex-block
