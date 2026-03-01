@@ -145,22 +145,16 @@ public sealed class ProfileService : IProfileService
         if (!string.IsNullOrWhiteSpace(newEnvironment))
         {
             var credentialStore = _credentialStoreFactory();
-            try
-            {
-                using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
-                var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
+            using var credentialStoreDisposable = credentialStore as IDisposable;
+            using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
+            var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
-                if (!result.Success)
-                {
-                    throw new PpdsException(ErrorCodes.Connection.EnvironmentNotFound, result.ErrorMessage ?? "Environment not found.");
-                }
-
-                profile.Environment = result.Environment;
-            }
-            finally
+            if (!result.Success)
             {
-                (credentialStore as IDisposable)?.Dispose();
+                throw new PpdsException(ErrorCodes.Connection.EnvironmentNotFound, result.ErrorMessage ?? "Environment not found.");
             }
+
+            profile.Environment = result.Environment;
         }
 
         await _store.SaveAsync(collection, cancellationToken);
@@ -186,14 +180,8 @@ public sealed class ProfileService : IProfileService
 
         // Clear secure credential store
         var credentialStore = _credentialStoreFactory();
-        try
-        {
-            await credentialStore.ClearAsync(cancellationToken);
-        }
-        finally
-        {
-            (credentialStore as IDisposable)?.Dispose();
-        }
+        using var credentialStoreDisposable = credentialStore as IDisposable;
+        await credentialStore.ClearAsync(cancellationToken);
 
         _logger.LogInformation("Cleared all profiles and credentials");
     }
