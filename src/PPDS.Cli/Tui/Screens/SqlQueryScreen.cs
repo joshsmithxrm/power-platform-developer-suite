@@ -957,7 +957,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     {
         var planText = QueryPlanView.FormatPlanTree(plan, executionTimeMs);
 
-        var dialog = new Dialog("Execution Plan", 80, 25)
+        using var dialog = new Dialog("Execution Plan", 80, 25)
         {
             ColorScheme = TuiColorPalette.Default
         };
@@ -984,7 +984,6 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         dialog.Add(textView, closeButton);
         closeButton.SetFocus();
         Application.Run(dialog);
-        dialog.Dispose();
     }
 
     private void DeleteWordBackward()
