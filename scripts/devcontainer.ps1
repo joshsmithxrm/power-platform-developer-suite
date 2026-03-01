@@ -507,7 +507,6 @@ switch ($Command) {
         # Find if any host worktree has this branch checked out and update it
         $wtLines = git -C $WorkspaceFolder worktree list --porcelain
         $wtPath = $null
-        $nextIsWorktree = $false
         foreach ($line in $wtLines) {
             if ($line -match '^worktree (.+)$') {
                 $wtPath = $Matches[1]
