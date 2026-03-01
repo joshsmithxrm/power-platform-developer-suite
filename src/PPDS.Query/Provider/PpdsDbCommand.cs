@@ -201,7 +201,7 @@ public sealed class PpdsDbCommand : DbCommand
     public override void Cancel()
     {
         try { _activeCts?.Cancel(); }
-        catch (ObjectDisposedException) { }
+        catch (ObjectDisposedException) { /* CTS may be disposed after command completion; safe to ignore */ }
     }
 
     /// <inheritdoc />
