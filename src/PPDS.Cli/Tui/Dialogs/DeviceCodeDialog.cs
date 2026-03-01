@@ -15,7 +15,7 @@ internal sealed class DeviceCodeDialog : TuiDialog, ITuiStateCapture<DeviceCodeD
     private readonly string _verificationUrl;
     private readonly bool _clipboardCopied;
     private readonly Label _statusLabel;
-    private CancellationTokenRegistration? _autoCloseRegistration;
+    private readonly CancellationTokenRegistration? _autoCloseRegistration;
 
     /// <summary>
     /// Creates a device code dialog with prominent code display and copy button.
