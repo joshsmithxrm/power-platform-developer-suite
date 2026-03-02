@@ -281,15 +281,14 @@ public static class JsonFunctions
                     segments = segments.Substring(1);
                 }
 
-                // Simple implementation: only supports single-level and dot-separated paths
-                var pathParts = segments.Split('.');
-                if (pathParts.Length == 0) return jsonStr;
+                var pathSegments = ParsePathSegments(segments);
+                if (pathSegments.Length == 0) return jsonStr;
 
                 // Re-serialize the document with the modification
                 using var stream = new System.IO.MemoryStream();
                 using (var writer = new Utf8JsonWriter(stream))
                 {
-                    WriteModified(writer, doc.RootElement, pathParts, 0, newValue);
+                    WriteModified(writer, doc.RootElement, pathSegments, 0, newValue);
                 }
                 return System.Text.Encoding.UTF8.GetString(stream.ToArray());
             }
@@ -299,28 +298,120 @@ public static class JsonFunctions
             }
         }
 
-        private static void WriteModified(
-            Utf8JsonWriter writer, JsonElement element, string[] pathParts, int depth, object? newValue)
+        /// <summary>
+        /// A path segment is either a property name or an array index.
+        /// </summary>
+        private readonly record struct PathSegment(string? Property, int ArrayIndex = -1)
         {
-            if (element.ValueKind == JsonValueKind.Object)
+            public bool IsArrayIndex => ArrayIndex >= 0;
+        }
+
+        /// <summary>
+        /// Parses a path string (after stripping "$."/"$") into segments,
+        /// handling both dot-separated property names and bracket array indexers.
+        /// </summary>
+        private static PathSegment[] ParsePathSegments(string path)
+        {
+            var result = new System.Collections.Generic.List<PathSegment>();
+            int pos = 0;
+
+            while (pos < path.Length)
+            {
+                int dotPos = path.IndexOf('.', pos);
+                int bracketPos = path.IndexOf('[', pos);
+
+                if (dotPos < 0 && bracketPos < 0)
+                {
+                    // Remaining is a property name
+                    result.Add(new PathSegment(path.Substring(pos)));
+                    break;
+                }
+                else if (bracketPos >= 0 && (dotPos < 0 || bracketPos < dotPos))
+                {
+                    // Array indexer comes first
+                    if (bracketPos > pos)
+                    {
+                        result.Add(new PathSegment(path.Substring(pos, bracketPos - pos)));
+                    }
+
+                    int closeBracket = path.IndexOf(']', bracketPos);
+                    if (closeBracket < 0) break;
+
+                    var indexStr = path.Substring(bracketPos + 1, closeBracket - bracketPos - 1);
+                    if (int.TryParse(indexStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var idx))
+                    {
+                        result.Add(new PathSegment(null, idx));
+                    }
+
+                    pos = closeBracket + 1;
+                    if (pos < path.Length && path[pos] == '.') pos++;
+                }
+                else
+                {
+                    // Dot-separated property
+                    result.Add(new PathSegment(path.Substring(pos, dotPos - pos)));
+                    pos = dotPos + 1;
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        private static void WriteModified(
+            Utf8JsonWriter writer, JsonElement element, PathSegment[] segments, int depth, object? newValue)
+        {
+            if (depth >= segments.Length)
+            {
+                // Past end of path — write element as-is
+                element.WriteTo(writer);
+                return;
+            }
+
+            var segment = segments[depth];
+            bool isTarget = depth == segments.Length - 1;
+
+            if (segment.IsArrayIndex && element.ValueKind == JsonValueKind.Array)
+            {
+                writer.WriteStartArray();
+                int i = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (i == segment.ArrayIndex)
+                    {
+                        if (isTarget)
+                        {
+                            WriteValue(writer, newValue);
+                        }
+                        else
+                        {
+                            WriteModified(writer, item, segments, depth + 1, newValue);
+                        }
+                    }
+                    else
+                    {
+                        item.WriteTo(writer);
+                    }
+                    i++;
+                }
+                writer.WriteEndArray();
+            }
+            else if (!segment.IsArrayIndex && element.ValueKind == JsonValueKind.Object)
             {
                 writer.WriteStartObject();
                 bool found = false;
                 foreach (var prop in element.EnumerateObject())
                 {
-                    if (depth < pathParts.Length && string.Equals(prop.Name, pathParts[depth], StringComparison.Ordinal))
+                    if (string.Equals(prop.Name, segment.Property, StringComparison.Ordinal))
                     {
                         found = true;
                         writer.WritePropertyName(prop.Name);
-                        if (depth == pathParts.Length - 1)
+                        if (isTarget)
                         {
-                            // This is the target property - write new value
                             WriteValue(writer, newValue);
                         }
                         else
                         {
-                            // Navigate deeper
-                            WriteModified(writer, prop.Value, pathParts, depth + 1, newValue);
+                            WriteModified(writer, prop.Value, segments, depth + 1, newValue);
                         }
                     }
                     else
@@ -329,15 +420,16 @@ public static class JsonFunctions
                     }
                 }
                 // If property not found at the target level, add it
-                if (!found && depth == pathParts.Length - 1)
+                if (!found && isTarget)
                 {
-                    writer.WritePropertyName(pathParts[depth]);
+                    writer.WritePropertyName(segment.Property!);
                     WriteValue(writer, newValue);
                 }
                 writer.WriteEndObject();
             }
             else
             {
+                // Type mismatch (e.g. array index on object) — write as-is
                 element.WriteTo(writer);
             }
         }

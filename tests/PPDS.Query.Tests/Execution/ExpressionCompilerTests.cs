@@ -1515,4 +1515,104 @@ public class ExpressionCompilerTests
         var compiled = _compiler.CompilePredicate(pred);
         compiled(MakeRow(("revenue", null))).Should().BeFalse();
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  JSON_MODIFY
+    // ════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CompileScalar_JsonModify_SimpleProperty()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"name\":\"old\"}', '$.name', 'new')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"name\":\"new\"");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_NestedProperty()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"a\":{\"b\":1}}', '$.a.b', 2)");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"b\":2");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_AddNewProperty()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"name\":\"test\"}', '$.age', 30)");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"age\":30");
+        result.Should().Contain("\"name\":\"test\"");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_ArrayIndex()
+    {
+        var expr = ParseExpression("JSON_MODIFY('[\"a\",\"b\",\"c\"]', '$[1]', 'updated')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"updated\"");
+        result.Should().Contain("\"a\"");
+        result.Should().Contain("\"c\"");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_NestedArrayProperty()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"items\":[{\"x\":1},{\"x\":2}]}', '$.items[0].x', 99)");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("99");
+        result.Should().Contain("\"x\":2");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_ArrayPropertyThenIndex()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"tags\":[\"old\",\"keep\"]}', '$.tags[0]', 'new')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"new\"");
+        result.Should().Contain("\"keep\"");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_SetToNull()
+    {
+        var expr = ParseExpression("JSON_MODIFY('{\"name\":\"test\"}', '$.name', NULL)");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var result = (string)compiled(EmptyRow)!;
+        result.Should().Contain("\"name\":null");
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_NullInput_ReturnsNull()
+    {
+        var expr = ParseExpression("JSON_MODIFY(NULL, '$.name', 'value')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        compiled(EmptyRow).Should().BeNull();
+    }
+
+    [Fact]
+    public void CompileScalar_JsonModify_ColumnReference()
+    {
+        var expr = ParseExpression("JSON_MODIFY(settings, '$.theme', 'dark')");
+        var compiled = _compiler.CompileScalar(expr);
+
+        var row = MakeRow(("settings", "{\"theme\":\"light\",\"lang\":\"en\"}"));
+        var result = (string)compiled(row)!;
+        result.Should().Contain("\"theme\":\"dark\"");
+        result.Should().Contain("\"lang\":\"en\"");
+    }
 }
