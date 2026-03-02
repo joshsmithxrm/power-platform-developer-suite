@@ -8,6 +8,8 @@ on:
       - 'Migration-v*'
       - 'Auth-v*'
       - 'Cli-v*'
+      - 'Query-v*'
+      - 'Mcp-v*'
 
 jobs:
   publish:
@@ -48,6 +50,12 @@ jobs:
         elif [[ $TAG == Cli-v* ]]; then
           echo "package=PPDS.Cli" >> $GITHUB_OUTPUT
           echo "projects=src/PPDS.Cli/PPDS.Cli.csproj" >> $GITHUB_OUTPUT
+        elif [[ $TAG == Query-v* ]]; then
+          echo "package=PPDS.Query" >> $GITHUB_OUTPUT
+          echo "projects=src/PPDS.Query/PPDS.Query.csproj" >> $GITHUB_OUTPUT
+        elif [[ $TAG == Mcp-v* ]]; then
+          echo "package=PPDS.Mcp" >> $GITHUB_OUTPUT
+          echo "projects=src/PPDS.Mcp/PPDS.Mcp.csproj" >> $GITHUB_OUTPUT
         else
           echo "Unknown tag format: $TAG"
           exit 1
