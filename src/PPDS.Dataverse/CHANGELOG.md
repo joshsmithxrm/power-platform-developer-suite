@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-03-02
+
 ### Added
 
 - **Query Engine v2** — Execution plan layer with Volcano iterator model for streaming results
@@ -19,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Metadata query system** — Queryable entity/attribute schema access
 - **Cached metadata provider** — TTL-based caching layer for IntelliSense metadata
 - **DML safety guard** — Structured protections for data modification operations
+- **Child record paging boundary detection** — Detects when linked entity results cross page boundaries for correct pagination
+- **Adaptive thread management for 429 backoff** — Reduces thread consumption during throttling for better resource utilization
+- **Auto-paging for RemoteScanNode** — Automatic page-through for cross-environment query results
+
+### Fixed
+
+- **Floating-point equality comparisons** — Use proper SQL semantics for float comparisons
 
 ## [1.0.0-beta.5] - 2026-01-14
 
@@ -161,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed rate control presets (`Conservative`, `Balanced`, `Aggressive`) in favor of DOP-based parallelism
 - Removed adaptive rate control in favor of server-recommended limits
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.5...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.6...HEAD
+[1.0.0-beta.6]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.5...Dataverse-v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.4...Dataverse-v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.3...Dataverse-v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Dataverse-v1.0.0-beta.2...Dataverse-v1.0.0-beta.3

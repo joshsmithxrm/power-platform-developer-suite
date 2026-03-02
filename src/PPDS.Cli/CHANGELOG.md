@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.13] - 2026-03-02
+
 ### Added
 
 - **SQL syntax highlighting** — Context-aware syntax coloring in the TUI query editor
@@ -19,12 +21,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Environment-colored tabs** — Tab bar reflects configured environment colors
 - **DML support** — INSERT, UPDATE, DELETE with safety guard and row caps
 - **Elapsed time spinner** — Query execution shows elapsed seconds in real-time
+- **Multi-tab query architecture** — Per-environment query tabs with independent editors and result views
+- **`ppds env config` command** — Configure environment label, type, and color
+- **EnvironmentConfigDialog** — TUI dialog for configuring environment label, type (dropdown), and color
+- **DeviceCodeDialog** — TUI dialog with selectable device code text and auto-close on auth completion
+- **TDS Endpoint toggle** — Toggle TDS Endpoint routing with Ctrl+T shortcut
+- **F7/F8/F9 keybindings** — Linux terminal compatibility keybindings
+- **Escape key cancels queries** — Press Escape to cancel a running query
+- **Certificate Store and Username/Password auth** — Additional authentication methods in TUI profile creation
+- **Environment selector improvements** — Resolved labels, preview panel, and config access
+- **DML safety with environment settings** — Environment-specific DML safety thresholds and protection levels
+- **Cross-environment query support** — Cross-environment queries wired to CLI and TUI
+
+### Changed
+
+- **Migrated to PPDS.Query engine** — Replaced legacy SQL parser with ScriptDom-based PPDS.Query engine
+- **Deleted legacy parser** — Removed legacy parser, AST, transpiler, and evaluator (-22K lines)
+- **Major DI refactoring** — AuthServices, EnvironmentConfigStore, ProfileStore injection throughout CLI and TUI
 
 ### Fixed
 
 - **Auth:** Profile creation flow, token scope mismatch, device code callbacks
 - **TUI:** Menu flicker, cursor visibility, first-frame colors, stale diagnostics clearing
 - **TUI:** High-contrast editor cursor with environment-colored tabs
+- **Timer and event leaks in TUI** — Fixed timer leak, event leak, and splitter drag issues
+- **Autocomplete interference during paste** — Prevented autocomplete popup from interfering with paste operations
+- **Tab highlight color regression** — Fixed tab color regression and config dialog defaults
+- **70 CodeQL code scanning alerts** — Resolved code quality findings across production code
 
 ## [1.0.0-beta.12] - 2026-01-14
 
@@ -350,7 +373,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged as .NET global tool (`ppds`)
 - Targets: `net8.0`, `net9.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.12...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.13...HEAD
+[1.0.0-beta.13]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.12...Cli-v1.0.0-beta.13
 [1.0.0-beta.12]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.11...Cli-v1.0.0-beta.12
 [1.0.0-beta.11]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.10...Cli-v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Cli-v1.0.0-beta.9...Cli-v1.0.0-beta.10

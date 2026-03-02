@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-03-02
+
+### Added
+
+- **`AddAuthServices()` DI registration** — Extension method for registering `ProfileStore`, `EnvironmentConfigStore`, and `NativeCredentialStore` into the DI container
+- **`EnvironmentConfig` models and `EnvironmentConfigStore`** — Per-environment configuration for label, type, and color settings
+- **`EnvironmentType` enum** — Typed environment classification (`Development`, `Test`, `Production`, `Sandbox`, `Default`), moved from CLI to Auth for shared use
+- **`QuerySafetySettings`** — Per-environment DML safety thresholds in `EnvironmentConfig`
+- **`ProtectionLevel`** — Environment protection level enforcement for production safety
+- **Cross-environment DML policy enforcement** — Safety policies for cross-environment data modification operations
+
+### Changed
+
+- **`EnvironmentConfig.Type` uses `EnvironmentType` enum** — Changed from `string` to typed enum for compile-time safety
+
+### Fixed
+
+- **Token cache scope mismatch in browser auth** — Fixed scope mismatch during interactive browser profile creation
+- **Disposal guards and typed catches** — Added disposal guards, empty-string-clears, and specific exception catches in credential providers
+
 ## [1.0.0-beta.6] - 2026-01-14
 
 ### Changed
@@ -117,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JWT claims parsing for identity information
 - Targets: `net8.0`, `net9.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.6...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.7...HEAD
+[1.0.0-beta.7]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.6...Auth-v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.5...Auth-v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.4...Auth-v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Auth-v1.0.0-beta.3...Auth-v1.0.0-beta.4
