@@ -9,6 +9,8 @@ This repository contains multiple packages with independent release cycles.
 - [PPDS.Migration](src/PPDS.Migration/CHANGELOG.md) - Data migration library
 - [PPDS.Auth](src/PPDS.Auth/CHANGELOG.md) - Authentication profiles and credentials
 - [PPDS.Cli](src/PPDS.Cli/CHANGELOG.md) - Unified CLI tool (`ppds` command)
+- [PPDS.Query](src/PPDS.Query/CHANGELOG.md) - SQL query engine for Dataverse
+- [PPDS.Mcp](src/PPDS.Mcp/CHANGELOG.md) - MCP server for AI assistant integration
 
 ## GitHub Releases
 
@@ -27,6 +29,8 @@ Each package has its own tag prefix:
 | PPDS.Migration | `Migration-v{version}` | `Migration-v1.0.0` |
 | PPDS.Auth | `Auth-v{version}` | `Auth-v1.0.0` |
 | PPDS.Cli | `Cli-v{version}` | `Cli-v1.0.0` |
+| PPDS.Query | `Query-v{version}` | `Query-v1.0.0` |
+| PPDS.Mcp | `Mcp-v{version}` | `Mcp-v1.0.0` |
 
 Pre-release versions follow SemVer:
 - Alpha: `Dataverse-v1.0.0-alpha.1`
