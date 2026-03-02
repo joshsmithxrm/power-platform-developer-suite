@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-03-02
+
+### Changed
+
+- **Updated Microsoft.Data.SqlClient** — Bumped from 5.2.2 to 6.1.4
+
 ## [1.0.0-beta.6] - 2026-01-14
 
 ### Added
@@ -92,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DI integration via `AddDataverseMigration()` extension method
 - Targets: `net8.0`, `net9.0`, `net10.0`
 
-[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.6...HEAD
+[Unreleased]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.7...HEAD
+[1.0.0-beta.7]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.6...Migration-v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.5...Migration-v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.4...Migration-v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/joshsmithxrm/power-platform-developer-suite/compare/Migration-v1.0.0-beta.3...Migration-v1.0.0-beta.4
