@@ -20,7 +20,7 @@ public class PlanExecutorTests
     private static QueryPlanContext CreateContext()
     {
         var mockQueryExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockQueryExecutor.Object, new ExpressionEvaluator());
+        return new QueryPlanContext(mockQueryExecutor.Object);
     }
 
     /// <summary>

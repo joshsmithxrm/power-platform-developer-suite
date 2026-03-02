@@ -50,6 +50,21 @@ public static class MetadataTableDefinitions
             ["optionsetvalue"] = new[]
             {
                 "optionsetname", "value", "label", "description"
+            },
+            ["relationship"] = new[]
+            {
+                "schemaname", "referencingentity", "referencedentity",
+                "referencingattribute", "referencedattribute",
+                "iscustomrelationship", "isvalidforadvancedfind",
+                "relationshiptype", "securitytypes",
+                "entity1logicalname", "entity2logicalname",
+                "intersectentityname"
+            },
+            ["key"] = new[]
+            {
+                "logicalname", "entitylogicalname", "displayname",
+                "keyattributes", "iscustomizable", "ismanaged",
+                "schemaname"
             }
         };
 

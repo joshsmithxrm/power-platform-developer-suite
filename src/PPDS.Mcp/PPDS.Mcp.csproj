@@ -43,6 +43,7 @@
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <ProjectReference Include="..\PPDS.Auth\PPDS.Auth.csproj" />
     <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+    <ProjectReference Include="..\PPDS.Query\PPDS.Query.csproj" />
     <ProjectReference Include="..\PPDS.Migration\PPDS.Migration.csproj" />
     <!-- PPDS architectural enforcement analyzers -->
     <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"

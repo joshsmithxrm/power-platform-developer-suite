@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>PPDS.Query</RootNamespace>
+    <AssemblyName>PPDS.Query</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- MinVer Configuration -->
+    <MinVerTagPrefix>Query-v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>PPDS.Query</PackageId>
+    <Authors>Josh Smith</Authors>
+    <Company>Power Platform Developer Suite</Company>
+    <Description>Production-grade SQL query engine for Dataverse. Provides full T-SQL parsing via ScriptDom, FetchXML transpilation, streaming execution with cost-based optimization, and an ADO.NET provider (PpdsDbConnection) for any .NET application.</Description>
+    <PackageTags>dataverse;dynamics365;powerplatform;sql;query;fetchxml;ado-net;ppds</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Josh Smith</Copyright>
+    <PackageProjectUrl>https://github.com/joshsmithxrm/power-platform-developer-suite</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshsmithxrm/power-platform-developer-suite.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Source Link for debugging -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PPDS.Query.Tests" />
+    <InternalsVisibleTo Include="PPDS.Cli" />
+    <InternalsVisibleTo Include="PPDS.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PPDS.Dataverse\PPDS.Dataverse.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using Moq;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using Xunit;
@@ -17,7 +16,7 @@ public class FetchXmlScanNodeTests
 {
     private static QueryPlanContext CreateContext(IQueryExecutor executor)
     {
-        return new QueryPlanContext(executor, new ExpressionEvaluator());
+        return new QueryPlanContext(executor);
     }
 
     private static QueryResult MakeResult(string entity, int count, bool moreRecords = false, string? pagingCookie = null)

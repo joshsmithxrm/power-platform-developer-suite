@@ -1,12 +1,14 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Query.Parsing;
 
 namespace PPDS.Cli.Commands.Query;
 
@@ -158,6 +160,7 @@ public static class SqlCommand
         CancellationToken cancellationToken)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var remoteProviders = new List<ServiceProvider>();
 
         try
         {
@@ -174,6 +177,45 @@ public static class SqlCommand
                 cancellationToken: cancellationToken);
 
             var sqlQueryService = serviceProvider.GetRequiredService<ISqlQueryService>();
+
+            // Wire cross-environment support: [LABEL].entity resolves via profile labels
+            if (sqlQueryService is SqlQueryService concreteSqlService)
+            {
+                var envConfigStore = serviceProvider.GetRequiredService<EnvironmentConfigStore>();
+                var envConfigs = await envConfigStore.LoadAsync(cancellationToken);
+                var resolver = new ProfileResolutionService(envConfigs.Environments);
+
+                concreteSqlService.RemoteExecutorFactory = label =>
+                {
+                    var config = resolver.ResolveByLabel(label);
+                    if (config?.Url == null) return null;
+
+#pragma warning disable PPDS012 // Planner is synchronous; single CLI invocation
+                    var remoteProvider = ProfileServiceFactory.CreateFromProfileAsync(
+                        profile, config.Url,
+                        globalOptions.Verbose, globalOptions.Debug,
+                        ProfileServiceFactory.DefaultDeviceCodeCallback,
+                        cancellationToken: cancellationToken)
+                        .GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+
+                    remoteProviders.Add(remoteProvider);
+                    return remoteProvider.GetRequiredService<IQueryExecutor>();
+                };
+
+                // Wire environment-specific DML safety settings (mirrors InteractiveSession)
+                concreteSqlService.ProfileResolver = resolver;
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                var envConfig = await envConfigStore.GetConfigAsync(
+                    connectionInfo.EnvironmentUrl, cancellationToken);
+                if (envConfig != null)
+                {
+                    concreteSqlService.EnvironmentSafetySettings = envConfig.SafetySettings;
+                    var envType = envConfig.Type ?? EnvironmentType.Unknown;
+                    concreteSqlService.EnvironmentProtectionLevel = envConfig.Protection
+                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                }
+            }
 
             // If --explain, show execution plan without executing
             if (explain)
@@ -265,11 +307,14 @@ public static class SqlCommand
 
             return ExitCodes.Success;
         }
-        catch (SqlParseException ex)
+        catch (QueryParseException ex)
         {
-            var details = globalOptions.Debug
-                ? $"Line {ex.Line}, Column {ex.Column}, Position {ex.Position}\nContext: {ex.ContextSnippet}"
-                : null;
+            string? details = null;
+            if (globalOptions.Debug && ex.Errors.Count > 0)
+            {
+                var first = ex.Errors[0];
+                details = $"Line {first.Line}, Column {first.Column}: {first.Message}";
+            }
 
             var error = StructuredError.Create(
                 "SQL_PARSE_ERROR",
@@ -286,6 +331,11 @@ public static class SqlCommand
             var error = ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
+        }
+        finally
+        {
+            foreach (var rp in remoteProviders)
+                await rp.DisposeAsync();
         }
     }
 

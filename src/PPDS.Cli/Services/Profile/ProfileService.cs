@@ -23,14 +23,26 @@ public sealed class ProfileService : IProfileService
 
     private readonly ProfileStore _store;
     private readonly ILogger<ProfileService> _logger;
+    private readonly Func<ISecureCredentialStore> _credentialStoreFactory;
 
     /// <summary>
     /// Creates a new profile service.
     /// </summary>
-    public ProfileService(ProfileStore store, ILogger<ProfileService> logger)
+    /// <param name="store">The profile store for reading/writing profiles.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="credentialStoreFactory">
+    /// Optional factory for creating credential stores. When null, creates
+    /// <see cref="NativeCredentialStore"/> directly (production default).
+    /// Pass a custom factory in tests to avoid requiring a configured GCM credential store.
+    /// </param>
+    public ProfileService(
+        ProfileStore store,
+        ILogger<ProfileService> logger,
+        Func<ISecureCredentialStore>? credentialStoreFactory = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _credentialStoreFactory = credentialStoreFactory ?? (() => new NativeCredentialStore());
     }
 
     /// <inheritdoc />
@@ -132,7 +144,8 @@ public sealed class ProfileService : IProfileService
         // Update environment if specified
         if (!string.IsNullOrWhiteSpace(newEnvironment))
         {
-            using var credentialStore = new NativeCredentialStore();
+            var credentialStore = _credentialStoreFactory();
+            using var credentialStoreDisposable = credentialStore as IDisposable;
             using var resolver = new EnvironmentResolutionService(profile, credentialStore: credentialStore);
             var result = await resolver.ResolveAsync(newEnvironment, cancellationToken);
 
@@ -166,7 +179,8 @@ public sealed class ProfileService : IProfileService
         await TokenCacheManager.ClearAllCachesAsync(tokenCachePath);
 
         // Clear secure credential store
-        using var credentialStore = new NativeCredentialStore();
+        var credentialStore = _credentialStoreFactory();
+        using var credentialStoreDisposable = credentialStore as IDisposable;
         await credentialStore.ClearAsync(cancellationToken);
 
         _logger.LogInformation("Cleared all profiles and credentials");

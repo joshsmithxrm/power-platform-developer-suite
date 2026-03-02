@@ -37,7 +37,7 @@ public class ProfilePathsTests
     {
         var directory = ProfilePaths.DataDirectory;
 
-        directory.Should().Contain("PPDS", "data directory should contain app name");
+        directory.Should().ContainEquivalentOf("PPDS", "data directory should contain app name (case-insensitive: Linux uses ~/.ppds)");
     }
 
     [Fact]

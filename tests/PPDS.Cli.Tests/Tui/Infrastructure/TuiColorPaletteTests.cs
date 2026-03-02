@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 using Xunit;
@@ -160,4 +161,11 @@ public class TuiColorPaletteTests
     }
 
     #endregion
+
+    [Fact]
+    public void TextInput_FocusBackground_DiffersFromNormalBackground()
+    {
+        var scheme = TuiColorPalette.TextInput;
+        Assert.NotEqual(scheme.Normal.Background, scheme.Focus.Background);
+    }
 }

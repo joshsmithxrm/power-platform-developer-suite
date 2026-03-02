@@ -23,7 +23,7 @@ public class EnvironmentConfigServiceTests : IDisposable
     public async Task ResolveColorAsync_ExplicitColor_WinsOverType()
     {
         await _service.SaveConfigAsync("https://org.crm.dynamics.com",
-            type: "Production", color: EnvironmentColor.Blue);
+            type: EnvironmentType.Production, color: EnvironmentColor.Blue);
         var color = await _service.ResolveColorAsync("https://org.crm.dynamics.com");
         Assert.Equal(EnvironmentColor.Blue, color);
     }
@@ -31,16 +31,16 @@ public class EnvironmentConfigServiceTests : IDisposable
     [Fact]
     public async Task ResolveColorAsync_TypeDefault_UsedWhenNoExplicitColor()
     {
-        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: "Production");
+        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Production);
         var color = await _service.ResolveColorAsync("https://org.crm.dynamics.com");
         Assert.Equal(EnvironmentColor.Red, color);
     }
 
     [Fact]
-    public async Task ResolveColorAsync_CustomType_UsesTypeDefaults()
+    public async Task ResolveColorAsync_CustomTypeOverride_UsesTypeDefaults()
     {
-        await _service.SaveTypeDefaultAsync("Gold", EnvironmentColor.BrightYellow);
-        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: "Gold");
+        await _service.SaveTypeDefaultAsync(EnvironmentType.Production, EnvironmentColor.BrightYellow);
+        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Production);
         var color = await _service.ResolveColorAsync("https://org.crm.dynamics.com");
         Assert.Equal(EnvironmentColor.BrightYellow, color);
     }
@@ -48,7 +48,7 @@ public class EnvironmentConfigServiceTests : IDisposable
     [Fact]
     public async Task ResolveColorAsync_NoConfig_FallsBackToUrlKeywords()
     {
-        // URL with dev keyword → Development → Green
+        // URL with dev keyword -> Development -> Green
         var color = await _service.ResolveColorAsync("https://org-dev.crm.dynamics.com");
         Assert.Equal(EnvironmentColor.Green, color);
     }
@@ -56,7 +56,7 @@ public class EnvironmentConfigServiceTests : IDisposable
     [Fact]
     public async Task ResolveColorAsync_NoConfig_PlainUrl_ReturnsGray()
     {
-        // Plain CRM URL with no keywords → no type detected → Gray
+        // Plain CRM URL with no keywords -> no type detected -> Gray
         var color = await _service.ResolveColorAsync("https://org.crm.dynamics.com");
         Assert.Equal(EnvironmentColor.Gray, color);
     }
@@ -71,42 +71,49 @@ public class EnvironmentConfigServiceTests : IDisposable
     [Fact]
     public async Task ResolveTypeAsync_UserConfig_WinsOverDiscovery()
     {
-        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: "UAT");
+        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Test);
         var type = await _service.ResolveTypeAsync("https://org.crm.dynamics.com", discoveredType: "Sandbox");
-        Assert.Equal("UAT", type);
+        Assert.Equal(EnvironmentType.Test, type);
     }
 
     [Fact]
     public async Task ResolveTypeAsync_Discovery_WinsOverUrlHeuristics()
     {
         var type = await _service.ResolveTypeAsync("https://org.crm.dynamics.com", discoveredType: "Sandbox");
-        Assert.Equal("Sandbox", type);
+        Assert.Equal(EnvironmentType.Sandbox, type);
     }
 
     [Fact]
     public async Task ResolveTypeAsync_NoConfigNoDiscovery_FallsBackToUrl()
     {
         var type = await _service.ResolveTypeAsync("https://org-dev.crm.dynamics.com");
-        Assert.Equal("Development", type);
+        Assert.Equal(EnvironmentType.Development, type);
     }
 
     [Fact]
-    public async Task GetAllTypeDefaultsAsync_MergesBuiltInAndCustom()
+    public async Task ResolveTypeAsync_NoConfigNoDiscoveryNoMatch_ReturnsUnknown()
     {
-        await _service.SaveTypeDefaultAsync("Gold", EnvironmentColor.BrightYellow);
+        var type = await _service.ResolveTypeAsync("https://org.crm.dynamics.com");
+        Assert.Equal(EnvironmentType.Unknown, type);
+    }
+
+    [Fact]
+    public async Task GetAllTypeDefaultsAsync_MergesBuiltInAndOverrides()
+    {
+        await _service.SaveTypeDefaultAsync(EnvironmentType.Sandbox, EnvironmentColor.BrightYellow);
         var defaults = await _service.GetAllTypeDefaultsAsync();
-        Assert.True(defaults.TryGetValue("Production", out var productionColor), "Should have built-in Production");
-        Assert.True(defaults.TryGetValue("Gold", out var goldColor), "Should have custom Gold");
+        Assert.True(defaults.TryGetValue(EnvironmentType.Production, out var productionColor), "Should have built-in Production");
+        Assert.True(defaults.TryGetValue(EnvironmentType.Sandbox, out var sandboxColor), "Should have Sandbox (overridden)");
         Assert.Equal(EnvironmentColor.Red, productionColor);
-        Assert.Equal(EnvironmentColor.BrightYellow, goldColor);
+        Assert.Equal(EnvironmentColor.BrightYellow, sandboxColor);
     }
 
     [Fact]
     public async Task GetAllTypeDefaultsAsync_CustomOverridesBuiltIn()
     {
-        await _service.SaveTypeDefaultAsync("Production", EnvironmentColor.BrightRed);
+        await _service.SaveTypeDefaultAsync(EnvironmentType.Production, EnvironmentColor.BrightRed);
         var defaults = await _service.GetAllTypeDefaultsAsync();
-        Assert.Equal(EnvironmentColor.BrightRed, defaults["Production"]);
+        Assert.Equal(EnvironmentColor.BrightRed, defaults[EnvironmentType.Production]);
     }
 
     [Fact]
@@ -125,29 +132,48 @@ public class EnvironmentConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public void DetectTypeFromUrl_PlainCrmUrl_ReturnsNull()
+    public void DetectTypeFromUrl_PlainCrmUrl_ReturnsUnknown()
     {
         // CRM regional suffix tells us nothing about environment type
-        Assert.Null(EnvironmentConfigService.DetectTypeFromUrl("https://org.crm.dynamics.com"));
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.DetectTypeFromUrl("https://org.crm.dynamics.com"));
     }
 
     [Fact]
-    public void DetectTypeFromUrl_RegionalCrmUrl_ReturnsNull()
+    public void DetectTypeFromUrl_RegionalCrmUrl_ReturnsUnknown()
     {
         // crm9 is UK region, not a sandbox indicator
-        Assert.Null(EnvironmentConfigService.DetectTypeFromUrl("https://org.crm9.dynamics.com"));
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.DetectTypeFromUrl("https://org.crm9.dynamics.com"));
     }
 
     [Fact]
     public void DetectTypeFromUrl_DevKeyword()
     {
-        Assert.Equal("Development", EnvironmentConfigService.DetectTypeFromUrl("https://org-dev.crm.dynamics.com"));
+        Assert.Equal(EnvironmentType.Development, EnvironmentConfigService.DetectTypeFromUrl("https://org-dev.crm.dynamics.com"));
     }
 
     [Fact]
     public void DetectTypeFromUrl_UnknownUrl()
     {
-        Assert.Null(EnvironmentConfigService.DetectTypeFromUrl("https://some-random.example.com"));
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.DetectTypeFromUrl("https://some-random.example.com"));
+    }
+
+    [Fact]
+    public void ParseDiscoveryType_MapsKnownTypes()
+    {
+        Assert.Equal(EnvironmentType.Production, EnvironmentConfigService.ParseDiscoveryType("Production"));
+        Assert.Equal(EnvironmentType.Sandbox, EnvironmentConfigService.ParseDiscoveryType("Sandbox"));
+        Assert.Equal(EnvironmentType.Development, EnvironmentConfigService.ParseDiscoveryType("Developer"));
+        Assert.Equal(EnvironmentType.Development, EnvironmentConfigService.ParseDiscoveryType("Development"));
+        Assert.Equal(EnvironmentType.Trial, EnvironmentConfigService.ParseDiscoveryType("Trial"));
+        Assert.Equal(EnvironmentType.Test, EnvironmentConfigService.ParseDiscoveryType("Test"));
+    }
+
+    [Fact]
+    public void ParseDiscoveryType_UnknownType_ReturnsUnknown()
+    {
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.ParseDiscoveryType("SomeCustomType"));
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.ParseDiscoveryType(null));
+        Assert.Equal(EnvironmentType.Unknown, EnvironmentConfigService.ParseDiscoveryType(""));
     }
 
     public void Dispose()

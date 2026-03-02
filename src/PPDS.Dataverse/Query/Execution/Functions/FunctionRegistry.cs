@@ -61,6 +61,10 @@ public sealed class FunctionRegistry
         var registry = new FunctionRegistry();
         StringFunctions.RegisterAll(registry);
         DateFunctions.RegisterAll(registry);
+        MathFunctions.RegisterAll(registry);
+        JsonFunctions.RegisterAll(registry);
+        DataverseFunctions.RegisterAll(registry);
+        NullFunctions.RegisterAll(registry);
         return registry;
     }
 }

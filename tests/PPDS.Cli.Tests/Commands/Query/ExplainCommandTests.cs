@@ -5,7 +5,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
-using PPDS.Dataverse.Sql.Parsing;
+using PPDS.Query.Parsing;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Query;
@@ -268,17 +268,17 @@ public class ExplainCommandTests
     #region Error Handling Pipeline
 
     [Fact]
-    public void ErrorHandling_SqlParseException_MapsToInvalidArgumentsExitCode()
+    public void ErrorHandling_QueryParseException_MapsToInvalidArgumentsExitCode()
     {
-        // The command catches SqlParseException and returns ExitCodes.InvalidArguments
+        // The command catches QueryParseException and returns ExitCodes.InvalidArguments
         var exitCode = ExitCodes.InvalidArguments;
         Assert.Equal(3, exitCode);
     }
 
     [Fact]
-    public void ErrorHandling_SqlParseException_ProducesStructuredError()
+    public void ErrorHandling_QueryParseException_ProducesStructuredError()
     {
-        var ex = new SqlParseException("Unexpected token 'INVALID'", 0, "INVALID SQL");
+        var ex = new QueryParseException("Unexpected token 'INVALID'");
         var error = StructuredError.Create(
             "SQL_PARSE_ERROR",
             ex.Message,
@@ -323,9 +323,9 @@ public class ExplainCommandTests
     public async Task ExplainPipeline_ExceptionToThrow_PropagatesFromExplainAsync()
     {
         var fake = new FakeSqlQueryService();
-        fake.ExceptionToThrow = new SqlParseException("Invalid SQL syntax");
+        fake.ExceptionToThrow = new QueryParseException("Invalid SQL syntax");
 
-        await Assert.ThrowsAsync<SqlParseException>(
+        await Assert.ThrowsAsync<QueryParseException>(
             () => fake.ExplainAsync("NOT VALID SQL"));
     }
 

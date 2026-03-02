@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 
@@ -92,4 +93,19 @@ public sealed class QueryPlanOptions
 
     /// <summary>Number of rows to buffer ahead for prefetch. Default 5000 (~3 FetchXML pages).</summary>
     public int PrefetchBufferSize { get; init; } = 5000;
+
+    /// <summary>
+    /// Factory for creating IQueryExecutor instances for remote environments.
+    /// Takes a profile label (e.g., "UAT"), returns an IQueryExecutor for that environment,
+    /// or null if the label is not found.
+    /// Combines profile resolution and executor creation. Set by the caller.
+    /// </summary>
+    public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; init; }
+
+    /// <summary>
+    /// CTE name-to-node bindings for recursive CTE planning. When the planner
+    /// encounters a table matching a CTE name in this dictionary, it returns
+    /// the bound node instead of generating FetchXML.
+    /// </summary>
+    public Dictionary<string, IQueryPlanNode>? CteBindings { get; init; }
 }

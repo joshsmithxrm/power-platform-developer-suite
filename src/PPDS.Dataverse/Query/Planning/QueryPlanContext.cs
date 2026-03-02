@@ -7,15 +7,12 @@ using PPDS.Dataverse.Query.Execution;
 namespace PPDS.Dataverse.Query.Planning;
 
 /// <summary>
-/// Shared context for plan execution: pool, evaluator, cancellation, statistics.
+/// Shared context for plan execution: pool, cancellation, statistics.
 /// </summary>
 public sealed class QueryPlanContext
 {
     /// <summary>Connection pool for executing FetchXML queries.</summary>
     public IQueryExecutor QueryExecutor { get; }
-
-    /// <summary>Expression evaluator for client-side computation.</summary>
-    public IExpressionEvaluator ExpressionEvaluator { get; }
 
     /// <summary>Cancellation token for the entire plan execution.</summary>
     public CancellationToken CancellationToken { get; }
@@ -38,20 +35,25 @@ public sealed class QueryPlanContext
     /// <summary>Optional variable scope for resolving @variable references in expressions.</summary>
     public VariableScope? VariableScope { get; }
 
+    /// <summary>
+    /// Maximum rows a node may materialize in memory (e.g., for sorting or aggregation).
+    /// Default is 500,000. Set to 0 for unlimited.
+    /// </summary>
+    public int MaxMaterializationRows { get; }
+
     /// <summary>Initializes a new instance of the <see cref="QueryPlanContext"/> class.</summary>
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
-        IExpressionEvaluator expressionEvaluator,
         CancellationToken cancellationToken = default,
         QueryPlanStatistics? statistics = null,
         IQueryProgressReporter? progressReporter = null,
         ITdsQueryExecutor? tdsQueryExecutor = null,
         IMetadataQueryExecutor? metadataQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
-        VariableScope? variableScope = null)
+        VariableScope? variableScope = null,
+        int maxMaterializationRows = 500_000)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
-        ExpressionEvaluator = expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
         CancellationToken = cancellationToken;
         Statistics = statistics ?? new QueryPlanStatistics();
         ProgressReporter = progressReporter;
@@ -59,5 +61,6 @@ public sealed class QueryPlanContext
         MetadataQueryExecutor = metadataQueryExecutor;
         BulkOperationExecutor = bulkOperationExecutor;
         VariableScope = variableScope;
+        MaxMaterializationRows = maxMaterializationRows;
     }
 }

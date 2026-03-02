@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
@@ -6,9 +8,9 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
-using PPDS.Dataverse.Sql.Ast;
-using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
+using PPDS.Query.Planning;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -23,9 +25,33 @@ public sealed class SqlQueryService : ISqlQueryService
     private readonly IBulkOperationExecutor? _bulkOperationExecutor;
     private readonly IMetadataQueryExecutor? _metadataQueryExecutor;
     private readonly int _poolCapacity;
-    private readonly QueryPlanner _planner;
+    private readonly ExecutionPlanBuilder _planBuilder;
     private readonly PlanExecutor _planExecutor;
     private readonly DmlSafetyGuard _dmlSafetyGuard = new();
+    private readonly QueryParser _queryParser = new();
+    private readonly PPDS.Query.Transpilation.FetchXmlGeneratorService _fetchXmlGeneratorService = new();
+
+    /// <summary>
+    /// Optional factory that resolves a profile label to a remote <see cref="IQueryExecutor"/>.
+    /// Set by the TUI's <c>InteractiveSession</c> to enable cross-environment queries
+    /// like <c>SELECT * FROM [QA].account</c>.
+    /// </summary>
+    public Func<string, IQueryExecutor?>? RemoteExecutorFactory { get; set; }
+
+    /// <summary>
+    /// Safety settings for the current environment. When null, uses defaults.
+    /// </summary>
+    public QuerySafetySettings? EnvironmentSafetySettings { get; set; }
+
+    /// <summary>
+    /// Protection level for the current environment. Defaults to Production (safest).
+    /// </summary>
+    public ProtectionLevel EnvironmentProtectionLevel { get; set; } = ProtectionLevel.Production;
+
+    /// <summary>
+    /// Optional profile resolution service for cross-environment DML checks.
+    /// </summary>
+    public ProfileResolutionService? ProfileResolver { get; set; }
 
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
@@ -47,7 +73,7 @@ public sealed class SqlQueryService : ISqlQueryService
         _bulkOperationExecutor = bulkOperationExecutor;
         _metadataQueryExecutor = metadataQueryExecutor;
         _poolCapacity = poolCapacity;
-        _planner = new QueryPlanner();
+        _planBuilder = new ExecutionPlanBuilder(_fetchXmlGeneratorService);
         _planExecutor = new PlanExecutor();
     }
 
@@ -56,16 +82,47 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var parser = new SqlParser(sql);
-        var ast = parser.Parse();
-
-        if (topOverride.HasValue)
+        try
         {
-            ast = ast.WithTop(topOverride.Value);
+            var fragment = _queryParser.Parse(sql);
+
+            if (topOverride.HasValue)
+            {
+                // Inject TOP override into the ScriptDom AST before transpilation
+                InjectTopOverride(fragment, topOverride.Value);
+            }
+
+            // Extract the first statement from the TSqlScript wrapper.
+            // QueryParser.Parse returns a TSqlScript, but FetchXmlGenerator
+            // expects a SelectStatement or QuerySpecification.
+            var statement = ExtractFirstStatement(fragment);
+            var generator = new PPDS.Query.Transpilation.FetchXmlGenerator();
+            return generator.Generate(statement);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the first <see cref="TSqlStatement"/> from a parsed fragment.
+    /// </summary>
+    private static TSqlStatement ExtractFirstStatement(TSqlFragment fragment)
+    {
+        if (fragment is TSqlScript script)
+        {
+            foreach (var batch in script.Batches)
+            {
+                if (batch.Statements.Count > 0)
+                    return batch.Statements[0];
+            }
         }
 
-        var transpiler = new SqlToFetchXmlTranspiler();
-        return transpiler.Transpile(ast);
+        if (fragment is TSqlStatement statement)
+            return statement;
+
+        throw new PpdsException(ErrorCodes.Query.ParseError, "SQL text does not contain any statements.");
     }
 
     /// <inheritdoc />
@@ -73,74 +130,8 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
-
-        // Parse SQL into AST
-        var parser = new SqlParser(request.Sql);
-        var statement = parser.ParseStatement();
-
-        // Apply TopOverride if the statement is a SELECT
-        if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
-        {
-            statement = selectStmt.WithTop(request.TopOverride.Value);
-        }
-
-        // DML safety check: validate DELETE/UPDATE/INSERT before execution.
-        // When DmlSafety options are provided, the guard blocks unsafe operations
-        // (DELETE/UPDATE without WHERE) and enforces row caps.
-        int? dmlRowCap = null;
-        DmlSafetyResult? safetyResult = null;
-
-        if (request.DmlSafety != null)
-        {
-            safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
-
-            if (safetyResult.IsBlocked)
-            {
-                throw new PpdsException(
-                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
-            }
-
-            // Don't return yet for dry-run — we need to run the planner first
-            // so the user sees the execution plan. The dry-run check moves
-            // to after planning.
-
-            if (safetyResult.RequiresConfirmation)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
-                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
-            }
-
-            dmlRowCap = safetyResult.RowCap;
-        }
-
-        // For aggregate queries, fetch metadata needed for partitioning decisions.
-        // This enables the planner to partition large aggregates across the pool.
-        var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
-
-        // Build execution plan via QueryPlanner
-        var planOptions = new QueryPlanOptions
-        {
-            MaxRows = request.TopOverride,
-            PageNumber = request.PageNumber,
-            PagingCookie = request.PagingCookie,
-            IncludeCount = request.IncludeCount,
-            UseTdsEndpoint = request.UseTdsEndpoint,
-            OriginalSql = request.Sql,
-            TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap,
-            EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
-            EstimatedRecordCount = estimatedRecordCount,
-            MinDate = minDate,
-            MaxDate = maxDate
-        };
-
-        var planResult = _planner.Plan(statement, planOptions);
+        var (fragment, planResult, safetyResult) =
+            await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -156,10 +147,8 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Execute the plan
-        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);
@@ -171,7 +160,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // SDK-specific FormattedValues metadata from the Entity objects.
         // Aggregate results are excluded — their FormattedValues are locale-formatted
         // numbers, not meaningful attribute labels.
-        var isAggregate = statement is SqlSelectStatement sel && sel.HasAggregates();
+        var isAggregate = HasAggregatesInFragment(fragment);
         var expandedResult = SqlQueryResultExpander.ExpandFormattedValueColumns(
             result,
             planResult.VirtualColumns,
@@ -190,10 +179,31 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        var parser = new SqlParser(sql);
-        var statement = parser.ParseStatement();
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
 
-        var planResult = _planner.Plan(statement);
+        var planOptions = new QueryPlanOptions
+        {
+            RemoteExecutorFactory = RemoteExecutorFactory
+        };
+
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment, planOptions);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
 
         // Extract parallelism metadata from plan tree
@@ -209,73 +219,29 @@ public sealed class SqlQueryService : ISqlQueryService
         int chunkSize = 100,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
-
         if (chunkSize <= 0) chunkSize = 100;
 
-        // Parse SQL into AST
-        var parser = new SqlParser(request.Sql);
-        var statement = parser.ParseStatement();
+        var (fragment, planResult, safetyResult) =
+            await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
-        // Apply TopOverride if the statement is a SELECT
-        if (request.TopOverride.HasValue && statement is SqlSelectStatement selectStmt)
+        // Dry-run: yield empty completion chunk
+        if (safetyResult?.IsDryRun == true)
         {
-            statement = selectStmt.WithTop(request.TopOverride.Value);
-        }
-
-        int? dmlRowCap = null;
-
-        if (request.DmlSafety != null)
-        {
-            var safetyResult = _dmlSafetyGuard.Check(statement, request.DmlSafety);
-
-            if (safetyResult.IsBlocked)
+            yield return new SqlQueryStreamChunk
             {
-                throw new PpdsException(
-                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
-            }
-
-            if (safetyResult.RequiresConfirmation)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
-                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
-            }
-
-            dmlRowCap = safetyResult.RowCap;
+                Rows = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Columns = Array.Empty<QueryColumn>(),
+                EntityLogicalName = planResult.EntityLogicalName,
+                TotalRowsSoFar = 0,
+                IsComplete = true,
+                TranspiledFetchXml = planResult.FetchXml
+            };
+            yield break;
         }
-
-        // For aggregate queries, fetch metadata needed for partitioning decisions.
-        var (estimatedRecordCount, minDate, maxDate) =
-            await FetchAggregateMetadataAsync(statement, cancellationToken).ConfigureAwait(false);
-
-        // Build execution plan via QueryPlanner
-        var planOptions = new QueryPlanOptions
-        {
-            MaxRows = request.TopOverride,
-            PageNumber = request.PageNumber,
-            PagingCookie = request.PagingCookie,
-            IncludeCount = request.IncludeCount,
-            UseTdsEndpoint = request.UseTdsEndpoint,
-            OriginalSql = request.Sql,
-            TdsQueryExecutor = _tdsQueryExecutor,
-            DmlRowCap = dmlRowCap,
-            EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
-            EstimatedRecordCount = estimatedRecordCount,
-            MinDate = minDate,
-            MaxDate = maxDate
-        };
-
-        var planResult = _planner.Plan(statement, planOptions);
 
         // Execute the plan with streaming
-        var expressionEvaluator = new ExpressionEvaluator();
         var context = new QueryPlanContext(
             _queryExecutor,
-            expressionEvaluator,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
             metadataQueryExecutor: _metadataQueryExecutor);
@@ -284,7 +250,7 @@ public sealed class SqlQueryService : ISqlQueryService
         IReadOnlyList<QueryColumn>? columns = null;
         var totalRows = 0;
         var isFirstChunk = true;
-        var streamIsAggregate = statement is SqlSelectStatement streamSel && streamSel.HasAggregates();
+        var streamIsAggregate = HasAggregatesInFragment(fragment);
 
         await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
         {
@@ -333,29 +299,235 @@ public sealed class SqlQueryService : ISqlQueryService
         };
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  Shared execution pipeline
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
+    /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
+    /// </summary>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult)>
+        PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
+
+        TSqlFragment fragment;
+        try
+        {
+            fragment = _queryParser.Parse(request.Sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // DML safety check
+        int? dmlRowCap = null;
+        DmlSafetyResult? safetyResult = null;
+
+        if (request.DmlSafety != null)
+        {
+            var firstStatement = ExtractFirstStatement(fragment);
+
+            safetyResult = _dmlSafetyGuard.Check(
+                firstStatement, request.DmlSafety,
+                EnvironmentSafetySettings, EnvironmentProtectionLevel);
+
+            if (safetyResult.IsBlocked)
+            {
+                throw new PpdsException(
+                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
+            }
+
+            if (safetyResult.RequiresConfirmation)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
+            }
+
+            dmlRowCap = safetyResult.RowCap;
+        }
+
+        // For aggregate queries, fetch metadata needed for partitioning decisions.
+        var (estimatedRecordCount, minDate, maxDate) =
+            await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
+
+        // Build execution plan
+        var planOptions = new QueryPlanOptions
+        {
+            MaxRows = request.TopOverride,
+            PageNumber = request.PageNumber,
+            PagingCookie = request.PagingCookie,
+            IncludeCount = request.IncludeCount,
+            UseTdsEndpoint = request.UseTdsEndpoint,
+            OriginalSql = request.Sql,
+            TdsQueryExecutor = _tdsQueryExecutor,
+            DmlRowCap = dmlRowCap,
+            EnablePrefetch = request.EnablePrefetch,
+            PoolCapacity = _poolCapacity,
+            EstimatedRecordCount = estimatedRecordCount,
+            MinDate = minDate,
+            MaxDate = maxDate,
+            RemoteExecutorFactory = RemoteExecutorFactory
+        };
+
+        QueryPlanResult planResult;
+        try
+        {
+            planResult = _planBuilder.Plan(fragment, planOptions);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // Check cross-environment DML policy after planning
+        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
+
+        return (fragment, planResult, safetyResult);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ScriptDom AST helpers (replace legacy ISqlStatement checks)
+    // ═══════════════════════════════════════════════════════════════════
+
     /// <summary>
     /// Fetches estimated record count and date range for aggregate queries.
     /// Returns nulls for non-aggregate statements (no metadata fetch needed).
-    /// The two metadata calls run in parallel via Task.WhenAll.
+    /// Uses ScriptDom AST analysis instead of legacy ISqlStatement.
     /// </summary>
     private async Task<(long? EstimatedRecordCount, DateTime? MinDate, DateTime? MaxDate)> FetchAggregateMetadataAsync(
-        ISqlStatement statement,
+        TSqlFragment fragment,
         CancellationToken cancellationToken)
     {
-        if (statement is SqlSelectStatement select && select.HasAggregates())
-        {
-            var entityName = select.GetEntityName();
-            var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
-            var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
-            await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+        var querySpec = ExtractQuerySpecification(fragment);
+        if (querySpec is null) return (null, null, null);
 
-            var count = await countTask.ConfigureAwait(false);
-            var dateRange = await dateTask.ConfigureAwait(false);
-            return (count, dateRange.Min, dateRange.Max);
+        if (!HasAggregateColumns(querySpec)) return (null, null, null);
+
+        var entityName = ExtractEntityName(querySpec);
+        if (entityName is null) return (null, null, null);
+
+        var countTask = _queryExecutor.GetTotalRecordCountAsync(entityName, cancellationToken);
+        var dateTask = _queryExecutor.GetMinMaxCreatedOnAsync(entityName, cancellationToken);
+        await Task.WhenAll(countTask, dateTask).ConfigureAwait(false);
+
+        var count = await countTask.ConfigureAwait(false);
+        var dateRange = await dateTask.ConfigureAwait(false);
+        return (count, dateRange.Min, dateRange.Max);
+    }
+
+    /// <summary>
+    /// Checks if a parsed ScriptDom fragment represents a SELECT with aggregate functions.
+    /// </summary>
+    private static bool HasAggregatesInFragment(TSqlFragment fragment)
+    {
+        var querySpec = ExtractQuerySpecification(fragment);
+        return querySpec is not null && HasAggregateColumns(querySpec);
+    }
+
+    /// <summary>
+    /// Extracts a <see cref="QuerySpecification"/> from a parsed fragment.
+    /// </summary>
+    private static QuerySpecification? ExtractQuerySpecification(TSqlFragment fragment)
+    {
+        if (fragment is TSqlScript script)
+        {
+            foreach (var batch in script.Batches)
+            {
+                foreach (var stmt in batch.Statements)
+                {
+                    if (stmt is SelectStatement sel && sel.QueryExpression is QuerySpecification qs)
+                        return qs;
+                }
+            }
+            return null;
         }
 
-        return (null, null, null);
+        if (fragment is SelectStatement selectStmt && selectStmt.QueryExpression is QuerySpecification querySpec)
+            return querySpec;
+
+        if (fragment is QuerySpecification directQs)
+            return directQs;
+
+        return null;
     }
+
+    /// <summary>
+    /// Checks if a QuerySpecification's SELECT list contains aggregate function calls.
+    /// </summary>
+    private static bool HasAggregateColumns(QuerySpecification querySpec)
+    {
+        foreach (var elem in querySpec.SelectElements)
+        {
+            if (elem is SelectScalarExpression scalar && scalar.Expression is FunctionCall funcCall)
+            {
+                var funcName = funcCall.FunctionName?.Value;
+                if (funcName is not null && IsAggregateFunction(funcName))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a function name is a recognized aggregate function.
+    /// </summary>
+    private static bool IsAggregateFunction(string functionName)
+    {
+        return functionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("SUM", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("AVG", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MIN", StringComparison.OrdinalIgnoreCase)
+            || functionName.Equals("MAX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Extracts the primary entity name from a QuerySpecification's FROM clause.
+    /// </summary>
+    private static string? ExtractEntityName(QuerySpecification querySpec)
+    {
+        if (querySpec.FromClause is null || querySpec.FromClause.TableReferences.Count == 0)
+            return null;
+
+        var tableRef = querySpec.FromClause.TableReferences[0];
+
+        // Drill through qualified joins to the base table
+        while (tableRef is QualifiedJoin qj)
+        {
+            tableRef = qj.FirstTableReference;
+        }
+
+        if (tableRef is NamedTableReference named)
+        {
+            return named.SchemaObject.BaseIdentifier.Value;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Injects a TOP override into the first SelectStatement's QuerySpecification.
+    /// Modifies the ScriptDom AST in place.
+    /// </summary>
+    private static void InjectTopOverride(TSqlFragment fragment, int topValue)
+    {
+        var querySpec = ExtractQuerySpecification(fragment);
+        if (querySpec is null) return;
+
+        querySpec.TopRowFilter = new TopRowFilter
+        {
+            Expression = new IntegerLiteral { Value = topValue.ToString() }
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Result helpers
+    // ═══════════════════════════════════════════════════════════════════
 
     private static IReadOnlyList<QueryColumn> InferColumnsFromRow(QueryRow row)
     {
@@ -398,6 +570,68 @@ public sealed class SqlQueryService : ISqlQueryService
             chunkResult, virtualColumns, isAggregate);
 
         return (expanded.Records.ToList(), expanded.Columns);
+    }
+
+    /// <summary>
+    /// Detects if a DML statement targets a remote environment by checking for RemoteScanNode in the plan.
+    /// Returns the remote label if found, null otherwise (SELECT or local-only DML).
+    /// </summary>
+    private static string? DetectCrossEnvironmentDmlTarget(TSqlFragment fragment, QueryPlanResult planResult)
+    {
+        var stmt = ExtractFirstStatement(fragment);
+        if (stmt is SelectStatement) return null;
+
+        return FindRemoteLabel(planResult.RootNode);
+    }
+
+    private static string? FindRemoteLabel(IQueryPlanNode node)
+    {
+        if (node is RemoteScanNode remote) return remote.RemoteLabel;
+        foreach (var child in node.Children)
+        {
+            var label = FindRemoteLabel(child);
+            if (label != null) return label;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Checks cross-environment DML policy after planning. Throws if blocked or requires unconfirmed confirmation.
+    /// </summary>
+    private void CheckCrossEnvironmentDmlPolicy(
+        TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyOptions? dmlSafety)
+    {
+        if (dmlSafety == null) return;
+
+        var targetLabel = DetectCrossEnvironmentDmlTarget(fragment, planResult);
+        if (targetLabel == null) return;
+
+        var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
+        var targetType = targetConfig?.Type ?? EnvironmentType.Production;
+        var targetProtection = targetConfig?.Protection
+            ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
+
+        var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
+            ExtractFirstStatement(fragment),
+            targetConfig?.SafetySettings,
+            "local",
+            targetLabel,
+            targetProtection);
+
+        if (crossEnvResult.IsBlocked)
+        {
+            throw new PpdsException(
+                crossEnvResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
+        }
+
+        if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.DmlBlocked,
+                crossEnvResult.ConfirmationMessage
+                    ?? "Cross-environment DML requires confirmation.");
+        }
     }
 
     private static int? ExtractPoolCapacity(IQueryPlanNode node)

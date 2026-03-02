@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Moq;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using Xunit;
@@ -20,7 +19,7 @@ public class ParallelPartitionNodeTests
     private static QueryPlanContext CreateContext()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        return new QueryPlanContext(mockExecutor.Object);
     }
 
     private static QueryRow MakeRow(params (string key, object? value)[] pairs)
@@ -314,7 +313,7 @@ public class MergeAggregateNodeTests
     private static QueryPlanContext CreateContext()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
-        return new QueryPlanContext(mockExecutor.Object, new ExpressionEvaluator());
+        return new QueryPlanContext(mockExecutor.Object);
     }
 
     private static QueryRow MakeRow(string entity, params (string key, object? value)[] pairs)

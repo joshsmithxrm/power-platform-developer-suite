@@ -250,7 +250,7 @@ internal sealed class QueryHistoryDialog : TuiDialog, ITuiStateCapture<QueryHist
         {
             var entry = _entries[_listView.SelectedItem];
 
-            if (PPDS.Cli.Infrastructure.ClipboardHelper.CopyToClipboard(entry.Sql))
+            if (Clipboard.TrySetClipboardData(entry.Sql))
             {
                 _statusLabel.Text = "Query copied to clipboard";
             }

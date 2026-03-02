@@ -113,6 +113,10 @@ internal sealed class PpdsApplication : IDisposable
 
         Application.Init();
 
+        // Replace Terminal.Gui's clipboard with ours (supports OSC 52 fallback for SSH/WSL).
+        // Must happen after Init() when the driver is available.
+        PpdsClipboardInstaller.Install();
+
         // Override terminal's 16-color palette AFTER Init so OSC 4 sequences
         // apply to the screen buffer Terminal.Gui is actually rendering on.
         TuiTerminalPalette.Apply();

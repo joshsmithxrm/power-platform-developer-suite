@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -64,7 +64,7 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Inject date range filter into template FetchXML
-        var fetchXml = QueryPlanner.InjectDateRangeFilter(TemplateFetchXml, RangeStart, RangeEnd);
+        var fetchXml = InjectDateRangeFilter(TemplateFetchXml, RangeStart, RangeEnd);
         var scanNode = new FetchXmlScanNode(fetchXml, EntityLogicalName, autoPage: false);
 
         List<QueryRow>? rows = null;
@@ -152,4 +152,26 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
         return false;
     }
 
+    /// <summary>
+    /// Injects a date range filter into FetchXML for partition-based aggregate queries.
+    /// </summary>
+    private static string InjectDateRangeFilter(string fetchXml, DateTime start, DateTime end)
+    {
+        var startStr = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+        var endStr = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+
+        var filterXml =
+            $"    <filter type=\"and\">\n" +
+            $"      <condition attribute=\"createdon\" operator=\"ge\" value=\"{startStr}\" />\n" +
+            $"      <condition attribute=\"createdon\" operator=\"lt\" value=\"{endStr}\" />\n" +
+            $"    </filter>";
+
+        var entityCloseIndex = fetchXml.LastIndexOf("</entity>", StringComparison.Ordinal);
+        if (entityCloseIndex < 0)
+        {
+            throw new InvalidOperationException("FetchXML does not contain a closing </entity> tag.");
+        }
+
+        return fetchXml[..entityCloseIndex] + filterXml + "\n" + fetchXml[entityCloseIndex..];
+    }
 }

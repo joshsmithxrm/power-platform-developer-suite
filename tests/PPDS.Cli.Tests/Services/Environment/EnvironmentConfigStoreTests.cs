@@ -31,11 +31,11 @@ public class EnvironmentConfigStoreTests : IDisposable
         var config = await _store.SaveConfigAsync(
             "https://org.crm.dynamics.com",
             label: "Contoso Prod",
-            type: "Production",
+            type: EnvironmentType.Production,
             color: EnvironmentColor.Red);
 
         Assert.Equal("Contoso Prod", config.Label);
-        Assert.Equal("Production", config.Type);
+        Assert.Equal(EnvironmentType.Production, config.Type);
         Assert.Equal(EnvironmentColor.Red, config.Color);
     }
 
@@ -43,10 +43,10 @@ public class EnvironmentConfigStoreTests : IDisposable
     public async Task SaveConfigAsync_ExistingEnvironment_MergesFields()
     {
         await _store.SaveConfigAsync("https://org.crm.dynamics.com", label: "Original");
-        var updated = await _store.SaveConfigAsync("https://org.crm.dynamics.com", type: "Sandbox");
+        var updated = await _store.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Sandbox);
 
         Assert.Equal("Original", updated.Label);
-        Assert.Equal("Sandbox", updated.Type);
+        Assert.Equal(EnvironmentType.Sandbox, updated.Type);
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class EnvironmentConfigStoreTests : IDisposable
     public async Task RoundTrip_PersistsToDisk()
     {
         await _store.SaveConfigAsync("https://org.crm.dynamics.com",
-            label: "Prod", type: "Production", color: EnvironmentColor.Red);
+            label: "Prod", type: EnvironmentType.Production, color: EnvironmentColor.Red);
 
         // Create new store pointing to same file to verify persistence
         using var store2 = new EnvironmentConfigStore(Path.Combine(_tempDir, "environments.json"));
@@ -98,7 +98,7 @@ public class EnvironmentConfigStoreTests : IDisposable
 
         Assert.NotNull(config);
         Assert.Equal("Prod", config!.Label);
-        Assert.Equal("Production", config.Type);
+        Assert.Equal(EnvironmentType.Production, config.Type);
         Assert.Equal(EnvironmentColor.Red, config.Color);
     }
 
@@ -106,15 +106,15 @@ public class EnvironmentConfigStoreTests : IDisposable
     public async Task TypeDefaults_RoundTrip()
     {
         var collection = await _store.LoadAsync();
-        collection.TypeDefaults["UAT"] = EnvironmentColor.Brown;
-        collection.TypeDefaults["Gold"] = EnvironmentColor.BrightYellow;
+        collection.TypeDefaults[EnvironmentType.Test] = EnvironmentColor.Brown;
+        collection.TypeDefaults[EnvironmentType.Trial] = EnvironmentColor.BrightYellow;
         await _store.SaveAsync(collection);
 
         _store.ClearCache();
         var reloaded = await _store.LoadAsync();
 
-        Assert.Equal(EnvironmentColor.Brown, reloaded.TypeDefaults["UAT"]);
-        Assert.Equal(EnvironmentColor.BrightYellow, reloaded.TypeDefaults["Gold"]);
+        Assert.Equal(EnvironmentColor.Brown, reloaded.TypeDefaults[EnvironmentType.Test]);
+        Assert.Equal(EnvironmentColor.BrightYellow, reloaded.TypeDefaults[EnvironmentType.Trial]);
     }
 
     [Fact]
@@ -148,6 +148,60 @@ public class EnvironmentConfigStoreTests : IDisposable
             label: "Updated");
 
         Assert.Equal(EnvironmentColor.Green, result.Color);
+    }
+
+    [Fact]
+    public async Task SafetySettings_RoundTrips()
+    {
+        var config = await _store.SaveConfigAsync(
+            "https://test.crm.dynamics.com",
+            label: "TEST",
+            type: EnvironmentType.Sandbox);
+
+        config.SafetySettings = new QuerySafetySettings
+        {
+            WarnInsertThreshold = 10,
+            WarnUpdateThreshold = 0,
+            WarnDeleteThreshold = 0,
+            PreventUpdateWithoutWhere = true,
+            PreventDeleteWithoutWhere = true,
+            DmlBatchSize = 200,
+            MaxResultRows = 50000,
+            QueryTimeoutSeconds = 120,
+            UseTdsEndpoint = false,
+            BypassCustomPlugins = BypassPluginMode.None,
+            BypassPowerAutomateFlows = false
+        };
+
+        // Save the collection (config is stored by reference)
+        await _store.SaveAsync(await _store.LoadAsync());
+
+        // Reload from disk via fresh store
+        using var store2 = new EnvironmentConfigStore(Path.Combine(_tempDir, "environments.json"));
+        var reloaded = await store2.GetConfigAsync("https://test.crm.dynamics.com");
+
+        Assert.NotNull(reloaded);
+        Assert.NotNull(reloaded!.SafetySettings);
+        Assert.Equal(10, reloaded.SafetySettings!.WarnInsertThreshold);
+        Assert.Equal(200, reloaded.SafetySettings.DmlBatchSize);
+        Assert.True(reloaded.SafetySettings.PreventDeleteWithoutWhere);
+        Assert.Equal(BypassPluginMode.None, reloaded.SafetySettings.BypassCustomPlugins);
+    }
+
+    [Fact]
+    public async Task SaveConfigAsync_DiscoveredType_Persists()
+    {
+        var config = await _store.SaveConfigAsync(
+            "https://org.crm.dynamics.com",
+            label: "Test",
+            discoveredType: "Sandbox");
+
+        Assert.Equal("Sandbox", config.DiscoveredType);
+
+        _store.ClearCache();
+        var reloaded = await _store.GetConfigAsync("https://org.crm.dynamics.com");
+        Assert.NotNull(reloaded);
+        Assert.Equal("Sandbox", reloaded!.DiscoveredType);
     }
 
     public void Dispose()

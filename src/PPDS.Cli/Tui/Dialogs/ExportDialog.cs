@@ -1,5 +1,4 @@
 using System.Data;
-using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Tui.Infrastructure;
@@ -146,7 +145,7 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
         {
             var text = _exportService.FormatForClipboard(_dataTable, includeHeaders: includeHeaders);
 
-            if (ClipboardHelper.CopyToClipboard(text))
+            if (Clipboard.TrySetClipboardData(text))
             {
                 _statusLabel.Text = $"Copied {_dataTable.Rows.Count} rows to clipboard";
                 _exportCompleted = true;

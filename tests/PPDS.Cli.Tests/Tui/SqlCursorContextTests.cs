@@ -1,4 +1,5 @@
 using PPDS.Dataverse.Sql.Intellisense;
+using PPDS.Query.Intellisense;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Tui;

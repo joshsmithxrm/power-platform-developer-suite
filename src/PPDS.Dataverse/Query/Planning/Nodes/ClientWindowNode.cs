@@ -5,7 +5,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query.Execution;
-using PPDS.Dataverse.Sql.Ast;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -30,7 +29,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     {
         get
         {
-            var funcs = string.Join(", ", Windows.Select(w => $"{w.Expression.FunctionName} AS {w.OutputColumnName}"));
+            var funcs = string.Join(", ", Windows.Select(w => $"{w.FunctionName} AS {w.OutputColumnName}"));
             return $"ClientWindow: [{funcs}]";
         }
     }
@@ -86,7 +85,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
 
         foreach (var windowDef in Windows)
         {
-            ComputeWindowFunction(windowDef, allRows, windowValues, context);
+            ComputeWindowFunction(windowDef, allRows, windowValues);
         }
 
         // Step 3: Yield enriched rows with window columns added
@@ -119,33 +118,31 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static void ComputeWindowFunction(
         WindowDefinition windowDef,
         List<QueryRow> allRows,
-        Dictionary<string, object?>[] windowValues,
-        QueryPlanContext context)
+        Dictionary<string, object?>[] windowValues)
     {
-        var expr = windowDef.Expression;
         var columnName = windowDef.OutputColumnName;
 
         // Build an index mapping: original row index -> row
         // Group rows by partition key
-        var partitions = PartitionRows(allRows, expr.PartitionBy, context);
+        var partitions = PartitionRows(allRows, windowDef.PartitionBy);
 
         foreach (var partition in partitions)
         {
             // Sort the partition by ORDER BY items
-            var sortedIndices = SortPartition(partition, allRows, expr.OrderBy);
+            var sortedIndices = SortPartition(partition, allRows, windowDef.OrderBy);
 
             // Compute function values
-            var functionName = expr.FunctionName.ToUpperInvariant();
+            var functionName = windowDef.FunctionName.ToUpperInvariant();
             switch (functionName)
             {
                 case "ROW_NUMBER":
                     ComputeRowNumber(sortedIndices, windowValues, columnName);
                     break;
                 case "RANK":
-                    ComputeRank(sortedIndices, allRows, expr.OrderBy, windowValues, columnName);
+                    ComputeRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
                     break;
                 case "DENSE_RANK":
-                    ComputeDenseRank(sortedIndices, allRows, expr.OrderBy, windowValues, columnName);
+                    ComputeDenseRank(sortedIndices, allRows, windowDef.OrderBy, windowValues, columnName);
                     break;
                 case "SUM":
                 case "COUNT":
@@ -153,7 +150,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
                 case "MIN":
                 case "MAX":
                     ComputeAggregateWindow(
-                        functionName, sortedIndices, allRows, expr, windowValues, columnName, context);
+                        functionName, sortedIndices, allRows, windowDef, windowValues, columnName);
                     break;
                 default:
                     throw new NotSupportedException($"Window function '{functionName}' is not supported.");
@@ -167,8 +164,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     /// </summary>
     private static List<List<int>> PartitionRows(
         List<QueryRow> allRows,
-        IReadOnlyList<ISqlExpression>? partitionBy,
-        QueryPlanContext context)
+        IReadOnlyList<CompiledScalarExpression>? partitionBy)
     {
         if (partitionBy == null || partitionBy.Count == 0)
         {
@@ -186,7 +182,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
 
         for (var i = 0; i < allRows.Count; i++)
         {
-            var key = ComputePartitionKey(allRows[i], partitionBy, context);
+            var key = ComputePartitionKey(allRows[i], partitionBy);
             if (!groups.TryGetValue(key, out var group))
             {
                 group = new List<int>();
@@ -203,19 +199,18 @@ public sealed class ClientWindowNode : IQueryPlanNode
     /// </summary>
     private static string ComputePartitionKey(
         QueryRow row,
-        IReadOnlyList<ISqlExpression> partitionBy,
-        QueryPlanContext context)
+        IReadOnlyList<CompiledScalarExpression> partitionBy)
     {
         if (partitionBy.Count == 1)
         {
-            var val = context.ExpressionEvaluator.Evaluate(partitionBy[0], row.Values);
+            var val = partitionBy[0](row.Values);
             return val?.ToString() ?? "\0NULL\0";
         }
 
         var parts = new string[partitionBy.Count];
         for (var i = 0; i < partitionBy.Count; i++)
         {
-            var val = context.ExpressionEvaluator.Evaluate(partitionBy[i], row.Values);
+            var val = partitionBy[i](row.Values);
             parts[i] = val?.ToString() ?? "\0NULL\0";
         }
         return string.Join("\0SEP\0", parts);
@@ -228,7 +223,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static List<int> SortPartition(
         List<int> partitionIndices,
         List<QueryRow> allRows,
-        IReadOnlyList<SqlOrderByItem>? orderBy)
+        IReadOnlyList<CompiledOrderByItem>? orderBy)
     {
         if (orderBy == null || orderBy.Count == 0)
         {
@@ -247,18 +242,18 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static int CompareRowsByOrderBy(
         QueryRow rowA,
         QueryRow rowB,
-        IReadOnlyList<SqlOrderByItem> orderBy)
+        IReadOnlyList<CompiledOrderByItem> orderBy)
     {
         foreach (var item in orderBy)
         {
-            var colName = item.Column.GetFullName();
+            var colName = item.ColumnName;
             var valA = GetColumnValue(rowA, colName);
             var valB = GetColumnValue(rowB, colName);
 
             var cmp = CompareValues(valA, valB);
             if (cmp != 0)
             {
-                return item.Direction == SqlSortDirection.Descending ? -cmp : cmp;
+                return item.Descending ? -cmp : cmp;
             }
         }
         return 0;
@@ -325,11 +320,11 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static bool AreOrderByValuesEqual(
         QueryRow rowA,
         QueryRow rowB,
-        IReadOnlyList<SqlOrderByItem> orderBy)
+        IReadOnlyList<CompiledOrderByItem> orderBy)
     {
         foreach (var item in orderBy)
         {
-            var colName = item.Column.GetFullName();
+            var colName = item.ColumnName;
             var valA = GetColumnValue(rowA, colName);
             var valB = GetColumnValue(rowB, colName);
 
@@ -363,7 +358,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static void ComputeRank(
         List<int> sortedIndices,
         List<QueryRow> allRows,
-        IReadOnlyList<SqlOrderByItem>? orderBy,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
         Dictionary<string, object?>[] windowValues,
         string columnName)
     {
@@ -405,7 +400,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
     private static void ComputeDenseRank(
         List<int> sortedIndices,
         List<QueryRow> allRows,
-        IReadOnlyList<SqlOrderByItem>? orderBy,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
         Dictionary<string, object?>[] windowValues,
         string columnName)
     {
@@ -446,10 +441,9 @@ public sealed class ClientWindowNode : IQueryPlanNode
         string functionName,
         List<int> sortedIndices,
         List<QueryRow> allRows,
-        SqlWindowExpression expr,
+        WindowDefinition windowDef,
         Dictionary<string, object?>[] windowValues,
-        string columnName,
-        QueryPlanContext context)
+        string columnName)
     {
         // Gather values for the aggregate
         object? aggregateResult;
@@ -458,7 +452,7 @@ public sealed class ClientWindowNode : IQueryPlanNode
         {
             case "COUNT":
             {
-                if (expr.IsCountStar)
+                if (windowDef.IsCountStar)
                 {
                     aggregateResult = sortedIndices.Count;
                 }
@@ -467,8 +461,8 @@ public sealed class ClientWindowNode : IQueryPlanNode
                     var count = 0;
                     foreach (var idx in sortedIndices)
                     {
-                        var val = expr.Operand != null
-                            ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[idx].Values)
+                        var val = windowDef.Operand != null
+                            ? windowDef.Operand(allRows[idx].Values)
                             : null;
                         if (val != null) count++;
                     }
@@ -482,8 +476,8 @@ public sealed class ClientWindowNode : IQueryPlanNode
                 var hasValue = false;
                 foreach (var idx in sortedIndices)
                 {
-                    var val = expr.Operand != null
-                        ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[idx].Values)
+                    var val = windowDef.Operand != null
+                        ? windowDef.Operand(allRows[idx].Values)
                         : null;
                     if (val != null)
                     {
@@ -500,8 +494,8 @@ public sealed class ClientWindowNode : IQueryPlanNode
                 var count = 0;
                 foreach (var idx in sortedIndices)
                 {
-                    var val = expr.Operand != null
-                        ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[idx].Values)
+                    var val = windowDef.Operand != null
+                        ? windowDef.Operand(allRows[idx].Values)
                         : null;
                     if (val != null)
                     {
@@ -517,8 +511,8 @@ public sealed class ClientWindowNode : IQueryPlanNode
                 object? minVal = null;
                 foreach (var idx in sortedIndices)
                 {
-                    var val = expr.Operand != null
-                        ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[idx].Values)
+                    var val = windowDef.Operand != null
+                        ? windowDef.Operand(allRows[idx].Values)
                         : null;
                     if (val != null)
                     {
@@ -536,8 +530,8 @@ public sealed class ClientWindowNode : IQueryPlanNode
                 object? maxVal = null;
                 foreach (var idx in sortedIndices)
                 {
-                    var val = expr.Operand != null
-                        ? context.ExpressionEvaluator.Evaluate(expr.Operand, allRows[idx].Values)
+                    var val = windowDef.Operand != null
+                        ? windowDef.Operand(allRows[idx].Values)
                         : null;
                     if (val != null)
                     {
@@ -566,19 +560,48 @@ public sealed class ClientWindowNode : IQueryPlanNode
 
 /// <summary>
 /// Defines a single window function to compute within a ClientWindowNode.
+/// Uses compiled delegates instead of AST types.
 /// </summary>
 public sealed class WindowDefinition
 {
     /// <summary>The output column name for this window function's result.</summary>
     public string OutputColumnName { get; }
 
-    /// <summary>The window function expression from the AST.</summary>
-    public SqlWindowExpression Expression { get; }
+    /// <summary>The window function name (ROW_NUMBER, RANK, DENSE_RANK, SUM, COUNT, AVG, MIN, MAX).</summary>
+    public string FunctionName { get; }
+
+    /// <summary>Optional compiled operand for aggregate window functions (e.g., SUM(revenue)). Null for ranking functions.</summary>
+    public CompiledScalarExpression? Operand { get; }
+
+    /// <summary>True when this is COUNT(*) with star instead of a column expression.</summary>
+    public bool IsCountStar { get; }
+
+    /// <summary>Compiled PARTITION BY expressions (groups rows into partitions). Null or empty if not specified.</summary>
+    public IReadOnlyList<CompiledScalarExpression>? PartitionBy { get; }
+
+    /// <summary>Compiled ORDER BY items within the window. Null or empty if not specified.</summary>
+    public IReadOnlyList<CompiledOrderByItem>? OrderBy { get; }
 
     /// <summary>Initializes a new instance of the <see cref="WindowDefinition"/> class.</summary>
-    public WindowDefinition(string outputColumnName, SqlWindowExpression expression)
+    public WindowDefinition(
+        string outputColumnName,
+        string functionName,
+        CompiledScalarExpression? operand,
+        IReadOnlyList<CompiledScalarExpression>? partitionBy,
+        IReadOnlyList<CompiledOrderByItem>? orderBy,
+        bool isCountStar = false)
     {
         OutputColumnName = outputColumnName ?? throw new ArgumentNullException(nameof(outputColumnName));
-        Expression = expression ?? throw new ArgumentNullException(nameof(expression));
+        FunctionName = functionName ?? throw new ArgumentNullException(nameof(functionName));
+        Operand = operand;
+        PartitionBy = partitionBy;
+        OrderBy = orderBy;
+        IsCountStar = isCountStar;
     }
 }
+
+/// <summary>
+/// A compiled ORDER BY item used by window functions. Contains the column name for
+/// value lookup, a compiled expression for evaluation, and the sort direction.
+/// </summary>
+public sealed record CompiledOrderByItem(string ColumnName, CompiledScalarExpression Value, bool Descending);

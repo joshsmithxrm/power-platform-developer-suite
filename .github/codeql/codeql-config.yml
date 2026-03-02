@@ -28,3 +28,11 @@ query-filters:
         - cs/catch-of-all-exceptions
         # Path handling - all paths are controlled inputs in CLI context
         - cs/path-combine
+        # Static tab ID counter written from constructor — thread-safe via Interlocked
+        - cs/static-field-written-by-instance
+        # SQL engine uses exact zero guard for divide-by-zero (intentional)
+        - cs/equality-on-floats
+        # Test assertions on default-constructed objects (false positive)
+        - cs/empty-collection
+        # Test methods have multi-step scenarios by design
+        - cs/complex-block

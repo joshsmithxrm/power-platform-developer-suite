@@ -536,9 +536,9 @@ public static class EnvCommandGroup
             Description = "Short display label for status bar and tabs"
         };
 
-        var typeOption = new Option<string?>("--type", "-t")
+        var typeOption = new Option<EnvironmentType?>("--type", "-t")
         {
-            Description = "Environment type (e.g., Production, Sandbox, Development, Test, Trial, or custom)"
+            Description = "Environment type (Production, Sandbox, Development, Test, Trial)"
         };
 
         var colorOption = new Option<EnvironmentColor?>("--color", "-c")
@@ -605,7 +605,7 @@ public static class EnvCommandGroup
 
     private static async Task<int> ExecuteConfigSetAsync(
         IEnvironmentConfigService service, string url,
-        string? label, string? type, EnvironmentColor? color,
+        string? label, EnvironmentType? type, EnvironmentColor? color,
         CancellationToken ct)
     {
         var config = await service.SaveConfigAsync(url, label, type, color, ct: ct);
@@ -689,9 +689,9 @@ public static class EnvCommandGroup
 
     private static Command CreateTypeCommand()
     {
-        var nameArgument = new Argument<string?>("name")
+        var nameArgument = new Argument<EnvironmentType?>("name")
         {
-            Description = "Type name (e.g., UAT, Gold, Train)"
+            Description = "Type name (Production, Sandbox, Development, Test, Trial)"
         };
         nameArgument.Arity = ArgumentArity.ZeroOrOne;
 
@@ -737,7 +737,7 @@ public static class EnvCommandGroup
                 return ExitCodes.Success;
             }
 
-            if (string.IsNullOrWhiteSpace(name))
+            if (name == null)
             {
                 Console.Error.WriteLine("Error: Type name is required. Use --list to see all types.");
                 return ExitCodes.Failure;
@@ -745,10 +745,10 @@ public static class EnvCommandGroup
 
             if (remove)
             {
-                var removed = await service.RemoveTypeDefaultAsync(name, cancellationToken);
+                var removed = await service.RemoveTypeDefaultAsync(name.Value, cancellationToken);
                 Console.Error.WriteLine(removed
-                    ? $"Removed custom type '{name}'."
-                    : $"'{name}' is not a custom type (may be built-in).");
+                    ? $"Removed type override '{name}'."
+                    : $"'{name}' is not a custom override (may be built-in).");
                 return ExitCodes.Success;
             }
 
@@ -758,7 +758,7 @@ public static class EnvCommandGroup
                 return ExitCodes.Failure;
             }
 
-            await service.SaveTypeDefaultAsync(name, color.Value, cancellationToken);
+            await service.SaveTypeDefaultAsync(name.Value, color.Value, cancellationToken);
             Console.ForegroundColor = ConsoleColor.Green;
             Console.Error.WriteLine($"Type '{name}' set to {color.Value}.");
             Console.ResetColor();

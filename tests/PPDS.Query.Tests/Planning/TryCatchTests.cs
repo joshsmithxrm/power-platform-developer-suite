@@ -1,0 +1,227 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using FluentAssertions;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using Moq;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
+using PPDS.Dataverse.Query.Planning;
+using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Sql.Transpilation;
+using PPDS.Query.Parsing;
+using PPDS.Query.Planning;
+using PPDS.Query.Planning.Nodes;
+using Xunit;
+using ExpressionCompiler = PPDS.Query.Execution.ExpressionCompiler;
+
+namespace PPDS.Query.Tests.Planning;
+
+[Trait("Category", "Unit")]
+public class TryCatchTests
+{
+    // ────────────────────────────────────────────
+    //  ScriptExecutionNode: TRY/CATCH without error
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_TryCatch_NoError_ExecutesTryBlock()
+    {
+        // DECLARE @x INT = 10
+        // BEGIN TRY
+        //   SET @x = 20
+        // END TRY
+        // BEGIN CATCH
+        //   SET @x = -1
+        // END CATCH
+
+        var scope = new VariableScope();
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
+
+        var declare = TestHelpers.MakeDeclare("@x", "INT", 10);
+
+        var setInTry = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "20" });
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
+
+        var setInCatch = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "-1" });
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
+
+        var statements = new TSqlStatement[] { declare, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(context))
+        {
+            rows.Add(row);
+        }
+
+        rows.Should().BeEmpty();
+        // After TRY block (no error), @x should be 20
+        scope.Get("@x").Should().Be(20);
+    }
+
+    // ────────────────────────────────────────────
+    //  ScriptExecutionNode: TRY/CATCH with error
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_TryCatch_WithError_ExecutesCatchBlock()
+    {
+        // DECLARE @x INT = 10
+        // BEGIN TRY
+        //   SET @x = 1 / 0   <-- this will throw
+        // END TRY
+        // BEGIN CATCH
+        //   SET @x = -99
+        // END CATCH
+
+        var scope = new VariableScope();
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
+
+        var declare = TestHelpers.MakeDeclare("@x", "INT", 10);
+
+        // 1 / 0 will throw DivideByZeroException
+        var divByZero = new BinaryExpression
+        {
+            FirstExpression = new IntegerLiteral { Value = "1" },
+            BinaryExpressionType = BinaryExpressionType.Divide,
+            SecondExpression = new IntegerLiteral { Value = "0" }
+        };
+        var setInTry = TestHelpers.MakeSetVariable("@x", divByZero);
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
+
+        var setInCatch = TestHelpers.MakeSetVariable("@x", new IntegerLiteral { Value = "-99" });
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
+
+        var statements = new TSqlStatement[] { declare, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(context))
+        {
+            rows.Add(row);
+        }
+
+        rows.Should().BeEmpty();
+        // After CATCH block (error occurred), @x should be -99
+        scope.Get("@x").Should().Be(-99);
+    }
+
+    // ────────────────────────────────────────────
+    //  Error functions in CATCH block
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_TryCatch_ErrorMessageIsAvailable()
+    {
+        // BEGIN TRY
+        //   SET @x = 1 / 0
+        // END TRY
+        // BEGIN CATCH
+        //   SET @msg = ERROR_MESSAGE()
+        // END CATCH
+
+        var scope = new VariableScope();
+        var (builder, compiler) = TestHelpers.CreatePlanBuilderAndCompiler(scope);
+
+        var declareX = TestHelpers.MakeDeclare("@x", "INT");
+        var declareMsg = TestHelpers.MakeDeclare("@msg", "NVARCHAR");
+
+        var divByZero = new BinaryExpression
+        {
+            FirstExpression = new IntegerLiteral { Value = "1" },
+            BinaryExpressionType = BinaryExpressionType.Divide,
+            SecondExpression = new IntegerLiteral { Value = "0" }
+        };
+        var setInTry = TestHelpers.MakeSetVariable("@x", divByZero);
+        var tryStatements = new StatementList();
+        tryStatements.Statements.Add(setInTry);
+
+        // ERROR_MESSAGE() call
+        var errorMsgFunc = new FunctionCall();
+        errorMsgFunc.FunctionName = new Identifier { Value = "ERROR_MESSAGE" };
+        var setInCatch = TestHelpers.MakeSetVariable("@msg", errorMsgFunc);
+        var catchStatements = new StatementList();
+        catchStatements.Statements.Add(setInCatch);
+
+        var tryCatch = new TryCatchStatement
+        {
+            TryStatements = tryStatements,
+            CatchStatements = catchStatements
+        };
+
+        var statements = new TSqlStatement[] { declareX, declareMsg, tryCatch };
+        var node = new ScriptExecutionNode(statements, builder, compiler);
+
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var context = new QueryPlanContext(mockExecutor.Object, variableScope: scope);
+
+        var rows = new List<QueryRow>();
+        await foreach (var row in node.ExecuteAsync(context))
+        {
+            rows.Add(row);
+        }
+
+        rows.Should().BeEmpty();
+        // ERROR_MESSAGE() should have captured the division by zero message
+        var msg = scope.Get("@msg");
+        msg.Should().NotBeNull();
+        msg.Should().BeOfType<string>();
+        ((string)msg!).Should().NotBeEmpty();
+    }
+
+    // ────────────────────────────────────────────
+    //  ExecutionPlanBuilder: TRY/CATCH plan detection
+    // ────────────────────────────────────────────
+
+    [Fact]
+    public void Plan_TryCatch_ProducesScriptExecutionNode()
+    {
+        var parser = new QueryParser();
+        var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
+        mockFetchXmlService
+            .Setup(s => s.Generate(It.IsAny<TSqlFragment>()))
+            .Returns(TranspileResult.Simple(
+                "<fetch><entity name=\"account\"><all-attributes /></entity></fetch>"));
+
+        var builder = new ExecutionPlanBuilder(mockFetchXmlService.Object);
+
+        var sql = @"
+            BEGIN TRY
+                DECLARE @x INT = 1
+            END TRY
+            BEGIN CATCH
+                DECLARE @y INT = 2
+            END CATCH";
+
+        var fragment = parser.Parse(sql);
+        var result = builder.Plan(fragment);
+
+        result.RootNode.Should().BeOfType<ScriptExecutionNode>();
+    }
+
+}

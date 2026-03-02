@@ -500,6 +500,35 @@ switch ($Command) {
         Write-Step 'Updating container remote refs...'
         devcontainer exec --workspace-folder $WorkspaceFolder bash -c 'cd "$1" && git fetch origin "$2" 2>/dev/null || git update-ref "refs/remotes/origin/$2" HEAD' _ $workdir $branch
 
+        # Sync host: update remote tracking ref and local worktree to match what was pushed
+        Write-Step 'Syncing host repo...'
+        git -C $WorkspaceFolder fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}" --force 2>$null
+
+        # Find if any host worktree has this branch checked out and update it
+        $wtLines = git -C $WorkspaceFolder worktree list --porcelain
+        $wtPath = $null
+        foreach ($line in $wtLines) {
+            if ($line -match '^worktree (.+)$') {
+                $wtPath = $Matches[1]
+            }
+            if ($line -eq "branch refs/heads/${branch}") {
+                break
+            }
+            if ($line -eq '') {
+                $wtPath = $null
+            }
+        }
+        if ($wtPath) {
+            $wtDirty = (git -C $wtPath status --porcelain 2>$null)
+            if ($wtDirty) {
+                Write-Warn "Host worktree at '$wtPath' has uncommitted changes — skipping reset. Run 'git -C $wtPath reset --hard origin/${branch}' manually."
+            }
+            else {
+                git -C $wtPath reset --hard "origin/${branch}" 2>$null | Out-Null
+                Write-Ok "Host worktree at '$wtPath' synced to latest."
+            }
+        }
+
         $verb = if ($forceNeeded) { 'Force pushed' } else { 'Pushed' }
         Write-Ok "$verb '$branch' to origin ($ahead commit(s))."
     }

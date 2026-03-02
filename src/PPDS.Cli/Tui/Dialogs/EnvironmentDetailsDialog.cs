@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Tui.Infrastructure;

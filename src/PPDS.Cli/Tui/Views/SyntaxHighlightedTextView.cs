@@ -38,6 +38,11 @@ internal sealed class SyntaxHighlightedTextView : TextView
     private CancellationTokenSource? _completionCts;
 
     /// <summary>
+    /// Suppresses autocomplete triggers during bulk paste operations.
+    /// </summary>
+    private bool _isPasting;
+
+    /// <summary>
     /// Latest validation diagnostics. Updated asynchronously after debounce.
     /// </summary>
     private IReadOnlyList<SqlDiagnostic> _diagnostics = Array.Empty<SqlDiagnostic>();
@@ -131,6 +136,29 @@ internal sealed class SyntaxHighlightedTextView : TextView
             return true;
         }
 
+        // Ctrl+V: handle paste as single bulk operation to avoid autocomplete interference
+        if (keyEvent.Key == (Key.CtrlMask | Key.V))
+        {
+            _isPasting = true;
+            try
+            {
+                var pasteHandled = base.ProcessKey(keyEvent);
+                if (pasteHandled)
+                {
+                    // Invalidate cached tokenization and schedule validation
+                    _cachedText = null;
+                    _cachedColorMap = null;
+                    ScheduleDebouncedValidation();
+                    SetNeedsDisplay();
+                }
+                return pasteHandled;
+            }
+            finally
+            {
+                _isPasting = false;
+            }
+        }
+
         // Let the base TextView handle the key
         var handled = base.ProcessKey(keyEvent);
 
@@ -154,6 +182,9 @@ internal sealed class SyntaxHighlightedTextView : TextView
     /// </summary>
     private void CheckAutocompleteTrigger(KeyEvent keyEvent)
     {
+        // Suppress autocomplete triggers during bulk paste operations
+        if (_isPasting) return;
+
         // If popup is showing, update filter on printable character, backspace, or delete
         if (_autocompletePopup.IsShowing)
         {
@@ -192,6 +223,8 @@ internal sealed class SyntaxHighlightedTextView : TextView
     /// </summary>
     private void CheckFromJoinTrigger()
     {
+        if (_isPasting) return;
+
         var fullText = Text?.ToString() ?? string.Empty;
         var offset = GetCursorFlatOffset();
 

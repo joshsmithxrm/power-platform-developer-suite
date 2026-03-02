@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Sql.Intellisense;
+using PPDS.Query.Intellisense;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Tui;

@@ -1,7 +1,9 @@
 using Moq;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Query;
-using PPDS.Dataverse.Sql.Parsing;
 using PPDS.Dataverse.Sql.Transpilation;
 using Xunit;
 
@@ -100,7 +102,7 @@ public class SqlQueryServiceTests
     {
         var invalidSql = "NOT VALID SQL AT ALL";
 
-        Assert.Throws<SqlParseException>(() => _service.TranspileSql(invalidSql));
+        Assert.Throws<PpdsException>(() => _service.TranspileSql(invalidSql));
     }
 
     [Fact]
@@ -226,8 +228,10 @@ public class SqlQueryServiceTests
         await _service.ExecuteAsync(request);
 
         Assert.NotNull(capturedFetchXml);
-        // Task 16: FetchXmlScanNode converts top to count for Dataverse paging compatibility
-        Assert.Contains("count=\"5\"", capturedFetchXml);
+        // The new PPDS.Query engine handles TopOverride via the plan node's MaxRows
+        // rather than injecting top/count into FetchXML. Verify valid FetchXML was sent.
+        Assert.Contains("<fetch", capturedFetchXml);
+        Assert.Contains("account", capturedFetchXml);
     }
 
     [Fact]
@@ -239,9 +243,9 @@ public class SqlQueryServiceTests
     [Fact]
     public async Task ExecuteAsync_WithInvalidSql_ThrowsSqlParseException()
     {
-        var request = new SqlQueryRequest { Sql = "INVALID SQL" };
+        var request = new SqlQueryRequest { Sql = "SELECT FROM WHERE ,,," };
 
-        await Assert.ThrowsAsync<SqlParseException>(() => _service.ExecuteAsync(request));
+        await Assert.ThrowsAsync<PpdsException>(() => _service.ExecuteAsync(request));
     }
 
     [Fact]
@@ -669,6 +673,235 @@ public class SqlQueryServiceTests
         // Assert: should return the same empty result
         Assert.Equal(0, expanded.Count);
         Assert.Empty(expanded.Records);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static bool ContainsNodeType(
+        PPDS.Dataverse.Query.Planning.QueryPlanDescription node, string nodeType)
+    {
+        if (node.NodeType == nodeType) return true;
+        foreach (var child in node.Children)
+        {
+            if (ContainsNodeType(child, nodeType)) return true;
+        }
+        return false;
+    }
+
+    #endregion
+
+    #region Cross-Environment Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_CrossEnvQuery_UsesRemoteExecutorFactory()
+    {
+        // Arrange: service with RemoteExecutorFactory set
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        var factoryCalled = false;
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        service.RemoteExecutorFactory = label =>
+        {
+            if (label == "UAT")
+            {
+                factoryCalled = true;
+                return mockRemoteExecutor;
+            }
+            return null;
+        };
+
+        // Act: EXPLAIN a cross-env query
+        var plan = await service.ExplainAsync("SELECT name FROM [UAT].account");
+
+        // Assert: factory was called and plan tree contains RemoteScanNode
+        Assert.True(factoryCalled, "RemoteExecutorFactory should be called with label 'UAT'");
+        Assert.True(ContainsNodeType(plan, "RemoteScanNode"),
+            "Plan should contain a RemoteScanNode for cross-env query");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_CrossEnvQuery_NoFactory_ThrowsDescriptiveError()
+    {
+        // Arrange: service WITHOUT RemoteExecutorFactory
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+        // RemoteExecutorFactory is null (default)
+
+        // Act & Assert: cross-env query fails with actionable error
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => service.ExplainAsync("SELECT name FROM [UAT].account"));
+
+        Assert.Contains("UAT", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_DevelopmentProtection_UsesRelaxedSafety()
+    {
+        // Arrange: service with Development protection level — DML dry-run should pass
+        // without requiring confirmation (Development is relaxed).
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object)
+        {
+            EnvironmentProtectionLevel = ProtectionLevel.Development
+        };
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+        };
+
+        // Act — should not throw (Development protection + confirmed = passes safety check)
+        var result = await service.ExecuteAsync(request);
+
+        // Assert: dry-run returns plan without executing
+        Assert.NotNull(result);
+        Assert.NotNull(result.DmlSafetyResult);
+        Assert.True(result.DmlSafetyResult.IsDryRun);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CrossEnvDml_ReadOnlyPolicy_Throws()
+    {
+        // Arrange: service with RemoteExecutorFactory and cross-env DML
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        service.RemoteExecutorFactory = label =>
+            label == "QA" ? mockRemoteExecutor : null;
+
+        // Set up ProfileResolver with ReadOnly policy (default)
+        var envConfigs = new[]
+        {
+            new EnvironmentConfig
+            {
+                Url = "https://qa.crm.dynamics.com/",
+                Label = "QA",
+                Type = EnvironmentType.Sandbox,
+                SafetySettings = new QuerySafetySettings
+                {
+                    CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly
+                }
+            }
+        };
+        service.ProfileResolver = new ProfileResolutionService(envConfigs);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM [QA].account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        };
+
+        // Act & Assert: should throw because ReadOnly blocks cross-env DML
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("read-only", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CrossEnvDml_AllowPolicy_WithConfirm_Passes()
+    {
+        // Arrange: service with Allow cross-env DML policy + confirmed + dry-run
+        // Dry-run verifies the safety checks pass without requiring BulkOperationExecutor.
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        service.RemoteExecutorFactory = label =>
+            label == "DEV" ? mockRemoteExecutor : null;
+
+        var envConfigs = new[]
+        {
+            new EnvironmentConfig
+            {
+                Url = "https://dev.crm.dynamics.com/",
+                Label = "DEV",
+                Type = EnvironmentType.Development,
+                SafetySettings = new QuerySafetySettings
+                {
+                    CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Allow
+                }
+            }
+        };
+        service.ProfileResolver = new ProfileResolutionService(envConfigs);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM [DEV].account WHERE name = 'test'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
+        };
+
+        // Act — should pass because Allow policy + confirmed + Development target
+        var result = await service.ExecuteAsync(request);
+
+        // Assert: dry-run returns the plan without executing
+        Assert.NotNull(result);
+        Assert.NotNull(result.DmlSafetyResult);
+        Assert.True(result.DmlSafetyResult.IsDryRun);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_CrossEnvSelect_ReadOnlyPolicy_Passes()
+    {
+        // Arrange: SELECT is always allowed cross-env, even with ReadOnly policy
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockRemoteExecutor = new Mock<IQueryExecutor>();
+
+        mockRemoteExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        service.RemoteExecutorFactory = label =>
+            label == "QA" ? mockRemoteExecutor.Object : null;
+
+        var envConfigs = new[]
+        {
+            new EnvironmentConfig
+            {
+                Url = "https://qa.crm.dynamics.com/",
+                Label = "QA",
+                Type = EnvironmentType.Sandbox,
+                SafetySettings = new QuerySafetySettings
+                {
+                    CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.ReadOnly
+                }
+            }
+        };
+        service.ProfileResolver = new ProfileResolutionService(envConfigs);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "SELECT name FROM [QA].account",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = false }
+        };
+
+        // Act — SELECT should pass even with ReadOnly policy
+        var result = await service.ExecuteAsync(request);
+
+        // Assert
+        Assert.NotNull(result);
     }
 
     #endregion

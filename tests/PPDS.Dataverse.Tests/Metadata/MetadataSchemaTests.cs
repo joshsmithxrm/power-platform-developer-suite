@@ -13,6 +13,8 @@ public class MetadataSchemaTests
     [InlineData("metadata.relationship_n_n")]
     [InlineData("metadata.optionset")]
     [InlineData("metadata.optionsetvalue")]
+    [InlineData("metadata.relationship")]
+    [InlineData("metadata.key")]
     public void IsMetadataTable_ReturnsTrue_ForKnownTables(string name)
     {
         Assert.True(MetadataTableDefinitions.IsMetadataTable(name));
@@ -90,13 +92,15 @@ public class MetadataSchemaTests
     [Fact]
     public void Tables_ContainsAllExpectedTables()
     {
-        Assert.Equal(6, MetadataTableDefinitions.Tables.Count);
+        Assert.Equal(8, MetadataTableDefinitions.Tables.Count);
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("entity"));
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("attribute"));
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("relationship_1_n"));
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("relationship_n_n"));
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("optionset"));
         Assert.True(MetadataTableDefinitions.Tables.ContainsKey("optionsetvalue"));
+        Assert.True(MetadataTableDefinitions.Tables.ContainsKey("relationship"));
+        Assert.True(MetadataTableDefinitions.Tables.ContainsKey("key"));
     }
 
     [Fact]

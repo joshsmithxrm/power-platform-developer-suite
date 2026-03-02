@@ -22,7 +22,7 @@ public interface IEnvironmentConfigService
     /// Saves or merges configuration for a specific environment.
     /// Only non-null parameters are updated (existing values preserved).
     /// </summary>
-    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, string? type = null, EnvironmentColor? color = null, bool clearColor = false, CancellationToken ct = default);
+    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null, bool clearColor = false, CancellationToken ct = default);
 
     /// <summary>
     /// Removes configuration for a specific environment.
@@ -30,19 +30,19 @@ public interface IEnvironmentConfigService
     Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default);
 
     /// <summary>
-    /// Adds or updates a custom type definition with a default color.
+    /// Adds or updates a type definition with a default color.
     /// </summary>
-    Task SaveTypeDefaultAsync(string typeName, EnvironmentColor color, CancellationToken ct = default);
+    Task SaveTypeDefaultAsync(EnvironmentType typeName, EnvironmentColor color, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes a custom type definition.
+    /// Removes a type definition override.
     /// </summary>
-    Task<bool> RemoveTypeDefaultAsync(string typeName, CancellationToken ct = default);
+    Task<bool> RemoveTypeDefaultAsync(EnvironmentType typeName, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets all type definitions (built-in + custom) with their default colors.
+    /// Gets all type definitions (built-in + custom overrides) with their default colors.
     /// </summary>
-    Task<IReadOnlyDictionary<string, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default);
+    Task<IReadOnlyDictionary<EnvironmentType, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Resolves the effective color for an environment.
@@ -51,10 +51,10 @@ public interface IEnvironmentConfigService
     Task<EnvironmentColor> ResolveColorAsync(string url, CancellationToken ct = default);
 
     /// <summary>
-    /// Resolves the effective environment type string for an environment.
-    /// Priority: user config type > discovery API type > URL heuristics > null.
+    /// Resolves the effective environment type for an environment.
+    /// Priority: user config type > discovery API type > URL heuristics > Unknown.
     /// </summary>
-    Task<string?> ResolveTypeAsync(string url, string? discoveredType = null, CancellationToken ct = default);
+    Task<EnvironmentType> ResolveTypeAsync(string url, string? discoveredType = null, CancellationToken ct = default);
 
     /// <summary>
     /// Resolves the display label for an environment.

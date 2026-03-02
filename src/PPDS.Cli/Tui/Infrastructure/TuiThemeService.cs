@@ -26,14 +26,7 @@ public sealed class TuiThemeService : ITuiThemeService
         }
 
         // Delegate to EnvironmentConfigService for segment-based keyword matching
-        var detectedType = EnvironmentConfigService.DetectTypeFromUrl(environmentUrl);
-        return detectedType switch
-        {
-            "Development" => EnvironmentType.Development,
-            "Test" => EnvironmentType.Test,
-            "Trial" => EnvironmentType.Trial,
-            _ => EnvironmentType.Unknown
-        };
+        return EnvironmentConfigService.DetectTypeFromUrl(environmentUrl);
     }
 
     /// <inheritdoc />
@@ -100,12 +93,13 @@ public sealed class TuiThemeService : ITuiThemeService
             // Priority 2: abbreviated type
             var type = _configService.ResolveTypeAsync(environmentUrl).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
-            return type?.ToUpperInvariant() switch
+            return type switch
             {
-                "PRODUCTION" => "PROD",
-                "DEVELOPMENT" => "DEV",
-                var t when t != null && t.Length <= 8 => t,
-                var t when t != null => t[..8],
+                EnvironmentType.Production => "PROD",
+                EnvironmentType.Development => "DEV",
+                EnvironmentType.Sandbox => "SANDBOX",
+                EnvironmentType.Test => "TEST",
+                EnvironmentType.Trial => "TRIAL",
                 _ => ""
             };
         }

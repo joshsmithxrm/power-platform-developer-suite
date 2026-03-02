@@ -8,15 +8,15 @@ namespace PPDS.Cli.Services.Environment;
 public sealed class EnvironmentConfigService : IEnvironmentConfigService
 {
     /// <summary>
-    /// Built-in type defaults. Custom user types in environments.json override these.
+    /// Built-in type defaults. User overrides in environments.json take precedence.
     /// </summary>
-    private static readonly Dictionary<string, EnvironmentColor> BuiltInTypeDefaults = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<EnvironmentType, EnvironmentColor> BuiltInTypeDefaults = new()
     {
-        ["Production"] = EnvironmentColor.Red,
-        ["Sandbox"] = EnvironmentColor.Brown,
-        ["Development"] = EnvironmentColor.Green,
-        ["Test"] = EnvironmentColor.Yellow,
-        ["Trial"] = EnvironmentColor.Cyan,
+        [EnvironmentType.Production] = EnvironmentColor.Red,
+        [EnvironmentType.Sandbox] = EnvironmentColor.Brown,
+        [EnvironmentType.Development] = EnvironmentColor.Green,
+        [EnvironmentType.Test] = EnvironmentColor.Yellow,
+        [EnvironmentType.Trial] = EnvironmentColor.Cyan,
     };
 
     private readonly EnvironmentConfigStore _store;
@@ -36,22 +36,22 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
     }
 
     public async Task<EnvironmentConfig> SaveConfigAsync(
-        string url, string? label = null, string? type = null, EnvironmentColor? color = null,
+        string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null,
         bool clearColor = false,
         CancellationToken ct = default)
-        => await _store.SaveConfigAsync(url, label, type, color, clearColor, ct).ConfigureAwait(false);
+        => await _store.SaveConfigAsync(url, label, type, color, clearColor, ct: ct).ConfigureAwait(false);
 
     public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
         => await _store.RemoveConfigAsync(url, ct).ConfigureAwait(false);
 
-    public async Task SaveTypeDefaultAsync(string typeName, EnvironmentColor color, CancellationToken ct = default)
+    public async Task SaveTypeDefaultAsync(EnvironmentType typeName, EnvironmentColor color, CancellationToken ct = default)
     {
         var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
         collection.TypeDefaults[typeName] = color;
         await _store.SaveAsync(collection, ct).ConfigureAwait(false);
     }
 
-    public async Task<bool> RemoveTypeDefaultAsync(string typeName, CancellationToken ct = default)
+    public async Task<bool> RemoveTypeDefaultAsync(EnvironmentType typeName, CancellationToken ct = default)
     {
         var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
         if (collection.TypeDefaults.Remove(typeName))
@@ -62,10 +62,10 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         return false;
     }
 
-    public async Task<IReadOnlyDictionary<string, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<EnvironmentType, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default)
     {
         var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
-        var merged = new Dictionary<string, EnvironmentColor>(BuiltInTypeDefaults, StringComparer.OrdinalIgnoreCase);
+        var merged = new Dictionary<EnvironmentType, EnvironmentColor>(BuiltInTypeDefaults);
         foreach (var (key, value) in collection.TypeDefaults)
         {
             merged[key] = value;
@@ -82,11 +82,11 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
             return config.Color.Value;
 
         // Priority 2: type-based color (resolve type first)
-        var type = (config is not null ? config.Type : null) ?? DetectTypeFromUrl(url);
-        if (type != null)
+        var envType = config?.Type ?? DetectTypeFromUrl(url);
+        if (envType != EnvironmentType.Unknown)
         {
             var allDefaults = await GetAllTypeDefaultsAsync(ct).ConfigureAwait(false);
-            if (allDefaults.TryGetValue(type, out var typeColor))
+            if (allDefaults.TryGetValue(envType, out var typeColor))
                 return typeColor;
         }
 
@@ -94,19 +94,27 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         return EnvironmentColor.Gray;
     }
 
-    public async Task<string?> ResolveTypeAsync(string url, string? discoveredType = null, CancellationToken ct = default)
+    public async Task<EnvironmentType> ResolveTypeAsync(string url, string? discoveredType = null, CancellationToken ct = default)
     {
         // Priority 1: user config type
         var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(config?.Type))
-            return config!.Type;
+        if (config?.Type != null)
+            return config.Type.Value;
 
         // Priority 2: discovery API type
         if (!string.IsNullOrWhiteSpace(discoveredType))
-            return discoveredType;
+        {
+            var parsed = ParseDiscoveryType(discoveredType);
+            if (parsed != EnvironmentType.Unknown)
+                return parsed;
+        }
 
         // Priority 3: URL heuristics
-        return DetectTypeFromUrl(url);
+        var heuristic = DetectTypeFromUrl(url);
+        if (heuristic != EnvironmentType.Unknown)
+            return heuristic;
+
+        return EnvironmentType.Unknown;
     }
 
     public async Task<string?> ResolveLabelAsync(string url, CancellationToken ct = default)
@@ -114,6 +122,20 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         var config = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
         return config?.Label;
     }
+
+    /// <summary>
+    /// Maps Discovery API type strings to EnvironmentType enum values.
+    /// </summary>
+    public static EnvironmentType ParseDiscoveryType(string? discoveryType) => discoveryType?.ToLowerInvariant() switch
+    {
+        "production" => EnvironmentType.Production,
+        "sandbox" => EnvironmentType.Sandbox,
+        "developer" => EnvironmentType.Development,
+        "development" => EnvironmentType.Development,
+        "trial" => EnvironmentType.Trial,
+        "test" => EnvironmentType.Test,
+        _ => EnvironmentType.Unknown
+    };
 
     #region URL Heuristics (fallback only)
 
@@ -132,21 +154,21 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
     /// splits it on common delimiters (-, ., _), and checks for exact segment matches
     /// to avoid false positives (e.g., "adventureworks" matching "dev").
     /// </remarks>
-    internal static string? DetectTypeFromUrl(string? url)
+    internal static EnvironmentType DetectTypeFromUrl(string? url)
     {
-        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (string.IsNullOrWhiteSpace(url)) return EnvironmentType.Unknown;
 
         var segments = ExtractOrgSegments(url);
-        if (segments.Length == 0) return null;
+        if (segments.Length == 0) return EnvironmentType.Unknown;
 
         if (segments.Any(s => DevKeywords.Any(k => s.Equals(k, StringComparison.OrdinalIgnoreCase))))
-            return "Development";
+            return EnvironmentType.Development;
         if (segments.Any(s => TestKeywords.Any(k => s.Equals(k, StringComparison.OrdinalIgnoreCase))))
-            return "Test";
+            return EnvironmentType.Test;
         if (segments.Any(s => TrialKeywords.Any(k => s.Equals(k, StringComparison.OrdinalIgnoreCase))))
-            return "Trial";
+            return EnvironmentType.Trial;
 
-        return null;
+        return EnvironmentType.Unknown;
     }
 
     /// <summary>
