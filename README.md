@@ -40,6 +40,7 @@ ppds data export --schema schema.xml --output data.zip
 | **PPDS.Dataverse** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Dataverse.svg)](https://www.nuget.org/packages/PPDS.Dataverse/) | High-performance connection pooling and bulk operations |
 | **PPDS.Migration** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Migration.svg)](https://www.nuget.org/packages/PPDS.Migration/) | High-performance data migration engine |
 | **PPDS.Auth** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Auth.svg)](https://www.nuget.org/packages/PPDS.Auth/) | Authentication profiles and credential management |
+| **PPDS.Query** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Query.svg)](https://www.nuget.org/packages/PPDS.Query/) | SQL query engine with FetchXML transpilation and ADO.NET provider |
 | **PPDS.Cli** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Cli.svg)](https://www.nuget.org/packages/PPDS.Cli/) | CLI tool with TUI (.NET tool) |
 | **PPDS.Mcp** | [![NuGet](https://img.shields.io/nuget/v/PPDS.Mcp.svg)](https://www.nuget.org/packages/PPDS.Mcp/) | MCP server for AI assistants (.NET tool) |
 
@@ -51,6 +52,7 @@ ppds data export --schema schema.xml --output data.zip
 | PPDS.Dataverse | net8.0, net9.0, net10.0 |
 | PPDS.Migration | net8.0, net9.0, net10.0 |
 | PPDS.Auth | net8.0, net9.0, net10.0 |
+| PPDS.Query | net8.0, net9.0, net10.0 |
 | PPDS.Cli | net8.0, net9.0, net10.0 |
 | PPDS.Mcp | net8.0, net9.0, net10.0 |
 
@@ -109,7 +111,7 @@ Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 | `ppds data` | Data operations (export, import, copy, schema, users, load, truncate) |
 | `ppds plugins` | Plugin registration (extract, deploy, diff, list, clean) |
 | `ppds metadata` | Entity browsing (entities, attributes, relationships, keys, optionsets) |
-| `ppds query` | Execute queries (fetch, sql) |
+| `ppds query` | Execute queries (fetch, sql, explain, history) |
 | `ppds serve` | Run RPC daemon for VS Code extension |
 
 ---
@@ -209,6 +211,41 @@ await importer.ImportAsync("data.zip");
 - Security-first: no PII in logs, connection string redaction
 
 See [PPDS.Migration documentation](src/PPDS.Migration/README.md) for details.
+
+---
+
+## PPDS.Query
+
+SQL query engine for Dataverse with FetchXML transpilation and an ADO.NET provider.
+
+```bash
+dotnet add package PPDS.Query
+```
+
+```csharp
+// ADO.NET provider — standard .NET data access for Dataverse
+using var connection = new PpdsDbConnection(pool);
+await connection.OpenAsync();
+
+using var command = connection.CreateCommand();
+command.CommandText = "SELECT name, revenue FROM account WHERE revenue > @threshold";
+command.Parameters.AddWithValue("@threshold", 1_000_000m);
+
+using var reader = await command.ExecuteReaderAsync();
+while (await reader.ReadAsync())
+{
+    Console.WriteLine($"{reader["name"]}: {reader["revenue"]:C}");
+}
+```
+
+**Key Features:**
+- Full T-SQL support (SELECT, JOIN, WHERE, GROUP BY, subqueries, CTEs, window functions)
+- FetchXML transpilation with automatic pushdown optimization
+- DML support (INSERT, UPDATE, DELETE) with safety guards
+- Cross-environment queries with bracket syntax
+- Streaming Volcano-model execution engine
+
+See [PPDS.Query documentation](src/PPDS.Query/README.md) for details.
 
 ---
 
