@@ -61,6 +61,9 @@ export class QueryPanel extends WebviewPanelBase {
                     case 'exportResults':
                         await this.exportResults();
                         break;
+                    case 'openInNotebook':
+                        await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql as string);
+                        break;
                     case 'showHistory': {
                         const sql = await showQueryHistory(this.daemon);
                         if (sql) {
@@ -89,7 +92,8 @@ export class QueryPanel extends WebviewPanelBase {
     private async executeQuery(sql: string, useTds?: boolean): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
-            const result = await this.daemon.querySql({ sql, useTds });
+            const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
+            const result = await this.daemon.querySql({ sql, useTds, top: defaultTop });
             this.lastSql = sql;
             this.lastResult = result;
             this.allRecords = [...result.records];
@@ -186,9 +190,10 @@ export class QueryPanel extends WebviewPanelBase {
         }
 
         const formatPick = await vscode.window.showQuickPick([
-            { label: 'CSV', description: 'Comma-separated values', format: 'csv' },
-            { label: 'TSV', description: 'Tab-separated values', format: 'tsv' },
-            { label: 'JSON', description: 'JSON array', format: 'json' },
+            { label: 'CSV', description: 'Comma-separated values', format: 'csv', isClipboard: false },
+            { label: 'TSV', description: 'Tab-separated values', format: 'tsv', isClipboard: false },
+            { label: 'JSON', description: 'JSON array', format: 'json', isClipboard: false },
+            { label: 'Clipboard', description: 'Copy as TSV to clipboard', format: 'tsv', isClipboard: true },
         ], {
             title: `Export ${this.allRecords.length} rows`,
             placeHolder: 'Select export format',
@@ -196,12 +201,29 @@ export class QueryPanel extends WebviewPanelBase {
 
         if (!formatPick) return;
 
+        // Headers toggle
+        const headersPick = await vscode.window.showQuickPick([
+            { label: 'Include column headers', includeHeaders: true },
+            { label: 'Data only (no headers)', includeHeaders: false },
+        ], {
+            title: 'Column Headers',
+            placeHolder: 'Include headers in export?',
+        });
+
+        if (!headersPick) return;
+
         try {
             const result = await this.daemon.queryExport({
                 sql: this.lastSql,
                 format: formatPick.format,
-                includeHeaders: true,
+                includeHeaders: headersPick.includeHeaders,
             });
+
+            if (formatPick.isClipboard) {
+                await vscode.env.clipboard.writeText(result.content);
+                vscode.window.showInformationMessage(`Copied ${result.rowCount} rows to clipboard`);
+                return;
+            }
 
             const fileExt = formatPick.format === 'tsv' ? 'tsv' : formatPick.format === 'json' ? 'json' : 'csv';
             const filterName = formatPick.format === 'tsv' ? 'TSV Files' : formatPick.format === 'json' ? 'JSON Files' : 'CSV Files';
@@ -272,6 +294,7 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="explain-btn" appearance="secondary">EXPLAIN</vscode-button>
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
+    <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
     <vscode-button id="tds-toggle-btn" appearance="secondary" title="Toggle TDS endpoint">TDS Off</vscode-button>
     <span class="toolbar-spacer"></span>
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
@@ -312,6 +335,7 @@ export class QueryPanel extends WebviewPanelBase {
     const explainBtn = document.getElementById('explain-btn');
     const exportBtn = document.getElementById('export-btn');
     const historyBtn = document.getElementById('history-btn');
+    const notebookBtn = document.getElementById('notebook-btn');
     const filterBtn = document.getElementById('filter-btn');
     const filterBar = document.getElementById('filter-bar');
     const filterInput = document.getElementById('filter-input');
@@ -359,6 +383,10 @@ export class QueryPanel extends WebviewPanelBase {
     historyBtn.addEventListener('click', () => {
         vscode.postMessage({ command: 'showHistory' });
     });
+    notebookBtn.addEventListener('click', () => {
+        const sql = sqlEditor.value.trim();
+        if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
+    });
     loadMoreBtn.addEventListener('click', () => {
         if (pagingCookie) {
             vscode.postMessage({ command: 'loadMore', pagingCookie, page: currentPage + 1 });
@@ -385,6 +413,22 @@ export class QueryPanel extends WebviewPanelBase {
         if ((e.ctrlKey || e.metaKey) && e.key === 'c' && document.activeElement !== sqlEditor) {
             e.preventDefault();
             copySelectedCells(e.shiftKey);
+        }
+        // Ctrl+Shift+F → FetchXML preview
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+            e.preventDefault();
+            const sql = sqlEditor.value.trim();
+            if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
+        }
+        // Ctrl+E → Export
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'e') {
+            e.preventDefault();
+            vscode.postMessage({ command: 'exportResults' });
+        }
+        // Ctrl+Shift+H → History
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') {
+            e.preventDefault();
+            vscode.postMessage({ command: 'showHistory' });
         }
     });
 

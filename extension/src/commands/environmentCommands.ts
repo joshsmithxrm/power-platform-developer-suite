@@ -74,6 +74,11 @@ export function registerEnvironmentCommands(
                     return;
                 }
 
+                const configureButton: vscode.QuickInputButton = {
+                    iconPath: new vscode.ThemeIcon('gear'),
+                    tooltip: 'Configure environment',
+                };
+
                 const items = environments.map(env => ({
                     label: env.friendlyName,
                     description: env.type ? `[${env.type}]` : undefined,
@@ -82,13 +87,32 @@ export function registerEnvironmentCommands(
                         : env.apiUrl,
                     picked: env.isActive,
                     apiUrl: env.apiUrl,
+                    buttons: [configureButton],
                 }));
 
-                const selected = await vscode.window.showQuickPick(items, {
-                    title: 'Select Dataverse Environment',
-                    placeHolder: 'Choose an environment to connect to',
-                    matchOnDescription: true,
-                    matchOnDetail: true,
+                const selected = await new Promise<typeof items[number] | undefined>(resolve => {
+                    const quickPick = vscode.window.createQuickPick<typeof items[number]>();
+                    quickPick.title = 'Select Dataverse Environment';
+                    quickPick.placeholder = 'Choose an environment to connect to';
+                    quickPick.matchOnDescription = true;
+                    quickPick.matchOnDetail = true;
+                    quickPick.items = items;
+
+                    quickPick.onDidTriggerItemButton(async (e) => {
+                        quickPick.hide();
+                        await vscode.commands.executeCommand('ppds.configureEnvironment');
+                    });
+
+                    quickPick.onDidAccept(() => {
+                        resolve(quickPick.selectedItems[0]);
+                        quickPick.hide();
+                    });
+                    quickPick.onDidHide(() => {
+                        resolve(undefined);
+                        quickPick.dispose();
+                    });
+
+                    quickPick.show();
                 });
 
                 if (!selected) {
