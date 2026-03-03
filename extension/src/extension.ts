@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
         treeDataProvider: profileTreeProvider,
         showCollapseAll: false,
     });
-    context.subscriptions.push(profileTreeView);
+    context.subscriptions.push(profileTreeView, profileTreeProvider);
 
     // ── Tools Tree View ──────────────────────────────────────────────────
     const toolsTreeProvider = new ToolsTreeDataProvider();
@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
         treeDataProvider: toolsTreeProvider,
         showCollapseAll: false,
     });
-    context.subscriptions.push(toolsTreeView);
+    context.subscriptions.push(toolsTreeView, toolsTreeProvider);
 
     // Sync tools tree disabled state with profile availability
     const refreshToolsState = () => {
@@ -119,11 +119,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Placeholder commands for tools tree items ───────────────────────
     // (will be implemented in later tasks)
-
-    const openDataExplorerCmd = vscode.commands.registerCommand('ppds.openDataExplorer', () => {
-        QueryPanel.show(context.extensionUri, daemonClient);
-    });
-    context.subscriptions.push(openDataExplorerCmd);
 
     const openNotebooksCmd = vscode.commands.registerCommand('ppds.openNotebooks', () => {
         void createNewNotebook();
