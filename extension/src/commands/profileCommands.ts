@@ -421,14 +421,19 @@ interface AuthParams {
 async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams | null> {
     const params: AuthParams = {};
 
-    // Environment URL is needed for all methods
+    // Service principals always need an environment URL upfront.
+    // User-based flows (deviceCode, interactive) can set it later via environment selector.
+    const isUserBased = authMethodId === 'deviceCode' || authMethodId === 'interactive';
+
     const envUrl = await vscode.window.showInputBox({
         title: 'Create Profile (Step 3): Environment URL',
-        prompt: 'Enter the Dataverse environment URL',
+        prompt: isUserBased
+            ? 'Enter the Dataverse environment URL (optional — you can select one after)'
+            : 'Enter the Dataverse environment URL',
         placeHolder: 'https://org.crm.dynamics.com',
         validateInput: (value) => {
             if (!value.trim()) {
-                return 'Environment URL is required';
+                return isUserBased ? undefined : 'Environment URL is required';
             }
             try {
                 new URL(value);
@@ -442,7 +447,9 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
     if (envUrl === undefined) {
         return null;
     }
-    params.environmentUrl = envUrl;
+    if (envUrl.trim()) {
+        params.environmentUrl = envUrl;
+    }
 
     switch (authMethodId) {
         case 'deviceCode':

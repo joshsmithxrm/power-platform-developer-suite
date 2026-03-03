@@ -107,16 +107,15 @@ export class DaemonClient implements vscode.Disposable {
             vscode.window.showErrorMessage(`PPDS daemon error: ${err.message}`);
         });
 
-        // Create a promise that rejects if the process exits during startup.
-        // This is used only for the handshake race below; post-startup exit
-        // cleanup is handled by the separate 'exit' listener attached after.
+        // Startup exit detection: rejects if the process exits before the
+        // handshake completes. Removed after handshake to avoid unhandled rejections.
         let startupExitReject: ((err: Error) => void) | null = null;
         const exitPromise = new Promise<never>((_, reject) => {
             startupExitReject = reject;
         });
 
-        const onExit = (code: number | null) => {
-            this.outputChannel.appendLine(`Daemon exited with code ${code}`);
+        const onStartupExit = (code: number | null) => {
+            this.outputChannel.appendLine(`Daemon exited during startup with code ${code}`);
             this.connection = null;
             this.process = null;
             this.connectingPromise = null;
@@ -124,7 +123,7 @@ export class DaemonClient implements vscode.Disposable {
                 startupExitReject(new Error(`Daemon exited during startup with code ${code}`));
             }
         };
-        this.process.on('exit', onExit);
+        this.process.on('exit', onStartupExit);
 
         // Create JSON-RPC connection over stdio
         const reader = new StreamMessageReader(this.process.stdout);
@@ -176,8 +175,17 @@ export class DaemonClient implements vscode.Disposable {
             clearTimeout(timeoutId);
         }
 
-        // Handshake succeeded — stop the exitPromise from ever rejecting again
+        // Handshake succeeded — remove the startup exit listener to prevent
+        // unhandled rejections, then install a post-startup exit listener for
+        // auto-reconnect cleanup.
         startupExitReject = null;
+        this.process.removeListener('exit', onStartupExit);
+
+        this.process.on('exit', (code: number | null) => {
+            this.outputChannel.appendLine(`Daemon exited with code ${code}`);
+            this.connection = null;
+            this.process = null;
+        });
 
         this.outputChannel.appendLine('Daemon connection established');
     }
@@ -591,6 +599,7 @@ export class DaemonClient implements vscode.Disposable {
      * RPC call will restart it since the exit handler sets connection to null.
      */
     private async ensureConnected(): Promise<void> {
+        if (this._disposed) throw new Error('DaemonClient is disposed');
         if (this.connection) return;
         if (!this.connectingPromise) {
             this.connectingPromise = this.start().finally(() => {
