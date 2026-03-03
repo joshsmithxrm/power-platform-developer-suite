@@ -16,6 +16,8 @@ import type {
     EnvConfigSetResponse,
     QueryResultResponse,
     QueryCompleteResponse,
+    QueryHistoryListResponse,
+    QueryHistoryDeleteResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -31,6 +33,8 @@ export type {
     EnvConfigSetResponse,
     QueryResultResponse,
     QueryCompleteResponse,
+    QueryHistoryListResponse,
+    QueryHistoryDeleteResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -251,6 +255,33 @@ export class DaemonClient implements vscode.Disposable {
         const result = await this.connection!.sendRequest<QueryCompleteResponse>('query/complete', params);
         this.outputChannel.appendLine(`Got ${result.items.length} completion items`);
 
+        return result;
+    }
+
+    // ── Query History ────────────────────────────────────────────────────────
+
+    /**
+     * Lists query history entries.
+     */
+    async queryHistoryList(search?: string, limit?: number): Promise<QueryHistoryListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (search !== undefined) params.search = search;
+        if (limit !== undefined) params.limit = limit;
+        this.outputChannel.appendLine(`Calling query/history/list...`);
+        const result = await this.connection!.sendRequest<QueryHistoryListResponse>('query/history/list', params);
+        this.outputChannel.appendLine(`Got ${result.entries.length} history entries`);
+        return result;
+    }
+
+    /**
+     * Deletes a query history entry.
+     */
+    async queryHistoryDelete(id: string): Promise<QueryHistoryDeleteResponse> {
+        await this.ensureConnected();
+        this.outputChannel.appendLine(`Calling query/history/delete for "${id}"...`);
+        const result = await this.connection!.sendRequest<QueryHistoryDeleteResponse>('query/history/delete', { id });
+        this.outputChannel.appendLine(`Deleted: ${result.deleted}`);
         return result;
     }
 

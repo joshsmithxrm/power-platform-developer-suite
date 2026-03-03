@@ -156,31 +156,38 @@ export interface EnvConfigSetResponse {
     saved: boolean;
 }
 
-// ── Query History (future daemon endpoint) ──────────────────────────────────
+// ── Query History ────────────────────────────────────────────────────────────
 
-export interface QueryHistoryEntry {
+export interface QueryHistoryListResponse {
+    entries: QueryHistoryEntryDto[];
+}
+
+export interface QueryHistoryEntryDto {
+    id: string;
     sql: string;
+    rowCount: number | null;
+    executionTimeMs: number | null;
+    environmentUrl: string | null;
     executedAt: string;
-    rowCount: number;
-    environmentUrl: string;
 }
 
-export interface QueryHistoryResponse {
-    entries: QueryHistoryEntry[];
+export interface QueryHistoryDeleteResponse {
+    deleted: boolean;
 }
 
-// ── Export (future daemon endpoint) ─────────────────────────────────────────
+// ── Export ───────────────────────────────────────────────────────────────────
 
-export interface ExportRequest {
-    sql: string;
-    format: 'csv' | 'tsv' | 'json';
-    includeHeaders: boolean;
-}
-
-export interface ExportResponse {
+export interface QueryExportResponse {
     content: string;
     format: string;
     rowCount: number;
+}
+
+// ── Explain ─────────────────────────────────────────────────────────────────
+
+export interface QueryExplainResponse {
+    plan: string;
+    format: string;
 }
 
 // ── IntelliSense / Completion types ─────────────────────────────────
