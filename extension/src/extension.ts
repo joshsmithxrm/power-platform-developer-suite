@@ -5,6 +5,7 @@ import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentCommands } from './commands/environmentCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
+import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -39,6 +40,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Environment Config Command ────────────────────────────────────
     registerEnvironmentConfigCommand(context, daemonClient, () => profileTreeProvider.refresh());
+
+    // ── Notebook Serializer ───────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.workspace.registerNotebookSerializer('ppdsnb', new DataverseNotebookSerializer(), {
+            transientOutputs: true  // Don't persist cell outputs — re-execute to get results
+        })
+    );
 
     // ── Placeholder commands for tools tree items ───────────────────────
     // (will be implemented in later tasks)
