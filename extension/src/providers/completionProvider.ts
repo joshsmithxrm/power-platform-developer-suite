@@ -14,14 +14,19 @@ export class DataverseCompletionProvider implements vscode.CompletionItemProvide
     async provideCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
-        _token: vscode.CancellationToken,
+        token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): Promise<vscode.CompletionItem[] | null> {
+        if (token.isCancellationRequested) return null;
+
         const text = document.getText();
         const offset = document.offsetAt(position);
 
         try {
             const result = await this.daemon.queryComplete({ sql: text, cursorOffset: offset });
+
+            if (token.isCancellationRequested) return null;
+
             return result.items.map((item, index) => {
                 const kind = item.kind === 'entity' ? vscode.CompletionItemKind.Class
                     : item.kind === 'attribute' ? vscode.CompletionItemKind.Field
