@@ -261,8 +261,8 @@ interface AuthMethodOption extends vscode.QuickPickItem {
 }
 
 async function runCreateProfileWizard(
-    _daemonClient: DaemonClient,
-    _refreshProfiles: () => void,
+    daemonClient: DaemonClient,
+    refreshProfiles: () => void,
 ): Promise<void> {
     // Step 1: Choose auth method
     const authMethods: AuthMethodOption[] = [
@@ -334,18 +334,42 @@ async function runCreateProfileWizard(
         return; // User cancelled during param collection
     }
 
-    // TODO: Wire to daemon when profiles/create RPC endpoint is available (Task 5)
-    // The call will look like:
-    // await daemonClient.profilesCreate({
-    //     name: profileName || undefined,
-    //     authMethod: selectedMethod.authMethodId,
-    //     ...params,
-    // });
-    // refreshProfiles();
+    // Ensure daemon is connected before registering notification handler
+    await daemonClient.start();
 
+    // Register device code handler before creating profile
+    daemonClient.onDeviceCode(async ({ userCode, verificationUrl, message }) => {
+        const action = await vscode.window.showInformationMessage(
+            message || `Enter code: ${userCode}`,
+            { modal: false },
+            'Open Browser', 'Copy Code'
+        );
+        if (action === 'Open Browser') {
+            await vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
+        } else if (action === 'Copy Code') {
+            await vscode.env.clipboard.writeText(userCode);
+        }
+    });
+
+    // Create the profile via daemon with progress indicator
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Creating authentication profile...',
+            cancellable: false,
+        },
+        async () => {
+            await daemonClient.profilesCreate({
+                name: profileName || undefined,
+                authMethod: selectedMethod.authMethodId,
+                ...params,
+            });
+        },
+    );
+
+    refreshProfiles();
     vscode.window.showInformationMessage(
-        `Profile creation will be available when daemon endpoints are ready. ` +
-        `(Method: ${selectedMethod.authMethodId}, Name: "${profileName || '(auto)'}")`,
+        `Profile created successfully (${selectedMethod.authMethodId}, Name: "${profileName || '(auto)'}")`,
     );
 }
 

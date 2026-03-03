@@ -94,8 +94,35 @@ export class QueryPanel extends WebviewPanelBase {
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
+
+            // Check for auth errors and offer re-authentication
+            if (this.isAuthError(error)) {
+                const action = await vscode.window.showErrorMessage(
+                    'Session expired. Re-authenticate?',
+                    'Re-authenticate', 'Cancel'
+                );
+                if (action === 'Re-authenticate') {
+                    try {
+                        await this.daemon.profilesInvalidate('');  // Invalidate active profile
+                        // Retry the query
+                        await this.executeQuery(sql, useTds);
+                        return;
+                    } catch {
+                        // Fall through to show error
+                    }
+                }
+            }
+
             this.postMessage({ command: 'queryError', error: msg });
         }
+    }
+
+    private isAuthError(error: unknown): boolean {
+        const msg = error instanceof Error ? error.message : String(error);
+        return msg.toLowerCase().includes('auth') ||
+               msg.toLowerCase().includes('token') ||
+               msg.toLowerCase().includes('unauthorized') ||
+               msg.toLowerCase().includes('401');
     }
 
     private async showFetchXml(sql: string): Promise<void> {

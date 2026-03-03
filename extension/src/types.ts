@@ -117,6 +117,25 @@ export interface QueryColumnInfo {
 
 // ── Profiles ────────────────────────────────────────────────────────────────
 
+export interface ProfileCreateResponse {
+    index: number;
+    name: string | null;
+    identity: string;
+    authMethod: string;
+    environment: string | null;
+}
+
+export interface ProfileDeleteResponse {
+    deleted: boolean;
+    profileName: string | null;
+}
+
+export interface ProfileRenameResponse {
+    index: number;
+    previousName: string | null;
+    newName: string;
+}
+
 export interface ProfilesInvalidateResponse {
     profileName: string;
     invalidated: boolean;
@@ -202,4 +221,42 @@ export interface CompletionItemDto {
     detail: string | null;
     description: string | null;
     sortOrder: number;
+}
+
+// ── Environment Who ─────────────────────────────────────────────────────────
+
+export interface EnvWhoResponse {
+    organizationName: string;
+    url: string;
+    uniqueName: string;
+    version: string;
+    organizationId: string;
+    userId: string;
+    businessUnitId: string;
+    connectedAs: string;
+    environmentType: string | null;
+}
+
+// ── Schema ──────────────────────────────────────────────────────────────────
+
+export interface SchemaEntitiesResponse {
+    entities: EntitySummaryDto[];
+}
+
+export interface EntitySummaryDto {
+    logicalName: string;
+    displayName: string | null;
+    isCustom: boolean;
+}
+
+export interface SchemaAttributesResponse {
+    entityName: string;
+    attributes: AttributeSummaryDto[];
+}
+
+export interface AttributeSummaryDto {
+    logicalName: string;
+    displayName: string | null;
+    dataType: string;
+    isCustom: boolean;
 }
