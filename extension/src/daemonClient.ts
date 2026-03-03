@@ -53,6 +53,7 @@ export type {
     ProfileRenameResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
+    SolutionComponentsResponse,
     SchemaEntitiesResponse,
     SchemaAttributesResponse,
 } from './types.js';

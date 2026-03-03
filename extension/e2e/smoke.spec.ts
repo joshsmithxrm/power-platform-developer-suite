@@ -31,7 +31,7 @@ test.describe('PPDS Extension Tests', () => {
     test('PPDS commands are registered', async ({ page }) => {
         await page.keyboard.press('Control+Shift+P');
         await page.type('.quick-input-widget input', 'PPDS');
-        await expect(page.locator('text=PPDS: Open Data Explorer')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('text=PPDS: Data Explorer')).toBeVisible({ timeout: 10000 });
     });
 
     test('PPDS tree view is registered', async ({ page }) => {
