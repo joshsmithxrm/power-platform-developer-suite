@@ -90,6 +90,11 @@
         "command": "ppds.refreshEnvironments",
         "title": "PPDS: Refresh Environments",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.configureEnvironment",
+        "title": "PPDS: Configure Environment",
+        "icon": "$(gear)"
       }
     ],
     "menus": {

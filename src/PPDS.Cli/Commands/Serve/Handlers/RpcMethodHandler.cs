@@ -7,6 +7,7 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Profile;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
@@ -372,6 +373,96 @@ public class RpcMethodHandler
                 EnvironmentType = env.Type
             };
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets environment configuration (label, type, color).
+    /// Maps to: ppds env config get --environment "url" --json
+    /// </summary>
+    [JsonRpcMethod("env/config/get")]
+    public async Task<EnvConfigGetResponse> EnvConfigGetAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'environmentUrl' parameter is required");
+        }
+
+        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
+        var config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
+        var resolvedColor = await configService.ResolveColorAsync(environmentUrl, cancellationToken);
+        var resolvedType = await configService.ResolveTypeAsync(environmentUrl, ct: cancellationToken);
+
+        return new EnvConfigGetResponse
+        {
+            EnvironmentUrl = environmentUrl,
+            Label = config?.Label,
+            Type = config?.Type?.ToString(),
+            Color = config?.Color?.ToString(),
+            ResolvedType = resolvedType.ToString(),
+            ResolvedColor = resolvedColor.ToString()
+        };
+    }
+
+    /// <summary>
+    /// Sets environment configuration (label, type, color).
+    /// Maps to: ppds env config set --environment "url" --label "label" --type "type" --color "color"
+    /// </summary>
+    [JsonRpcMethod("env/config/set")]
+    public async Task<EnvConfigSetResponse> EnvConfigSetAsync(
+        string environmentUrl,
+        string? label = null,
+        string? type = null,
+        string? color = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'environmentUrl' parameter is required");
+        }
+
+        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
+
+        EnvironmentType? parsedType = null;
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            if (!Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
+            {
+                throw new RpcException(
+                    ErrorCodes.Validation.RequiredField,
+                    $"Invalid environment type '{type}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentType>())}");
+            }
+            parsedType = t;
+        }
+
+        EnvironmentColor? parsedColor = null;
+        if (!string.IsNullOrWhiteSpace(color))
+        {
+            if (!Enum.TryParse<EnvironmentColor>(color, ignoreCase: true, out var c))
+            {
+                throw new RpcException(
+                    ErrorCodes.Validation.RequiredField,
+                    $"Invalid environment color '{color}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentColor>())}");
+            }
+            parsedColor = c;
+        }
+
+        var saved = await configService.SaveConfigAsync(
+            environmentUrl, label, parsedType, parsedColor, ct: cancellationToken);
+
+        return new EnvConfigSetResponse
+        {
+            EnvironmentUrl = environmentUrl,
+            Label = saved.Label,
+            Type = saved.Type?.ToString(),
+            Color = saved.Color?.ToString(),
+            Saved = true
+        };
     }
 
     #endregion
@@ -1443,6 +1534,25 @@ public class EnvWhoResponse
     [JsonPropertyName("environmentType")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EnvironmentType { get; set; }
+}
+
+public class EnvConfigGetResponse
+{
+    [JsonPropertyName("environmentUrl")] public string EnvironmentUrl { get; set; } = "";
+    [JsonPropertyName("label")] public string? Label { get; set; }
+    [JsonPropertyName("type")] public string? Type { get; set; }
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    [JsonPropertyName("resolvedType")] public string ResolvedType { get; set; } = "";
+    [JsonPropertyName("resolvedColor")] public string ResolvedColor { get; set; } = "";
+}
+
+public class EnvConfigSetResponse
+{
+    [JsonPropertyName("environmentUrl")] public string EnvironmentUrl { get; set; } = "";
+    [JsonPropertyName("label")] public string? Label { get; set; }
+    [JsonPropertyName("type")] public string? Type { get; set; }
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    [JsonPropertyName("saved")] public bool Saved { get; set; }
 }
 
 /// <summary>

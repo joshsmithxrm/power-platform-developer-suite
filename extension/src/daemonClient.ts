@@ -12,6 +12,8 @@ import type {
     AuthSelectResponse,
     EnvListResponse,
     EnvSelectResponse,
+    EnvConfigGetResponse,
+    EnvConfigSetResponse,
     QueryResultResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
@@ -24,6 +26,8 @@ export type {
     AuthSelectResponse,
     EnvListResponse,
     EnvSelectResponse,
+    EnvConfigGetResponse,
+    EnvConfigSetResponse,
     QueryResultResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
@@ -158,6 +162,37 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine(`Calling env/select for "${environment}"...`);
         const result = await this.connection!.sendRequest<EnvSelectResponse>('env/select', { environment });
         this.outputChannel.appendLine(`Selected environment: ${result.displayName} (${result.url})`);
+
+        return result;
+    }
+
+    /**
+     * Gets the configuration for a specific environment.
+     */
+    async envConfigGet(environmentUrl: string): Promise<EnvConfigGetResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling env/config/get for "${environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigGetResponse>('env/config/get', { environmentUrl });
+        this.outputChannel.appendLine(`Got config: label=${result.label ?? '(none)'}, type=${result.type ?? '(none)'}, color=${result.color ?? '(none)'}`);
+
+        return result;
+    }
+
+    /**
+     * Sets the configuration for a specific environment.
+     */
+    async envConfigSet(params: {
+        environmentUrl: string;
+        label?: string;
+        type?: string;
+        color?: string;
+    }): Promise<EnvConfigSetResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling env/config/set for "${params.environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigSetResponse>('env/config/set', params);
+        this.outputChannel.appendLine(`Config saved: saved=${result.saved}`);
 
         return result;
     }
