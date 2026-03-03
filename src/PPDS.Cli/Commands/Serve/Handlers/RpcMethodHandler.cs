@@ -6,6 +6,7 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Profile;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
@@ -875,6 +876,148 @@ public class RpcMethodHandler
 
     #endregion
 
+    #region Profile CRUD
+
+    /// <summary>
+    /// Creates a new authentication profile.
+    /// Maps to: ppds auth create --json
+    /// </summary>
+    [JsonRpcMethod("profiles/create")]
+    public async Task<ProfileCreateResponse> ProfilesCreateAsync(
+        string authMethod,
+        string? name = null,
+        string? applicationId = null,
+        string? clientSecret = null,
+        string? tenantId = null,
+        string? environmentUrl = null,
+        string? certificatePath = null,
+        string? certificatePassword = null,
+        string? certificateThumbprint = null,
+        string? username = null,
+        string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(authMethod))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'authMethod' parameter is required");
+        }
+
+        if (!Enum.TryParse<AuthMethod>(authMethod, ignoreCase: true, out var parsedMethod))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"Invalid auth method '{authMethod}'. Valid values: {string.Join(", ", Enum.GetNames<AuthMethod>())}");
+        }
+
+        var request = new ProfileCreateRequest
+        {
+            Name = name,
+            AuthMethod = parsedMethod,
+            ApplicationId = applicationId,
+            ClientSecret = clientSecret,
+            TenantId = tenantId,
+            Environment = environmentUrl,
+            CertificatePath = certificatePath,
+            CertificatePassword = certificatePassword,
+            CertificateThumbprint = certificateThumbprint,
+            Username = username,
+            Password = password,
+        };
+
+        var profileService = _authServices.GetRequiredService<IProfileService>();
+        var result = await profileService.CreateProfileAsync(
+            request,
+            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+            beforeInteractiveAuth: null,
+            cancellationToken: cancellationToken);
+
+        return new ProfileCreateResponse
+        {
+            Index = result.Index,
+            Name = result.Name,
+            Identity = result.Identity,
+            AuthMethod = result.AuthMethod.ToString(),
+            Environment = result.EnvironmentUrl,
+        };
+    }
+
+    /// <summary>
+    /// Deletes an authentication profile by index or name.
+    /// Maps to: ppds auth delete --json
+    /// </summary>
+    [JsonRpcMethod("profiles/delete")]
+    public async Task<ProfileDeleteResponse> ProfilesDeleteAsync(
+        int? index = null,
+        string? name = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (index == null && string.IsNullOrWhiteSpace(name))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "Either 'index' or 'name' parameter is required");
+        }
+
+        if (index != null && !string.IsNullOrWhiteSpace(name))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                "Provide either 'index' or 'name', not both");
+        }
+
+        var nameOrIndex = index != null ? index.Value.ToString() : name!;
+        var profileService = _authServices.GetRequiredService<IProfileService>();
+        var deleted = await profileService.DeleteProfileAsync(nameOrIndex, cancellationToken);
+
+        return new ProfileDeleteResponse
+        {
+            Deleted = deleted,
+            ProfileName = name ?? index?.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// Renames an authentication profile.
+    /// Maps to: ppds auth rename --json
+    /// </summary>
+    [JsonRpcMethod("profiles/rename")]
+    public async Task<ProfileRenameResponse> ProfilesRenameAsync(
+        string currentName,
+        string newName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(currentName))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'currentName' parameter is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'newName' parameter is required");
+        }
+
+        var profileService = _authServices.GetRequiredService<IProfileService>();
+        var result = await profileService.UpdateProfileAsync(
+            currentName,
+            newName: newName,
+            cancellationToken: cancellationToken);
+
+        return new ProfileRenameResponse
+        {
+            Index = result.Index,
+            PreviousName = currentName,
+            NewName = result.Name ?? newName,
+        };
+    }
+
+    #endregion
+
     #region Solutions Methods
 
     /// <summary>
@@ -1478,6 +1621,52 @@ public class ProfilesInvalidateResponse
     /// </summary>
     [JsonPropertyName("invalidated")]
     public bool Invalidated { get; set; }
+}
+
+/// <summary>
+/// Response for profiles/create method.
+/// </summary>
+public class ProfileCreateResponse
+{
+    [JsonPropertyName("index")] public int Index { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("identity")] public string Identity { get; set; } = "";
+
+    [JsonPropertyName("authMethod")] public string AuthMethod { get; set; } = "";
+
+    [JsonPropertyName("environment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Environment { get; set; }
+}
+
+/// <summary>
+/// Response for profiles/delete method.
+/// </summary>
+public class ProfileDeleteResponse
+{
+    [JsonPropertyName("deleted")] public bool Deleted { get; set; }
+
+    [JsonPropertyName("profileName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProfileName { get; set; }
+}
+
+/// <summary>
+/// Response for profiles/rename method.
+/// </summary>
+public class ProfileRenameResponse
+{
+    [JsonPropertyName("index")] public int Index { get; set; }
+
+    [JsonPropertyName("previousName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousName { get; set; }
+
+    [JsonPropertyName("newName")] public string NewName { get; set; } = "";
 }
 
 /// <summary>
