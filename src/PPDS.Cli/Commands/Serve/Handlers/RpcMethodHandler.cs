@@ -492,73 +492,22 @@ public class RpcMethodHandler
         string? package = null,
         CancellationToken cancellationToken = default)
     {
-        var store = _authServices.GetRequiredService<ProfileStore>();
-        var collection = await store.LoadAsync(cancellationToken);
-
-        var profile = collection.ActiveProfile;
-        if (profile == null)
+        return await WithActiveProfileAsync(async (sp, ct) =>
         {
-            throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
-        }
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
 
-        if (profile.Environment == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Connection.EnvironmentNotFound,
-                "No environment selected. Use env/select first.");
-        }
+            // Create registration service with pool (use NullLogger for daemon context)
+            var registrationService = new PluginRegistrationService(
+                pool,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
 
-        var pool = await _poolManager.GetOrCreatePoolAsync(
-            new[] { profile.Name ?? profile.DisplayIdentifier },
-            profile.Environment.Url,
-            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-            cancellationToken: cancellationToken);
+            var response = new PluginsListResponse();
 
-        // Create registration service with pool (use NullLogger for daemon context)
-        var registrationService = new PluginRegistrationService(
-            pool,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
-
-        var response = new PluginsListResponse();
-
-        // Get assemblies (unless package filter is specified)
-        if (string.IsNullOrEmpty(package))
-        {
-            var assemblies = await registrationService.ListAssembliesAsync(assembly, options: null, cancellationToken);
-
-            foreach (var asm in assemblies)
+            // Get assemblies (unless package filter is specified)
+            if (string.IsNullOrEmpty(package))
             {
-                var assemblyOutput = new PluginAssemblyInfo
-                {
-                    Name = asm.Name,
-                    Version = asm.Version,
-                    PublicKeyToken = asm.PublicKeyToken,
-                    Types = []
-                };
+                var assemblies = await registrationService.ListAssembliesAsync(assembly, options: null, ct);
 
-                var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, cancellationToken);
-                await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, cancellationToken);
-
-                response.Assemblies.Add(assemblyOutput);
-            }
-        }
-
-        // Get packages (unless assembly filter is specified)
-        if (string.IsNullOrEmpty(assembly))
-        {
-            var packages = await registrationService.ListPackagesAsync(package, options: null, cancellationToken);
-
-            foreach (var pkg in packages)
-            {
-                var packageOutput = new PluginPackageInfo
-                {
-                    Name = pkg.Name,
-                    UniqueName = pkg.UniqueName,
-                    Version = pkg.Version,
-                    Assemblies = []
-                };
-
-                var assemblies = await registrationService.ListAssembliesForPackageAsync(pkg.Id, cancellationToken);
                 foreach (var asm in assemblies)
                 {
                     var assemblyOutput = new PluginAssemblyInfo
@@ -569,17 +518,51 @@ public class RpcMethodHandler
                         Types = []
                     };
 
-                    var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, cancellationToken);
-                    await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, cancellationToken);
+                    var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, ct);
+                    await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, ct);
 
-                    packageOutput.Assemblies.Add(assemblyOutput);
+                    response.Assemblies.Add(assemblyOutput);
                 }
-
-                response.Packages.Add(packageOutput);
             }
-        }
 
-        return response;
+            // Get packages (unless assembly filter is specified)
+            if (string.IsNullOrEmpty(assembly))
+            {
+                var packages = await registrationService.ListPackagesAsync(package, options: null, ct);
+
+                foreach (var pkg in packages)
+                {
+                    var packageOutput = new PluginPackageInfo
+                    {
+                        Name = pkg.Name,
+                        UniqueName = pkg.UniqueName,
+                        Version = pkg.Version,
+                        Assemblies = []
+                    };
+
+                    var pkgAssemblies = await registrationService.ListAssembliesForPackageAsync(pkg.Id, ct);
+                    foreach (var asm in pkgAssemblies)
+                    {
+                        var assemblyOutput = new PluginAssemblyInfo
+                        {
+                            Name = asm.Name,
+                            Version = asm.Version,
+                            PublicKeyToken = asm.PublicKeyToken,
+                            Types = []
+                        };
+
+                        var types = await registrationService.ListTypesForAssemblyAsync(asm.Id, ct);
+                        await PopulatePluginTypesAsync(registrationService, types, assemblyOutput.Types, ct);
+
+                        packageOutput.Assemblies.Add(assemblyOutput);
+                    }
+
+                    response.Packages.Add(packageOutput);
+                }
+            }
+
+            return response;
+        }, cancellationToken);
     }
 
     private static async Task PopulatePluginTypesAsync(
@@ -1302,7 +1285,8 @@ public class RpcMethodHandler
 
     /// <summary>
     /// Executes an action with an active profile's service provider.
-    /// Handles profile loading, validation, and service provider creation.
+    /// Handles profile loading, validation, and service provider resolution via the pool manager.
+    /// The service provider is long-lived (cached by the pool manager) — do NOT dispose it inside the action.
     /// </summary>
     /// <typeparam name="T">The return type of the action.</typeparam>
     /// <param name="action">The action to execute with the service provider.</param>
@@ -1326,8 +1310,10 @@ public class RpcMethodHandler
                 ErrorCodes.Connection.EnvironmentNotFound,
                 "No environment selected. Use env/select first.");
 
-        await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-            profile.Name,
+        // Use the pool manager to get a cached service provider. This reuses the existing
+        // connection pool instead of creating a new ServiceClient on every RPC call.
+        var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
+            new[] { profile.Name ?? profile.DisplayIdentifier },
             environment.Url,
             deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
             cancellationToken: cancellationToken);
