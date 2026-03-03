@@ -9,6 +9,13 @@ export class DataverseNotebookController implements vscode.Disposable {
     private readonly controller: vscode.NotebookController;
     private readonly disposables: vscode.Disposable[] = [];
 
+    /**
+     * Current environment URL. Shared across all notebooks in this session.
+     * Each notebook persists its preference in metadata, and the controller
+     * loads it when the notebook gains focus. However, queries always run
+     * against this single active environment.
+     * TODO: Support true per-notebook environment isolation.
+     */
     private selectedEnvironmentUrl: string | undefined;
     private selectedEnvironmentName: string | undefined;
     private statusBarItem: vscode.StatusBarItem;

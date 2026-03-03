@@ -641,30 +641,6 @@ public class RpcMethodHandler
     #region Schema Methods
 
     /// <summary>
-    /// Lists entity schema (fields/attributes).
-    /// Maps to: ppds data schema --entity "entityname" --json
-    /// </summary>
-    [JsonRpcMethod("schema/list")]
-    public async Task<SchemaListResponse> SchemaListAsync(
-        string entity,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(entity))
-        {
-            throw new RpcException(
-                ErrorCodes.Validation.RequiredField,
-                "The 'entity' parameter is required");
-        }
-
-        // TODO: Implement schema retrieval
-        // This will be fully implemented when #51 (metadata commands) is merged
-        // For now, return a placeholder indicating the method is recognized
-        throw new RpcException(
-            ErrorCodes.Operation.NotSupported,
-            "Schema retrieval will be available after metadata commands (#51) are implemented");
-    }
-
-    /// <summary>
     /// Lists all entities in the environment with summary metadata.
     /// Used by VS Code extension for IntelliSense entity completion.
     /// </summary>
@@ -800,28 +776,7 @@ public class RpcMethodHandler
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var historyService = _authServices.GetService<IQueryHistoryService>();
-                if (historyService != null)
-                {
-                    var store = _authServices.GetRequiredService<ProfileStore>();
-                    var collection = await store.LoadAsync(CancellationToken.None);
-                    var envUrl = collection.ActiveProfile?.Environment?.Url;
-                    if (envUrl != null)
-                    {
-                        await historyService.AddQueryAsync(
-                            envUrl,
-                            fetchXml,
-                            rowCount: response.Count,
-                            executionTimeMs: response.ExecutionTimeMs);
-                    }
-                }
-            }
-            catch { /* silently ignore history save failures */ }
-        });
+        FireAndForgetHistorySave(fetchXml, response);
 
         return response;
     }
@@ -881,28 +836,7 @@ public class RpcMethodHandler
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var historyService = _authServices.GetService<IQueryHistoryService>();
-                if (historyService != null)
-                {
-                    var store = _authServices.GetRequiredService<ProfileStore>();
-                    var collection = await store.LoadAsync(CancellationToken.None);
-                    var envUrl = collection.ActiveProfile?.Environment?.Url;
-                    if (envUrl != null)
-                    {
-                        await historyService.AddQueryAsync(
-                            envUrl,
-                            sql,
-                            rowCount: response.Count,
-                            executionTimeMs: response.ExecutionTimeMs);
-                    }
-                }
-            }
-            catch { /* silently ignore history save failures */ }
-        });
+        FireAndForgetHistorySave(sql, response);
 
         return response;
     }
@@ -1109,6 +1043,35 @@ public class RpcMethodHandler
         {
             Plan = fetchXml,
             Format = "fetchxml"
+        });
+    }
+
+    /// <summary>
+    /// Saves a query to history in a fire-and-forget fashion so callers are not
+    /// blocked.  Failures are silently swallowed – history is best-effort.
+    /// </summary>
+    private void FireAndForgetHistorySave(string queryText, QueryResultResponse response)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var historyService = _authServices.GetService<IQueryHistoryService>();
+                if (historyService != null)
+                {
+                    var store = _authServices.GetRequiredService<ProfileStore>();
+                    var collection = await store.LoadAsync(CancellationToken.None);
+                    var envUrl = collection.ActiveProfile?.Environment?.Url;
+                    if (envUrl != null)
+                    {
+                        await historyService.AddQueryAsync(
+                            envUrl, queryText,
+                            rowCount: response.Count,
+                            executionTimeMs: response.ExecutionTimeMs);
+                    }
+                }
+            }
+            catch { /* silently ignore history save failures */ }
         });
     }
 
@@ -1904,43 +1867,6 @@ public class EnvConfigSetResponse
     [JsonPropertyName("type")] public string? Type { get; set; }
     [JsonPropertyName("color")] public string? Color { get; set; }
     [JsonPropertyName("saved")] public bool Saved { get; set; }
-}
-
-/// <summary>
-/// Response for schema/list method.
-/// </summary>
-public class SchemaListResponse
-{
-    [JsonPropertyName("entity")]
-    public string Entity { get; set; } = "";
-
-    [JsonPropertyName("attributes")]
-    public List<AttributeInfo> Attributes { get; set; } = [];
-}
-
-/// <summary>
-/// Attribute/field information.
-/// </summary>
-public class AttributeInfo
-{
-    [JsonPropertyName("logicalName")]
-    public string LogicalName { get; set; } = "";
-
-    [JsonPropertyName("displayName")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DisplayName { get; set; }
-
-    [JsonPropertyName("attributeType")]
-    public string AttributeType { get; set; } = "";
-
-    [JsonPropertyName("isCustomAttribute")]
-    public bool IsCustomAttribute { get; set; }
-
-    [JsonPropertyName("isPrimaryId")]
-    public bool IsPrimaryId { get; set; }
-
-    [JsonPropertyName("isPrimaryName")]
-    public bool IsPrimaryName { get; set; }
 }
 
 /// <summary>
