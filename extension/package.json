@@ -32,23 +32,27 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
     "lint": "eslint src",
-    "test": "echo \"No tests yet\"",
-    "package": "vsce package --pre-release"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "vscode-jsonrpc": "^8.2.0"
+    "@vscode/webview-ui-toolkit": "^1.4.0",
+    "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
     "@types/vscode": "^1.109.0",
     "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.27.3",
     "eslint": "^10.0.2",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
   },
   "repository": {
     "type": "git",
