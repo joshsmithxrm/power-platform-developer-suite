@@ -33,6 +33,9 @@ vi.mock('vscode', () => {
         NotebookCellKind,
         NotebookCellData,
         NotebookData,
+        window: {
+            showWarningMessage: vi.fn(),
+        },
         workspace: {
             registerNotebookSerializer: vi.fn(),
         },
@@ -220,5 +223,20 @@ describe('DataverseNotebookSerializer', () => {
         expect(parsed.metadata.environmentId).toBe('env-789');
         expect(parsed.metadata.environmentName).toBe('Staging');
         expect(parsed.metadata.environmentUrl).toBe('https://staging.crm.dynamics.com');
+    });
+
+    it('handles valid JSON with unexpected structure', async () => {
+        const notebook = await serializer.deserializeNotebook(
+            encode('{"cells": "not-an-array", "metadata": 42}'), token
+        );
+        expect(notebook.cells).toHaveLength(1);
+        expect(notebook.cells[0].languageId).toBe('sql');
+    });
+
+    it('handles JSON with null cells', async () => {
+        const notebook = await serializer.deserializeNotebook(
+            encode('{"cells": null}'), token
+        );
+        expect(notebook.cells).toHaveLength(1);
     });
 });

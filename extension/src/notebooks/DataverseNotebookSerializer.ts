@@ -27,9 +27,18 @@ export class DataverseNotebookSerializer implements vscode.NotebookSerializer {
         }
 
         try {
-            const data = JSON.parse(text) as NotebookFileData;
-            return this.parseNotebookData(data);
+            const data = JSON.parse(text);
+            if (!data || !Array.isArray(data.cells)) {
+                vscode.window.showWarningMessage(
+                    'Could not parse notebook file. Starting with empty notebook.'
+                );
+                return this.createEmptyNotebook();
+            }
+            return this.parseNotebookData(data as NotebookFileData);
         } catch {
+            vscode.window.showWarningMessage(
+                'Could not parse notebook file. Starting with empty notebook.'
+            );
             return this.createEmptyNotebook();
         }
     }
