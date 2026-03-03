@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { renderResultsHtml } from './notebookResultRenderer.js';
+import { isAuthError } from '../utils/errorUtils.js';
 
 const AUTO_SWITCH_THRESHOLD = 30;
 
@@ -57,6 +58,10 @@ export class DataverseNotebookController implements vscode.Disposable {
             vscode.workspace.onDidCloseNotebookDocument(notebook => {
                 if (notebook.notebookType === 'ppdsnb') {
                     this.interruptHandler(notebook);
+                    // Clean up cached results for cells in this notebook
+                    for (const cell of notebook.getCells()) {
+                        this.cellResults.delete(cell.document.uri.toString());
+                    }
                 }
             })
         );
@@ -250,14 +255,21 @@ export class DataverseNotebookController implements vscode.Disposable {
             }
 
             // Check for auth errors and offer re-authentication
-            if (this.isAuthError(error)) {
+            if (isAuthError(error)) {
                 const action = await vscode.window.showErrorMessage(
                     'Session expired. Re-authenticate?',
                     'Re-authenticate', 'Cancel'
                 );
                 if (action === 'Re-authenticate') {
                     try {
-                        await this.daemon.profilesInvalidate('');
+                        const who = await this.daemon.authWho();
+                        if (who.profileName) {
+                            await this.daemon.profilesInvalidate(who.profileName);
+                        }
+                    } catch {
+                        // If authWho fails, we can't invalidate - just proceed with re-auth
+                    }
+                    try {
                         // Don't retry automatically for notebooks - user can re-execute
                         execution.replaceOutput([new vscode.NotebookCellOutput([
                             vscode.NotebookCellOutputItem.text('Re-authenticated. Please re-execute the cell.', 'text/plain'),
@@ -282,14 +294,6 @@ export class DataverseNotebookController implements vscode.Disposable {
     private looksLikeFetchXml(content: string): boolean {
         const trimmed = content.trimStart().toLowerCase();
         return trimmed.startsWith('<fetch') || trimmed.startsWith('<?xml');
-    }
-
-    private isAuthError(error: unknown): boolean {
-        const msg = error instanceof Error ? error.message : String(error);
-        return msg.toLowerCase().includes('auth') ||
-               msg.toLowerCase().includes('token') ||
-               msg.toLowerCase().includes('unauthorized') ||
-               msg.toLowerCase().includes('401');
     }
 
     // ========== AUTO LANGUAGE SWITCHING ==========
@@ -351,6 +355,7 @@ export class DataverseNotebookController implements vscode.Disposable {
     // ========== DISPOSAL ==========
 
     dispose(): void {
+        this.cellResults.clear();
         this.controller.dispose();
         this.statusBarItem.dispose();
         for (const d of this.disposables) d.dispose();
