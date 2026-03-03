@@ -75,6 +75,52 @@ describe('DaemonClient', () => {
             expect(mockConnection.listen).toHaveBeenCalled();
         });
 
+        it('should not spawn multiple daemon processes on concurrent calls', async () => {
+            const mockAuthListResult = {
+                activeProfile: null,
+                activeProfileIndex: null,
+                profiles: [],
+            };
+            const mockAuthWhoResult = {
+                index: 0,
+                name: 'test',
+                authMethod: 'DeviceCode',
+                cloud: 'Public',
+                tenantId: 'tenant-id',
+                username: 'user@example.com',
+                objectId: null,
+                applicationId: null,
+                tokenExpiresOn: null,
+                tokenStatus: null,
+                environment: null,
+                createdAt: null,
+                lastUsedAt: null,
+            };
+            // Route mock responses by RPC method name so ordering doesn't matter
+            mockConnection.sendRequest.mockImplementation((method: string) => {
+                if (method === 'auth/list') return Promise.resolve(mockAuthListResult);
+                if (method === 'auth/who') return Promise.resolve(mockAuthWhoResult);
+                return Promise.reject(new Error(`Unexpected method: ${method}`));
+            });
+
+            // Call two methods concurrently before the daemon is connected
+            const [result1, result2] = await Promise.all([
+                client.authList(),
+                client.authWho(),
+            ]);
+
+            // Both calls should succeed
+            expect(result1).toEqual(mockAuthListResult);
+            expect(result2).toEqual(mockAuthWhoResult);
+
+            // start() should only have been called once (spawn called once)
+            const { spawn } = await import('child_process');
+            expect(spawn).toHaveBeenCalledTimes(1);
+
+            // Both RPC requests should have been sent
+            expect(mockConnection.sendRequest).toHaveBeenCalledTimes(2);
+        });
+
         it('should not restart if already connected', async () => {
             const mockResult = {
                 activeProfile: null,

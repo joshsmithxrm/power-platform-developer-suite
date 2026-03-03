@@ -65,6 +65,7 @@ export type {
 export class DaemonClient implements vscode.Disposable {
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
+    private connectingPromise: Promise<void> | null = null;
     private outputChannel: vscode.OutputChannel;
 
     constructor() {
@@ -497,9 +498,13 @@ export class DaemonClient implements vscode.Disposable {
      * RPC call will restart it since the exit handler sets connection to null.
      */
     private async ensureConnected(): Promise<void> {
-        if (!this.connection) {
-            await this.start();
+        if (this.connection) return;
+        if (!this.connectingPromise) {
+            this.connectingPromise = this.start().finally(() => {
+                this.connectingPromise = null;
+            });
         }
+        await this.connectingPromise;
     }
 
     /**
@@ -507,6 +512,8 @@ export class DaemonClient implements vscode.Disposable {
      */
     dispose(): void {
         this.outputChannel.appendLine('Disposing daemon client...');
+
+        this.connectingPromise = null;
 
         if (this.connection) {
             this.connection.dispose();
