@@ -97,10 +97,24 @@ function Ensure-WorkspaceVolume {
 }
 
 function Get-Worktrees {
+    # Prune stale worktrees first (directories that git no longer tracks)
+    devcontainer exec --workspace-folder $WorkspaceFolder git worktree prune 2>$null | Out-Null
+
     # Query the container for worktrees (they live in the volume, not on Windows)
+    # Only return directories that git worktree list actually knows about
     $raw = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
     if ($raw) {
-        $raw -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') -replace '^\.worktrees/','' } | Where-Object { $_ }
+        $dirs = $raw -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') -replace '^\.worktrees/','' } | Where-Object { $_ }
+        $gitWorktrees = devcontainer exec --workspace-folder $WorkspaceFolder git worktree list --porcelain 2>$null
+        foreach ($dir in $dirs) {
+            # Only include if git worktree list knows about this directory
+            if ($gitWorktrees -match [regex]::Escape(".worktrees/$dir")) {
+                $dir
+            } else {
+                Write-Warn "Removing stale worktree directory: .worktrees/$dir"
+                devcontainer exec --workspace-folder $WorkspaceFolder rm -rf ".worktrees/$dir" 2>$null | Out-Null
+            }
+        }
     }
 }
 
