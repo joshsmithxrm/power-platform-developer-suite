@@ -381,7 +381,9 @@ interface AuthParams {
     environmentUrl?: string;
     applicationId?: string;
     clientSecret?: string;
+    tenantId?: string;
     certificatePath?: string;
+    certificatePassword?: string;
     certificateThumbprint?: string;
     username?: string;
     password?: string;
@@ -437,6 +439,15 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             });
             if (secret === undefined) { return null; }
             params.clientSecret = secret;
+
+            const tenantId = await vscode.window.showInputBox({
+                title: 'Create Profile: Tenant ID',
+                prompt: 'Enter the Azure AD tenant ID',
+                placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
+            });
+            if (tenantId === undefined) { return null; }
+            params.tenantId = tenantId;
             break;
         }
 
@@ -458,6 +469,25 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             });
             if (certPath === undefined) { return null; }
             params.certificatePath = certPath;
+
+            const certPassword = await vscode.window.showInputBox({
+                title: 'Create Profile: Certificate Password',
+                prompt: 'Enter the certificate password (leave empty if none)',
+                password: true,
+            });
+            if (certPassword === undefined) { return null; }
+            if (certPassword) {
+                params.certificatePassword = certPassword;
+            }
+
+            const tenantId = await vscode.window.showInputBox({
+                title: 'Create Profile: Tenant ID',
+                prompt: 'Enter the Azure AD tenant ID',
+                placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
+            });
+            if (tenantId === undefined) { return null; }
+            params.tenantId = tenantId;
             break;
         }
 
@@ -479,6 +509,15 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             });
             if (thumbprint === undefined) { return null; }
             params.certificateThumbprint = thumbprint;
+
+            const tenantId = await vscode.window.showInputBox({
+                title: 'Create Profile: Tenant ID',
+                prompt: 'Enter the Azure AD tenant ID',
+                placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
+            });
+            if (tenantId === undefined) { return null; }
+            params.tenantId = tenantId;
             break;
         }
 
@@ -514,17 +553,21 @@ async function runDeleteProfile(
     daemonClient: DaemonClient,
     refreshProfiles: () => void,
 ): Promise<void> {
-    const profileItem = item as { profile?: { index: number; name: string | null } } | undefined;
+    const profileItem = item as { profile?: { index: number; name: string | null; isActive?: boolean } } | undefined;
     if (!profileItem?.profile) {
         vscode.window.showWarningMessage('No profile selected. Use the context menu on a profile to delete it.');
         return;
     }
 
-    const { name, index } = profileItem.profile;
+    const { name, index, isActive } = profileItem.profile;
     const displayName = name ?? `Profile ${index}`;
 
+    const warningMessage = isActive
+        ? `This is your active profile. Deleting "${displayName}" will sign you out. This cannot be undone.`
+        : `Are you sure you want to delete profile "${displayName}"? This cannot be undone.`;
+
     const confirm = await vscode.window.showWarningMessage(
-        `Are you sure you want to delete profile "${displayName}"? This cannot be undone.`,
+        warningMessage,
         { modal: true },
         'Delete',
     );

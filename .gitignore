@@ -79,6 +79,9 @@ states.json
 
 *.log
 
+# Node
+node_modules/
+
 # Git worktrees
 .worktrees/
 .muse/

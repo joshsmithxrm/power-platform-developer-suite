@@ -358,7 +358,9 @@ export class DaemonClient implements vscode.Disposable {
         environmentUrl?: string;
         applicationId?: string;
         clientSecret?: string;
+        tenantId?: string;
         certificatePath?: string;
+        certificatePassword?: string;
         certificateThumbprint?: string;
         username?: string;
         password?: string;
