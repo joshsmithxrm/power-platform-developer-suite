@@ -63,6 +63,8 @@ export type {
  * call will automatically restart it (auto-reconnect).
  */
 export class DaemonClient implements vscode.Disposable {
+    private static readonly STARTUP_TIMEOUT_MS = 30_000;
+
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
     private connectingPromise: Promise<void> | null = null;
@@ -147,11 +149,19 @@ export class DaemonClient implements vscode.Disposable {
         this.pendingNotificationHandlers = [];
 
         // Startup handshake: race a health check against the process exit event
-        // to detect immediate daemon failures before accepting the connection
+        // and a startup timeout to detect immediate failures or hangs.
+        const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(
+                () => reject(new Error(`Daemon startup timed out after ${DaemonClient.STARTUP_TIMEOUT_MS / 1000}s`)),
+                DaemonClient.STARTUP_TIMEOUT_MS
+            )
+        );
+
         try {
             await Promise.race([
                 this.connection.sendRequest('auth/list', {}),
                 exitPromise,
+                timeoutPromise,
             ]);
         } catch (err) {
             this.connection?.dispose();
@@ -326,15 +336,11 @@ export class DaemonClient implements vscode.Disposable {
 
     /**
      * Gets IntelliSense completion items for SQL/FetchXML.
+     * Uses quiet (non-logging) transport to avoid flooding the output channel
+     * on every keystroke.
      */
     async queryComplete(params: { sql: string; cursorOffset: number }): Promise<QueryCompleteResponse> {
-        await this.ensureConnected();
-
-        this.outputChannel.appendLine(`Calling query/complete at offset ${params.cursorOffset}...`);
-        const result = await this.connection!.sendRequest<QueryCompleteResponse>('query/complete', params);
-        this.outputChannel.appendLine(`Got ${result.items.length} completion items`);
-
-        return result;
+        return this.sendRequestQuiet<QueryCompleteResponse>('query/complete', params);
     }
 
     // ── Query History ────────────────────────────────────────────────────────
@@ -541,6 +547,15 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     // ── Connection management ───────────────────────────────────────────────
+
+    /**
+     * Sends an RPC request without logging, for high-frequency calls such as
+     * IntelliSense completions that would otherwise flood the output channel.
+     */
+    private async sendRequestQuiet<T>(method: string, params?: unknown): Promise<T> {
+        await this.ensureConnected();
+        return this.connection!.sendRequest<T>(method, params);
+    }
 
     /**
      * Ensures the daemon is connected, starting it if necessary.
