@@ -11,7 +11,19 @@ export class QueryPanel extends WebviewPanelBase {
     private static nextId = 1;
     private readonly panelId: number;
 
+    private static readonly MAX_PANELS = 10;
+    private static readonly MAX_CLIENT_RECORDS = 100_000;
+
     static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): QueryPanel {
+        if (QueryPanel.instances.length >= QueryPanel.MAX_PANELS) {
+            // Reuse the oldest (first) panel instead of creating a new one
+            const oldest = QueryPanel.instances[0];
+            oldest.panel?.reveal();
+            if (initialSql) {
+                oldest.postMessage({ command: 'setSql', sql: initialSql });
+            }
+            return oldest;
+        }
         // Always create a new instance (no singleton reuse)
         const panel = new QueryPanel(extensionUri, daemon, initialSql);
         return panel;
@@ -187,6 +199,15 @@ export class QueryPanel extends WebviewPanelBase {
                 page,
                 pagingCookie,
             });
+
+            if (this.allRecords.length + result.records.length > QueryPanel.MAX_CLIENT_RECORDS) {
+                this.postMessage({
+                    command: 'queryError',
+                    error: `Record limit reached (${QueryPanel.MAX_CLIENT_RECORDS.toLocaleString()}). Export your results for larger datasets.`,
+                });
+                return;
+            }
+
             this.lastResult = result;
             this.allRecords.push(...result.records);
             this.postMessage({ command: 'appendResults', data: result });
