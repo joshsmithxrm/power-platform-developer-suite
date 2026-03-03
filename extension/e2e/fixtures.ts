@@ -34,7 +34,11 @@ export const test = base.extend<{ vscodeApp: ElectronApplication; page: Page }>(
             await use(electronApp);
         } finally {
             await electronApp.close();
-            fs.rmSync(tmpUserDataDir, { recursive: true, force: true });
+            try {
+                fs.rmSync(tmpUserDataDir, { recursive: true, force: true });
+            } catch {
+                // VS Code may still have file handles open on Windows — ignore cleanup failure
+            }
         }
     },
 

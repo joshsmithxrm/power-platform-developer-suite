@@ -24,6 +24,12 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// </summary>
     private static readonly TimeSpan DefaultPoolCreationTimeout = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Maximum number of pooled connections per environment per profile.
+    /// TODO: Make this configurable via DaemonOptions in a future release.
+    /// </summary>
+    private const int MaxPoolSizePerProfile = 52;
+
     private readonly ConcurrentDictionary<string, Lazy<Task<CachedPoolEntry>>> _pools = new();
     private readonly ConcurrentBag<Task> _disposalTasks = new();
     private readonly ILoggerFactory _loggerFactory;
@@ -287,7 +293,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 var source = new ProfileConnectionSource(
                     profile,
                     environmentUrl,
-                    maxPoolSize: 52,
+                    maxPoolSize: MaxPoolSizePerProfile,
                     deviceCodeCallback: deviceCodeCallback,
                     environmentDisplayName: null,
                     credentialStore: credentialStore);

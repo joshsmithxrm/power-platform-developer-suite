@@ -68,6 +68,10 @@ export class DataverseNotebookSerializer implements vscode.NotebookSerializer {
                 ? vscode.NotebookCellKind.Markup
                 : vscode.NotebookCellKind.Code;
 
+            if (cellData.kind !== 'markdown' && cellData.kind !== 'fetchxml' && cellData.kind !== 'sql') {
+                console.warn(`[DataverseNotebookSerializer] Unrecognized cell kind '${cellData.kind}' — defaulting to SQL.`);
+            }
+
             const language = cellData.kind === 'markdown' ? 'markdown'
                 : cellData.kind === 'fetchxml' ? 'fetchxml'
                 : 'sql';
