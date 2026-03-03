@@ -9,7 +9,7 @@ import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerial
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
 import {
     createNewNotebook, toggleCellLanguage, openCellInDataExplorer,
-    exportCellResults,
+    exportCellResults, openQueryInNotebook,
 } from './commands/notebookCommands.js';
 import { DataverseCompletionProvider } from './providers/completionProvider.js';
 import { QueryPanel } from './panels/QueryPanel.js';
@@ -19,9 +19,17 @@ let daemonClient: DaemonClient | undefined;
 export function activate(context: vscode.ExtensionContext) {
     console.log('Power Platform Developer Suite is now active');
 
+    // Read extension settings
+    const config = vscode.workspace.getConfiguration('ppds');
+
     // Create the daemon client
     daemonClient = new DaemonClient();
     context.subscriptions.push(daemonClient);
+
+    // Auto-start daemon if configured (default: true)
+    if (config.get<boolean>('autoStartDaemon', true)) {
+        void daemonClient.start();
+    }
 
     // ── Profile Tree View ────────────────────────────────────────────────
     const profileTreeProvider = new ProfileTreeDataProvider(daemonClient);
@@ -43,7 +51,12 @@ export function activate(context: vscode.ExtensionContext) {
     registerProfileCommands(context, daemonClient, () => profileTreeProvider.refresh());
 
     // ── Environment Commands ─────────────────────────────────────────────
-    registerEnvironmentCommands(context, daemonClient, () => profileTreeProvider.refresh());
+    const envStatusBar = registerEnvironmentCommands(context, daemonClient, () => profileTreeProvider.refresh());
+
+    // Respect showEnvironmentInStatusBar setting
+    if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {
+        envStatusBar.hide();
+    }
 
     // ── Environment Config Command ────────────────────────────────────
     registerEnvironmentConfigCommand(context, daemonClient, () => profileTreeProvider.refresh());
@@ -88,7 +101,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.dataExplorer', () => {
             QueryPanel.show(context.extensionUri, daemonClient);
-        })
+        }),
+        vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
+            openQueryInNotebook(sql ?? '');
+        }),
     );
 
     // ── Placeholder commands for tools tree items ───────────────────────

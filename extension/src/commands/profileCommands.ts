@@ -286,11 +286,12 @@ async function runCreateProfileWizard(
             description: 'Service principal with certificate file (.pfx)',
             authMethodId: 'certificateFile',
         },
-        {
-            label: '$(shield) Certificate Store (Windows only)',
+        // Certificate Store is only available on Windows
+        ...(process.platform === 'win32' ? [{
+            label: '$(shield) Certificate Store',
             description: 'Service principal with certificate from Windows certificate store',
             authMethodId: 'certificateStore',
-        },
+        }] : []),
         {
             label: '$(account) Username & Password',
             description: 'Resource owner password credentials (legacy)',
