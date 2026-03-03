@@ -848,6 +848,13 @@ public class RpcMethodHandler
                 "The 'sql' parameter is required");
         }
 
+        if (useTds)
+        {
+            throw new RpcException(
+                ErrorCodes.Operation.NotSupported,
+                "TDS Read Replica mode is not yet implemented. Use the standard FetchXML execution path.");
+        }
+
         // Parse and transpile SQL to FetchXML
         TSqlStatement stmt;
         try
