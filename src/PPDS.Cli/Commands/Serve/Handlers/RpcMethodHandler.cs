@@ -8,6 +8,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
@@ -785,7 +786,7 @@ public class RpcMethodHandler
             query = InjectTopAttribute(query, top.Value);
         }
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        var response = await WithActiveProfileAsync(async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -797,6 +798,32 @@ public class RpcMethodHandler
 
             return MapToResponse(result, query);
         }, cancellationToken);
+
+        // Auto-save to history (fire-and-forget)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var historyService = _authServices.GetService<IQueryHistoryService>();
+                if (historyService != null)
+                {
+                    var store = _authServices.GetRequiredService<ProfileStore>();
+                    var collection = await store.LoadAsync(CancellationToken.None);
+                    var envUrl = collection.ActiveProfile?.Environment?.Url;
+                    if (envUrl != null)
+                    {
+                        await historyService.AddQueryAsync(
+                            envUrl,
+                            fetchXml,
+                            rowCount: response.Count,
+                            executionTimeMs: response.ExecutionTimeMs);
+                    }
+                }
+            }
+            catch { /* silently ignore history save failures */ }
+        });
+
+        return response;
     }
 
     /// <summary>
@@ -855,7 +882,7 @@ public class RpcMethodHandler
             };
         }
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        var response = await WithActiveProfileAsync(async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -867,6 +894,120 @@ public class RpcMethodHandler
 
             return MapToResponse(result, fetchXml);
         }, cancellationToken);
+
+        // Auto-save to history (fire-and-forget)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var historyService = _authServices.GetService<IQueryHistoryService>();
+                if (historyService != null)
+                {
+                    var store = _authServices.GetRequiredService<ProfileStore>();
+                    var collection = await store.LoadAsync(CancellationToken.None);
+                    var envUrl = collection.ActiveProfile?.Environment?.Url;
+                    if (envUrl != null)
+                    {
+                        await historyService.AddQueryAsync(
+                            envUrl,
+                            sql,
+                            rowCount: response.Count,
+                            executionTimeMs: response.ExecutionTimeMs);
+                    }
+                }
+            }
+            catch { /* silently ignore history save failures */ }
+        });
+
+        return response;
+    }
+
+    /// <summary>
+    /// Lists query history entries for the active environment.
+    /// Maps to: ppds query history list --json
+    /// </summary>
+    /// <param name="search">Optional search pattern (case-insensitive substring match on SQL text).</param>
+    /// <param name="limit">Maximum number of entries to return (default 50).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [JsonRpcMethod("query/history/list")]
+    public async Task<QueryHistoryListResponse> QueryHistoryListAsync(
+        string? search = null,
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var store = _authServices.GetRequiredService<ProfileStore>();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile
+            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+
+        var environment = profile.Environment
+            ?? throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+
+        var historyService = _authServices.GetRequiredService<IQueryHistoryService>();
+
+        IReadOnlyList<QueryHistoryEntry> entries;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            entries = await historyService.SearchHistoryAsync(environment.Url, search, limit, cancellationToken);
+        }
+        else
+        {
+            entries = await historyService.GetHistoryAsync(environment.Url, limit, cancellationToken);
+        }
+
+        return new QueryHistoryListResponse
+        {
+            Entries = entries.Select(e => new QueryHistoryEntryDto
+            {
+                Id = e.Id,
+                Sql = e.Sql,
+                RowCount = e.RowCount,
+                ExecutionTimeMs = e.ExecutionTimeMs,
+                EnvironmentUrl = environment.Url,
+                ExecutedAt = e.ExecutedAt
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Deletes a query history entry by ID.
+    /// Maps to: ppds query history delete --json
+    /// </summary>
+    /// <param name="id">The history entry ID to delete.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [JsonRpcMethod("query/history/delete")]
+    public async Task<QueryHistoryDeleteResponse> QueryHistoryDeleteAsync(
+        string id,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter is required");
+        }
+
+        var store = _authServices.GetRequiredService<ProfileStore>();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile
+            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+
+        var environment = profile.Environment
+            ?? throw new RpcException(
+                ErrorCodes.Connection.EnvironmentNotFound,
+                "No environment selected. Use env/select first.");
+
+        var historyService = _authServices.GetRequiredService<IQueryHistoryService>();
+        var deleted = await historyService.DeleteEntryAsync(environment.Url, id, cancellationToken);
+
+        return new QueryHistoryDeleteResponse
+        {
+            Deleted = deleted
+        };
     }
 
     private static string InjectTopAttribute(string fetchXml, int top)
@@ -2064,6 +2205,35 @@ public class CompletionItemDto
     [JsonPropertyName("detail")] public string? Detail { get; set; }
     [JsonPropertyName("description")] public string? Description { get; set; }
     [JsonPropertyName("sortOrder")] public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// Response for query/history/list method.
+/// </summary>
+public class QueryHistoryListResponse
+{
+    [JsonPropertyName("entries")] public List<QueryHistoryEntryDto> Entries { get; set; } = [];
+}
+
+/// <summary>
+/// A single query history entry DTO for RPC responses.
+/// </summary>
+public class QueryHistoryEntryDto
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("rowCount")] public int? RowCount { get; set; }
+    [JsonPropertyName("executionTimeMs")] public long? ExecutionTimeMs { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("executedAt")] public DateTimeOffset ExecutedAt { get; set; }
+}
+
+/// <summary>
+/// Response for query/history/delete method.
+/// </summary>
+public class QueryHistoryDeleteResponse
+{
+    [JsonPropertyName("deleted")] public bool Deleted { get; set; }
 }
 
 #endregion
