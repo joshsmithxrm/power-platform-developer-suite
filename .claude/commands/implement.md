@@ -21,19 +21,56 @@ $ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3
 - Identify which phases are SEQUENTIAL (have dependencies) vs PARALLEL (independent streams)
 - Note the quality gates defined in the plan
 
-### Step 2: Assess Current State
+### Step 2: Load Spec Context
+
+Before dispatching any agents, load the specification context that will be injected into every subagent prompt.
+
+**A. Read Foundation**
+- Read `specs/CONSTITUTION.md` — full content will be injected into every subagent prompt
+- Read `specs/README.md` — maps code paths to specs
+
+**B. Identify Relevant Specs**
+- From the plan, identify which source directories/files will be touched
+- Map each to its spec using the README.md code column:
+  - `src/PPDS.Dataverse/Pooling/` → `specs/connection-pooling.md`
+  - `src/PPDS.Dataverse/Query/` → `specs/query.md`
+  - `src/PPDS.Cli/Tui/` → `specs/tui.md` + `specs/tui-foundation.md`
+  - `src/PPDS.Cli/Commands/` → `specs/cli.md`
+  - `src/PPDS.Mcp/` → `specs/mcp.md`
+  - `src/PPDS.Migration/` → `specs/migration.md`
+  - `src/PPDS.Auth/` → `specs/authentication.md`
+- Always include `specs/architecture.md`
+- Read each relevant spec and extract the `## Acceptance Criteria` section
+
+**C. Build Spec Context Block**
+Construct a text block that will be prepended to every subagent prompt:
+
+```
+## Constitution (MUST comply — violations are defects)
+{full CONSTITUTION.md content}
+
+## Relevant Specifications — Acceptance Criteria
+### {spec-name}.md
+{AC table rows from that spec}
+
+Your implementation MUST satisfy these criteria. If your task conflicts
+with a spec or constitution principle, STOP and report the conflict
+to the orchestrator — do not silently deviate.
+```
+
+### Step 3: Assess Current State
 - Check git status and current branch
 - Search for any existing work (worktrees, branches) related to this plan
 - Check if a feature branch exists; if not, create one from the plan name
 - Determine what has already been implemented vs what remains
 - Check git log to see if prior phases were already committed
 
-### Step 3: Create Task Tracking
+### Step 4: Create Task Tracking
 - Use TaskCreate to build a task list from the plan phases
 - Set up dependencies between tasks using addBlockedBy/addBlocks
 - Mark any already-completed work as done
 
-### Step 4: Execute Each Phase
+### Step 5: Execute Each Phase
 
 For EACH phase in the plan, repeat this cycle:
 
@@ -46,6 +83,7 @@ For EACH phase in the plan, repeat this cycle:
   - Instructions to read existing code before writing anything
   - Build verification command to run before finishing
   - Test command to run and verify
+  - The spec context block from Step 2 (constitution + relevant AC tables)
   - Reminder: no shell redirections (2>&1, >, >>)
 - Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
 
@@ -60,11 +98,15 @@ For EACH phase in the plan, repeat this cycle:
 - Both MUST show 0 errors / 0 failures
 - If build errors exist, dispatch a fix agent with the specific errors
 - If test failures exist, dispatch a fix agent with the failing test names and error messages
+- If specs with ACs are relevant to this phase, check: do the AC test methods pass?
+  Run: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
+  for each AC referenced by this phase's tasks
 - Re-run verification after fixes. Do NOT proceed until gate passes.
 
 **D. Review**
 - Use `superpowers:requesting-code-review` agent to review the phase's work against the plan
 - If the review identifies issues, dispatch fix agents before committing
+- The code-reviewer agent MUST also receive the spec context block (constitution + ACs) but NO implementation context (no plan, no task descriptions) — it reviews code against specs, not against the plan
 - Only proceed to commit when review passes
 
 **E. Commit the Phase**
@@ -85,7 +127,7 @@ For EACH phase in the plan, repeat this cycle:
 - Update task tracking
 - Continue until all phases are complete
 
-### Step 5: Final Verification
+### Step 6: Final Verification
 - Full solution build
 - Full test suite run (all categories except Integration)
 - Verify git log shows clean commit history with one commit per phase
