@@ -19,6 +19,20 @@ export function registerProfileCommands(
     refreshProfiles: () => void,
 ): void {
 
+    // ── Device Code Handler (registered once, not per createProfile call) ─
+    daemonClient.onDeviceCode(async ({ userCode, verificationUrl, message }) => {
+        const action = await vscode.window.showInformationMessage(
+            message || `Enter code: ${userCode}`,
+            { modal: false },
+            'Open Browser', 'Copy Code'
+        );
+        if (action === 'Open Browser') {
+            await vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
+        } else if (action === 'Copy Code') {
+            await vscode.env.clipboard.writeText(userCode);
+        }
+    });
+
     // ── Refresh Profiles ────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.refreshProfiles', () => {
@@ -75,7 +89,14 @@ export function registerProfileCommands(
                 });
 
                 if (selected) {
-                    vscode.window.showInformationMessage(`Selected profile: ${selected.label}`);
+                    try {
+                        await daemonClient.authSelect({ name: selected.label });
+                        refreshProfiles();
+                        vscode.window.showInformationMessage(`Switched to profile: ${selected.label}`);
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        vscode.window.showErrorMessage(`Failed to switch profile: ${message}`);
+                    }
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -351,23 +372,6 @@ async function runCreateProfileWizard(
     if (!params) {
         return; // User cancelled during param collection
     }
-
-    // Ensure daemon is connected before registering notification handler
-    await daemonClient.start();
-
-    // Register device code handler before creating profile
-    daemonClient.onDeviceCode(async ({ userCode, verificationUrl, message }) => {
-        const action = await vscode.window.showInformationMessage(
-            message || `Enter code: ${userCode}`,
-            { modal: false },
-            'Open Browser', 'Copy Code'
-        );
-        if (action === 'Open Browser') {
-            await vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
-        } else if (action === 'Copy Code') {
-            await vscode.env.clipboard.writeText(userCode);
-        }
-    });
 
     // Create the profile via daemon with progress indicator
     await vscode.window.withProgress(
