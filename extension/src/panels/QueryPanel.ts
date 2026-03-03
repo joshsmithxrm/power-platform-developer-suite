@@ -5,17 +5,14 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 
 export class QueryPanel extends WebviewPanelBase {
-    private static instance: QueryPanel | undefined;
+    private static instances: QueryPanel[] = [];
+    private static nextId = 1;
+    private readonly panelId: number;
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): void {
-        if (QueryPanel.instance) {
-            QueryPanel.instance.panel?.reveal();
-            if (initialSql) {
-                QueryPanel.instance.postMessage({ command: 'loadQuery', sql: initialSql });
-            }
-            return;
-        }
-        QueryPanel.instance = new QueryPanel(extensionUri, daemon, initialSql);
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): QueryPanel {
+        // Always create a new instance (no singleton reuse)
+        const panel = new QueryPanel(extensionUri, daemon, initialSql);
+        return panel;
     }
 
     private allRecords: Record<string, unknown>[] = [];
@@ -28,9 +25,12 @@ export class QueryPanel extends WebviewPanelBase {
     ) {
         super();
 
+        this.panelId = QueryPanel.nextId++;
+        QueryPanel.instances.push(this);
+
         this.panel = vscode.window.createWebviewPanel(
             'ppds.dataExplorer',
-            'Data Explorer',
+            'Data Explorer #' + this.panelId,
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -45,7 +45,7 @@ export class QueryPanel extends WebviewPanelBase {
             async (message: { command: string; [key: string]: unknown }) => {
                 switch (message.command) {
                     case 'executeQuery':
-                        await this.executeQuery(message.sql as string);
+                        await this.executeQuery(message.sql as string, message.useTds as boolean | undefined);
                         break;
                     case 'showFetchXml':
                         await this.showFetchXml(message.sql as string);
@@ -71,15 +71,16 @@ export class QueryPanel extends WebviewPanelBase {
         );
 
         this.panel.onDidDispose(() => {
-            QueryPanel.instance = undefined;
+            const idx = QueryPanel.instances.indexOf(this);
+            if (idx >= 0) QueryPanel.instances.splice(idx, 1);
             this.dispose();
         }, null, this.disposables);
     }
 
-    private async executeQuery(sql: string): Promise<void> {
+    private async executeQuery(sql: string, useTds?: boolean): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
-            const result = await this.daemon.querySql({ sql });
+            const result = await this.daemon.querySql({ sql, useTds });
             this.lastResult = result;
             this.allRecords = [...result.records];
             this.postMessage({
@@ -231,6 +232,7 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="fetchxml-btn" appearance="secondary">FetchXML</vscode-button>
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
+    <vscode-button id="tds-toggle-btn" appearance="secondary" title="Toggle TDS endpoint">TDS Off</vscode-button>
     <span class="toolbar-spacer"></span>
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
         <span class="codicon codicon-filter"></span>
@@ -289,11 +291,18 @@ export class QueryPanel extends WebviewPanelBase {
     let selectedCells = new Set();
     let sortColumn = -1;
     let sortAsc = true;
+    let useTds = false;
+    const tdsBtn = document.getElementById('tds-toggle-btn');
+    tdsBtn.addEventListener('click', () => {
+        useTds = !useTds;
+        tdsBtn.textContent = useTds ? 'TDS On' : 'TDS Off';
+        tdsBtn.setAttribute('appearance', useTds ? 'primary' : 'secondary');
+    });
 
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
-        if (sql) vscode.postMessage({ command: 'executeQuery', sql });
+        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
     });
     fetchxmlBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
@@ -316,7 +325,7 @@ export class QueryPanel extends WebviewPanelBase {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
             const sql = sqlEditor.value.trim();
-            if (sql) vscode.postMessage({ command: 'executeQuery', sql });
+            if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
         }
     });
 

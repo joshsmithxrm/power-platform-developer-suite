@@ -211,6 +211,7 @@ export class DaemonClient implements vscode.Disposable {
         pagingCookie?: string;
         count?: boolean;
         showFetchXml?: boolean;
+        useTds?: boolean;
     }): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
