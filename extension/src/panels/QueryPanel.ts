@@ -4,6 +4,7 @@ import { getNonce } from './getWebviewContent.js';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
+import { isAuthError } from '../utils/errorUtils.js';
 
 export class QueryPanel extends WebviewPanelBase {
     private static instances: QueryPanel[] = [];
@@ -110,7 +111,7 @@ export class QueryPanel extends WebviewPanelBase {
             const msg = error instanceof Error ? error.message : String(error);
 
             // Check for auth errors and offer re-authentication
-            if (this.isAuthError(error)) {
+            if (isAuthError(error)) {
                 const action = await vscode.window.showErrorMessage(
                     'Session expired. Re-authenticate?',
                     'Re-authenticate', 'Cancel'
@@ -257,6 +258,7 @@ export class QueryPanel extends WebviewPanelBase {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- 'unsafe-inline' is required by @vscode/webview-ui-toolkit for dynamic styles -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="module" nonce="${nonce}" src="${toolkitUri}"></script>

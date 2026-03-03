@@ -879,6 +879,7 @@ public class RpcMethodHandler
         int limit = 50,
         CancellationToken cancellationToken = default)
     {
+        limit = Math.Min(limit, 1000);
         var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
@@ -1186,7 +1187,7 @@ public class RpcMethodHandler
                 var key = col.Alias ?? col.LogicalName;
                 record.TryGetValue(key, out var val);
                 var display = ExtractDisplayValue(val)?.ToString() ?? "";
-                return format == "csv" ? CsvEscape(display, separator) : display;
+                return format == "csv" ? CsvEscape(display, separator) : display.Replace("\t", " ").Replace("\n", " ").Replace("\r", "");
             });
             sb.AppendLine(string.Join(separator, values));
         }
@@ -1216,6 +1217,11 @@ public class RpcMethodHandler
         return value;
     }
 
+    /// <summary>
+    /// Injects a top="N" attribute into generated FetchXML.
+    /// Uses string manipulation (not XML parsing) because the FetchXML
+    /// comes from our generator and always has a predictable format.
+    /// </summary>
     private static string InjectTopAttribute(string fetchXml, int top)
     {
         var fetchIndex = fetchXml.IndexOf("<fetch", StringComparison.OrdinalIgnoreCase);
@@ -1597,6 +1603,8 @@ public class RpcMethodHandler
 }
 
 #region Response DTOs
+
+// TODO: Extract DTOs to a separate RpcMethodDtos.cs file for better maintainability
 
 /// <summary>
 /// Response for auth/list method.

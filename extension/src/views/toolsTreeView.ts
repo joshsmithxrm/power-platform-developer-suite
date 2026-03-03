@@ -38,7 +38,7 @@ export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeIt
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
     ];
 
-    private _onDidChangeTreeData = new vscode.EventEmitter<ToolTreeItem | undefined | void>();
+    private readonly _onDidChangeTreeData = new vscode.EventEmitter<ToolTreeItem | undefined | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private hasActiveProfile = false;
