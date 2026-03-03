@@ -20,7 +20,8 @@
     "Microsoft"
   ],
   "activationEvents": [
-    "onView:ppds.profiles"
+    "onView:ppds.profiles",
+    "onNotebook:ppdsnb"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -132,7 +133,30 @@
           "group": "profile@3"
         }
       ]
-    }
+    },
+    "notebooks": [
+      {
+        "type": "ppdsnb",
+        "displayName": "Power Platform Developer Suite Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.ppdsnb"
+          }
+        ]
+      }
+    ],
+    "languages": [
+      {
+        "id": "fetchxml",
+        "aliases": [
+          "FetchXML",
+          "fetchxml"
+        ],
+        "extensions": [
+          ".fetchxml"
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
