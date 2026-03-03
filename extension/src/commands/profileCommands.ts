@@ -507,8 +507,8 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
 
 async function runDeleteProfile(
     item: unknown,
-    _daemonClient: DaemonClient,
-    _refreshProfiles: () => void,
+    daemonClient: DaemonClient,
+    refreshProfiles: () => void,
 ): Promise<void> {
     const profileItem = item as { profile?: { index: number; name: string | null } } | undefined;
     if (!profileItem?.profile) {
@@ -529,23 +529,18 @@ async function runDeleteProfile(
         return;
     }
 
-    // TODO: Wire to daemon when profiles/delete RPC endpoint is available (Task 5)
-    // The call will look like:
-    // await daemonClient.profilesDelete(name ? { name } : { index });
-    // refreshProfiles();
+    await daemonClient.profilesDelete(name ? { name } : { index });
+    refreshProfiles();
 
-    vscode.window.showInformationMessage(
-        `Profile deletion will be available when daemon endpoints are ready. ` +
-        `(Profile: "${displayName}")`,
-    );
+    vscode.window.showInformationMessage(`Profile "${displayName}" deleted.`);
 }
 
 // ── Rename Profile ──────────────────────────────────────────────────────────
 
 async function runRenameProfile(
     item: unknown,
-    _daemonClient: DaemonClient,
-    _refreshProfiles: () => void,
+    daemonClient: DaemonClient,
+    refreshProfiles: () => void,
 ): Promise<void> {
     const profileItem = item as { profile?: { index: number; name: string | null } } | undefined;
     if (!profileItem?.profile) {
@@ -576,13 +571,9 @@ async function runRenameProfile(
         return; // User cancelled
     }
 
-    // TODO: Wire to daemon when profiles/rename RPC endpoint is available (Task 5)
-    // The call will look like:
-    // await daemonClient.profilesRename(name ? { name } : { index }, newName.trim());
-    // refreshProfiles();
+    const currentName = name ?? index.toString();
+    await daemonClient.profilesRename(currentName, newName.trim());
+    refreshProfiles();
 
-    vscode.window.showInformationMessage(
-        `Profile rename will be available when daemon endpoints are ready. ` +
-        `(Profile: "${displayName}" -> "${newName.trim()}")`,
-    );
+    vscode.window.showInformationMessage(`Profile renamed: "${displayName}" -> "${newName.trim()}"`);
 }
