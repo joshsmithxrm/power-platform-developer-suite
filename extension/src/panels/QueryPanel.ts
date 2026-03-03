@@ -100,7 +100,7 @@ export class QueryPanel extends WebviewPanelBase {
         super.dispose();
     }
 
-    private async executeQuery(sql: string, useTds?: boolean): Promise<void> {
+    private async executeQuery(sql: string, useTds?: boolean, isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
@@ -115,8 +115,8 @@ export class QueryPanel extends WebviewPanelBase {
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
 
-            // Check for auth errors and offer re-authentication
-            if (isAuthError(error)) {
+            // Check for auth errors and offer re-authentication (only on first attempt)
+            if (isAuthError(error) && !isRetry) {
                 const action = await vscode.window.showErrorMessage(
                     'Session expired. Re-authenticate?',
                     'Re-authenticate', 'Cancel'
@@ -131,8 +131,8 @@ export class QueryPanel extends WebviewPanelBase {
                         // If authWho fails, we can't invalidate - just proceed with re-auth
                     }
                     try {
-                        // Retry the query
-                        await this.executeQuery(sql, useTds);
+                        // Retry the query with isRetry=true to prevent recursive re-auth prompts
+                        await this.executeQuery(sql, useTds, true);
                         return;
                     } catch {
                         // Fall through to show error
