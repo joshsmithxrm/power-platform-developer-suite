@@ -7,6 +7,10 @@ import { registerEnvironmentCommands } from './commands/environmentCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
+import {
+    createNewNotebook, toggleCellLanguage, openCellInDataExplorer,
+    exportCellResults,
+} from './commands/notebookCommands.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -56,6 +60,19 @@ export function activate(context: vscode.ExtensionContext) {
     // Register environment selection command for notebooks
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.selectNotebookEnvironment', () => notebookController.selectEnvironment())
+    );
+
+    // ── Notebook Commands ─────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.newNotebook', createNewNotebook),
+        vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(daemonClient)),
+        vscode.commands.registerCommand('ppds.openCellInDataExplorer', () => {
+            openCellInDataExplorer(() => {
+                vscode.window.showInformationMessage('Data Explorer will be available in a future update.');
+            });
+        }),
+        vscode.commands.registerCommand('ppds.exportCellResultsCsv', () => exportCellResults(notebookController, 'csv')),
+        vscode.commands.registerCommand('ppds.exportCellResultsJson', () => exportCellResults(notebookController, 'json')),
     );
 
     // ── Placeholder commands for tools tree items ───────────────────────
