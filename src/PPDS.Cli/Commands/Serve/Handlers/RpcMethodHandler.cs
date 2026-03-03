@@ -391,6 +391,12 @@ public class RpcMethodHandler
                 ErrorCodes.Validation.RequiredField,
                 "The 'environmentUrl' parameter is required");
         }
+        if (!Uri.TryCreate(environmentUrl, UriKind.Absolute, out _))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"The 'environmentUrl' parameter must be a valid absolute URL");
+        }
 
         var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
         var config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
@@ -425,6 +431,12 @@ public class RpcMethodHandler
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
                 "The 'environmentUrl' parameter is required");
+        }
+        if (!Uri.TryCreate(environmentUrl, UriKind.Absolute, out _))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"The 'environmentUrl' parameter must be a valid absolute URL");
         }
 
         var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
@@ -714,6 +726,19 @@ public class RpcMethodHandler
         int cursorOffset,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrEmpty(sql))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sql' parameter is required");
+        }
+        if (cursorOffset < 0 || cursorOffset > sql.Length)
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"cursorOffset must be between 0 and {sql.Length}");
+        }
+
         return await WithActiveProfileAsync(async (sp, ct) =>
         {
             var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
@@ -1071,6 +1096,7 @@ public class RpcMethodHandler
                     }
                 }
             }
+            catch (OperationCanceledException) { /* shutdown */ }
             catch { /* silently ignore history save failures */ }
         });
     }
