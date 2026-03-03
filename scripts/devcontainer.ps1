@@ -97,23 +97,38 @@ function Ensure-WorkspaceVolume {
 }
 
 function Get-Worktrees {
-    # Prune stale worktrees first (directories that git no longer tracks)
-    devcontainer exec --workspace-folder $WorkspaceFolder git worktree prune 2>$null | Out-Null
+    # The host is the source of truth for which worktrees should exist.
+    # The container volume may have stale worktree directories from previous sessions.
+    # Strategy: get host worktree names, then clean up any container directories not on that list.
 
-    # Query the container for worktrees (they live in the volume, not on Windows)
-    # Only return directories that git worktree list actually knows about
-    $raw = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
-    if ($raw) {
-        $dirs = $raw -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') -replace '^\.worktrees/','' } | Where-Object { $_ }
-        $gitWorktrees = devcontainer exec --workspace-folder $WorkspaceFolder git worktree list --porcelain 2>$null
-        foreach ($dir in $dirs) {
-            # Only include if git worktree list knows about this directory
-            if ($gitWorktrees -match [regex]::Escape(".worktrees/$dir")) {
-                $dir
-            } else {
-                Write-Warn "Removing stale worktree directory: .worktrees/$dir"
-                devcontainer exec --workspace-folder $WorkspaceFolder rm -rf ".worktrees/$dir" 2>$null | Out-Null
+    # 1. Get worktree names the HOST knows about
+    $hostWorktreeNames = @()
+    $hostRaw = git -C $WorkspaceFolder worktree list --porcelain 2>$null
+    if ($hostRaw) {
+        $hostRaw -split "`n" | ForEach-Object {
+            if ($_ -match '\.worktrees[/\\]([^\s]+)') {
+                $hostWorktreeNames += $Matches[1]
             }
+        }
+    }
+
+    # 2. Get worktree directories that exist in the CONTAINER
+    $containerRaw = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
+    if (-not $containerRaw) { return }
+
+    $containerDirs = $containerRaw -split "`n" | ForEach-Object {
+        ($_.Trim() -replace '/$','') -replace '^\.worktrees/',''
+    } | Where-Object { $_ }
+
+    # 3. Clean up container worktrees not tracked by host, return valid ones
+    foreach ($dir in $containerDirs) {
+        if ($hostWorktreeNames -contains $dir) {
+            $dir
+        } else {
+            Write-Warn "Removing stale container worktree: .worktrees/$dir"
+            devcontainer exec --workspace-folder $WorkspaceFolder git worktree remove --force ".worktrees/$dir" 2>$null | Out-Null
+            # If git worktree remove fails (already orphaned), force-delete the directory
+            devcontainer exec --workspace-folder $WorkspaceFolder sh -c "test -d .worktrees/$dir && rm -rf .worktrees/$dir" 2>$null | Out-Null
         }
     }
 }
