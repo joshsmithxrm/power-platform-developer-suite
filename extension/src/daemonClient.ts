@@ -15,6 +15,7 @@ import type {
     EnvConfigGetResponse,
     EnvConfigSetResponse,
     QueryResultResponse,
+    QueryCompleteResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -29,6 +30,7 @@ export type {
     EnvConfigGetResponse,
     EnvConfigSetResponse,
     QueryResultResponse,
+    QueryCompleteResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -234,6 +236,19 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine('Calling query/fetch...');
         const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
         this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+
+        return result;
+    }
+
+    /**
+     * Gets IntelliSense completion items for SQL/FetchXML.
+     */
+    async queryComplete(params: { sql: string; cursorOffset: number }): Promise<QueryCompleteResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling query/complete at offset ${params.cursorOffset}...`);
+        const result = await this.connection!.sendRequest<QueryCompleteResponse>('query/complete', params);
+        this.outputChannel.appendLine(`Got ${result.items.length} completion items`);
 
         return result;
     }

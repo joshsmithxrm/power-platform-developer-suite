@@ -11,6 +11,7 @@ import {
     createNewNotebook, toggleCellLanguage, openCellInDataExplorer,
     exportCellResults,
 } from './commands/notebookCommands.js';
+import { DataverseCompletionProvider } from './providers/completionProvider.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -73,6 +74,13 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('ppds.exportCellResultsCsv', () => exportCellResults(notebookController, 'csv')),
         vscode.commands.registerCommand('ppds.exportCellResultsJson', () => exportCellResults(notebookController, 'json')),
+    );
+
+    // ── IntelliSense Completion Provider ──────────────────────────────
+    const completionProvider = new DataverseCompletionProvider(daemonClient);
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
+        vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<'),
     );
 
     // ── Placeholder commands for tools tree items ───────────────────────

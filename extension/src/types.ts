@@ -182,3 +182,17 @@ export interface ExportResponse {
     format: string;
     rowCount: number;
 }
+
+// ── IntelliSense / Completion types ─────────────────────────────────
+export interface QueryCompleteResponse {
+    items: CompletionItemDto[];
+}
+
+export interface CompletionItemDto {
+    label: string;
+    insertText: string;
+    kind: string;
+    detail: string | null;
+    description: string | null;
+    sortOrder: number;
+}
