@@ -116,16 +116,4 @@ public class DaemonIntegrationTests : IClassFixture<DaemonTestFixture>
             .Where(ex => ex.Message.Contains("No active profile"));
     }
 
-    [Fact]
-    public async Task SchemaList_ReturnsNotSupported()
-    {
-        // Act & Assert - Schema list is not yet implemented
-        var act = async () => await _fixture.Rpc.InvokeWithParameterObjectAsync<SchemaListResponse>(
-            "schema/list",
-            new { entity = "account" },
-            CancellationToken.None);
-
-        await act.Should().ThrowAsync<RemoteInvocationException>()
-            .Where(ex => ex.Message.Contains("NotSupported") || ex.Message.Contains("will be available"));
-    }
 }

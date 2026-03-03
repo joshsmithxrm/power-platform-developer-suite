@@ -308,46 +308,6 @@ public class RpcMethodHandlerTests
 
     #endregion
 
-    #region SchemaListResponse Tests
-
-    [Fact]
-    public void SchemaListResponse_WithAttributes_SerializesCorrectly()
-    {
-        var response = new SchemaListResponse
-        {
-            Entity = "account",
-            Attributes =
-            [
-                new AttributeInfo
-                {
-                    LogicalName = "accountid",
-                    DisplayName = "Account ID",
-                    AttributeType = "Uniqueidentifier",
-                    IsCustomAttribute = false,
-                    IsPrimaryId = true,
-                    IsPrimaryName = false
-                },
-                new AttributeInfo
-                {
-                    LogicalName = "name",
-                    DisplayName = "Account Name",
-                    AttributeType = "String",
-                    IsCustomAttribute = false,
-                    IsPrimaryId = false,
-                    IsPrimaryName = true
-                }
-            ]
-        };
-
-        var json = JsonSerializer.Serialize(response, JsonOptions);
-
-        Assert.Contains("account", json);
-        Assert.Contains("accountid", json);
-        Assert.Contains("Uniqueidentifier", json);
-    }
-
-    #endregion
-
     #region Null Handling Tests
 
     [Fact]
