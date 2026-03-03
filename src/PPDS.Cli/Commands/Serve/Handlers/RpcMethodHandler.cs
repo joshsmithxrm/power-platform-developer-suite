@@ -713,13 +713,21 @@ public class RpcMethodHandler : IDisposable
     #region Query Methods
 
     /// <summary>
-    /// Gets SQL completion items at a given cursor position.
-    /// Used by VS Code extension for IntelliSense in the SQL query editor.
+    /// Gets completion items at a given cursor position for SQL or FetchXML.
+    /// Used by VS Code extension for IntelliSense in the query editor.
     /// </summary>
+    /// <param name="sql">The query text (SQL or FetchXML) being edited.</param>
+    /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
+    /// <param name="language">
+    /// The language of the query. Use <c>"fetchxml"</c> for FetchXML documents.
+    /// Defaults to SQL when null or omitted.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/complete")]
     public async Task<QueryCompleteResponse> QueryCompleteAsync(
         string sql,
         int cursorOffset,
+        string? language = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(sql))
@@ -738,8 +746,19 @@ public class RpcMethodHandler : IDisposable
         return await WithActiveProfileAsync(async (sp, ct) =>
         {
             var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
-            var engine = new SqlCompletionEngine(metadataProvider);
-            var completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+
+            IReadOnlyList<PPDS.Dataverse.Sql.Intellisense.SqlCompletion> completions;
+
+            if (string.Equals(language, "fetchxml", StringComparison.OrdinalIgnoreCase))
+            {
+                var engine = new FetchXmlCompletionEngine(metadataProvider);
+                completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+            }
+            else
+            {
+                var engine = new SqlCompletionEngine(metadataProvider);
+                completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+            }
 
             return new QueryCompleteResponse
             {

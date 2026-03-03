@@ -3,11 +3,11 @@ import type { DaemonClient } from '../daemonClient.js';
 
 /**
  * VS Code CompletionItemProvider that delegates to the daemon's query/complete
- * RPC endpoint for SQL IntelliSense.
+ * RPC endpoint for SQL and FetchXML IntelliSense.
  *
- * Note: The daemon's query/complete endpoint only supports SQL. FetchXML
- * completion is not yet implemented on the daemon side, so we guard against
- * sending FetchXML documents to the SQL completion engine.
+ * The provider is registered for both 'sql' and 'fetchxml' language IDs.
+ * The language is forwarded to the daemon so it can select the appropriate
+ * completion engine (SqlCompletionEngine or FetchXmlCompletionEngine).
  */
 export class DataverseCompletionProvider implements vscode.CompletionItemProvider {
     constructor(private readonly daemon: DaemonClient) {}
@@ -18,17 +18,17 @@ export class DataverseCompletionProvider implements vscode.CompletionItemProvide
         token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): Promise<vscode.CompletionItem[] | null> {
-        // Only SQL is supported by the daemon's query/complete endpoint.
-        // FetchXML documents must not be sent as the sql parameter.
-        if (document.languageId !== 'sql') return null;
-
         if (token.isCancellationRequested) return null;
 
         const text = document.getText();
         const offset = document.offsetAt(position);
 
         try {
-            const result = await this.daemon.queryComplete({ sql: text, cursorOffset: offset });
+            const result = await this.daemon.queryComplete({
+                sql: text,
+                cursorOffset: offset,
+                language: document.languageId,
+            });
 
             if (token.isCancellationRequested) return null;
 
