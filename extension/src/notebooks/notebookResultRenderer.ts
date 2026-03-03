@@ -17,13 +17,16 @@ export interface CellData {
 
 /**
  * Renders query results as HTML with virtual scrolling for notebook cell output.
+ *
+ * @param containerId - Optional deterministic container ID for testing. When omitted,
+ *   a unique ID is generated using Date.now() + Math.random().
  */
-export function renderResultsHtml(result: QueryResultResponse, environmentUrl: string | undefined): string {
+export function renderResultsHtml(result: QueryResultResponse, environmentUrl: string | undefined, containerId?: string): string {
     if (result.records.length === 0) {
         return renderEmptyResults();
     }
 
-    const uniqueId = generateUniqueId();
+    const uniqueId = containerId ?? generateUniqueId();
     const scrollContainerId = `scrollContainer_${uniqueId}`;
     const tbodyId = `tableBody_${uniqueId}`;
 
