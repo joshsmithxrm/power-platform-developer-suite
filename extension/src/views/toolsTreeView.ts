@@ -31,7 +31,8 @@ export class ToolTreeItem extends vscode.TreeItem {
  * Solutions. Each item opens the corresponding panel or command when clicked.
  * Items are disabled (grayed out) when no profile is active.
  */
-export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeItem> {
+export class ToolsTreeDataProvider
+    implements vscode.TreeDataProvider<ToolTreeItem>, vscode.Disposable {
     private static readonly tools: { label: string; commandId: string; icon: string }[] = [
         { label: 'Data Explorer', commandId: 'ppds.dataExplorer', icon: 'database' },
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },

@@ -47,7 +47,8 @@ function buildTooltip(profile: ProfileInfo): string {
  * Calls daemonClient.authList() to populate the tree with authentication
  * profiles. The active profile is marked with a checkmark icon.
  */
-export class ProfileTreeDataProvider implements vscode.TreeDataProvider<ProfileTreeItem> {
+export class ProfileTreeDataProvider
+    implements vscode.TreeDataProvider<ProfileTreeItem>, vscode.Disposable {
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<ProfileTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
