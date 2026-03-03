@@ -88,8 +88,10 @@ export class QueryPanel extends WebviewPanelBase {
         this.panel.onDidDispose(() => {
             const idx = QueryPanel.instances.indexOf(this);
             if (idx >= 0) QueryPanel.instances.splice(idx, 1);
-            this.dispose();
-        }, null, this.disposables);
+            this.lastSql = undefined;
+            this.lastResult = undefined;
+            this.allRecords = [];
+        });
     }
 
     private async executeQuery(sql: string, useTds?: boolean): Promise<void> {

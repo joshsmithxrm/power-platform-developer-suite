@@ -131,6 +131,21 @@
         "command": "ppds.dataExplorer",
         "title": "PPDS: Data Explorer",
         "icon": "$(database)"
+      },
+      {
+        "command": "ppds.openQueryInNotebook",
+        "title": "PPDS: Open Query in Notebook",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.openNotebooks",
+        "title": "PPDS: Open Notebooks",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.openSolutions",
+        "title": "PPDS: Open Solutions",
+        "icon": "$(package)"
       }
     ],
     "menus": {
