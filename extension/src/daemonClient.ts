@@ -189,6 +189,20 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     /**
+     * Returns WhoAmI details for the active environment connection.
+     * This is separate from authWho - it queries the live Dataverse connection.
+     */
+    async envWho(): Promise<EnvWhoResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine('Calling env/who...');
+        const result = await this.connection!.sendRequest<EnvWhoResponse>('env/who');
+        this.outputChannel.appendLine(`env/who: ${result.connectedAs} @ ${result.organizationName}`);
+
+        return result;
+    }
+
+    /**
      * Gets the configuration for a specific environment.
      */
     async envConfigGet(environmentUrl: string): Promise<EnvConfigGetResponse> {
@@ -422,6 +436,39 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
         const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
         this.outputChannel.appendLine(`Got ${result.solutions.length} solutions`);
+
+        return result;
+    }
+
+    // ── Schema ──────────────────────────────────────────────────────────────
+
+    /**
+     * Lists all entities in the active Dataverse environment.
+     * Used for IntelliSense entity completion.
+     */
+    async schemaEntities(): Promise<SchemaEntitiesResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine('Calling schema/entities...');
+        const result = await this.connection!.sendRequest<SchemaEntitiesResponse>('schema/entities');
+        this.outputChannel.appendLine(`Got ${result.entities.length} entities`);
+
+        return result;
+    }
+
+    /**
+     * Lists attributes for a specific entity in the active Dataverse environment.
+     * Used for IntelliSense attribute completion.
+     */
+    async schemaAttributes(entity: string): Promise<SchemaAttributesResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling schema/attributes for "${entity}"...`);
+        const result = await this.connection!.sendRequest<SchemaAttributesResponse>(
+            'schema/attributes',
+            { entity }
+        );
+        this.outputChannel.appendLine(`Got ${result.attributes.length} attributes for ${result.entityName}`);
 
         return result;
     }
