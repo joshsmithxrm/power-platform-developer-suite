@@ -116,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(openDataExplorerCmd);
 
     const openNotebooksCmd = vscode.commands.registerCommand('ppds.openNotebooks', () => {
-        vscode.window.showInformationMessage('Notebooks will be available in a future update.');
+        void createNewNotebook();
     });
     context.subscriptions.push(openNotebooksCmd);
 
