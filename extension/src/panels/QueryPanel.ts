@@ -3,6 +3,7 @@ import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './getWebviewContent.js';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
+import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 
 export class QueryPanel extends WebviewPanelBase {
     private static instances: QueryPanel[] = [];
@@ -56,9 +57,13 @@ export class QueryPanel extends WebviewPanelBase {
                     case 'exportResults':
                         await this.exportResults(message.format as string);
                         break;
-                    case 'showHistory':
-                        // Will be wired up in Task 12
+                    case 'showHistory': {
+                        const sql = await showQueryHistory(this.daemon);
+                        if (sql) {
+                            this.postMessage({ command: 'loadQuery', sql });
+                        }
                         break;
+                    }
                     case 'ready':
                         if (initialSql) {
                             this.postMessage({ command: 'loadQuery', sql: initialSql });
