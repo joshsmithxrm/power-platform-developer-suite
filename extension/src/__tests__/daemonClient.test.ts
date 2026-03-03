@@ -343,6 +343,309 @@ describe('DaemonClient', () => {
         });
     });
 
+    describe('envWho', () => {
+        it('should call env/who and return result', async () => {
+            const mockResult = {
+                connectedAs: 'user@example.com',
+                organizationName: 'Test Org',
+                organizationId: 'org-123',
+                environmentId: 'env-456',
+                userId: 'user-789',
+                businessUnitId: 'bu-001',
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.envWho();
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/who');
+            expect(result).toEqual(mockResult);
+            expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('Calling env/who...');
+        });
+    });
+
+    describe('envConfigGet', () => {
+        it('should call env/config/get with environmentUrl', async () => {
+            const mockResult = {
+                label: 'Production',
+                type: 'Production',
+                color: '#FF0000',
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.envConfigGet('https://org.crm.dynamics.com');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/config/get', {
+                environmentUrl: 'https://org.crm.dynamics.com',
+            });
+            expect(result).toEqual(mockResult);
+        });
+
+        it('should handle null config values', async () => {
+            const mockResult = {
+                label: null,
+                type: null,
+                color: null,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.envConfigGet('https://dev.crm.dynamics.com');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/config/get', {
+                environmentUrl: 'https://dev.crm.dynamics.com',
+            });
+            expect(result).toEqual(mockResult);
+        });
+    });
+
+    describe('envConfigSet', () => {
+        it('should call env/config/set with all params', async () => {
+            const mockResult = {
+                saved: true,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = {
+                environmentUrl: 'https://org.crm.dynamics.com',
+                label: 'Production',
+                type: 'Production',
+                color: '#FF0000',
+            };
+            const result = await client.envConfigSet(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/config/set', params);
+            expect(result.saved).toBe(true);
+        });
+
+        it('should call env/config/set with only required params', async () => {
+            const mockResult = {
+                saved: true,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = {
+                environmentUrl: 'https://org.crm.dynamics.com',
+            };
+            const result = await client.envConfigSet(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/config/set', params);
+            expect(result.saved).toBe(true);
+        });
+    });
+
+    describe('queryComplete', () => {
+        it('should call query/complete with sql and cursorOffset', async () => {
+            const mockResult = {
+                items: [
+                    { label: 'account', kind: 'table' },
+                    { label: 'accountid', kind: 'column' },
+                ],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = { sql: 'SELECT * FROM acc', cursorOffset: 18 };
+            const result = await client.queryComplete(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/complete', params);
+            expect(result.items).toHaveLength(2);
+        });
+    });
+
+    describe('queryHistoryList', () => {
+        it('should call query/history/list without params', async () => {
+            const mockResult = {
+                entries: [],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.queryHistoryList();
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {});
+            expect(result.entries).toHaveLength(0);
+        });
+
+        it('should call query/history/list with search and limit', async () => {
+            const mockResult = {
+                entries: [
+                    { id: 'h-1', sql: 'SELECT name FROM account', executedAt: '2026-03-01T00:00:00Z' },
+                ],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.queryHistoryList('account', 10);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {
+                search: 'account',
+                limit: 10,
+            });
+            expect(result.entries).toHaveLength(1);
+        });
+
+        it('should call query/history/list with only search', async () => {
+            const mockResult = {
+                entries: [],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.queryHistoryList('contact');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {
+                search: 'contact',
+            });
+            expect(result.entries).toHaveLength(0);
+        });
+    });
+
+    describe('queryHistoryDelete', () => {
+        it('should call query/history/delete with id', async () => {
+            const mockResult = {
+                deleted: true,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.queryHistoryDelete('h-123');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/delete', {
+                id: 'h-123',
+            });
+            expect(result.deleted).toBe(true);
+        });
+    });
+
+    describe('queryExport', () => {
+        it('should call query/export with params', async () => {
+            const mockResult = {
+                content: 'name\nContoso\nAdventureWorks',
+                format: 'csv',
+                rowCount: 2,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = { sql: 'SELECT name FROM account', format: 'csv', includeHeaders: true, top: 100 };
+            const result = await client.queryExport(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/export', params);
+            expect(result.rowCount).toBe(2);
+            expect(result.format).toBe('csv');
+        });
+
+        it('should call query/export with only required params', async () => {
+            const mockResult = {
+                content: '{"records":[]}',
+                format: 'json',
+                rowCount: 0,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = { sql: 'SELECT name FROM contact' };
+            const result = await client.queryExport(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/export', params);
+            expect(result.rowCount).toBe(0);
+        });
+    });
+
+    describe('queryExplain', () => {
+        it('should call query/explain with sql', async () => {
+            const mockResult = {
+                fetchXml: '<fetch><entity name="account"><attribute name="name" /></entity></fetch>',
+                format: 'fetchxml',
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.queryExplain('SELECT name FROM account');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/explain', {
+                sql: 'SELECT name FROM account',
+            });
+            expect(result.format).toBe('fetchxml');
+        });
+    });
+
+    describe('profilesCreate', () => {
+        it('should call profiles/create with params', async () => {
+            const mockResult = {
+                index: 1,
+                name: 'new-profile',
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = {
+                name: 'new-profile',
+                authMethod: 'ClientSecret',
+                environmentUrl: 'https://org.crm.dynamics.com',
+                applicationId: 'app-123',
+                clientSecret: 'secret-456',
+                tenantId: 'tenant-789',
+            };
+            const result = await client.profilesCreate(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('profiles/create', params);
+            expect(result.index).toBe(1);
+            expect(result.name).toBe('new-profile');
+        });
+
+        it('should call profiles/create with minimal params', async () => {
+            const mockResult = {
+                index: 0,
+                name: null,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const params = {
+                authMethod: 'DeviceCode',
+            };
+            const result = await client.profilesCreate(params);
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('profiles/create', params);
+            expect(result.index).toBe(0);
+        });
+    });
+
+    describe('profilesDelete', () => {
+        it('should call profiles/delete with index', async () => {
+            const mockResult = {
+                deleted: true,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.profilesDelete({ index: 1 });
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('profiles/delete', { index: 1 });
+            expect(result.deleted).toBe(true);
+        });
+
+        it('should call profiles/delete with name', async () => {
+            const mockResult = {
+                deleted: true,
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.profilesDelete({ name: 'old-profile' });
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('profiles/delete', { name: 'old-profile' });
+            expect(result.deleted).toBe(true);
+        });
+    });
+
+    describe('profilesRename', () => {
+        it('should call profiles/rename with currentName and newName', async () => {
+            const mockResult = {
+                previousName: 'old-name',
+                newName: 'new-name',
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.profilesRename('old-name', 'new-name');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('profiles/rename', {
+                currentName: 'old-name',
+                newName: 'new-name',
+            });
+            expect(result.previousName).toBe('old-name');
+            expect(result.newName).toBe('new-name');
+        });
+    });
+
     describe('profilesInvalidate', () => {
         it('should call profiles/invalidate with profile name', async () => {
             const mockResult = {
@@ -396,6 +699,45 @@ describe('DaemonClient', () => {
                 includeManaged: true,
             });
             expect(result.solutions).toHaveLength(1);
+        });
+    });
+
+    describe('schemaEntities', () => {
+        it('should call schema/entities and return result', async () => {
+            const mockResult = {
+                entities: [
+                    { logicalName: 'account', displayName: 'Account', schemaName: 'Account' },
+                    { logicalName: 'contact', displayName: 'Contact', schemaName: 'Contact' },
+                ],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.schemaEntities();
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('schema/entities');
+            expect(result.entities).toHaveLength(2);
+            expect(result.entities[0].logicalName).toBe('account');
+        });
+    });
+
+    describe('schemaAttributes', () => {
+        it('should call schema/attributes with entity name', async () => {
+            const mockResult = {
+                entityName: 'account',
+                attributes: [
+                    { logicalName: 'name', displayName: 'Account Name', attributeType: 'String' },
+                    { logicalName: 'accountid', displayName: 'Account', attributeType: 'Uniqueidentifier' },
+                ],
+            };
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
+
+            const result = await client.schemaAttributes('account');
+
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('schema/attributes', {
+                entity: 'account',
+            });
+            expect(result.entityName).toBe('account');
+            expect(result.attributes).toHaveLength(2);
         });
     });
 
