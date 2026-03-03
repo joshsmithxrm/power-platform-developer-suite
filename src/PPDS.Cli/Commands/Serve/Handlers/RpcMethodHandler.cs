@@ -6,10 +6,14 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Services;
+using PPDS.Dataverse.Sql.Intellisense;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Query.Intellisense;
 using PPDS.Query.Parsing;
 using PPDS.Query.Transpilation;
 using StreamJsonRpc;
@@ -523,9 +527,100 @@ public class RpcMethodHandler
             "Schema retrieval will be available after metadata commands (#51) are implemented");
     }
 
+    /// <summary>
+    /// Lists all entities in the environment with summary metadata.
+    /// Used by VS Code extension for IntelliSense entity completion.
+    /// </summary>
+    [JsonRpcMethod("schema/entities")]
+    public async Task<SchemaEntitiesResponse> SchemaEntitiesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
+            var entities = await metadataProvider.GetEntitiesAsync(ct);
+
+            return new SchemaEntitiesResponse
+            {
+                Entities = entities.Select(e => new EntitySummaryDto
+                {
+                    LogicalName = e.LogicalName,
+                    DisplayName = e.DisplayName,
+                    IsCustom = e.IsCustomEntity
+                }).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists attributes for a specific entity.
+    /// Used by VS Code extension for IntelliSense attribute completion.
+    /// </summary>
+    [JsonRpcMethod("schema/attributes")]
+    public async Task<SchemaAttributesResponse> SchemaAttributesAsync(
+        string entity,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(entity))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'entity' parameter is required");
+        }
+
+        return await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
+            var attributes = await metadataProvider.GetAttributesAsync(entity, ct);
+
+            return new SchemaAttributesResponse
+            {
+                EntityName = entity,
+                Attributes = attributes.Select(a => new AttributeSummaryDto
+                {
+                    LogicalName = a.LogicalName,
+                    DisplayName = a.DisplayName,
+                    DataType = a.AttributeType,
+                    IsCustom = a.IsCustomAttribute
+                }).ToList()
+            };
+        }, cancellationToken);
+    }
+
     #endregion
 
     #region Query Methods
+
+    /// <summary>
+    /// Gets SQL completion items at a given cursor position.
+    /// Used by VS Code extension for IntelliSense in the SQL query editor.
+    /// </summary>
+    [JsonRpcMethod("query/complete")]
+    public async Task<QueryCompleteResponse> QueryCompleteAsync(
+        string sql,
+        int cursorOffset,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
+            var engine = new SqlCompletionEngine(metadataProvider);
+            var completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+
+            return new QueryCompleteResponse
+            {
+                Items = completions.Select(c => new CompletionItemDto
+                {
+                    Label = c.Label,
+                    InsertText = c.InsertText,
+                    Kind = c.Kind.ToString().ToLowerInvariant(),
+                    Detail = c.Detail,
+                    Description = c.Description,
+                    SortOrder = c.SortOrder
+                }).ToList()
+            };
+        }, cancellationToken);
+    }
 
     /// <summary>
     /// Executes a FetchXML query against Dataverse.
@@ -1533,6 +1628,65 @@ public class SolutionComponentInfoDto
     /// </summary>
     [JsonPropertyName("isMetadata")]
     public bool IsMetadata { get; set; }
+}
+
+/// <summary>
+/// Response for schema/entities method.
+/// </summary>
+public class SchemaEntitiesResponse
+{
+    [JsonPropertyName("entities")] public List<EntitySummaryDto> Entities { get; set; } = [];
+}
+
+/// <summary>
+/// Entity summary for schema/entities response.
+/// </summary>
+public class EntitySummaryDto
+{
+    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
+    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
+    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
+}
+
+/// <summary>
+/// Response for schema/attributes method.
+/// </summary>
+public class SchemaAttributesResponse
+{
+    [JsonPropertyName("entityName")] public string EntityName { get; set; } = "";
+    [JsonPropertyName("attributes")] public List<AttributeSummaryDto> Attributes { get; set; } = [];
+}
+
+/// <summary>
+/// Attribute summary for schema/attributes response.
+/// </summary>
+public class AttributeSummaryDto
+{
+    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
+    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
+    [JsonPropertyName("dataType")] public string DataType { get; set; } = "";
+    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
+}
+
+/// <summary>
+/// Response for query/complete method.
+/// </summary>
+public class QueryCompleteResponse
+{
+    [JsonPropertyName("items")] public List<CompletionItemDto> Items { get; set; } = [];
+}
+
+/// <summary>
+/// Completion item for query/complete response.
+/// </summary>
+public class CompletionItemDto
+{
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("insertText")] public string InsertText { get; set; } = "";
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("detail")] public string? Detail { get; set; }
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    [JsonPropertyName("sortOrder")] public int SortOrder { get; set; }
 }
 
 #endregion
