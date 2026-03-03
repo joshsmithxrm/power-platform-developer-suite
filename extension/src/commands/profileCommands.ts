@@ -371,6 +371,9 @@ async function runCreateProfileWizard(
     vscode.window.showInformationMessage(
         `Profile created successfully (${selectedMethod.authMethodId}, Name: "${profileName || '(auto)'}")`,
     );
+
+    // Auto-launch environment selector so user can pick an environment right away
+    await vscode.commands.executeCommand('ppds.selectEnvironment');
 }
 
 interface AuthParams {
