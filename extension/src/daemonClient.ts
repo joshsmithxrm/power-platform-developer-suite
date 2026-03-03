@@ -18,6 +18,8 @@ import type {
     QueryCompleteResponse,
     QueryHistoryListResponse,
     QueryHistoryDeleteResponse,
+    QueryExportResponse,
+    QueryExplainResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -35,6 +37,8 @@ export type {
     QueryCompleteResponse,
     QueryHistoryListResponse,
     QueryHistoryDeleteResponse,
+    QueryExportResponse,
+    QueryExplainResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
 } from './types.js';
@@ -282,6 +286,38 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine(`Calling query/history/delete for "${id}"...`);
         const result = await this.connection!.sendRequest<QueryHistoryDeleteResponse>('query/history/delete', { id });
         this.outputChannel.appendLine(`Deleted: ${result.deleted}`);
+        return result;
+    }
+
+    // ── Query Export & Explain ──────────────────────────────────────────────
+
+    /**
+     * Exports query results in the specified format (CSV, TSV, or JSON).
+     * The daemon executes the query and formats results server-side.
+     */
+    async queryExport(params: {
+        sql: string;
+        format?: string;
+        includeHeaders?: boolean;
+        top?: number;
+    }): Promise<QueryExportResponse> {
+        await this.ensureConnected();
+        this.outputChannel.appendLine(`Calling query/export...`);
+        const result = await this.connection!.sendRequest<QueryExportResponse>('query/export', params);
+        this.outputChannel.appendLine(`Exported ${result.rowCount} rows as ${result.format}`);
+        return result;
+    }
+
+    /**
+     * Returns the execution plan (FetchXML) for a SQL query.
+     * Since Dataverse SQL is transpiled to FetchXML, the transpiled FetchXML
+     * serves as the execution plan.
+     */
+    async queryExplain(sql: string): Promise<QueryExplainResponse> {
+        await this.ensureConnected();
+        this.outputChannel.appendLine('Calling query/explain...');
+        const result = await this.connection!.sendRequest<QueryExplainResponse>('query/explain', { sql });
+        this.outputChannel.appendLine(`Got explain plan (${result.format})`);
         return result;
     }
 

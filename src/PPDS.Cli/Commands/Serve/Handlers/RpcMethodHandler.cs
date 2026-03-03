@@ -1010,6 +1010,231 @@ public class RpcMethodHandler
         };
     }
 
+    /// <summary>
+    /// Exports query results in the specified format (CSV, TSV, or JSON).
+    /// Reuses the same SQL-to-FetchXML transpilation and execution pipeline as QuerySqlAsync.
+    /// </summary>
+    /// <param name="sql">The SQL query to execute.</param>
+    /// <param name="format">Export format: "csv", "tsv", or "json" (default: "csv").</param>
+    /// <param name="includeHeaders">Whether to include column headers (default: true). Applies to CSV/TSV only.</param>
+    /// <param name="top">Optional row limit to inject into the query.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [JsonRpcMethod("query/export")]
+    public async Task<QueryExportResponse> QueryExportAsync(
+        string sql,
+        string format = "csv",
+        bool includeHeaders = true,
+        int? top = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sql' parameter is required");
+        }
+
+        format = format.ToLowerInvariant();
+        if (format is not ("csv" or "tsv" or "json"))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidArguments,
+                $"Invalid format '{format}'. Valid values: csv, tsv, json");
+        }
+
+        // Parse and transpile SQL to FetchXML (same pipeline as QuerySqlAsync)
+        TSqlStatement stmt;
+        try
+        {
+            var parser = new QueryParser();
+            stmt = parser.ParseStatement(sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex);
+        }
+
+        // Override top if specified
+        if (top.HasValue && stmt is SelectStatement exportSelectStmt
+            && exportSelectStmt.QueryExpression is QuerySpecification exportQuerySpec)
+        {
+            exportQuerySpec.TopRowFilter = new TopRowFilter
+            {
+                Expression = new IntegerLiteral { Value = top.Value.ToString() }
+            };
+        }
+
+        var generator = new FetchXmlGenerator();
+        var fetchXml = generator.Generate(stmt);
+
+        // Execute the query
+        var queryResponse = await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+
+            // Fetch all pages to export complete results
+            var allRecords = new List<Dictionary<string, object?>>();
+            List<QueryColumnInfo>? columns = null;
+            string? pagingCookie = null;
+            int? currentPage = null;
+            bool moreRecords;
+
+            do
+            {
+                var result = await queryExecutor.ExecuteFetchXmlAsync(
+                    fetchXml,
+                    currentPage,
+                    pagingCookie,
+                    false,
+                    ct);
+
+                var mapped = MapToResponse(result, fetchXml);
+                columns ??= mapped.Columns;
+
+                allRecords.AddRange(mapped.Records);
+                pagingCookie = mapped.PagingCookie;
+                moreRecords = mapped.MoreRecords;
+                currentPage = (currentPage ?? 1) + 1;
+            } while (moreRecords);
+
+            return (columns: columns ?? [], records: allRecords);
+        }, cancellationToken);
+
+        // Format the results
+        var content = FormatExportContent(
+            queryResponse.columns,
+            queryResponse.records,
+            format,
+            includeHeaders);
+
+        return new QueryExportResponse
+        {
+            Content = content,
+            Format = format,
+            RowCount = queryResponse.records.Count
+        };
+    }
+
+    /// <summary>
+    /// Returns the execution plan for a SQL query by transpiling it to FetchXML.
+    /// Since Dataverse SQL is always transpiled to FetchXML for execution,
+    /// the FetchXML output serves as the execution plan.
+    /// </summary>
+    /// <param name="sql">The SQL query to explain.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [JsonRpcMethod("query/explain")]
+    public Task<QueryExplainResponse> QueryExplainAsync(
+        string sql,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'sql' parameter is required");
+        }
+
+        // Parse and transpile SQL to FetchXML
+        TSqlStatement stmt;
+        try
+        {
+            var parser = new QueryParser();
+            stmt = parser.ParseStatement(sql);
+        }
+        catch (QueryParseException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex);
+        }
+
+        var generator = new FetchXmlGenerator();
+        var fetchXml = generator.Generate(stmt);
+
+        return Task.FromResult(new QueryExplainResponse
+        {
+            Plan = fetchXml,
+            Format = "fetchxml"
+        });
+    }
+
+    private static string FormatExportContent(
+        List<QueryColumnInfo> columns,
+        List<Dictionary<string, object?>> records,
+        string format,
+        bool includeHeaders)
+    {
+        if (format == "json")
+        {
+            // JSON array of objects
+            var jsonArray = records.Select(record =>
+            {
+                var obj = new Dictionary<string, object?>();
+                foreach (var col in columns)
+                {
+                    var key = col.Alias ?? col.LogicalName;
+                    record.TryGetValue(key, out var val);
+                    obj[key] = ExtractDisplayValue(val);
+                }
+                return obj;
+            }).ToList();
+
+            return System.Text.Json.JsonSerializer.Serialize(jsonArray,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+
+        // CSV or TSV
+        var separator = format == "tsv" ? '\t' : ',';
+        var sb = new System.Text.StringBuilder();
+
+        if (includeHeaders)
+        {
+            var headers = columns.Select(c => c.Alias ?? c.LogicalName);
+            if (format == "csv")
+            {
+                sb.AppendLine(string.Join(separator, headers.Select(h => CsvEscape(h, separator))));
+            }
+            else
+            {
+                sb.AppendLine(string.Join(separator, headers));
+            }
+        }
+
+        foreach (var record in records)
+        {
+            var values = columns.Select(col =>
+            {
+                var key = col.Alias ?? col.LogicalName;
+                record.TryGetValue(key, out var val);
+                var display = ExtractDisplayValue(val)?.ToString() ?? "";
+                return format == "csv" ? CsvEscape(display, separator) : display;
+            });
+            sb.AppendLine(string.Join(separator, values));
+        }
+
+        return sb.ToString();
+    }
+
+    private static object? ExtractDisplayValue(object? val)
+    {
+        if (val is Dictionary<string, object?> dict)
+        {
+            // Return formatted value if available, otherwise raw value
+            if (dict.TryGetValue("formatted", out var formatted) && formatted != null)
+                return formatted;
+            if (dict.TryGetValue("value", out var value))
+                return value;
+        }
+        return val;
+    }
+
+    private static string CsvEscape(string value, char separator)
+    {
+        if (value.Contains(separator) || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        }
+        return value;
+    }
+
     private static string InjectTopAttribute(string fetchXml, int top)
     {
         var fetchIndex = fetchXml.IndexOf("<fetch", StringComparison.OrdinalIgnoreCase);
@@ -2234,6 +2459,25 @@ public class QueryHistoryEntryDto
 public class QueryHistoryDeleteResponse
 {
     [JsonPropertyName("deleted")] public bool Deleted { get; set; }
+}
+
+/// <summary>
+/// Response for query/export method.
+/// </summary>
+public class QueryExportResponse
+{
+    [JsonPropertyName("content")] public string Content { get; set; } = "";
+    [JsonPropertyName("format")] public string Format { get; set; } = "";
+    [JsonPropertyName("rowCount")] public int RowCount { get; set; }
+}
+
+/// <summary>
+/// Response for query/explain method.
+/// </summary>
+public class QueryExplainResponse
+{
+    [JsonPropertyName("plan")] public string Plan { get; set; } = "";
+    [JsonPropertyName("format")] public string Format { get; set; } = "fetchxml";
 }
 
 #endregion
