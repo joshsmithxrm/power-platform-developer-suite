@@ -826,9 +826,34 @@ public class RpcMethodHandler : IDisposable
 
         if (useTds)
         {
-            throw new RpcException(
-                ErrorCodes.Operation.NotSupported,
-                "TDS Read Replica mode is not yet implemented. Use the standard FetchXML execution path.");
+            var response = await WithActiveProfileAsync(async (sp, profile, env, ct) =>
+            {
+                using var credentialProvider = CredentialProviderFactory.Create(
+                    profile,
+                    DaemonDeviceCodeHandler.CreateCallback(_rpc));
+
+                var tdsExecutor = new TdsQueryExecutor(
+                    env.Url,
+                    async token =>
+                    {
+                        // Create a ServiceClient to trigger MSAL token acquisition,
+                        // then grab the cached access token from the credential provider.
+                        var client = await credentialProvider.CreateServiceClientAsync(env.Url, token)
+                            .ConfigureAwait(false);
+                        client.Dispose();
+                        return credentialProvider.AccessToken
+                            ?? throw new InvalidOperationException("Failed to acquire access token for TDS endpoint");
+                    },
+                    sp.GetService<ILogger<TdsQueryExecutor>>());
+
+                var result = await tdsExecutor.ExecuteSqlAsync(sql, top, ct);
+                return MapToResponse(result, sql);
+            }, cancellationToken);
+
+            // Auto-save to history (fire-and-forget)
+            FireAndForgetHistorySave(sql, response);
+
+            return response;
         }
 
         var fetchXml = TranspileSqlToFetchXml(sql, top);
@@ -843,7 +868,7 @@ public class RpcMethodHandler : IDisposable
             };
         }
 
-        var response = await WithActiveProfileAsync(async (sp, ct) =>
+        var fetchResponse = await WithActiveProfileAsync(async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -857,9 +882,9 @@ public class RpcMethodHandler : IDisposable
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(sql, response);
+        FireAndForgetHistorySave(sql, fetchResponse);
 
-        return response;
+        return fetchResponse;
     }
 
     /// <summary>
