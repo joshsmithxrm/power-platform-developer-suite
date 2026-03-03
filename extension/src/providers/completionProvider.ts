@@ -3,10 +3,11 @@ import type { DaemonClient } from '../daemonClient.js';
 
 /**
  * VS Code CompletionItemProvider that delegates to the daemon's query/complete
- * RPC endpoint for SQL and FetchXML IntelliSense.
+ * RPC endpoint for SQL IntelliSense.
  *
- * Registered for both 'sql' and 'fetchxml' languages, so it works in
- * standalone files and notebook cells.
+ * Note: The daemon's query/complete endpoint only supports SQL. FetchXML
+ * completion is not yet implemented on the daemon side, so we guard against
+ * sending FetchXML documents to the SQL completion engine.
  */
 export class DataverseCompletionProvider implements vscode.CompletionItemProvider {
     constructor(private readonly daemon: DaemonClient) {}
@@ -17,6 +18,10 @@ export class DataverseCompletionProvider implements vscode.CompletionItemProvide
         token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): Promise<vscode.CompletionItem[] | null> {
+        // Only SQL is supported by the daemon's query/complete endpoint.
+        // FetchXML documents must not be sent as the sql parameter.
+        if (document.languageId !== 'sql') return null;
+
         if (token.isCancellationRequested) return null;
 
         const text = document.getText();
