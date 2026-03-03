@@ -8,13 +8,19 @@ export class ToolTreeItem extends vscode.TreeItem {
         label: string,
         public readonly commandId: string,
         iconId: string,
+        disabled: boolean,
     ) {
         super(label, vscode.TreeItemCollapsibleState.None);
         this.iconPath = new vscode.ThemeIcon(iconId);
-        this.command = {
-            command: commandId,
-            title: label,
-        };
+        if (disabled) {
+            this.description = '(no profile)';
+            // No command — clicking does nothing when disabled
+        } else {
+            this.command = {
+                command: commandId,
+                title: label,
+            };
+        }
     }
 }
 
@@ -23,6 +29,7 @@ export class ToolTreeItem extends vscode.TreeItem {
  *
  * Displays a fixed set of tool entries: Data Explorer, Notebooks, and
  * Solutions. Each item opens the corresponding panel or command when clicked.
+ * Items are disabled (grayed out) when no profile is active.
  */
 export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeItem> {
     private static readonly tools: { label: string; commandId: string; icon: string }[] = [
@@ -30,6 +37,19 @@ export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeIt
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
     ];
+
+    private _onDidChangeTreeData = new vscode.EventEmitter<ToolTreeItem | undefined | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private hasActiveProfile = false;
+
+    /** Update the disabled state based on whether a profile is active. */
+    setHasActiveProfile(hasProfile: boolean): void {
+        if (this.hasActiveProfile !== hasProfile) {
+            this.hasActiveProfile = hasProfile;
+            this._onDidChangeTreeData.fire();
+        }
+    }
 
     getTreeItem(element: ToolTreeItem): vscode.TreeItem {
         return element;
@@ -42,7 +62,11 @@ export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeIt
         }
 
         return ToolsTreeDataProvider.tools.map(
-            t => new ToolTreeItem(t.label, t.commandId, t.icon),
+            t => new ToolTreeItem(t.label, t.commandId, t.icon, !this.hasActiveProfile),
         );
+    }
+
+    dispose(): void {
+        this._onDidChangeTreeData.dispose();
     }
 }

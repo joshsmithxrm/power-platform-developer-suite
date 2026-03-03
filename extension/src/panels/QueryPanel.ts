@@ -276,6 +276,9 @@ export class QueryPanel extends WebviewPanelBase {
     .results-table td.selected { background: var(--vscode-editor-selectionBackground); }
     .results-table td a { color: var(--vscode-textLink-foreground); text-decoration: none; }
     .results-table td a:hover { text-decoration: underline; }
+    .context-menu { position: fixed; z-index: 1000; background: var(--vscode-menu-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); border-radius: 4px; padding: 4px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
+    .context-menu-item { padding: 4px 16px; cursor: pointer; font-size: 13px; color: var(--vscode-menu-foreground, var(--vscode-foreground)); white-space: nowrap; }
+    .context-menu-item:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
     .status-bar { display: flex; gap: 16px; padding: 4px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
     .filter-bar { display: none; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
     .filter-bar.visible { display: flex; align-items: center; gap: 8px; }
@@ -644,6 +647,74 @@ export class QueryPanel extends WebviewPanelBase {
             text += vals.join('\\t') + '\\n';
         }
         navigator.clipboard.writeText(text.trim());
+    }
+
+    // ── Right-click context menu ──
+    let contextMenu = null;
+    document.addEventListener('contextmenu', (e) => {
+        const td = e.target.closest('td.selected, td[data-row]');
+        if (!td || !td.dataset.row) return;
+        e.preventDefault();
+        removeContextMenu();
+        // If right-clicked cell is not selected, select only it
+        const cellId = td.dataset.row + ':' + td.dataset.col;
+        if (!selectedCells.has(cellId)) {
+            selectedCells.clear();
+            selectedCells.add(cellId);
+            updateCellSelection();
+        }
+        contextMenu = document.createElement('div');
+        contextMenu.className = 'context-menu';
+        contextMenu.innerHTML =
+            '<div class="context-menu-item" data-action="cell">Copy Cell Value</div>' +
+            '<div class="context-menu-item" data-action="row">Copy Row</div>' +
+            '<div class="context-menu-item" data-action="all">Copy All Results</div>';
+        contextMenu.style.left = e.clientX + 'px';
+        contextMenu.style.top = e.clientY + 'px';
+        document.body.appendChild(contextMenu);
+        contextMenu.addEventListener('click', (ev) => {
+            const action = ev.target.dataset.action;
+            if (action === 'cell') {
+                const r = parseInt(td.dataset.row);
+                const c = parseInt(td.dataset.col);
+                const key = columns[c].alias || columns[c].logicalName;
+                const val = allRows[r] ? allRows[r][key] : '';
+                let display = '';
+                if (val !== null && val !== undefined) {
+                    display = typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
+                }
+                navigator.clipboard.writeText(display);
+            } else if (action === 'row') {
+                const r = parseInt(td.dataset.row);
+                const vals = columns.map(col => {
+                    const key = col.alias || col.logicalName;
+                    const val = allRows[r] ? allRows[r][key] : '';
+                    if (val === null || val === undefined) return '';
+                    return typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
+                });
+                navigator.clipboard.writeText(vals.join('\\t'));
+            } else if (action === 'all') {
+                const headers = columns.map(c => c.alias || c.logicalName);
+                let text = headers.join('\\t') + '\\n';
+                allRows.forEach(row => {
+                    const vals = columns.map(col => {
+                        const key = col.alias || col.logicalName;
+                        const val = row[key];
+                        if (val === null || val === undefined) return '';
+                        return typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
+                    });
+                    text += vals.join('\\t') + '\\n';
+                });
+                navigator.clipboard.writeText(text.trim());
+            }
+            removeContextMenu();
+        });
+    });
+    document.addEventListener('click', (e) => {
+        if (contextMenu && !contextMenu.contains(e.target)) removeContextMenu();
+    });
+    function removeContextMenu() {
+        if (contextMenu) { contextMenu.remove(); contextMenu = null; }
     }
 
     function escapeHtml(str) {

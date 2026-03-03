@@ -179,9 +179,10 @@ async function showProfileDetails(who: AuthWhoResponse): Promise<void> {
         description: 'Token Status',
     });
     if (who.tokenExpiresOn) {
+        const countdown = formatCountdown(who.tokenExpiresOn);
         items.push({
             label: `$(clock) ${formatDateTime(who.tokenExpiresOn)}`,
-            description: 'Expires',
+            description: countdown ? `Expires (${countdown})` : 'Expires',
         });
     }
 
@@ -251,6 +252,22 @@ function formatDateTime(iso: string): string {
         return date.toLocaleString();
     } catch {
         return iso;
+    }
+}
+
+function formatCountdown(iso: string): string | null {
+    try {
+        const expiresAt = new Date(iso).getTime();
+        const now = Date.now();
+        const diffMs = expiresAt - now;
+        if (diffMs <= 0) { return 'expired'; }
+        const totalMinutes = Math.floor(diffMs / 60000);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours > 0) { return `${hours}h ${minutes}m`; }
+        return `${minutes}m`;
+    } catch {
+        return null;
     }
 }
 
