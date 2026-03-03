@@ -68,6 +68,7 @@ export class DaemonClient implements vscode.Disposable {
     private connectingPromise: Promise<void> | null = null;
     private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
     private outputChannel: vscode.OutputChannel;
+    private _disposed = false;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('PPDS Daemon');
@@ -124,7 +125,17 @@ export class DaemonClient implements vscode.Disposable {
         // Create JSON-RPC connection over stdio
         const reader = new StreamMessageReader(this.process.stdout);
         const writer = new StreamMessageWriter(this.process.stdin);
-        this.connection = createMessageConnection(reader, writer);
+        const connection = createMessageConnection(reader, writer);
+
+        // Guard: if dispose() was called while we were setting up, clean up and abort
+        if (this._disposed) {
+            connection.dispose();
+            this.process?.kill();
+            this.process = null;
+            return;
+        }
+
+        this.connection = connection;
 
         // Start listening for messages
         this.connection.listen();
@@ -552,6 +563,7 @@ export class DaemonClient implements vscode.Disposable {
     dispose(): void {
         this.outputChannel.appendLine('Disposing daemon client...');
 
+        this._disposed = true;
         this.connectingPromise = null;
 
         if (this.connection) {
