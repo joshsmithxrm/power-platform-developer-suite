@@ -117,6 +117,10 @@ export class DataverseNotebookController implements vscode.Disposable {
         }
     }
 
+    public updateEnvironment(url: string): void {
+        this.selectedEnvironmentUrl = url;
+    }
+
     loadEnvironmentFromNotebook(notebook: vscode.NotebookDocument): void {
         const metadata = notebook.metadata as { environmentName?: string; environmentUrl?: string } | undefined;
         if (metadata?.environmentUrl) {

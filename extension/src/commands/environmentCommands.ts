@@ -111,22 +111,24 @@ export function registerEnvironmentCommands(
                     quickPick.matchOnDetail = true;
                     quickPick.items = items;
 
+                    let resolved = false;
                     const disposables: vscode.Disposable[] = [];
 
                     disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
                         const envItem = e.item as EnvQuickPickItem;
+                        if (!resolved) { resolved = true; resolve(undefined); }
                         quickPick.hide();
                         await vscode.commands.executeCommand('ppds.configureEnvironment', envItem.apiUrl);
                     }));
 
                     disposables.push(quickPick.onDidAccept(() => {
-                        resolve(quickPick.selectedItems[0]);
+                        if (!resolved) { resolved = true; resolve(quickPick.selectedItems[0]); }
                         quickPick.hide();
                     }));
                     disposables.push(quickPick.onDidHide(() => {
                         disposables.forEach(d => d.dispose());
                         quickPick.dispose();
-                        resolve(undefined);
+                        if (!resolved) { resolved = true; resolve(undefined); }
                     }));
 
                     quickPick.show();
