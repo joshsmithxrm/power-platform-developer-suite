@@ -866,7 +866,7 @@ public class RpcMethodHandler : IDisposable
                     sp.GetService<ILogger<TdsQueryExecutor>>());
 
                 var result = await tdsExecutor.ExecuteSqlAsync(sql, top, ct);
-                return MapToResponse(result, sql);
+                return MapToResponse(result, null);
             }, cancellationToken);
 
             // Auto-save to history (fire-and-forget)
@@ -1293,7 +1293,7 @@ public class RpcMethodHandler : IDisposable
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
     }
 
-    private static QueryResultResponse MapToResponse(QueryResult result, string fetchXml)
+    private static QueryResultResponse MapToResponse(QueryResult result, string? fetchXml)
     {
         return new QueryResultResponse
         {
