@@ -77,6 +77,19 @@
         "command": "ppds.renameProfile",
         "title": "PPDS: Rename Profile",
         "icon": "$(edit)"
+      },
+      {
+        "command": "ppds.selectEnvironment",
+        "title": "PPDS: Select Environment"
+      },
+      {
+        "command": "ppds.environmentDetails",
+        "title": "PPDS: Environment Details"
+      },
+      {
+        "command": "ppds.refreshEnvironments",
+        "title": "PPDS: Refresh Environments",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
