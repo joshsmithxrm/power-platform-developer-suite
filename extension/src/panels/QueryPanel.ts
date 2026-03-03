@@ -444,9 +444,13 @@ export class QueryPanel extends WebviewPanelBase {
         if (e.key === 'Escape' && filterBar.classList.contains('visible')) {
             hideFilter();
         }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && document.activeElement !== sqlEditor) {
-            e.preventDefault();
-            copySelectedCells(e.shiftKey);
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' &&
+            document.activeElement !== sqlEditor &&
+            document.activeElement !== filterInput) {
+            if (selectedCells.size > 0) {
+                e.preventDefault();
+                copySelectedCells(e.shiftKey);
+            }
         }
         // Ctrl+Shift+F → FetchXML preview
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
