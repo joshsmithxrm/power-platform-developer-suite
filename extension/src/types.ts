@@ -155,6 +155,73 @@ export interface SolutionInfoDto {
     isManaged: boolean;
     publisherName: string | null;
     description: string | null;
+    createdOn: string | null;
+    modifiedOn: string | null;
+    installedOn: string | null;
+}
+
+export interface SolutionComponentsResponse {
+    solutionId: string;
+    uniqueName: string;
+    components: SolutionComponentInfoDto[];
+}
+
+export interface SolutionComponentInfoDto {
+    id: string;
+    objectId: string;
+    componentType: number;
+    componentTypeName: string;
+    rootComponentBehavior: number;
+    isMetadata: boolean;
+}
+
+// ── Plugins ──────────────────────────────────────────────────────────────────
+
+export interface PluginsListResponse {
+    assemblies: PluginAssemblyInfo[];
+    packages: PluginPackageInfo[];
+}
+
+export interface PluginPackageInfo {
+    name: string;
+    uniqueName: string | null;
+    version: string | null;
+    assemblies: PluginAssemblyInfo[];
+}
+
+export interface PluginAssemblyInfo {
+    name: string;
+    version: string | null;
+    publicKeyToken: string | null;
+    types: PluginTypeInfoDto[];
+}
+
+export interface PluginTypeInfoDto {
+    typeName: string;
+    steps: PluginStepInfo[];
+}
+
+export interface PluginStepInfo {
+    name: string;
+    message: string;
+    entity: string;
+    stage: string;
+    mode: string;
+    executionOrder: number;
+    filteringAttributes: string | null;
+    isEnabled: boolean;
+    description: string | null;
+    deployment: string;
+    runAsUser: string | null;
+    asyncAutoDelete: boolean;
+    images: PluginImageInfo[];
+}
+
+export interface PluginImageInfo {
+    name: string;
+    entityAlias: string;
+    imageType: string;
+    attributes: string | null;
 }
 
 // ── Environment Config types ────────────────────────────────────────
