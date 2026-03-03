@@ -171,22 +171,22 @@
       "notebook/cell/title": [
         {
           "command": "ppds.toggleNotebookCellLanguage",
-          "when": "notebookType == 'ppdsnb'",
+          "when": "notebookType == ppdsnb",
           "group": "inline@1"
         },
         {
           "command": "ppds.openCellInDataExplorer",
-          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
           "group": "inline@2"
         },
         {
           "command": "ppds.exportCellResultsCsv",
-          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
           "group": "export@1"
         },
         {
           "command": "ppds.exportCellResultsJson",
-          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
           "group": "export@2"
         }
       ]
@@ -212,28 +212,6 @@
         "extensions": [
           ".fetchxml"
         ]
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "ppds.dataExplorer",
-        "key": "ctrl+shift+d",
-        "when": "!editorFocus"
-      },
-      {
-        "command": "ppds.selectEnvironment",
-        "key": "ctrl+shift+e",
-        "when": "!editorFocus"
-      },
-      {
-        "command": "ppds.selectProfile",
-        "key": "ctrl+shift+p",
-        "when": "!editorFocus"
-      },
-      {
-        "command": "ppds.newNotebook",
-        "key": "ctrl+shift+n",
-        "when": "!editorFocus"
       }
     ],
     "configuration": {
