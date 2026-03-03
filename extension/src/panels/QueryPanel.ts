@@ -20,7 +20,7 @@ export class QueryPanel extends WebviewPanelBase {
             const oldest = QueryPanel.instances[0];
             oldest.panel?.reveal();
             if (initialSql) {
-                oldest.postMessage({ command: 'setSql', sql: initialSql });
+                oldest.postMessage({ command: 'loadQuery', sql: initialSql });
             }
             return oldest;
         }
@@ -764,7 +764,8 @@ export class QueryPanel extends WebviewPanelBase {
         if (str === null || str === undefined) return '';
         const s = String(str);
         return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     // Signal ready
