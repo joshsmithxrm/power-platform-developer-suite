@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { DaemonClient, AuthWhoResponse } from '../daemonClient.js';
+import type { ProfileInfo } from '../types.js';
 
 /**
  * Registers all profile management commands and returns the disposables.
@@ -60,6 +61,11 @@ export function registerProfileCommands(
     );
 
     // ── List Profiles (command palette quick pick) ──────────────────────
+
+    interface ProfileQuickPickItem extends vscode.QuickPickItem {
+        profile: ProfileInfo;
+    }
+
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.listProfiles', async () => {
             try {
@@ -72,13 +78,14 @@ export function registerProfileCommands(
                     return;
                 }
 
-                const items = result.profiles.map(p => ({
+                const items: ProfileQuickPickItem[] = result.profiles.map(p => ({
                     label: p.name ?? `Profile ${p.index}`,
-                    description: p.identity,
+                    description: p.identity ?? undefined,
                     detail: p.environment
                         ? `${p.environment.displayName} (${p.authMethod})`
-                        : p.authMethod,
+                        : (p.authMethod ?? undefined),
                     picked: p.isActive,
+                    profile: p,
                 }));
 
                 const selected = await vscode.window.showQuickPick(items, {
@@ -90,7 +97,8 @@ export function registerProfileCommands(
 
                 if (selected) {
                     try {
-                        await daemonClient.authSelect({ name: selected.label });
+                        const p = selected.profile;
+                        await daemonClient.authSelect(p.name ? { name: p.name } : { index: p.index });
                         refreshProfiles();
                         vscode.window.showInformationMessage(`Switched to profile: ${selected.label}`);
                     } catch (error) {
