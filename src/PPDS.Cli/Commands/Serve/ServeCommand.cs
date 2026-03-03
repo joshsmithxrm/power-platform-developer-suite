@@ -51,7 +51,10 @@ public static class ServeCommand
         // Create the RPC target that handles method calls
         var handler = new RpcMethodHandler(poolManager, authProvider);
 
-        // Attach JSON-RPC to the duplex stream with our handler
+        // Attach JSON-RPC to the duplex stream with our handler.
+        // SECURITY: TraceSource is intentionally NOT configured here. StreamJsonRpc trace logging
+        // would capture full request payloads, including plain-text secrets passed to profiles/create
+        // (clientSecret, password, certificatePassword). Keep trace logging disabled in production.
         using var rpc = JsonRpc.Attach(duplexStream, handler);
 
         // Set RPC context for device code notifications
