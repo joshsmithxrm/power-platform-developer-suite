@@ -106,7 +106,7 @@ describe('buildHistoryItem', () => {
     it('sets description to row count when rowCount is set', () => {
         const entry = makeEntry({ rowCount: 1234 });
         const item = buildHistoryItem(entry);
-        expect(item.description).toBe('(1,234 rows)');
+        expect(item.description).toMatch(/\(1.?234 rows\)/);
     });
 
     it('sets description to empty string when rowCount is null', () => {

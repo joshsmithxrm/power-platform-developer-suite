@@ -49,7 +49,7 @@ export class QueryPanel extends WebviewPanelBase {
                 async (message: { command: string; [key: string]: unknown }) => {
                     switch (message.command) {
                         case 'executeQuery':
-                            await this.executeQuery(message.sql as string, message.useTds as boolean | undefined);
+                            await this.executeQuery(message.sql as string);
                             break;
                         case 'showFetchXml':
                             await this.showFetchXml(message.sql as string);
@@ -104,11 +104,11 @@ export class QueryPanel extends WebviewPanelBase {
         super.dispose();
     }
 
-    private async executeQuery(sql: string, useTds?: boolean, isRetry = false): Promise<void> {
+    private async executeQuery(sql: string, isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
-            const result = await this.daemon.querySql({ sql, useTds, top: defaultTop });
+            const result = await this.daemon.querySql({ sql, top: defaultTop });
             this.lastSql = sql;
             this.lastResult = result;
             this.allRecords = [...result.records];
@@ -128,15 +128,14 @@ export class QueryPanel extends WebviewPanelBase {
                 if (action === 'Re-authenticate') {
                     try {
                         const who = await this.daemon.authWho();
-                        if (who.name) {
-                            await this.daemon.profilesInvalidate(who.name);
-                        }
+                        const profileId = who.name ?? String(who.index);
+                        await this.daemon.profilesInvalidate(profileId);
                     } catch {
                         // If authWho fails, we can't invalidate - just proceed with re-auth
                     }
                     try {
                         // Retry the query with isRetry=true to prevent recursive re-auth prompts
-                        await this.executeQuery(sql, useTds, true);
+                        await this.executeQuery(sql, true);
                         return;
                     } catch {
                         // Fall through to show error
@@ -313,7 +312,6 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
     <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
-    <vscode-button id="tds-toggle-btn" appearance="secondary" title="Toggle TDS endpoint">TDS Off</vscode-button>
     <span class="toolbar-spacer"></span>
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
         <span class="codicon codicon-filter"></span>
@@ -374,18 +372,11 @@ export class QueryPanel extends WebviewPanelBase {
     let selectedCells = new Set();
     let sortColumn = -1;
     let sortAsc = true;
-    let useTds = false;
-    const tdsBtn = document.getElementById('tds-toggle-btn');
-    tdsBtn.addEventListener('click', () => {
-        useTds = !useTds;
-        tdsBtn.textContent = useTds ? 'TDS On' : 'TDS Off';
-        tdsBtn.setAttribute('appearance', useTds ? 'primary' : 'secondary');
-    });
 
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
-        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
+        if (sql) vscode.postMessage({ command: 'executeQuery', sql });
     });
     fetchxmlBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
@@ -436,7 +427,7 @@ export class QueryPanel extends WebviewPanelBase {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
             const sql = sqlEditor.value.trim();
-            if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
+            if (sql) vscode.postMessage({ command: 'executeQuery', sql });
         }
     });
 

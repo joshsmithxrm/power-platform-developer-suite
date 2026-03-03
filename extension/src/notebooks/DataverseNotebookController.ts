@@ -199,6 +199,11 @@ export class DataverseNotebookController implements vscode.Disposable {
     }
 
     private async executeCell(cell: vscode.NotebookCell): Promise<void> {
+        // Load environment from notebook metadata so per-notebook environment
+        // context is respected even when the notebook was opened before the
+        // controller was initialised or when another notebook was active last.
+        this.loadEnvironmentFromNotebook(cell.notebook);
+
         const execution = this.controller.createNotebookCellExecution(cell);
         execution.executionOrder = ++this.executionOrder;
         execution.start(Date.now());
@@ -286,20 +291,17 @@ export class DataverseNotebookController implements vscode.Disposable {
                 if (action === 'Re-authenticate') {
                     try {
                         const who = await this.daemon.authWho();
-                        if (who.name) {
-                            await this.daemon.profilesInvalidate(who.name);
-                        }
+                        const profileId = who.name ?? String(who.index);
+                        await this.daemon.profilesInvalidate(profileId);
                     } catch {
                         // If authWho fails, we can't invalidate - just proceed with re-auth
                     }
-                    try {
-                        // Don't retry automatically for notebooks - user can re-execute
-                        execution.replaceOutput([new vscode.NotebookCellOutput([
-                            vscode.NotebookCellOutputItem.text('Re-authenticated. Please re-execute the cell.', 'text/plain'),
-                        ])]);
-                        execution.end(false, Date.now());
-                        return;
-                    } catch { /* fall through */ }
+                    // Don't retry automatically for notebooks - user can re-execute
+                    execution.replaceOutput([new vscode.NotebookCellOutput([
+                        vscode.NotebookCellOutputItem.text('Re-authenticated. Please re-execute the cell.', 'text/plain'),
+                    ])]);
+                    execution.end(false, Date.now());
+                    return;
                 }
             }
 
