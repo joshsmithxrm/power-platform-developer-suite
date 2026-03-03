@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
-import { getNonce } from './getWebviewContent.js';
+import { getNonce } from './webviewUtils.js';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
@@ -732,8 +732,10 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        if (str === null || str === undefined) return '';
+        const s = String(str);
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     // Signal ready

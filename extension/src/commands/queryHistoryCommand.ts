@@ -2,6 +2,43 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryHistoryEntryDto } from '../types.js';
 
+// ── Button constants (identity-comparable) ───────────────────────────────────
+
+export const RUN_BUTTON: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('play'),
+    tooltip: 'Run this query',
+};
+export const COPY_BUTTON: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('copy'),
+    tooltip: 'Copy SQL',
+};
+export const DELETE_BUTTON: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('trash'),
+    tooltip: 'Delete',
+};
+
+interface HistoryQuickPickItem extends vscode.QuickPickItem {
+    entry: QueryHistoryEntryDto;
+}
+
+/**
+ * Builds a QuickPickItem for a single history entry.
+ */
+export function buildHistoryItem(entry: QueryHistoryEntryDto): HistoryQuickPickItem {
+    const date = new Date(entry.executedAt);
+    const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const sqlPreview = entry.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
+    const rowInfo = entry.rowCount !== null ? `(${entry.rowCount.toLocaleString()} rows)` : '';
+
+    return {
+        label: `[${dateStr}] ${sqlPreview}${entry.sql.length > 50 ? '...' : ''}`,
+        description: rowInfo,
+        detail: entry.sql,
+        entry,
+        buttons: [RUN_BUTTON, COPY_BUTTON, DELETE_BUTTON],
+    };
+}
+
 /**
  * Shows the query history as a QuickPick with run, copy, and delete actions.
  * Returns the selected SQL string (or undefined if cancelled).
@@ -14,28 +51,7 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
         return undefined;
     }
 
-    interface HistoryQuickPickItem extends vscode.QuickPickItem {
-        entry: QueryHistoryEntryDto;
-    }
-
-    const items: HistoryQuickPickItem[] = result.entries.map(entry => {
-        const date = new Date(entry.executedAt);
-        const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-        const sqlPreview = entry.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
-        const rowInfo = entry.rowCount !== null ? `(${entry.rowCount.toLocaleString()} rows)` : '';
-
-        return {
-            label: `[${dateStr}] ${sqlPreview}${entry.sql.length > 50 ? '...' : ''}`,
-            description: rowInfo,
-            detail: entry.sql,
-            entry,
-            buttons: [
-                { iconPath: new vscode.ThemeIcon('play'), tooltip: 'Run this query' },
-                { iconPath: new vscode.ThemeIcon('copy'), tooltip: 'Copy SQL' },
-                { iconPath: new vscode.ThemeIcon('trash'), tooltip: 'Delete' },
-            ],
-        };
-    });
+    const items: HistoryQuickPickItem[] = result.entries.map(buildHistoryItem);
 
     return new Promise<string | undefined>((resolve) => {
         const quickPick = vscode.window.createQuickPick<HistoryQuickPickItem>();
@@ -48,12 +64,11 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
 
         disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
             const entry = e.item.entry;
-            const buttonTooltip = (e.button as vscode.QuickInputButton & { tooltip: string }).tooltip;
 
-            if (buttonTooltip === 'Copy SQL') {
+            if (e.button === COPY_BUTTON) {
                 await vscode.env.clipboard.writeText(entry.sql);
                 vscode.window.showInformationMessage('SQL copied to clipboard');
-            } else if (buttonTooltip === 'Delete') {
+            } else if (e.button === DELETE_BUTTON) {
                 const confirm = await vscode.window.showWarningMessage(
                     'Delete this history entry?', { modal: true }, 'Delete'
                 );
@@ -61,28 +76,13 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                     try {
                         await daemon.queryHistoryDelete(entry.id);
                         const refreshed = await daemon.queryHistoryList(undefined, 50);
-                        quickPick.items = refreshed.entries.map(e2 => {
-                            const d = new Date(e2.executedAt);
-                            const ds = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                            const sp = e2.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
-                            return {
-                                label: `[${ds}] ${sp}${e2.sql.length > 50 ? '...' : ''}`,
-                                description: e2.rowCount !== null ? `(${e2.rowCount.toLocaleString()} rows)` : '',
-                                detail: e2.sql,
-                                entry: e2,
-                                buttons: [
-                                    { iconPath: new vscode.ThemeIcon('play'), tooltip: 'Run this query' },
-                                    { iconPath: new vscode.ThemeIcon('copy'), tooltip: 'Copy SQL' },
-                                    { iconPath: new vscode.ThemeIcon('trash'), tooltip: 'Delete' },
-                                ],
-                            };
-                        });
+                        quickPick.items = refreshed.entries.map(buildHistoryItem);
                     } catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
                         vscode.window.showErrorMessage(`Failed to delete history entry: ${msg}`);
                     }
                 }
-            } else if (buttonTooltip === 'Run this query') {
+            } else if (e.button === RUN_BUTTON) {
                 resolve(entry.sql);
                 quickPick.hide();
             }
