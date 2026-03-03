@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
@@ -33,10 +35,12 @@ namespace PPDS.Cli.Commands.Serve.Handlers;
 /// Handles JSON-RPC method calls for the serve daemon.
 /// Method naming follows the CLI command structure: "group/subcommand".
 /// </summary>
-public class RpcMethodHandler
+public class RpcMethodHandler : IDisposable
 {
     private readonly IDaemonConnectionPoolManager _poolManager;
     private readonly IServiceProvider _authServices;
+    private readonly ILogger<RpcMethodHandler> _logger;
+    private readonly CancellationTokenSource _daemonCts = new();
     private JsonRpc? _rpc;
 
     /// <summary>
@@ -44,10 +48,22 @@ public class RpcMethodHandler
     /// </summary>
     /// <param name="poolManager">The connection pool manager for caching Dataverse pools.</param>
     /// <param name="authServices">Service provider for auth services (ProfileStore, ISecureCredentialStore).</param>
-    public RpcMethodHandler(IDaemonConnectionPoolManager poolManager, IServiceProvider authServices)
+    /// <param name="logger">Optional logger. If null, a NullLogger is used.</param>
+    public RpcMethodHandler(
+        IDaemonConnectionPoolManager poolManager,
+        IServiceProvider authServices,
+        ILogger<RpcMethodHandler>? logger = null)
     {
         _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
         _authServices = authServices ?? throw new ArgumentNullException(nameof(authServices));
+        _logger = logger ?? NullLogger<RpcMethodHandler>.Instance;
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _daemonCts.Cancel();
+        _daemonCts.Dispose();
     }
 
     /// <summary>
@@ -1054,32 +1070,44 @@ public class RpcMethodHandler
 
     /// <summary>
     /// Saves a query to history in a fire-and-forget fashion so callers are not
-    /// blocked.  Failures are silently swallowed – history is best-effort.
+    /// blocked. History saves are best-effort: cancellation (daemon shutdown) is silently
+    /// ignored, and all other exceptions are logged at Debug level to aid diagnostics
+    /// without surfacing failures to the caller.
     /// </summary>
     private void FireAndForgetHistorySave(string queryText, QueryResultResponse response)
     {
+        var daemonToken = _daemonCts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
+                daemonToken.ThrowIfCancellationRequested();
+
                 var historyService = _authServices.GetService<IQueryHistoryService>();
                 if (historyService != null)
                 {
                     var store = _authServices.GetRequiredService<ProfileStore>();
-                    var collection = await store.LoadAsync(CancellationToken.None);
+                    var collection = await store.LoadAsync(daemonToken);
                     var envUrl = collection.ActiveProfile?.Environment?.Url;
                     if (envUrl != null)
                     {
                         await historyService.AddQueryAsync(
                             envUrl, queryText,
                             rowCount: response.Count,
-                            executionTimeMs: response.ExecutionTimeMs);
+                            executionTimeMs: response.ExecutionTimeMs,
+                            cancellationToken: daemonToken);
                     }
                 }
             }
-            catch (OperationCanceledException) { /* shutdown */ }
-            catch { /* silently ignore history save failures */ }
-        });
+            catch (OperationCanceledException)
+            {
+                // Daemon is shutting down — silently discard
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to save query history entry");
+            }
+        }, daemonToken);
     }
 
     /// <summary>
