@@ -70,7 +70,6 @@ describe('DaemonClient', () => {
             const { spawn } = await import('child_process');
             expect(spawn).toHaveBeenCalledWith('ppds', ['serve'], {
                 stdio: ['pipe', 'pipe', 'pipe'],
-                shell: true,
             });
             expect(mockConnection.listen).toHaveBeenCalled();
         });
