@@ -205,6 +205,8 @@ describe('Extension Smoke Tests', () => {
         expect(registeredCommands).toContain('ppds.selectProfile');
         expect(registeredCommands).toContain('ppds.refreshProfiles');
         expect(registeredCommands).toContain('ppds.newNotebook');
+        expect(registeredCommands).toContain('ppds.openSolutions');
+        expect(registeredCommands).toContain('ppds.refreshSolutions');
     });
 
     it('activate registers notebook serializer', async () => {

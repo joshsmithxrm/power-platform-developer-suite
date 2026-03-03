@@ -27,6 +27,7 @@ import type {
     ProfileRenameResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
+    SolutionComponentsResponse,
     SchemaEntitiesResponse,
     SchemaAttributesResponse,
 } from './types.js';
@@ -502,6 +503,24 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
         const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
         this.outputChannel.appendLine(`Got ${result.solutions.length} solutions`);
+
+        return result;
+    }
+
+    /**
+     * Lists components for a specific solution.
+     */
+    async solutionsComponents(uniqueName: string, componentType?: number): Promise<SolutionComponentsResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { uniqueName };
+        if (componentType !== undefined) {
+            params.componentType = componentType;
+        }
+
+        this.outputChannel.appendLine(`Calling solutions/components for "${uniqueName}"...`);
+        const result = await this.connection!.sendRequest<SolutionComponentsResponse>('solutions/components', params);
+        this.outputChannel.appendLine(`Got ${result.components.length} components`);
 
         return result;
     }

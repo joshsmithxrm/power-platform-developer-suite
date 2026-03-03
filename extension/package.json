@@ -43,6 +43,10 @@
         {
           "id": "ppds.tools",
           "name": "Tools"
+        },
+        {
+          "id": "ppds.solutions",
+          "name": "Solutions"
         }
       ]
     },
@@ -146,6 +150,16 @@
         "command": "ppds.openSolutions",
         "title": "PPDS: Open Solutions",
         "icon": "$(package)"
+      },
+      {
+        "command": "ppds.refreshSolutions",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.toggleManagedSolutions",
+        "title": "Toggle Managed Solutions",
+        "icon": "$(filter)"
       }
     ],
     "menus": {
@@ -158,6 +172,16 @@
         {
           "command": "ppds.createProfile",
           "when": "view == ppds.profiles",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.refreshSolutions",
+          "when": "view == ppds.solutions",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.toggleManagedSolutions",
+          "when": "view == ppds.solutions",
           "group": "navigation"
         }
       ],
