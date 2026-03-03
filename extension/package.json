@@ -96,6 +96,36 @@
         "command": "ppds.configureEnvironment",
         "title": "PPDS: Configure Environment",
         "icon": "$(gear)"
+      },
+      {
+        "command": "ppds.newNotebook",
+        "title": "PPDS: New Notebook",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.toggleNotebookCellLanguage",
+        "title": "PPDS: Toggle SQL/FetchXML",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "ppds.openCellInDataExplorer",
+        "title": "PPDS: Open in Data Explorer",
+        "icon": "$(table)"
+      },
+      {
+        "command": "ppds.exportCellResultsCsv",
+        "title": "PPDS: Export Cell Results to CSV",
+        "icon": "$(file)"
+      },
+      {
+        "command": "ppds.exportCellResultsJson",
+        "title": "PPDS: Export Cell Results to JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "ppds.selectNotebookEnvironment",
+        "title": "PPDS: Select Notebook Environment",
+        "icon": "$(database)"
       }
     ],
     "menus": {
@@ -131,6 +161,28 @@
           "command": "ppds.deleteProfile",
           "when": "view == ppds.profiles && viewItem == profile",
           "group": "profile@3"
+        }
+      ],
+      "notebook/cell/title": [
+        {
+          "command": "ppds.toggleNotebookCellLanguage",
+          "when": "notebookType == 'ppdsnb'",
+          "group": "inline@1"
+        },
+        {
+          "command": "ppds.openCellInDataExplorer",
+          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "group": "inline@2"
+        },
+        {
+          "command": "ppds.exportCellResultsCsv",
+          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "group": "export@1"
+        },
+        {
+          "command": "ppds.exportCellResultsJson",
+          "when": "notebookType == 'ppdsnb' && notebookCellType == 'code'",
+          "group": "export@2"
         }
       ]
     },
