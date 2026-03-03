@@ -61,7 +61,7 @@ export class QueryPanel extends WebviewPanelBase {
                 async (message: { command: string; [key: string]: unknown }) => {
                     switch (message.command) {
                         case 'executeQuery':
-                            await this.executeQuery(message.sql as string);
+                            await this.executeQuery(message.sql as string, false, message.useTds as boolean | undefined);
                             break;
                         case 'showFetchXml':
                             await this.showFetchXml(message.sql as string);
@@ -116,11 +116,11 @@ export class QueryPanel extends WebviewPanelBase {
         super.dispose();
     }
 
-    private async executeQuery(sql: string, isRetry = false): Promise<void> {
+    private async executeQuery(sql: string, isRetry = false, useTds?: boolean): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
-            const result = await this.daemon.querySql({ sql, top: defaultTop });
+            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: useTds ?? false });
             this.lastSql = sql;
             this.lastResult = result;
             this.allRecords = [...result.records];
@@ -333,6 +333,7 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
     <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
+    <vscode-button id="tds-btn" appearance="secondary" title="Toggle TDS Read Replica mode (direct SQL via port 5558)">TDS: Off</vscode-button>
     <span class="toolbar-spacer"></span>
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
         <span class="codicon codicon-filter"></span>
@@ -373,6 +374,7 @@ export class QueryPanel extends WebviewPanelBase {
     const exportBtn = document.getElementById('export-btn');
     const historyBtn = document.getElementById('history-btn');
     const notebookBtn = document.getElementById('notebook-btn');
+    const tdsBtn = document.getElementById('tds-btn');
     const filterBtn = document.getElementById('filter-btn');
     const filterBar = document.getElementById('filter-bar');
     const filterInput = document.getElementById('filter-input');
@@ -393,11 +395,12 @@ export class QueryPanel extends WebviewPanelBase {
     let selectedCells = new Set();
     let sortColumn = -1;
     let sortAsc = true;
+    let useTds = false;
 
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
-        if (sql) vscode.postMessage({ command: 'executeQuery', sql });
+        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
     });
     fetchxmlBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
@@ -416,6 +419,11 @@ export class QueryPanel extends WebviewPanelBase {
     notebookBtn.addEventListener('click', () => {
         const sql = sqlEditor.value.trim();
         if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
+    });
+    tdsBtn.addEventListener('click', () => {
+        useTds = !useTds;
+        tdsBtn.textContent = useTds ? 'TDS: On' : 'TDS: Off';
+        tdsBtn.setAttribute('appearance', useTds ? 'primary' : 'secondary');
     });
     loadMoreBtn.addEventListener('click', () => {
         if (pagingCookie) {
@@ -448,7 +456,7 @@ export class QueryPanel extends WebviewPanelBase {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
             const sql = sqlEditor.value.trim();
-            if (sql) vscode.postMessage({ command: 'executeQuery', sql });
+            if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
         }
     });
 
