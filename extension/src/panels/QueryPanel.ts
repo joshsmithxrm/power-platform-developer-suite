@@ -12,7 +12,7 @@ export class QueryPanel extends WebviewPanelBase {
     private readonly panelId: number;
 
     private static readonly MAX_PANELS = 10;
-    private static readonly MAX_CLIENT_RECORDS = 100_000;
+    private static readonly MAX_CLIENT_RECORDS = 5_000;
 
     static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): QueryPanel {
         if (QueryPanel.instances.length >= QueryPanel.MAX_PANELS) {

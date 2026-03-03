@@ -338,6 +338,9 @@ export class DataverseNotebookController implements vscode.Disposable {
 
     // ========== AUTO LANGUAGE SWITCHING ==========
 
+    private autoSwitchTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly AUTO_SWITCH_DEBOUNCE_MS = 100;
+
     private registerAutoSwitchListener(): void {
         this.disposables.push(
             vscode.workspace.onDidChangeTextDocument(event => {
@@ -373,11 +376,14 @@ export class DataverseNotebookController implements vscode.Disposable {
                 // May misfire for SQL with leading comments, but user can manually toggle.
                 const shouldBeFetchXml = contentToAnalyze.charAt(0) === '<';
 
-                if (shouldBeFetchXml && currentLanguage !== 'fetchxml') {
-                    void vscode.languages.setTextDocumentLanguage(event.document, 'fetchxml');
-                } else if (!shouldBeFetchXml && currentLanguage === 'fetchxml') {
-                    void vscode.languages.setTextDocumentLanguage(event.document, 'sql');
-                }
+                const targetLanguage = shouldBeFetchXml ? 'fetchxml' : 'sql';
+                if (currentLanguage === targetLanguage) return;
+
+                // Debounce to avoid flicker during rapid typing
+                clearTimeout(this.autoSwitchTimer);
+                this.autoSwitchTimer = setTimeout(() => {
+                    void vscode.languages.setTextDocumentLanguage(event.document, targetLanguage);
+                }, DataverseNotebookController.AUTO_SWITCH_DEBOUNCE_MS);
             })
         );
     }
@@ -395,6 +401,7 @@ export class DataverseNotebookController implements vscode.Disposable {
     // ========== DISPOSAL ==========
 
     dispose(): void {
+        clearTimeout(this.autoSwitchTimer);
         this.cellResults.clear();
         this.controller.dispose();
         this.statusBarItem.dispose();
