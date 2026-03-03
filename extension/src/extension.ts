@@ -6,6 +6,7 @@ import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentCommands } from './commands/environmentCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
+import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -46,6 +47,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.registerNotebookSerializer('ppdsnb', new DataverseNotebookSerializer(), {
             transientOutputs: true  // Don't persist cell outputs — re-execute to get results
         })
+    );
+
+    // ── Notebook Controller ───────────────────────────────────────────
+    const notebookController = new DataverseNotebookController(daemonClient);
+    context.subscriptions.push(notebookController);
+
+    // Register environment selection command for notebooks
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.selectNotebookEnvironment', () => notebookController.selectEnvironment())
     );
 
     // ── Placeholder commands for tools tree items ───────────────────────
