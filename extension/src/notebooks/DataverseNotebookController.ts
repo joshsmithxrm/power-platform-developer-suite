@@ -198,6 +198,10 @@ export class DataverseNotebookController implements vscode.Disposable {
         const abortController = new AbortController();
         this.activeExecutions.set(cellUri, abortController);
 
+        const tokenDisposable = execution.token.onCancellationRequested(() => {
+            abortController.abort();
+        });
+
         try {
             if (!this.selectedEnvironmentUrl) {
                 await this.selectEnvironment();
@@ -219,6 +223,11 @@ export class DataverseNotebookController implements vscode.Disposable {
                 return;
             }
 
+            if (abortController.signal.aborted) {
+                execution.end(false, Date.now());
+                return;
+            }
+
             const language = cell.document.languageId;
             const isFetchXml = language === 'fetchxml' || language === 'xml' || this.looksLikeFetchXml(content);
 
@@ -234,6 +243,7 @@ export class DataverseNotebookController implements vscode.Disposable {
                     vscode.NotebookCellOutputItem.text('Query cancelled', 'text/plain'),
                 ])]);
                 execution.end(false, Date.now());
+                tokenDisposable.dispose();
                 return;
             }
 
@@ -288,6 +298,7 @@ export class DataverseNotebookController implements vscode.Disposable {
             execution.end(false, Date.now());
         } finally {
             this.activeExecutions.delete(cellUri);
+            tokenDisposable.dispose();
         }
     }
 
