@@ -138,6 +138,24 @@ export interface SolutionInfoDto {
     description: string | null;
 }
 
+// ── Environment Config types ────────────────────────────────────────
+export interface EnvConfigGetResponse {
+    environmentUrl: string;
+    label?: string;
+    type?: string;
+    color?: string;
+    resolvedType: string;
+    resolvedColor: string;
+}
+
+export interface EnvConfigSetResponse {
+    environmentUrl: string;
+    label?: string;
+    type?: string;
+    color?: string;
+    saved: boolean;
+}
+
 // ── Query History (future daemon endpoint) ──────────────────────────────────
 
 export interface QueryHistoryEntry {

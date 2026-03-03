@@ -4,6 +4,7 @@ import { ProfileTreeDataProvider } from './views/profileTreeView.js';
 import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentCommands } from './commands/environmentCommands.js';
+import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -35,6 +36,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Environment Commands ─────────────────────────────────────────────
     registerEnvironmentCommands(context, daemonClient, () => profileTreeProvider.refresh());
+
+    // ── Environment Config Command ────────────────────────────────────
+    registerEnvironmentConfigCommand(context, daemonClient, () => profileTreeProvider.refresh());
 
     // ── Placeholder commands for tools tree items ───────────────────────
     // (will be implemented in later tasks)
