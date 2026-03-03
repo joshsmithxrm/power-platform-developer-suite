@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 export abstract class WebviewPanelBase implements vscode.Disposable {
     protected panel: vscode.WebviewPanel | undefined;
     protected disposables: vscode.Disposable[] = [];
+    private _disposed = false;
 
     protected postMessage(message: unknown): void {
         this.panel?.webview.postMessage(message);
@@ -15,8 +16,11 @@ export abstract class WebviewPanelBase implements vscode.Disposable {
     abstract getHtmlContent(webview: vscode.Webview): string;
 
     dispose(): void {
+        if (this._disposed) return;
+        this._disposed = true;
+
         this.panel?.dispose();
-        this.panel = undefined;
+
         for (const d of this.disposables) {
             d.dispose();
         }

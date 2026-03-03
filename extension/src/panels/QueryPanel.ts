@@ -44,55 +44,60 @@ export class QueryPanel extends WebviewPanelBase {
 
         this.panel.webview.html = this.getHtmlContent(this.panel.webview);
 
-        this.panel.webview.onDidReceiveMessage(
-            async (message: { command: string; [key: string]: unknown }) => {
-                switch (message.command) {
-                    case 'executeQuery':
-                        await this.executeQuery(message.sql as string, message.useTds as boolean | undefined);
-                        break;
-                    case 'showFetchXml':
-                        await this.showFetchXml(message.sql as string);
-                        break;
-                    case 'loadMore':
-                        await this.loadMore(message.pagingCookie as string, message.page as number);
-                        break;
-                    case 'explainQuery':
-                        await this.explainQuery(message.sql as string);
-                        break;
-                    case 'exportResults':
-                        await this.exportResults();
-                        break;
-                    case 'openInNotebook':
-                        await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql as string);
-                        break;
-                    case 'showHistory': {
-                        const sql = await showQueryHistory(this.daemon);
-                        if (sql) {
-                            this.postMessage({ command: 'loadQuery', sql });
+        this.disposables.push(
+            this.panel.webview.onDidReceiveMessage(
+                async (message: { command: string; [key: string]: unknown }) => {
+                    switch (message.command) {
+                        case 'executeQuery':
+                            await this.executeQuery(message.sql as string, message.useTds as boolean | undefined);
+                            break;
+                        case 'showFetchXml':
+                            await this.showFetchXml(message.sql as string);
+                            break;
+                        case 'loadMore':
+                            await this.loadMore(message.pagingCookie as string, message.page as number);
+                            break;
+                        case 'explainQuery':
+                            await this.explainQuery(message.sql as string);
+                            break;
+                        case 'exportResults':
+                            await this.exportResults();
+                            break;
+                        case 'openInNotebook':
+                            await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql as string);
+                            break;
+                        case 'showHistory': {
+                            const sql = await showQueryHistory(this.daemon);
+                            if (sql) {
+                                this.postMessage({ command: 'loadQuery', sql });
+                            }
+                            break;
                         }
-                        break;
+                        case 'copyToClipboard':
+                            await vscode.env.clipboard.writeText(message.text as string);
+                            break;
+                        case 'ready':
+                            if (initialSql) {
+                                this.postMessage({ command: 'loadQuery', sql: initialSql });
+                            }
+                            break;
                     }
-                    case 'copyToClipboard':
-                        await vscode.env.clipboard.writeText(message.text as string);
-                        break;
-                    case 'ready':
-                        if (initialSql) {
-                            this.postMessage({ command: 'loadQuery', sql: initialSql });
-                        }
-                        break;
                 }
-            },
-            undefined,
-            this.disposables,
+            )
         );
 
-        this.panel.onDidDispose(() => {
-            const idx = QueryPanel.instances.indexOf(this);
-            if (idx >= 0) QueryPanel.instances.splice(idx, 1);
-            this.lastSql = undefined;
-            this.lastResult = undefined;
-            this.allRecords = [];
-        });
+        this.disposables.push(
+            this.panel.onDidDispose(() => this.dispose())
+        );
+    }
+
+    override dispose(): void {
+        const idx = QueryPanel.instances.indexOf(this);
+        if (idx >= 0) QueryPanel.instances.splice(idx, 1);
+        this.lastSql = undefined;
+        this.lastResult = undefined;
+        this.allRecords = [];
+        super.dispose();
     }
 
     private async executeQuery(sql: string, useTds?: boolean): Promise<void> {
