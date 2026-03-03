@@ -14,14 +14,20 @@ import type {
     EnvSelectResponse,
     EnvConfigGetResponse,
     EnvConfigSetResponse,
+    EnvWhoResponse,
     QueryResultResponse,
     QueryCompleteResponse,
     QueryHistoryListResponse,
     QueryHistoryDeleteResponse,
     QueryExportResponse,
     QueryExplainResponse,
+    ProfileCreateResponse,
+    ProfileDeleteResponse,
+    ProfileRenameResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
+    SchemaEntitiesResponse,
+    SchemaAttributesResponse,
 } from './types.js';
 
 // Re-export types that other modules may need via daemonClient
@@ -33,14 +39,20 @@ export type {
     EnvSelectResponse,
     EnvConfigGetResponse,
     EnvConfigSetResponse,
+    EnvWhoResponse,
     QueryResultResponse,
     QueryCompleteResponse,
     QueryHistoryListResponse,
     QueryHistoryDeleteResponse,
     QueryExportResponse,
     QueryExplainResponse,
+    ProfileCreateResponse,
+    ProfileDeleteResponse,
+    ProfileRenameResponse,
     ProfilesInvalidateResponse,
     SolutionsListResponse,
+    SchemaEntitiesResponse,
+    SchemaAttributesResponse,
 } from './types.js';
 
 /**
@@ -322,6 +334,58 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     // ── Profile management ──────────────────────────────────────────────────
+
+    /**
+     * Creates a new authentication profile.
+     */
+    async profilesCreate(params: {
+        name?: string;
+        authMethod: string;
+        environmentUrl?: string;
+        applicationId?: string;
+        clientSecret?: string;
+        certificatePath?: string;
+        certificateThumbprint?: string;
+        username?: string;
+        password?: string;
+    }): Promise<ProfileCreateResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling profiles/create (method=${params.authMethod})...`);
+        const result = await this.connection!.sendRequest<ProfileCreateResponse>('profiles/create', params);
+        this.outputChannel.appendLine(`Profile created: index=${result.index}, name=${result.name ?? '(auto)'}`);
+
+        return result;
+    }
+
+    /**
+     * Deletes an authentication profile by index or name.
+     */
+    async profilesDelete(params: { index?: number; name?: string }): Promise<ProfileDeleteResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling profiles/delete with params: ${JSON.stringify(params)}...`);
+        const result = await this.connection!.sendRequest<ProfileDeleteResponse>('profiles/delete', params);
+        this.outputChannel.appendLine(`Profile deleted: ${result.deleted}`);
+
+        return result;
+    }
+
+    /**
+     * Renames an authentication profile.
+     */
+    async profilesRename(currentName: string, newName: string): Promise<ProfileRenameResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
+        const result = await this.connection!.sendRequest<ProfileRenameResponse>(
+            'profiles/rename',
+            { currentName, newName }
+        );
+        this.outputChannel.appendLine(`Profile renamed: ${result.previousName} -> ${result.newName}`);
+
+        return result;
+    }
 
     /**
      * Invalidates (clears cached tokens for) a profile.

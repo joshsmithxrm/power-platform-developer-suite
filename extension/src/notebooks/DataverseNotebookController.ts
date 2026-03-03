@@ -242,6 +242,25 @@ export class DataverseNotebookController implements vscode.Disposable {
                 return;
             }
 
+            // Check for auth errors and offer re-authentication
+            if (this.isAuthError(error)) {
+                const action = await vscode.window.showErrorMessage(
+                    'Session expired. Re-authenticate?',
+                    'Re-authenticate', 'Cancel'
+                );
+                if (action === 'Re-authenticate') {
+                    try {
+                        await this.daemon.profilesInvalidate('');
+                        // Don't retry automatically for notebooks - user can re-execute
+                        execution.replaceOutput([new vscode.NotebookCellOutput([
+                            vscode.NotebookCellOutputItem.text('Re-authenticated. Please re-execute the cell.', 'text/plain'),
+                        ])]);
+                        execution.end(false, Date.now());
+                        return;
+                    } catch { /* fall through */ }
+                }
+            }
+
             execution.replaceOutput([
                 new vscode.NotebookCellOutput([
                     vscode.NotebookCellOutputItem.error(error instanceof Error ? error : new Error(String(error))),
@@ -256,6 +275,14 @@ export class DataverseNotebookController implements vscode.Disposable {
     private looksLikeFetchXml(content: string): boolean {
         const trimmed = content.trimStart().toLowerCase();
         return trimmed.startsWith('<fetch') || trimmed.startsWith('<?xml');
+    }
+
+    private isAuthError(error: unknown): boolean {
+        const msg = error instanceof Error ? error.message : String(error);
+        return msg.toLowerCase().includes('auth') ||
+               msg.toLowerCase().includes('token') ||
+               msg.toLowerCase().includes('unauthorized') ||
+               msg.toLowerCase().includes('401');
     }
 
     // ========== AUTO LANGUAGE SWITCHING ==========
