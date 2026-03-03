@@ -252,7 +252,7 @@ export class DataverseNotebookController implements vscode.Disposable {
                     vscode.NotebookCellOutputItem.text('Query cancelled', 'text/plain'),
                 ])]);
                 execution.end(false, Date.now());
-                tokenDisposable.dispose();
+                // tokenDisposable is cleaned up in the finally block
                 return;
             }
 

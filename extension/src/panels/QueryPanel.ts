@@ -92,11 +92,15 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     override dispose(): void {
+        // Guard: super.dispose() checks _disposed, but we must also guard
+        // the instances splice to prevent re-entrant onDidDispose removing
+        // the wrong panel (splice(-1, 1) removes last element).
         const idx = QueryPanel.instances.indexOf(this);
         if (idx >= 0) QueryPanel.instances.splice(idx, 1);
         this.lastSql = undefined;
         this.lastResult = undefined;
         this.allRecords = [];
+        // super.dispose() has its own _disposed guard to prevent re-entrancy
         super.dispose();
     }
 

@@ -150,12 +150,13 @@ export class DaemonClient implements vscode.Disposable {
 
         // Startup handshake: race a health check against the process exit event
         // and a startup timeout to detect immediate failures or hangs.
-        const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
                 () => reject(new Error(`Daemon startup timed out after ${DaemonClient.STARTUP_TIMEOUT_MS / 1000}s`)),
                 DaemonClient.STARTUP_TIMEOUT_MS
-            )
-        );
+            );
+        });
 
         try {
             await Promise.race([
@@ -169,6 +170,8 @@ export class DaemonClient implements vscode.Disposable {
             this.process?.kill();
             this.process = null;
             throw err;
+        } finally {
+            clearTimeout(timeoutId);
         }
 
         // Handshake succeeded — stop the exitPromise from ever rejecting again
