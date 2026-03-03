@@ -407,6 +407,26 @@ export class QueryPanel extends WebviewPanelBase {
         }
     });
 
+    // ── Delegated table event handlers (set up once, not per-render) ──
+    resultsWrapper.addEventListener('click', (e) => {
+        const th = e.target.closest('th[data-col]');
+        if (th) {
+            const col = parseInt(th.dataset.col);
+            if (sortColumn === col) { sortAsc = !sortAsc; }
+            else { sortColumn = col; sortAsc = true; }
+            sortAndRender();
+            return;
+        }
+        const td = e.target.closest('td[data-row]');
+        if (td) {
+            const cellId = td.dataset.row + ':' + td.dataset.col;
+            if (!e.ctrlKey && !e.metaKey) selectedCells.clear();
+            if (selectedCells.has(cellId)) selectedCells.delete(cellId);
+            else selectedCells.add(cellId);
+            updateCellSelection();
+        }
+    });
+
     // ── Keyboard shortcuts ──
     sqlEditor.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -578,27 +598,6 @@ export class QueryPanel extends WebviewPanelBase {
         });
         html += '</tbody></table>';
         resultsWrapper.innerHTML = html;
-
-        // Attach sort handlers
-        resultsWrapper.querySelectorAll('th').forEach(th => {
-            th.addEventListener('click', () => {
-                const col = parseInt(th.dataset.col);
-                if (sortColumn === col) { sortAsc = !sortAsc; }
-                else { sortColumn = col; sortAsc = true; }
-                sortAndRender();
-            });
-        });
-
-        // Attach cell click for selection
-        resultsWrapper.querySelectorAll('td').forEach(td => {
-            td.addEventListener('click', (e) => {
-                const cellId = td.dataset.row + ':' + td.dataset.col;
-                if (!e.ctrlKey && !e.metaKey) selectedCells.clear();
-                if (selectedCells.has(cellId)) selectedCells.delete(cellId);
-                else selectedCells.add(cellId);
-                updateCellSelection();
-            });
-        });
     }
 
     function sortAndRender() {
