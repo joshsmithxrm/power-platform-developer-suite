@@ -54,8 +54,11 @@ export class QueryPanel extends WebviewPanelBase {
                     case 'loadMore':
                         await this.loadMore(message.pagingCookie as string, message.page as number);
                         break;
+                    case 'explainQuery':
+                        await this.explainQuery(message.sql as string);
+                        break;
                     case 'exportResults':
-                        await this.exportResults(message.format as string);
+                        await this.exportResults();
                         break;
                     case 'showHistory': {
                         const sql = await showQueryHistory(this.daemon);
@@ -141,6 +144,21 @@ export class QueryPanel extends WebviewPanelBase {
         }
     }
 
+    private async explainQuery(sql: string): Promise<void> {
+        try {
+            const result = await this.daemon.queryExplain(sql);
+            const language = result.format === 'fetchxml' ? 'xml' : 'text';
+            const doc = await vscode.workspace.openTextDocument({
+                content: result.plan,
+                language,
+            });
+            await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`EXPLAIN failed: ${msg}`);
+        }
+    }
+
     private async loadMore(pagingCookie: string, page: number): Promise<void> {
         if (!this.lastResult) return;
         try {
@@ -159,12 +177,24 @@ export class QueryPanel extends WebviewPanelBase {
         }
     }
 
-    private async exportResults(format: string): Promise<void> {
+    private async exportResults(): Promise<void> {
         if (!this.lastResult || this.allRecords.length === 0) {
             vscode.window.showWarningMessage('No results to export. Run a query first.');
             return;
         }
 
+        const formatPick = await vscode.window.showQuickPick([
+            { label: 'CSV', description: 'Comma-separated values', format: 'csv' },
+            { label: 'TSV', description: 'Tab-separated values', format: 'tsv' },
+            { label: 'JSON', description: 'JSON array', format: 'json' },
+        ], {
+            title: `Export ${this.allRecords.length} rows`,
+            placeHolder: 'Select export format',
+        });
+
+        if (!formatPick) return;
+
+        const format = formatPick.format;
         const columns = this.lastResult.columns;
         let content: string;
         let fileExt: string;
@@ -262,6 +292,7 @@ export class QueryPanel extends WebviewPanelBase {
 <div class="toolbar">
     <vscode-button id="execute-btn" appearance="primary">Execute</vscode-button>
     <vscode-button id="fetchxml-btn" appearance="secondary">FetchXML</vscode-button>
+    <vscode-button id="explain-btn" appearance="secondary">EXPLAIN</vscode-button>
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
     <vscode-button id="tds-toggle-btn" appearance="secondary" title="Toggle TDS endpoint">TDS Off</vscode-button>
@@ -301,6 +332,7 @@ export class QueryPanel extends WebviewPanelBase {
     const sqlEditor = document.getElementById('sql-editor');
     const executeBtn = document.getElementById('execute-btn');
     const fetchxmlBtn = document.getElementById('fetchxml-btn');
+    const explainBtn = document.getElementById('explain-btn');
     const exportBtn = document.getElementById('export-btn');
     const historyBtn = document.getElementById('history-btn');
     const filterBtn = document.getElementById('filter-btn');
@@ -340,8 +372,12 @@ export class QueryPanel extends WebviewPanelBase {
         const sql = sqlEditor.value.trim();
         if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
     });
+    explainBtn.addEventListener('click', () => {
+        const sql = sqlEditor.value.trim();
+        if (sql) vscode.postMessage({ command: 'explainQuery', sql });
+    });
     exportBtn.addEventListener('click', () => {
-        vscode.postMessage({ command: 'exportResults', format: 'csv' });
+        vscode.postMessage({ command: 'exportResults' });
     });
     historyBtn.addEventListener('click', () => {
         vscode.postMessage({ command: 'showHistory' });
