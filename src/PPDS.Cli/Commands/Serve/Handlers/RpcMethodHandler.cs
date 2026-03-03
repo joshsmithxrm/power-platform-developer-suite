@@ -340,7 +340,7 @@ public class RpcMethodHandler
     [JsonRpcMethod("env/who")]
     public async Task<EnvWhoResponse> EnvWhoAsync(CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithActiveProfileAsync(async (sp, profile, env, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             await using var client = await pool.GetClientAsync(cancellationToken: ct);
@@ -355,12 +355,8 @@ public class RpcMethodHandler
             var orgId = client.ConnectedOrgId ?? Guid.Empty;
             var orgVersion = client.ConnectedOrgVersion?.ToString();
 
-            // Get environment info from the active profile for supplementary details
-            var store = _authServices.GetRequiredService<ProfileStore>();
-            var collection = await store.LoadAsync(ct);
-            var profile = collection.ActiveProfile!;
-            var env = profile.Environment!;
-
+            // Use the already-validated profile and environment passed by WithActiveProfileAsync —
+            // no need to reload from ProfileStore, which avoids a null-forgiving operator race.
             return new EnvWhoResponse
             {
                 OrganizationName = orgName ?? env.DisplayName,
@@ -1284,17 +1280,18 @@ public class RpcMethodHandler
     }
 
     /// <summary>
-    /// Executes an action with an active profile's service provider.
-    /// Handles profile loading, validation, and service provider resolution via the pool manager.
+    /// Executes an action with the validated active profile, its environment, and a cached service provider.
+    /// Profile and environment are loaded once, validated, then passed directly into the lambda —
+    /// eliminating the need for callers to reload the store or use null-forgiving operators.
     /// The service provider is long-lived (cached by the pool manager) — do NOT dispose it inside the action.
     /// </summary>
     /// <typeparam name="T">The return type of the action.</typeparam>
-    /// <param name="action">The action to execute with the service provider.</param>
+    /// <param name="action">The action to execute with the service provider, profile, and environment.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result of the action.</returns>
     /// <exception cref="RpcException">Thrown when no active profile or environment is configured.</exception>
     private async Task<T> WithActiveProfileAsync<T>(
-        Func<IServiceProvider, CancellationToken, Task<T>> action,
+        Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1318,8 +1315,19 @@ public class RpcMethodHandler
             deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
             cancellationToken: cancellationToken);
 
-        return await action(serviceProvider, cancellationToken);
+        return await action(serviceProvider, profile, environment, cancellationToken);
     }
+
+    /// <summary>
+    /// Convenience overload for actions that only need the service provider and cancellation token.
+    /// Wraps the full overload, discarding the profile and environment parameters.
+    /// </summary>
+    private Task<T> WithActiveProfileAsync<T>(
+        Func<IServiceProvider, CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+        => WithActiveProfileAsync<T>(
+            (sp, _, _, ct) => action(sp, ct),
+            cancellationToken);
 
     #endregion
 
