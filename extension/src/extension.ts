@@ -110,11 +110,12 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── IntelliSense Completion Provider ──────────────────────────────
-    // Register IntelliSense for SQL only (FetchXML completion not yet supported)
-    // TODO: Add FetchXML completion support when daemon's query/complete handles it
+    // Register IntelliSense for both SQL and FetchXML.
+    // The language is forwarded to the daemon which routes to the appropriate engine.
     const completionProvider = new DataverseCompletionProvider(client);
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
+        vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<', '"'),
     );
 
     // ── Data Explorer ─────────────────────────────────────────────────

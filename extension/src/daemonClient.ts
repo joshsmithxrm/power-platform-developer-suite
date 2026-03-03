@@ -343,11 +343,12 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     /**
-     * Gets IntelliSense completion items for SQL/FetchXML.
+     * Gets IntelliSense completion items for SQL or FetchXML.
+     * Pass language='fetchxml' for FetchXML documents; omit or pass 'sql' for SQL.
      * Uses quiet (non-logging) transport to avoid flooding the output channel
      * on every keystroke.
      */
-    async queryComplete(params: { sql: string; cursorOffset: number }): Promise<QueryCompleteResponse> {
+    async queryComplete(params: { sql: string; cursorOffset: number; language?: string }): Promise<QueryCompleteResponse> {
         return this.sendRequestQuiet<QueryCompleteResponse>('query/complete', params);
     }
 

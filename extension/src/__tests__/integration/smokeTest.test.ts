@@ -236,11 +236,11 @@ describe('Extension Smoke Tests', () => {
 
         ext.activate(context);
 
-        // Should register for SQL only (FetchXML completion not yet supported)
+        // Should register for both SQL and FetchXML
         const calls = (vscode.languages.registerCompletionItemProvider as any).mock.calls;
         const languages = calls.map((c: any[]) => c[0]?.language);
         expect(languages).toContain('sql');
-        expect(languages).not.toContain('fetchxml');
+        expect(languages).toContain('fetchxml');
     });
 
     it('DaemonClient class can be imported', async () => {
