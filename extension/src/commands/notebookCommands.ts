@@ -72,6 +72,7 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
         const newLang = currentLanguage === 'fetchxml' ? 'sql' : 'fetchxml';
         await vscode.languages.setTextDocumentLanguage(cell.document, newLang);
     } catch {
+        vscode.window.showWarningMessage('Could not transpile. Language toggled without conversion.');
         const newLang = currentLanguage === 'fetchxml' ? 'sql' : 'fetchxml';
         await vscode.languages.setTextDocumentLanguage(cell.document, newLang);
     }
