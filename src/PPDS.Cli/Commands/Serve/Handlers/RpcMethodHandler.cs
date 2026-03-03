@@ -14,6 +14,7 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Security;
 using PPDS.Dataverse.Services;
 using PPDS.Dataverse.Sql.Intellisense;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
@@ -1364,18 +1365,30 @@ public class RpcMethodHandler
     /// Creates a new authentication profile.
     /// Maps to: ppds auth create --json
     /// </summary>
+    /// <remarks>
+    /// SECURITY: <paramref name="clientSecret"/>, <paramref name="password"/>, and
+    /// <paramref name="certificatePassword"/> are transmitted as plain-text JSON-RPC parameters
+    /// over the local stdio pipe. This is acceptable for local-only IPC (the pipe is not
+    /// network-accessible) but these values MUST NOT be logged anywhere in the call stack.
+    /// StreamJsonRpc trace logging is deliberately not configured in ServeCommand to avoid
+    /// capturing sensitive parameters. The extension should prefer device code or browser-based
+    /// auth flows (Interactive, DeviceCode) over secret-bearing flows when possible.
+    /// </remarks>
     [JsonRpcMethod("profiles/create")]
     public async Task<ProfileCreateResponse> ProfilesCreateAsync(
         string authMethod,
         string? name = null,
         string? applicationId = null,
+        [SensitiveData("Client secret transmitted as plain-text over local stdio pipe")]
         string? clientSecret = null,
         string? tenantId = null,
         string? environmentUrl = null,
         string? certificatePath = null,
+        [SensitiveData("Certificate password transmitted as plain-text over local stdio pipe")]
         string? certificatePassword = null,
         string? certificateThumbprint = null,
         string? username = null,
+        [SensitiveData("Password transmitted as plain-text over local stdio pipe")]
         string? password = null,
         CancellationToken cancellationToken = default)
     {
