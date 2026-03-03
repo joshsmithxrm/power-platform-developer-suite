@@ -13,6 +13,7 @@ import {
 } from './commands/notebookCommands.js';
 import { DataverseCompletionProvider } from './providers/completionProvider.js';
 import { QueryPanel } from './panels/QueryPanel.js';
+import { SolutionsTreeDataProvider } from './views/solutionsTreeView.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -128,18 +129,32 @@ export function activate(context: vscode.ExtensionContext) {
         }),
     );
 
-    // ── Placeholder commands for tools tree items ───────────────────────
-    // (will be implemented in later tasks)
-
     const openNotebooksCmd = vscode.commands.registerCommand('ppds.openNotebooks', () => {
         void createNewNotebook();
     });
     context.subscriptions.push(openNotebooksCmd);
 
-    const openSolutionsCmd = vscode.commands.registerCommand('ppds.openSolutions', () => {
-        vscode.window.showInformationMessage('Solutions will be available in a future update.');
+    // ── Solutions Tree View ─────────────────────────────────────────────
+    const solutionsTreeProvider = new SolutionsTreeDataProvider(client);
+    const solutionsTreeView = vscode.window.createTreeView('ppds.solutions', {
+        treeDataProvider: solutionsTreeProvider,
+        showCollapseAll: true,
     });
-    context.subscriptions.push(openSolutionsCmd);
+    context.subscriptions.push(solutionsTreeView, solutionsTreeProvider);
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.openSolutions', () => {
+            void vscode.commands.executeCommand('ppds.solutions.focus');
+        }),
+        vscode.commands.registerCommand('ppds.refreshSolutions', () => {
+            solutionsTreeProvider.refresh();
+        }),
+        vscode.commands.registerCommand('ppds.toggleManagedSolutions', () => {
+            solutionsTreeProvider.toggleManaged();
+            const state = solutionsTreeProvider.getIncludeManaged() ? 'shown' : 'hidden';
+            vscode.window.showInformationMessage(`Managed solutions: ${state}`);
+        }),
+    );
 }
 
 export function deactivate() {
