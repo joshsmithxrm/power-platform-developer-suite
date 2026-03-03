@@ -647,6 +647,10 @@ async function runRenameProfile(
         return; // User cancelled
     }
 
+    // The daemon's profiles/rename RPC only accepts currentName as a string.
+    // ProfileStore.GetByNameOrIndex supports plain index strings (e.g. "0"),
+    // so passing index.toString() for unnamed profiles resolves correctly on
+    // the C# side. Long-term, the daemon should expose an index-based overload.
     const currentName = name ?? index.toString();
     await daemonClient.profilesRename(currentName, newName.trim());
     refreshProfiles();
