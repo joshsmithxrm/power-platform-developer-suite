@@ -20,16 +20,62 @@
     "Microsoft"
   ],
   "activationEvents": [
-    "onCommand:ppds.listProfiles"
+    "onView:ppds.profiles"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ppds",
+          "title": "Power Platform Developer Suite",
+          "icon": "images/activity-bar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ppds": [
+        {
+          "id": "ppds.profiles",
+          "name": "Profiles"
+        },
+        {
+          "id": "ppds.tools",
+          "name": "Tools"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ppds.listProfiles",
         "title": "PPDS: List Profiles"
+      },
+      {
+        "command": "ppds.refreshProfiles",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.selectProfile",
+        "title": "PPDS: Select Profile"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ppds.refreshProfiles",
+          "when": "view == ppds.profiles",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ppds.selectProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "inline"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
