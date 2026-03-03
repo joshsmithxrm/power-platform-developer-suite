@@ -24,15 +24,16 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Create the daemon client
     daemonClient = new DaemonClient();
-    context.subscriptions.push(daemonClient);
+    const client = daemonClient; // Local const for type narrowing in closures
+    context.subscriptions.push(client);
 
     // Auto-start daemon if configured (default: true)
     if (config.get<boolean>('autoStartDaemon', true)) {
-        void daemonClient.start();
+        void client.start();
     }
 
     // ── Profile Tree View ────────────────────────────────────────────────
-    const profileTreeProvider = new ProfileTreeDataProvider(daemonClient);
+    const profileTreeProvider = new ProfileTreeDataProvider(client);
     const profileTreeView = vscode.window.createTreeView('ppds.profiles', {
         treeDataProvider: profileTreeProvider,
         showCollapseAll: false,
@@ -49,7 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Sync tools tree disabled state with profile availability
     const refreshToolsState = () => {
-        daemonClient.authList().then(result => {
+        client.authList().then(result => {
             toolsTreeProvider.setHasActiveProfile(result.activeProfile !== null);
         }).catch(() => {
             toolsTreeProvider.setHasActiveProfile(false);
@@ -58,10 +59,10 @@ export function activate(context: vscode.ExtensionContext) {
     refreshToolsState();
 
     // ── Profile Commands ────────────────────────────────────────────────
-    registerProfileCommands(context, daemonClient, () => { profileTreeProvider.refresh(); refreshToolsState(); });
+    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
     // ── Environment Commands ─────────────────────────────────────────────
-    const envStatusBar = registerEnvironmentCommands(context, daemonClient, () => { profileTreeProvider.refresh(); refreshToolsState(); });
+    const envStatusBar = registerEnvironmentCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
     // Respect showEnvironmentInStatusBar setting
     if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {
@@ -69,7 +70,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // ── Environment Config Command ────────────────────────────────────
-    registerEnvironmentConfigCommand(context, daemonClient, () => profileTreeProvider.refresh());
+    registerEnvironmentConfigCommand(context, client, () => profileTreeProvider.refresh());
 
     // ── Notebook Serializer ───────────────────────────────────────────
     context.subscriptions.push(
@@ -79,7 +80,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── Notebook Controller ───────────────────────────────────────────
-    const notebookController = new DataverseNotebookController(daemonClient);
+    const notebookController = new DataverseNotebookController(client);
     context.subscriptions.push(notebookController);
 
     // Register environment selection command for notebooks
@@ -90,10 +91,10 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Notebook Commands ─────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.newNotebook', createNewNotebook),
-        vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(daemonClient)),
+        vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(client)),
         vscode.commands.registerCommand('ppds.openCellInDataExplorer', () => {
             openCellInDataExplorer((sql: string) => {
-                QueryPanel.show(context.extensionUri, daemonClient, sql);
+                QueryPanel.show(context.extensionUri, client, sql);
             });
         }),
         vscode.commands.registerCommand('ppds.exportCellResultsCsv', () => exportCellResults(notebookController, 'csv')),
@@ -101,7 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── IntelliSense Completion Provider ──────────────────────────────
-    const completionProvider = new DataverseCompletionProvider(daemonClient);
+    const completionProvider = new DataverseCompletionProvider(client);
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
         vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<'),
@@ -110,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Data Explorer ─────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.dataExplorer', () => {
-            QueryPanel.show(context.extensionUri, daemonClient);
+            QueryPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             openQueryInNotebook(sql ?? '');
