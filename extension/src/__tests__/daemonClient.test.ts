@@ -47,21 +47,38 @@ vi.mock('child_process', () => ({
 
 import { DaemonClient } from '../daemonClient.js';
 
+// Minimal auth/list response used to satisfy the startup handshake
+const HANDSHAKE_MOCK = { activeProfile: null, activeProfileIndex: null, profiles: [] };
+
 describe('DaemonClient', () => {
     let client: DaemonClient;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.clearAllMocks();
         client = new DaemonClient();
+        // Pre-connect the client so individual tests don't trigger the startup
+        // handshake and consume their own mocked responses.
+        mockConnection.sendRequest.mockResolvedValue(HANDSHAKE_MOCK);
+        await client.authList(); // triggers start() + handshake + authList RPC
+        vi.clearAllMocks(); // reset call counts; connection remains live
     });
 
     describe('ensureConnected', () => {
+        // Tests in this block need an unconnected client to observe startup behaviour
+        beforeEach(() => {
+            vi.clearAllMocks();
+            client = new DaemonClient();
+        });
+
         it('should start the daemon on first RPC call', async () => {
             const mockResult = {
                 activeProfile: null,
                 activeProfileIndex: null,
                 profiles: [],
             };
+            // First call: startup handshake (auth/list from start())
+            // Second call: the actual authList RPC
+            mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
             await client.authList();
@@ -116,8 +133,8 @@ describe('DaemonClient', () => {
             const { spawn } = await import('child_process');
             expect(spawn).toHaveBeenCalledTimes(1);
 
-            // Both RPC requests should have been sent
-            expect(mockConnection.sendRequest).toHaveBeenCalledTimes(2);
+            // Startup handshake (auth/list) + both RPC requests = 3 total
+            expect(mockConnection.sendRequest).toHaveBeenCalledTimes(3);
         });
 
         it('should not restart if already connected', async () => {
@@ -757,17 +774,22 @@ describe('DaemonClient', () => {
         });
 
         it('should queue handler if called before connection is established', async () => {
+            // Needs an unconnected client to test queuing behaviour
+            vi.clearAllMocks();
+            const unconnectedClient = new DaemonClient();
             const handler = vi.fn();
 
             // Should NOT throw — queues for deferred registration
-            expect(() => client.onDeviceCode(handler)).not.toThrow();
+            expect(() => unconnectedClient.onDeviceCode(handler)).not.toThrow();
 
             // Handler not yet registered (no connection)
             expect(mockConnection.onNotification).not.toHaveBeenCalled();
 
             // Now connect — handler should be flushed
+            // Two mocks: one for the startup handshake, one for authList RPC
             mockConnection.sendRequest.mockResolvedValueOnce({ profiles: [] });
-            await client.authList();
+            mockConnection.sendRequest.mockResolvedValueOnce({ profiles: [] });
+            await unconnectedClient.authList();
 
             expect(mockConnection.onNotification).toHaveBeenCalledWith('auth/deviceCode', handler);
         });
@@ -791,8 +813,12 @@ describe('DaemonClient', () => {
         });
 
         it('should handle dispose when not connected', () => {
+            // Needs a client that has never been connected
+            vi.clearAllMocks();
+            const unconnectedClient = new DaemonClient();
+
             // Should not throw
-            client.dispose();
+            unconnectedClient.dispose();
 
             expect(mockOutputChannel.dispose).toHaveBeenCalled();
             expect(mockConnection.dispose).not.toHaveBeenCalled();

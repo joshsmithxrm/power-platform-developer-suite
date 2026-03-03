@@ -102,11 +102,24 @@ export class DaemonClient implements vscode.Disposable {
             vscode.window.showErrorMessage(`PPDS daemon error: ${err.message}`);
         });
 
-        this.process.on('exit', (code) => {
+        // Create a promise that rejects if the process exits during startup.
+        // This is used only for the handshake race below; post-startup exit
+        // cleanup is handled by the separate 'exit' listener attached after.
+        let startupExitReject: ((err: Error) => void) | null = null;
+        const exitPromise = new Promise<never>((_, reject) => {
+            startupExitReject = reject;
+        });
+
+        const onExit = (code: number | null) => {
             this.outputChannel.appendLine(`Daemon exited with code ${code}`);
             this.connection = null;
             this.process = null;
-        });
+            this.connectingPromise = null;
+            if (startupExitReject) {
+                startupExitReject(new Error(`Daemon exited during startup with code ${code}`));
+            }
+        };
+        this.process.on('exit', onExit);
 
         // Create JSON-RPC connection over stdio
         const reader = new StreamMessageReader(this.process.stdout);
@@ -121,6 +134,24 @@ export class DaemonClient implements vscode.Disposable {
             this.connection.onNotification(pending.method, pending.handler);
         }
         this.pendingNotificationHandlers = [];
+
+        // Startup handshake: race a health check against the process exit event
+        // to detect immediate daemon failures before accepting the connection
+        try {
+            await Promise.race([
+                this.connection.sendRequest('auth/list', {}),
+                exitPromise,
+            ]);
+        } catch (err) {
+            this.connection?.dispose();
+            this.connection = null;
+            this.process?.kill();
+            this.process = null;
+            throw err;
+        }
+
+        // Handshake succeeded — stop the exitPromise from ever rejecting again
+        startupExitReject = null;
 
         this.outputChannel.appendLine('Daemon connection established');
     }
