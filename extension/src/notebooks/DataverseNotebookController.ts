@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { renderResultsHtml } from './notebookResultRenderer.js';
@@ -216,8 +217,10 @@ export class DataverseNotebookController implements vscode.Disposable {
         const abortController = new AbortController();
         this.activeExecutions.set(cellUri, abortController);
 
+        const cts = new CancellationTokenSource();
         const tokenDisposable = execution.token.onCancellationRequested(() => {
             abortController.abort();
+            cts.cancel();
         });
 
         try {
@@ -251,9 +254,9 @@ export class DataverseNotebookController implements vscode.Disposable {
 
             let result: QueryResultResponse;
             if (isFetchXml) {
-                result = await this.daemon.queryFetch({ fetchXml: content });
+                result = await this.daemon.queryFetch({ fetchXml: content }, cts.token);
             } else {
-                result = await this.daemon.querySql({ sql: content });
+                result = await this.daemon.querySql({ sql: content }, cts.token);
             }
 
             if (abortController.signal.aborted) {
@@ -314,6 +317,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         } finally {
             this.activeExecutions.delete(cellUri);
             tokenDisposable.dispose();
+            cts.dispose();
         }
     }
 
