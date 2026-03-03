@@ -71,6 +71,9 @@ export class QueryPanel extends WebviewPanelBase {
                         }
                         break;
                     }
+                    case 'copyToClipboard':
+                        await vscode.env.clipboard.writeText(message.text as string);
+                        break;
                     case 'ready':
                         if (initialSql) {
                             this.postMessage({ command: 'loadQuery', sql: initialSql });
@@ -646,7 +649,7 @@ export class QueryPanel extends WebviewPanelBase {
             }
             text += vals.join('\\t') + '\\n';
         }
-        navigator.clipboard.writeText(text.trim());
+        vscode.postMessage({ command: 'copyToClipboard', text: text.trim() });
     }
 
     // ── Right-click context menu ──
@@ -683,7 +686,7 @@ export class QueryPanel extends WebviewPanelBase {
                 if (val !== null && val !== undefined) {
                     display = typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
                 }
-                navigator.clipboard.writeText(display);
+                vscode.postMessage({ command: 'copyToClipboard', text: display });
             } else if (action === 'row') {
                 const r = parseInt(td.dataset.row);
                 const vals = columns.map(col => {
@@ -692,7 +695,7 @@ export class QueryPanel extends WebviewPanelBase {
                     if (val === null || val === undefined) return '';
                     return typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
                 });
-                navigator.clipboard.writeText(vals.join('\\t'));
+                vscode.postMessage({ command: 'copyToClipboard', text: vals.join('\\t') });
             } else if (action === 'all') {
                 const headers = columns.map(c => c.alias || c.logicalName);
                 let text = headers.join('\\t') + '\\n';
@@ -705,7 +708,7 @@ export class QueryPanel extends WebviewPanelBase {
                     });
                     text += vals.join('\\t') + '\\n';
                 });
-                navigator.clipboard.writeText(text.trim());
+                vscode.postMessage({ command: 'copyToClipboard', text: text.trim() });
             }
             removeContextMenu();
         });
