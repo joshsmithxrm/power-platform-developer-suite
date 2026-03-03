@@ -66,6 +66,7 @@ export class DaemonClient implements vscode.Disposable {
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
     private connectingPromise: Promise<void> | null = null;
+    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
     private outputChannel: vscode.OutputChannel;
 
     constructor() {
@@ -115,6 +116,12 @@ export class DaemonClient implements vscode.Disposable {
 
         // Start listening for messages
         this.connection.listen();
+
+        // Flush any notification handlers that were registered before connect
+        for (const pending of this.pendingNotificationHandlers) {
+            this.connection.onNotification(pending.method, pending.handler);
+        }
+        this.pendingNotificationHandlers = [];
 
         this.outputChannel.appendLine('Daemon connection established');
     }
@@ -483,10 +490,12 @@ export class DaemonClient implements vscode.Disposable {
      * The daemon sends these when interactive browser-based auth is required.
      */
     onDeviceCode(handler: (params: { userCode: string; verificationUrl: string; message: string }) => void): void {
-        if (!this.connection) {
-            throw new Error('Cannot register notification handler: daemon is not connected. Call start() first.');
+        const method = 'auth/deviceCode';
+        if (this.connection) {
+            this.connection.onNotification(method, handler);
+        } else {
+            this.pendingNotificationHandlers.push({ method, handler });
         }
-        this.connection.onNotification('auth/deviceCode', handler);
         this.outputChannel.appendLine('Registered auth/deviceCode notification handler');
     }
 
