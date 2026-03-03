@@ -6,6 +6,16 @@ const OVERSCAN = 5;
 const CONTAINER_HEIGHT = 400;
 
 /**
+ * Structured cell data for virtual scroll rendering.
+ * text is always plain text (NOT pre-escaped).
+ * url, if present, makes the cell a clickable link (for lookup fields and primary keys).
+ */
+export interface CellData {
+    text: string;
+    url?: string;
+}
+
+/**
  * Renders query results as HTML with virtual scrolling for notebook cell output.
  */
 export function renderResultsHtml(result: QueryResultResponse, environmentUrl: string | undefined): string {
@@ -40,17 +50,17 @@ export function renderResultsHtml(result: QueryResultResponse, environmentUrl: s
                 </table>
             </div>
         </div>
-        <script>${generateVirtualScrollScript(JSON.stringify(rowData), {
+        ${generateVirtualScrollScript(JSON.stringify(rowData), {
             rowHeight: ROW_HEIGHT,
             overscan: OVERSCAN,
             scrollContainerId,
             tbodyId,
             columnCount: result.columns.length
-        })}</script>
+        })}
     `;
 }
 
-function prepareRowData(result: QueryResultResponse, environmentUrl: string | undefined): string[][] {
+function prepareRowData(result: QueryResultResponse, environmentUrl: string | undefined): CellData[][] {
     const primaryKeyColumn = result.entityName ? `${result.entityName}id` : null;
 
     return result.records.map(record => {
@@ -59,7 +69,7 @@ function prepareRowData(result: QueryResultResponse, environmentUrl: string | un
             const rawValue = record[key];
 
             if (rawValue === null || rawValue === undefined) {
-                return '';
+                return { text: '' };
             }
 
             // Structured lookup value
@@ -68,15 +78,15 @@ function prepareRowData(result: QueryResultResponse, environmentUrl: string | un
                 const displayText = String(lookup.formatted ?? lookup.value ?? '');
                 if (environmentUrl && lookup.entityType && lookup.entityId) {
                     const url = buildRecordUrl(environmentUrl, lookup.entityType, lookup.entityId);
-                    return `<a href="${escapeHtml(url)}" target="_blank">${escapeHtml(displayText)}</a>`;
+                    return { text: displayText, url };
                 }
-                return escapeHtml(displayText);
+                return { text: displayText };
             }
 
             // Structured formatted value
             if (typeof rawValue === 'object' && rawValue !== null && 'formatted' in rawValue) {
                 const formatted = rawValue as { value: unknown; formatted: string | null };
-                return escapeHtml(String(formatted.formatted ?? formatted.value ?? ''));
+                return { text: String(formatted.formatted ?? formatted.value ?? '') };
             }
 
             // Primary key column — make GUID clickable
@@ -85,10 +95,10 @@ function prepareRowData(result: QueryResultResponse, environmentUrl: string | un
                 && col.logicalName.toLowerCase() === primaryKeyColumn.toLowerCase()
                 && isGuid(stringValue)) {
                 const url = buildRecordUrl(environmentUrl, result.entityName, stringValue);
-                return `<a href="${escapeHtml(url)}" target="_blank">${escapeHtml(stringValue)}</a>`;
+                return { text: stringValue, url };
             }
 
-            return escapeHtml(stringValue);
+            return { text: stringValue };
         });
     });
 }
