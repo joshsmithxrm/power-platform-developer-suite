@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
@@ -328,6 +329,49 @@ public class RpcMethodHandler
             EnvironmentId = resolved.EnvironmentId,
             ResolutionMethod = result.Method.ToString()
         };
+    }
+
+    /// <summary>
+    /// Gets WhoAmI information for the current environment.
+    /// Maps to: ppds env who --json
+    /// </summary>
+    [JsonRpcMethod("env/who")]
+    public async Task<EnvWhoResponse> EnvWhoAsync(CancellationToken cancellationToken = default)
+    {
+        return await WithActiveProfileAsync(async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            await using var client = await pool.GetClientAsync(cancellationToken: ct);
+
+            // WhoAmI verifies the connection and returns user/org IDs
+            var whoAmI = (WhoAmIResponse)await client.ExecuteAsync(
+                new WhoAmIRequest(), ct);
+
+            // Org info is available directly on the client
+            var orgName = client.ConnectedOrgFriendlyName;
+            var orgUniqueName = client.ConnectedOrgUniqueName;
+            var orgId = client.ConnectedOrgId ?? Guid.Empty;
+            var orgVersion = client.ConnectedOrgVersion?.ToString();
+
+            // Get environment info from the active profile for supplementary details
+            var store = _authServices.GetRequiredService<ProfileStore>();
+            var collection = await store.LoadAsync(ct);
+            var profile = collection.ActiveProfile!;
+            var env = profile.Environment!;
+
+            return new EnvWhoResponse
+            {
+                OrganizationName = orgName ?? env.DisplayName,
+                Url = env.Url,
+                UniqueName = orgUniqueName ?? env.UniqueName ?? "",
+                Version = orgVersion ?? "",
+                OrganizationId = orgId != Guid.Empty ? orgId : Guid.TryParse(env.OrganizationId, out var parsedOrgId) ? parsedOrgId : Guid.Empty,
+                UserId = whoAmI.UserId,
+                BusinessUnitId = whoAmI.BusinessUnitId,
+                ConnectedAs = profile.IdentityDisplay,
+                EnvironmentType = env.Type
+            };
+        }, cancellationToken);
     }
 
     #endregion
@@ -1365,6 +1409,40 @@ public class EnvSelectResponse
 
     [JsonPropertyName("resolutionMethod")]
     public string ResolutionMethod { get; set; } = "";
+}
+
+/// <summary>
+/// Response for env/who method. Returns WhoAmI and environment details.
+/// </summary>
+public class EnvWhoResponse
+{
+    [JsonPropertyName("organizationName")]
+    public string OrganizationName { get; set; } = "";
+
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = "";
+
+    [JsonPropertyName("organizationId")]
+    public Guid OrganizationId { get; set; }
+
+    [JsonPropertyName("userId")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("businessUnitId")]
+    public Guid BusinessUnitId { get; set; }
+
+    [JsonPropertyName("connectedAs")]
+    public string ConnectedAs { get; set; } = "";
+
+    [JsonPropertyName("environmentType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentType { get; set; }
 }
 
 /// <summary>
