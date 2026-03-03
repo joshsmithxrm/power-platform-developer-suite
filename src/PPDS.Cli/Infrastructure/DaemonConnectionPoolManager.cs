@@ -70,6 +70,32 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         CancellationToken cancellationToken = default)
     {
+        var entry = await GetOrCreateEntryAsync(profileNames, environmentUrl, deviceCodeCallback, cancellationToken)
+            .ConfigureAwait(false);
+        return entry.Pool;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IServiceProvider> GetOrCreateServiceProviderAsync(
+        IReadOnlyList<string> profileNames,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = await GetOrCreateEntryAsync(profileNames, environmentUrl, deviceCodeCallback, cancellationToken)
+            .ConfigureAwait(false);
+        return entry.ServiceProvider;
+    }
+
+    /// <summary>
+    /// Core implementation that gets or creates a cached pool entry, shared by both public methods.
+    /// </summary>
+    private async Task<CachedPoolEntry> GetOrCreateEntryAsync(
+        IReadOnlyList<string> profileNames,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
         if (profileNames == null || profileNames.Count == 0)
@@ -97,8 +123,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
 
         try
         {
-            var entry = await lazyEntry.Value.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-            return entry.Pool;
+            return await lazyEntry.Value.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
