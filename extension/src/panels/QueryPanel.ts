@@ -166,11 +166,11 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     private async loadMore(pagingCookie: string, page: number): Promise<void> {
-        if (!this.lastResult) return;
+        if (!this.lastResult || !this.lastSql) return;
         try {
             this.postMessage({ command: 'executionStarted' });
             const result = await this.daemon.querySql({
-                sql: '',
+                sql: this.lastSql,
                 page,
                 pagingCookie,
             });
