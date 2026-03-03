@@ -4,7 +4,8 @@ import {
     createMessageConnection,
     MessageConnection,
     StreamMessageReader,
-    StreamMessageWriter
+    StreamMessageWriter,
+    CancellationToken
 } from 'vscode-jsonrpc/node';
 import type {
     AuthListResponse,
@@ -308,11 +309,13 @@ export class DaemonClient implements vscode.Disposable {
         count?: boolean;
         showFetchXml?: boolean;
         useTds?: boolean;
-    }): Promise<QueryResultResponse> {
+    }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
         this.outputChannel.appendLine(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
-        const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params);
+        const result = token
+            ? await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token)
+            : await this.connection!.sendRequest<QueryResultResponse>('query/sql', params);
         this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
@@ -327,11 +330,13 @@ export class DaemonClient implements vscode.Disposable {
         page?: number;
         pagingCookie?: string;
         count?: boolean;
-    }): Promise<QueryResultResponse> {
+    }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
         this.outputChannel.appendLine('Calling query/fetch...');
-        const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
+        const result = token
+            ? await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token)
+            : await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
         this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
