@@ -58,25 +58,29 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                     'Delete this history entry?', { modal: true }, 'Delete'
                 );
                 if (confirm === 'Delete') {
-                    await daemon.queryHistoryDelete(entry.id);
-                    // Refresh the list
-                    const refreshed = await daemon.queryHistoryList(undefined, 50);
-                    quickPick.items = refreshed.entries.map(e2 => {
-                        const d = new Date(e2.executedAt);
-                        const ds = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                        const sp = e2.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
-                        return {
-                            label: `[${ds}] ${sp}${e2.sql.length > 50 ? '...' : ''}`,
-                            description: e2.rowCount !== null ? `(${e2.rowCount.toLocaleString()} rows)` : '',
-                            detail: e2.sql,
-                            entry: e2,
-                            buttons: [
-                                { iconPath: new vscode.ThemeIcon('play'), tooltip: 'Run this query' },
-                                { iconPath: new vscode.ThemeIcon('copy'), tooltip: 'Copy SQL' },
-                                { iconPath: new vscode.ThemeIcon('trash'), tooltip: 'Delete' },
-                            ],
-                        };
-                    });
+                    try {
+                        await daemon.queryHistoryDelete(entry.id);
+                        const refreshed = await daemon.queryHistoryList(undefined, 50);
+                        quickPick.items = refreshed.entries.map(e2 => {
+                            const d = new Date(e2.executedAt);
+                            const ds = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                            const sp = e2.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
+                            return {
+                                label: `[${ds}] ${sp}${e2.sql.length > 50 ? '...' : ''}`,
+                                description: e2.rowCount !== null ? `(${e2.rowCount.toLocaleString()} rows)` : '',
+                                detail: e2.sql,
+                                entry: e2,
+                                buttons: [
+                                    { iconPath: new vscode.ThemeIcon('play'), tooltip: 'Run this query' },
+                                    { iconPath: new vscode.ThemeIcon('copy'), tooltip: 'Copy SQL' },
+                                    { iconPath: new vscode.ThemeIcon('trash'), tooltip: 'Delete' },
+                                ],
+                            };
+                        });
+                    } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        vscode.window.showErrorMessage(`Failed to delete history entry: ${msg}`);
+                    }
                 }
             } else if (buttonTooltip === 'Run this query') {
                 resolve(entry.sql);

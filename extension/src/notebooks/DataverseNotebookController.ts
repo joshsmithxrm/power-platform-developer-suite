@@ -73,42 +73,47 @@ export class DataverseNotebookController implements vscode.Disposable {
     // ========== ENVIRONMENT MANAGEMENT ==========
 
     async selectEnvironment(): Promise<void> {
-        const envResult = await this.daemon.envList();
-        if (envResult.environments.length === 0) {
-            vscode.window.showErrorMessage('No environments found. Create a profile and select an environment first.');
-            return;
-        }
-
-        const items = envResult.environments.map(env => ({
-            label: env.friendlyName,
-            description: `${env.type ?? ''} ${env.region ?? ''}`.trim(),
-            detail: env.apiUrl,
-            apiUrl: env.apiUrl,
-            picked: env.isActive,
-        }));
-
-        const selected = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Select Dataverse environment for this notebook',
-        });
-
-        if (selected) {
-            await this.daemon.envSelect(selected.apiUrl);
-            this.selectedEnvironmentUrl = selected.apiUrl;
-            this.selectedEnvironmentName = selected.label;
-            this.updateStatusBar();
-
-            const activeEditor = vscode.window.activeNotebookEditor;
-            if (activeEditor?.notebook.notebookType === 'ppdsnb') {
-                const edit = new vscode.WorkspaceEdit();
-                edit.set(activeEditor.notebook.uri, [
-                    vscode.NotebookEdit.updateNotebookMetadata({
-                        ...activeEditor.notebook.metadata,
-                        environmentName: this.selectedEnvironmentName,
-                        environmentUrl: this.selectedEnvironmentUrl,
-                    }),
-                ]);
-                await vscode.workspace.applyEdit(edit);
+        try {
+            const envResult = await this.daemon.envList();
+            if (envResult.environments.length === 0) {
+                vscode.window.showErrorMessage('No environments found. Create a profile and select an environment first.');
+                return;
             }
+
+            const items = envResult.environments.map(env => ({
+                label: env.friendlyName,
+                description: `${env.type ?? ''} ${env.region ?? ''}`.trim(),
+                detail: env.apiUrl,
+                apiUrl: env.apiUrl,
+                picked: env.isActive,
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select Dataverse environment for this notebook',
+            });
+
+            if (selected) {
+                await this.daemon.envSelect(selected.apiUrl);
+                this.selectedEnvironmentUrl = selected.apiUrl;
+                this.selectedEnvironmentName = selected.label;
+                this.updateStatusBar();
+
+                const activeEditor = vscode.window.activeNotebookEditor;
+                if (activeEditor?.notebook.notebookType === 'ppdsnb') {
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.set(activeEditor.notebook.uri, [
+                        vscode.NotebookEdit.updateNotebookMetadata({
+                            ...activeEditor.notebook.metadata,
+                            environmentName: this.selectedEnvironmentName,
+                            environmentUrl: this.selectedEnvironmentUrl,
+                        }),
+                    ]);
+                    await vscode.workspace.applyEdit(edit);
+                }
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`Failed to select environment: ${msg}`);
         }
     }
 
