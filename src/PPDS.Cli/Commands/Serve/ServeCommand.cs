@@ -48,8 +48,9 @@ public static class ServeCommand
         // Create a lightweight auth service provider for profile/credential store access
         await using var authProvider = ProfileServiceFactory.CreateLocalProvider();
 
-        // Create the RPC target that handles method calls
-        var handler = new RpcMethodHandler(poolManager, authProvider);
+        // Create the RPC target that handles method calls. Dispose cancels the daemon-lifetime
+        // CancellationTokenSource used by fire-and-forget background tasks.
+        using var handler = new RpcMethodHandler(poolManager, authProvider);
 
         // Attach JSON-RPC to the duplex stream with our handler.
         // SECURITY: TraceSource is intentionally NOT configured here. StreamJsonRpc trace logging
