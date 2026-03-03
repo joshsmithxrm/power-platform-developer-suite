@@ -32,6 +32,7 @@ export class QueryPanel extends WebviewPanelBase {
     private allRecords: Record<string, unknown>[] = [];
     private lastResult: QueryResultResponse | undefined;
     private lastSql: string | undefined;
+    private lastUseTds = false;
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -110,6 +111,7 @@ export class QueryPanel extends WebviewPanelBase {
         const idx = QueryPanel.instances.indexOf(this);
         if (idx >= 0) QueryPanel.instances.splice(idx, 1);
         this.lastSql = undefined;
+        this.lastUseTds = false;
         this.lastResult = undefined;
         this.allRecords = [];
         // super.dispose() has its own _disposed guard to prevent re-entrancy
@@ -120,8 +122,10 @@ export class QueryPanel extends WebviewPanelBase {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
-            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: useTds ?? false });
+            const tds = useTds ?? false;
+            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds });
             this.lastSql = sql;
+            this.lastUseTds = tds;
             this.lastResult = result;
             this.allRecords = [...result.records];
             this.postMessage({
@@ -161,10 +165,10 @@ export class QueryPanel extends WebviewPanelBase {
 
     private async showFetchXml(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.querySql({ sql, showFetchXml: true });
-            if (result.executedFetchXml) {
+            const result = await this.daemon.queryExplain(sql);
+            if (result.plan) {
                 const doc = await vscode.workspace.openTextDocument({
-                    content: result.executedFetchXml,
+                    content: result.plan,
                     language: 'xml',
                 });
                 await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
@@ -198,6 +202,7 @@ export class QueryPanel extends WebviewPanelBase {
                 sql: this.lastSql,
                 page,
                 pagingCookie,
+                useTds: this.lastUseTds,
             });
 
             if (this.allRecords.length + result.records.length > QueryPanel.MAX_CLIENT_RECORDS) {

@@ -36,6 +36,7 @@ const mockProcess = {
     stdin: { on: vi.fn() },
     stderr: { on: vi.fn() },
     on: vi.fn(),
+    removeListener: vi.fn(),
     kill: vi.fn(),
 };
 

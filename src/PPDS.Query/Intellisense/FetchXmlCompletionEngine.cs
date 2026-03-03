@@ -247,8 +247,8 @@ public sealed class FetchXmlCompletionEngine
 
         if (textBefore[pos] == '<')
         {
-            // Make sure this isn't a closing tag (</)
-            if (pos > 0 && textBefore[pos - 1] == '/')
+            // Make sure this isn't a closing tag: check if '<' is followed by '/'
+            if (pos + 1 < textBefore.Length && textBefore[pos + 1] == '/')
                 return false;
 
             // Ensure we're not inside a tag that already has whitespace (attribute position)

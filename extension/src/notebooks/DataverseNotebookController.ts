@@ -23,7 +23,7 @@ export class DataverseNotebookController implements vscode.Disposable {
     private statusBarItem: vscode.StatusBarItem;
 
     private readonly cellResults = new Map<string, QueryResultResponse>();
-    private readonly activeExecutions = new Map<string, AbortController>();
+    private readonly activeExecutions = new Map<string, { abort: AbortController; cts: CancellationTokenSource }>();
     private executionInterrupted = false;
     private executionOrder = 0;
 
@@ -177,10 +177,20 @@ export class DataverseNotebookController implements vscode.Disposable {
 
     private async executeHandler(
         cells: vscode.NotebookCell[],
-        _notebook: vscode.NotebookDocument,
+        notebook: vscode.NotebookDocument,
         _controller: vscode.NotebookController
     ): Promise<void> {
         this.executionInterrupted = false;
+
+        // Prompt for environment once before running any cells, not per-cell
+        this.loadEnvironmentFromNotebook(notebook);
+        if (!this.selectedEnvironmentUrl) {
+            await this.selectEnvironment();
+            if (!this.selectedEnvironmentUrl) {
+                return; // User cancelled — don't start any cells
+            }
+        }
+
         for (const cell of cells) {
             if (this.executionInterrupted) break;
             await this.executeCell(cell);
@@ -191,9 +201,10 @@ export class DataverseNotebookController implements vscode.Disposable {
         this.executionInterrupted = true;
         for (const cell of notebook.getCells()) {
             const cellUri = cell.document.uri.toString();
-            const abort = this.activeExecutions.get(cellUri);
-            if (abort) {
-                abort.abort();
+            const entry = this.activeExecutions.get(cellUri);
+            if (entry) {
+                entry.abort.abort();
+                entry.cts.cancel();
                 this.activeExecutions.delete(cellUri);
             }
         }
@@ -212,12 +223,13 @@ export class DataverseNotebookController implements vscode.Disposable {
         const cellUri = cell.document.uri.toString();
         const existing = this.activeExecutions.get(cellUri);
         if (existing) {
-            existing.abort();
+            existing.abort.abort();
+            existing.cts.cancel();
         }
         const abortController = new AbortController();
-        this.activeExecutions.set(cellUri, abortController);
-
         const cts = new CancellationTokenSource();
+        this.activeExecutions.set(cellUri, { abort: abortController, cts });
+
         const tokenDisposable = execution.token.onCancellationRequested(() => {
             abortController.abort();
             cts.cancel();
@@ -225,14 +237,11 @@ export class DataverseNotebookController implements vscode.Disposable {
 
         try {
             if (!this.selectedEnvironmentUrl) {
-                await this.selectEnvironment();
-                if (!this.selectedEnvironmentUrl) {
-                    execution.replaceOutput([new vscode.NotebookCellOutput([
-                        vscode.NotebookCellOutputItem.text('No environment selected. Click the environment selector in the status bar.', 'text/plain'),
-                    ])]);
-                    execution.end(false, Date.now());
-                    return;
-                }
+                execution.replaceOutput([new vscode.NotebookCellOutput([
+                    vscode.NotebookCellOutputItem.text('No environment selected. Click the environment selector in the status bar.', 'text/plain'),
+                ])]);
+                execution.end(false, Date.now());
+                return;
             }
 
             const content = cell.document.getText().trim();
