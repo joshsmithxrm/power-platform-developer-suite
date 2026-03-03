@@ -325,6 +325,8 @@ export class DataverseNotebookController implements vscode.Disposable {
                 }
 
                 const currentLanguage = event.document.languageId;
+                // Heuristic: content starting with '<' is likely FetchXML.
+                // May misfire for SQL with leading comments, but user can manually toggle.
                 const shouldBeFetchXml = contentToAnalyze.charAt(0) === '<';
 
                 if (shouldBeFetchXml && currentLanguage !== 'fetchxml') {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DaemonClient } from '../daemonClient.js';
+import type { DaemonClient } from '../daemonClient.js';
 import type { ProfileInfo } from '../types.js';
 
 /**
