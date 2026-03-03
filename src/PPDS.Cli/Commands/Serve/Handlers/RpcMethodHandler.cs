@@ -838,6 +838,7 @@ public class RpcMethodHandler
         string? pagingCookie = null,
         bool count = false,
         bool showFetchXml = false,
+        bool useTds = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(sql))

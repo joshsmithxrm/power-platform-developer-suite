@@ -18,6 +18,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     private allRecords: Record<string, unknown>[] = [];
     private lastResult: QueryResultResponse | undefined;
+    private lastSql: string | undefined;
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -89,6 +90,7 @@ export class QueryPanel extends WebviewPanelBase {
         try {
             this.postMessage({ command: 'executionStarted' });
             const result = await this.daemon.querySql({ sql, useTds });
+            this.lastSql = sql;
             this.lastResult = result;
             this.allRecords = [...result.records];
             this.postMessage({
@@ -178,7 +180,7 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     private async exportResults(): Promise<void> {
-        if (!this.lastResult || this.allRecords.length === 0) {
+        if (!this.lastResult || this.allRecords.length === 0 || !this.lastSql) {
             vscode.window.showWarningMessage('No results to export. Run a query first.');
             return;
         }
@@ -194,52 +196,27 @@ export class QueryPanel extends WebviewPanelBase {
 
         if (!formatPick) return;
 
-        const format = formatPick.format;
-        const columns = this.lastResult.columns;
-        let content: string;
-        let fileExt: string;
-        let filterName: string;
-
-        if (format === 'json') {
-            const jsonArray = this.allRecords.map(record => {
-                const obj: Record<string, unknown> = {};
-                for (const col of columns) {
-                    const key = col.alias ?? col.logicalName;
-                    obj[key] = record[key];
-                }
-                return obj;
+        try {
+            const result = await this.daemon.queryExport({
+                sql: this.lastSql,
+                format: formatPick.format,
+                includeHeaders: true,
             });
-            content = JSON.stringify(jsonArray, null, 2);
-            fileExt = 'json';
-            filterName = 'JSON Files';
-        } else {
-            const sep = format === 'tsv' ? '\t' : ',';
-            const headers = columns.map(c => c.alias ?? c.logicalName);
-            const rows = this.allRecords.map(record =>
-                columns.map(col => {
-                    const key = col.alias ?? col.logicalName;
-                    const val = record[key];
-                    if (val === null || val === undefined) return '';
-                    if (typeof val === 'object' && val !== null && 'formatted' in val) {
-                        return String((val as { formatted: string }).formatted ?? '');
-                    }
-                    const str = String(val);
-                    return sep === ',' && (str.includes(',') || str.includes('"') || str.includes('\n'))
-                        ? `"${str.replace(/"/g, '""')}"` : str;
-                })
-            );
-            content = [headers.join(sep), ...rows.map(r => r.join(sep))].join('\n');
-            fileExt = format === 'tsv' ? 'tsv' : 'csv';
-            filterName = format === 'tsv' ? 'TSV Files' : 'CSV Files';
-        }
 
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(`query_results.${fileExt}`),
-            filters: { [filterName]: [fileExt] },
-        });
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
-            vscode.window.showInformationMessage(`Exported ${this.allRecords.length} rows to ${uri.fsPath}`);
+            const fileExt = formatPick.format === 'tsv' ? 'tsv' : formatPick.format === 'json' ? 'json' : 'csv';
+            const filterName = formatPick.format === 'tsv' ? 'TSV Files' : formatPick.format === 'json' ? 'JSON Files' : 'CSV Files';
+
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(`query_results.${fileExt}`),
+                filters: { [filterName]: [fileExt] },
+            });
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(result.content));
+                vscode.window.showInformationMessage(`Exported ${result.rowCount} rows to ${uri.fsPath}`);
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Export failed: ${msg}`);
         }
     }
 
