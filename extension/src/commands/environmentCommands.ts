@@ -67,13 +67,6 @@ export function registerEnvironmentCommands(
                     },
                 );
 
-                if (environments.length === 0) {
-                    vscode.window.showInformationMessage(
-                        'No environments found. Ensure you have an active authentication profile.',
-                    );
-                    return;
-                }
-
                 const configureButton: vscode.QuickInputButton = {
                     iconPath: new vscode.ThemeIcon('gear'),
                     tooltip: 'Configure environment',
@@ -87,8 +80,19 @@ export function registerEnvironmentCommands(
                         : env.apiUrl,
                     picked: env.isActive,
                     apiUrl: env.apiUrl,
-                    buttons: [configureButton],
+                    buttons: [configureButton] as vscode.QuickInputButton[],
                 }));
+
+                // Manual URL entry — always available, even when the list is empty
+                const manualEntry = {
+                    label: '$(link) Enter URL manually...',
+                    description: 'Connect to an environment not in the list',
+                    detail: '',
+                    picked: false,
+                    apiUrl: '__manual__',
+                    buttons: [] as vscode.QuickInputButton[],
+                };
+                items.push(manualEntry);
 
                 const selected = await new Promise<typeof items[number] | undefined>(resolve => {
                     const quickPick = vscode.window.createQuickPick<typeof items[number]>();
@@ -117,6 +121,42 @@ export function registerEnvironmentCommands(
 
                 if (!selected) {
                     return; // User cancelled
+                }
+
+                // Handle manual URL entry
+                if (selected.apiUrl === '__manual__') {
+                    const url = await vscode.window.showInputBox({
+                        title: 'Dataverse Environment URL',
+                        prompt: 'Enter the full URL (e.g., https://myorg.crm.dynamics.com)',
+                        placeHolder: 'https://myorg.crm.dynamics.com',
+                        validateInput: (value) => {
+                            if (!value.trim()) {
+                                return 'URL is required';
+                            }
+                            try {
+                                new URL(value.trim());
+                                return undefined;
+                            } catch {
+                                return 'Enter a valid URL';
+                            }
+                        },
+                    });
+                    if (!url) {
+                        return;
+                    }
+
+                    const trimmedUrl = url.trim();
+                    await daemonClient.envSelect(trimmedUrl);
+
+                    envStatusBar.text = `$(cloud) ${trimmedUrl}`;
+                    envStatusBar.tooltip = trimmedUrl;
+
+                    onEnvironmentChanged();
+
+                    vscode.window.showInformationMessage(
+                        `Connected to environment: ${trimmedUrl}`,
+                    );
+                    return;
                 }
 
                 await daemonClient.envSelect(selected.apiUrl);
