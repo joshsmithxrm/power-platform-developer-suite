@@ -6,41 +6,35 @@ import {
     StreamMessageReader,
     StreamMessageWriter
 } from 'vscode-jsonrpc/node';
+import type {
+    AuthListResponse,
+    AuthWhoResponse,
+    AuthSelectResponse,
+    EnvListResponse,
+    EnvSelectResponse,
+    QueryResultResponse,
+    ProfilesInvalidateResponse,
+    SolutionsListResponse,
+} from './types.js';
+
+// Re-export types that other modules may need via daemonClient
+export type {
+    AuthListResponse,
+    AuthWhoResponse,
+    AuthSelectResponse,
+    EnvListResponse,
+    EnvSelectResponse,
+    QueryResultResponse,
+    ProfilesInvalidateResponse,
+    SolutionsListResponse,
+} from './types.js';
 
 /**
- * Response from auth/list RPC method
- */
-export interface AuthListResponse {
-    activeProfile: string | null;
-    activeProfileIndex: number | null;
-    profiles: ProfileInfo[];
-}
-
-/**
- * Profile information from auth/list
- */
-export interface ProfileInfo {
-    index: number;
-    name: string | null;
-    identity: string;
-    authMethod: string;
-    cloud: string;
-    environment: EnvironmentSummary | null;
-    isActive: boolean;
-    createdAt: string | null;
-    lastUsedAt: string | null;
-}
-
-/**
- * Environment summary in profile
- */
-export interface EnvironmentSummary {
-    url: string;
-    displayName: string;
-}
-
-/**
- * Client for communicating with the ppds serve daemon via JSON-RPC
+ * Client for communicating with the ppds serve daemon via JSON-RPC.
+ *
+ * All RPC methods call ensureConnected() first, which starts the daemon
+ * process if it is not already running. If the daemon dies, the next RPC
+ * call will automatically restart it (auto-reconnect).
  */
 export class DaemonClient implements vscode.Disposable {
     private process: ChildProcess | null = null;
@@ -98,10 +92,12 @@ export class DaemonClient implements vscode.Disposable {
         this.outputChannel.appendLine('Daemon connection established');
     }
 
+    // ── Auth methods ────────────────────────────────────────────────────────
+
     /**
-     * Lists all authentication profiles
+     * Lists all authentication profiles.
      */
-    async listProfiles(): Promise<AuthListResponse> {
+    async authList(): Promise<AuthListResponse> {
         await this.ensureConnected();
 
         this.outputChannel.appendLine('Calling auth/list...');
@@ -112,7 +108,162 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     /**
-     * Ensures the daemon is connected, starting it if necessary
+     * Gets detailed information about the currently active profile.
+     */
+    async authWho(): Promise<AuthWhoResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine('Calling auth/who...');
+        const result = await this.connection!.sendRequest<AuthWhoResponse>('auth/who');
+        this.outputChannel.appendLine(`auth/who returned profile index ${result.index}`);
+
+        return result;
+    }
+
+    /**
+     * Selects (activates) an authentication profile by index or name.
+     */
+    async authSelect(params: { index?: number; name?: string }): Promise<AuthSelectResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling auth/select with params: ${JSON.stringify(params)}...`);
+        const result = await this.connection!.sendRequest<AuthSelectResponse>('auth/select', params);
+        this.outputChannel.appendLine(`Selected profile: ${result.name ?? result.identity}`);
+
+        return result;
+    }
+
+    // ── Environment methods ─────────────────────────────────────────────────
+
+    /**
+     * Lists available Dataverse environments, optionally filtered.
+     */
+    async envList(filter?: string): Promise<EnvListResponse> {
+        await this.ensureConnected();
+
+        const params = filter !== undefined ? { filter } : {};
+        this.outputChannel.appendLine(`Calling env/list${filter ? ` with filter="${filter}"` : ''}...`);
+        const result = await this.connection!.sendRequest<EnvListResponse>('env/list', params);
+        this.outputChannel.appendLine(`Got ${result.environments.length} environments`);
+
+        return result;
+    }
+
+    /**
+     * Selects (activates) a Dataverse environment by URL or name.
+     */
+    async envSelect(environment: string): Promise<EnvSelectResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling env/select for "${environment}"...`);
+        const result = await this.connection!.sendRequest<EnvSelectResponse>('env/select', { environment });
+        this.outputChannel.appendLine(`Selected environment: ${result.displayName} (${result.url})`);
+
+        return result;
+    }
+
+    // ── Query methods ───────────────────────────────────────────────────────
+
+    /**
+     * Executes a SQL query against the active Dataverse environment.
+     */
+    async querySql(params: {
+        sql: string;
+        top?: number;
+        page?: number;
+        pagingCookie?: string;
+        count?: boolean;
+        showFetchXml?: boolean;
+    }): Promise<QueryResultResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
+        const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params);
+        this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+
+        return result;
+    }
+
+    /**
+     * Executes a FetchXML query against the active Dataverse environment.
+     */
+    async queryFetch(params: {
+        fetchXml: string;
+        top?: number;
+        page?: number;
+        pagingCookie?: string;
+        count?: boolean;
+    }): Promise<QueryResultResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine('Calling query/fetch...');
+        const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
+        this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+
+        return result;
+    }
+
+    // ── Profile management ──────────────────────────────────────────────────
+
+    /**
+     * Invalidates (clears cached tokens for) a profile.
+     */
+    async profilesInvalidate(profileName: string): Promise<ProfilesInvalidateResponse> {
+        await this.ensureConnected();
+
+        this.outputChannel.appendLine(`Calling profiles/invalidate for "${profileName}"...`);
+        const result = await this.connection!.sendRequest<ProfilesInvalidateResponse>(
+            'profiles/invalidate',
+            { profileName }
+        );
+        this.outputChannel.appendLine(`Profile "${profileName}" invalidated: ${result.invalidated}`);
+
+        return result;
+    }
+
+    // ── Solutions ───────────────────────────────────────────────────────────
+
+    /**
+     * Lists solutions in the active Dataverse environment.
+     */
+    async solutionsList(filter?: string, includeManaged?: boolean): Promise<SolutionsListResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) {
+            params.filter = filter;
+        }
+        if (includeManaged !== undefined) {
+            params.includeManaged = includeManaged;
+        }
+
+        this.outputChannel.appendLine(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
+        const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
+        this.outputChannel.appendLine(`Got ${result.solutions.length} solutions`);
+
+        return result;
+    }
+
+    // ── Notifications ───────────────────────────────────────────────────────
+
+    /**
+     * Registers a handler for device code authentication notifications.
+     * The daemon sends these when interactive browser-based auth is required.
+     */
+    onDeviceCode(handler: (params: { userCode: string; verificationUrl: string; message: string }) => void): void {
+        if (!this.connection) {
+            throw new Error('Cannot register notification handler: daemon is not connected. Call start() first.');
+        }
+        this.connection.onNotification('auth/deviceCode', handler);
+        this.outputChannel.appendLine('Registered auth/deviceCode notification handler');
+    }
+
+    // ── Connection management ───────────────────────────────────────────────
+
+    /**
+     * Ensures the daemon is connected, starting it if necessary.
+     * This provides auto-reconnect: if the daemon process dies, the next
+     * RPC call will restart it since the exit handler sets connection to null.
      */
     private async ensureConnected(): Promise<void> {
         if (!this.connection) {
