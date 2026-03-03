@@ -225,6 +225,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         if (existing) {
             existing.abort.abort();
             existing.cts.cancel();
+            existing.cts.dispose();
         }
         const abortController = new AbortController();
         const cts = new CancellationTokenSource();

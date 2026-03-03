@@ -30,7 +30,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Auto-start daemon if configured (default: true)
     if (config.get<boolean>('autoStartDaemon', true)) {
-        void client.start();
+        void client.start().catch(err => {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`PPDS daemon failed to start: ${msg}`);
+        });
     }
 
     // ── Profile Tree View ────────────────────────────────────────────────

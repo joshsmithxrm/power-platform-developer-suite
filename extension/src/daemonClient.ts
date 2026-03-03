@@ -135,7 +135,7 @@ export class DaemonClient implements vscode.Disposable {
             connection.dispose();
             this.process?.kill();
             this.process = null;
-            return;
+            throw new Error('DaemonClient is disposed');
         }
 
         this.connection = connection;
@@ -224,7 +224,7 @@ export class DaemonClient implements vscode.Disposable {
     async authSelect(params: { index?: number; name?: string }): Promise<AuthSelectResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling auth/select with params: ${JSON.stringify(params)}...`);
+        this.outputChannel.appendLine(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<AuthSelectResponse>('auth/select', params);
         this.outputChannel.appendLine(`Selected profile: ${result.name ?? result.identity}`);
 
@@ -453,7 +453,7 @@ export class DaemonClient implements vscode.Disposable {
     async profilesDelete(params: { index?: number; name?: string }): Promise<ProfileDeleteResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling profiles/delete with params: ${JSON.stringify(params)}...`);
+        this.outputChannel.appendLine(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<ProfileDeleteResponse>('profiles/delete', params);
         this.outputChannel.appendLine(`Profile deleted: ${result.deleted}`);
 
