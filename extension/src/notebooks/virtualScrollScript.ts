@@ -23,7 +23,7 @@ interface VirtualScrollConfig {
 export function generateVirtualScrollScript(rowDataJson: string, config: VirtualScrollConfig): string {
     const dataElementId = `${config.scrollContainerId}-data`;
     return `
-<script type="application/json" id="${dataElementId}">${rowDataJson}</script>
+<script type="application/json" id="${dataElementId}">${rowDataJson.replace(/<\//g, '<\\/')}</script>
 <script>
 (function() {
     var dataEl = document.getElementById('${dataElementId}');
