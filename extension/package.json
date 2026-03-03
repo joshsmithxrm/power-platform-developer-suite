@@ -215,10 +215,26 @@
       }
     ],
     "keybindings": [
-      { "command": "ppds.dataExplorer", "key": "ctrl+shift+d", "when": "!editorFocus" },
-      { "command": "ppds.selectEnvironment", "key": "ctrl+shift+e", "when": "!editorFocus" },
-      { "command": "ppds.selectProfile", "key": "ctrl+shift+p", "when": "!editorFocus" },
-      { "command": "ppds.newNotebook", "key": "ctrl+shift+n", "when": "!editorFocus" }
+      {
+        "command": "ppds.dataExplorer",
+        "key": "ctrl+shift+d",
+        "when": "!editorFocus"
+      },
+      {
+        "command": "ppds.selectEnvironment",
+        "key": "ctrl+shift+e",
+        "when": "!editorFocus"
+      },
+      {
+        "command": "ppds.selectProfile",
+        "key": "ctrl+shift+p",
+        "when": "!editorFocus"
+      },
+      {
+        "command": "ppds.newNotebook",
+        "key": "ctrl+shift+n",
+        "when": "!editorFocus"
+      }
     ],
     "configuration": {
       "title": "Power Platform Developer Suite",
@@ -250,13 +266,15 @@
     "package": "node esbuild.js --production",
     "lint": "eslint src",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.3.5",
     "@types/vscode": "^1.109.0",
     "@vscode/vsce": "^3.0.0",
