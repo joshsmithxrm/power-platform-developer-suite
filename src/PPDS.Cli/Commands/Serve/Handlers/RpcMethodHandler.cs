@@ -1101,7 +1101,14 @@ public class RpcMethodHandler
             };
         }
 
-        return new FetchXmlGenerator().Generate(stmt);
+        try
+        {
+            return new FetchXmlGenerator().Generate(stmt);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or ArgumentException)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+        }
     }
 
     private static string FormatExportContent(
