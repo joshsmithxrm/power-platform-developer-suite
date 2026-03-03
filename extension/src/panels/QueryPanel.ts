@@ -118,7 +118,14 @@ export class QueryPanel extends WebviewPanelBase {
                 );
                 if (action === 'Re-authenticate') {
                     try {
-                        await this.daemon.profilesInvalidate('');  // Invalidate active profile
+                        const who = await this.daemon.authWho();
+                        if (who.profileName) {
+                            await this.daemon.profilesInvalidate(who.profileName);
+                        }
+                    } catch {
+                        // If authWho fails, we can't invalidate - just proceed with re-auth
+                    }
+                    try {
                         // Retry the query
                         await this.executeQuery(sql, useTds);
                         return;
@@ -130,14 +137,6 @@ export class QueryPanel extends WebviewPanelBase {
 
             this.postMessage({ command: 'queryError', error: msg });
         }
-    }
-
-    private isAuthError(error: unknown): boolean {
-        const msg = error instanceof Error ? error.message : String(error);
-        return msg.toLowerCase().includes('auth') ||
-               msg.toLowerCase().includes('token') ||
-               msg.toLowerCase().includes('unauthorized') ||
-               msg.toLowerCase().includes('401');
     }
 
     private async showFetchXml(sql: string): Promise<void> {

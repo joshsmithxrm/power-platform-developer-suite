@@ -102,19 +102,22 @@ export function registerEnvironmentCommands(
                     quickPick.matchOnDetail = true;
                     quickPick.items = items;
 
-                    quickPick.onDidTriggerItemButton(async (e) => {
+                    const disposables: vscode.Disposable[] = [];
+
+                    disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
                         quickPick.hide();
                         await vscode.commands.executeCommand('ppds.configureEnvironment');
-                    });
+                    }));
 
-                    quickPick.onDidAccept(() => {
+                    disposables.push(quickPick.onDidAccept(() => {
                         resolve(quickPick.selectedItems[0]);
                         quickPick.hide();
-                    });
-                    quickPick.onDidHide(() => {
-                        resolve(undefined);
+                    }));
+                    disposables.push(quickPick.onDidHide(() => {
+                        disposables.forEach(d => d.dispose());
                         quickPick.dispose();
-                    });
+                        resolve(undefined);
+                    }));
 
                     quickPick.show();
                 });

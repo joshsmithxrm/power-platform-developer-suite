@@ -44,7 +44,9 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
         quickPick.items = items;
         quickPick.matchOnDetail = true;
 
-        quickPick.onDidTriggerItemButton(async (e) => {
+        const disposables: vscode.Disposable[] = [];
+
+        disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
             const entry = e.item.entry;
             const buttonTooltip = (e.button as vscode.QuickInputButton & { tooltip: string }).tooltip;
 
@@ -80,18 +82,19 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                 quickPick.hide();
                 resolve(entry.sql);
             }
-        });
+        }));
 
-        quickPick.onDidAccept(() => {
+        disposables.push(quickPick.onDidAccept(() => {
             const selected = quickPick.selectedItems[0];
             quickPick.hide();
             resolve(selected?.entry.sql);
-        });
+        }));
 
-        quickPick.onDidHide(() => {
+        disposables.push(quickPick.onDidHide(() => {
+            disposables.forEach(d => d.dispose());
             quickPick.dispose();
             resolve(undefined);
-        });
+        }));
 
         quickPick.show();
     });
