@@ -365,9 +365,12 @@ describe('DaemonClient', () => {
                 connectedAs: 'user@example.com',
                 organizationName: 'Test Org',
                 organizationId: 'org-123',
-                environmentId: 'env-456',
                 userId: 'user-789',
                 businessUnitId: 'bu-001',
+                url: 'https://org.crm.dynamics.com',
+                uniqueName: 'org',
+                version: '9.2.0.0',
+                environmentType: null,
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
@@ -382,9 +385,12 @@ describe('DaemonClient', () => {
     describe('envConfigGet', () => {
         it('should call env/config/get with environmentUrl', async () => {
             const mockResult = {
+                environmentUrl: 'https://org.crm.dynamics.com',
                 label: 'Production',
                 type: 'Production',
                 color: '#FF0000',
+                resolvedType: 'Production',
+                resolvedColor: 'Red',
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
@@ -398,9 +404,12 @@ describe('DaemonClient', () => {
 
         it('should handle null config values', async () => {
             const mockResult = {
+                environmentUrl: 'https://dev.crm.dynamics.com',
                 label: null,
                 type: null,
                 color: null,
+                resolvedType: 'Default',
+                resolvedColor: 'Default',
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
@@ -416,6 +425,10 @@ describe('DaemonClient', () => {
     describe('envConfigSet', () => {
         it('should call env/config/set with all params', async () => {
             const mockResult = {
+                environmentUrl: 'https://org.crm.dynamics.com',
+                label: 'Production',
+                type: 'Production',
+                color: '#FF0000',
                 saved: true,
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -434,6 +447,7 @@ describe('DaemonClient', () => {
 
         it('should call env/config/set with only required params', async () => {
             const mockResult = {
+                environmentUrl: 'https://org.crm.dynamics.com',
                 saved: true,
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -452,8 +466,8 @@ describe('DaemonClient', () => {
         it('should call query/complete with sql and cursorOffset', async () => {
             const mockResult = {
                 items: [
-                    { label: 'account', kind: 'table' },
-                    { label: 'accountid', kind: 'column' },
+                    { label: 'account', insertText: 'account', kind: 'table', detail: null, description: null, sortOrder: 0 },
+                    { label: 'accountid', insertText: 'accountid', kind: 'column', detail: null, description: null, sortOrder: 1 },
                 ],
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -482,7 +496,7 @@ describe('DaemonClient', () => {
         it('should call query/history/list with search and limit', async () => {
             const mockResult = {
                 entries: [
-                    { id: 'h-1', sql: 'SELECT name FROM account', executedAt: '2026-03-01T00:00:00Z' },
+                    { id: 'h-1', sql: 'SELECT name FROM account', rowCount: null, executionTimeMs: null, environmentUrl: null, executedAt: '2026-03-01T00:00:00Z' },
                 ],
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -563,7 +577,7 @@ describe('DaemonClient', () => {
     describe('queryExplain', () => {
         it('should call query/explain with sql', async () => {
             const mockResult = {
-                fetchXml: '<fetch><entity name="account"><attribute name="name" /></entity></fetch>',
+                plan: '<fetch><entity name="account"><attribute name="name" /></entity></fetch>',
                 format: 'fetchxml',
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -582,6 +596,9 @@ describe('DaemonClient', () => {
             const mockResult = {
                 index: 1,
                 name: 'new-profile',
+                identity: 'admin@example.com',
+                authMethod: 'ClientSecret',
+                environment: 'https://org.crm.dynamics.com',
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
@@ -604,6 +621,9 @@ describe('DaemonClient', () => {
             const mockResult = {
                 index: 0,
                 name: null,
+                identity: 'unknown',
+                authMethod: 'DeviceCode',
+                environment: null,
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
@@ -646,6 +666,7 @@ describe('DaemonClient', () => {
     describe('profilesRename', () => {
         it('should call profiles/rename with currentName and newName', async () => {
             const mockResult = {
+                index: 0,
                 previousName: 'old-name',
                 newName: 'new-name',
             };
@@ -722,8 +743,8 @@ describe('DaemonClient', () => {
         it('should call schema/entities and return result', async () => {
             const mockResult = {
                 entities: [
-                    { logicalName: 'account', displayName: 'Account', schemaName: 'Account' },
-                    { logicalName: 'contact', displayName: 'Contact', schemaName: 'Contact' },
+                    { logicalName: 'account', displayName: 'Account', isCustom: false },
+                    { logicalName: 'contact', displayName: 'Contact', isCustom: false },
                 ],
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
@@ -741,8 +762,8 @@ describe('DaemonClient', () => {
             const mockResult = {
                 entityName: 'account',
                 attributes: [
-                    { logicalName: 'name', displayName: 'Account Name', attributeType: 'String' },
-                    { logicalName: 'accountid', displayName: 'Account', attributeType: 'Uniqueidentifier' },
+                    { logicalName: 'name', displayName: 'Account Name', dataType: 'String', isCustom: false },
+                    { logicalName: 'accountid', displayName: 'Account', dataType: 'Uniqueidentifier', isCustom: false },
                 ],
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
