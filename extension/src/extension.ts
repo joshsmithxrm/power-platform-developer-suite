@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { DaemonClient } from './daemonClient.js';
 import { ProfileTreeDataProvider } from './views/profileTreeView.js';
 import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
+import { registerProfileCommands } from './commands/profileCommands.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -28,67 +29,12 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(toolsTreeView);
 
-    // ── Commands ─────────────────────────────────────────────────────────
+    // ── Profile Commands ────────────────────────────────────────────────
+    registerProfileCommands(context, daemonClient, () => profileTreeProvider.refresh());
 
-    // Refresh profiles tree
-    const refreshProfilesCmd = vscode.commands.registerCommand('ppds.refreshProfiles', () => {
-        profileTreeProvider.refresh();
-    });
-    context.subscriptions.push(refreshProfilesCmd);
+    // ── Placeholder commands for tools tree items ───────────────────────
+    // (will be implemented in later tasks)
 
-    // Select a profile (from context menu or inline button)
-    const selectProfileCmd = vscode.commands.registerCommand('ppds.selectProfile', async (item: unknown) => {
-        // item comes from the tree view context menu
-        const profileItem = item as { profile?: { index: number; name: string | null } } | undefined;
-        if (!profileItem?.profile) {
-            return;
-        }
-        try {
-            const { index, name } = profileItem.profile;
-            await daemonClient!.authSelect(name ? { name } : { index });
-            profileTreeProvider.refresh();
-            vscode.window.showInformationMessage(`Switched to profile: ${name ?? `Profile ${index}`}`);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to select profile: ${message}`);
-        }
-    });
-    context.subscriptions.push(selectProfileCmd);
-
-    // List profiles command (quick pick) — kept for command palette access
-    const listProfilesCmd = vscode.commands.registerCommand('ppds.listProfiles', async () => {
-        try {
-            const result = await daemonClient!.authList();
-
-            if (result.profiles.length === 0) {
-                vscode.window.showInformationMessage('No authentication profiles found. Use "ppds auth create" to create one.');
-                return;
-            }
-
-            // Show profiles in a quick pick
-            const items = result.profiles.map(p => ({
-                label: p.name ?? `Profile ${p.index}`,
-                description: p.identity,
-                detail: p.environment ? `${p.environment.displayName} (${p.authMethod})` : p.authMethod,
-                picked: p.isActive,
-            }));
-
-            const selected = await vscode.window.showQuickPick(items, {
-                title: 'Authentication Profiles',
-                placeHolder: result.activeProfile ? `Active: ${result.activeProfile}` : 'No active profile',
-            });
-
-            if (selected) {
-                vscode.window.showInformationMessage(`Selected profile: ${selected.label}`);
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to list profiles: ${message}`);
-        }
-    });
-    context.subscriptions.push(listProfilesCmd);
-
-    // Placeholder commands for tools tree items (will be implemented in later tasks)
     const openDataExplorerCmd = vscode.commands.registerCommand('ppds.openDataExplorer', () => {
         vscode.window.showInformationMessage('Data Explorer will be available in a future update.');
     });

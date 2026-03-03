@@ -58,12 +58,36 @@
       {
         "command": "ppds.selectProfile",
         "title": "PPDS: Select Profile"
+      },
+      {
+        "command": "ppds.profileDetails",
+        "title": "PPDS: Profile Details"
+      },
+      {
+        "command": "ppds.createProfile",
+        "title": "PPDS: Create Profile",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ppds.deleteProfile",
+        "title": "PPDS: Delete Profile",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "ppds.renameProfile",
+        "title": "PPDS: Rename Profile",
+        "icon": "$(edit)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "ppds.refreshProfiles",
+          "when": "view == ppds.profiles",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.createProfile",
           "when": "view == ppds.profiles",
           "group": "navigation"
         }
@@ -73,6 +97,21 @@
           "command": "ppds.selectProfile",
           "when": "view == ppds.profiles && viewItem == profile",
           "group": "inline"
+        },
+        {
+          "command": "ppds.profileDetails",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@1"
+        },
+        {
+          "command": "ppds.renameProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@2"
+        },
+        {
+          "command": "ppds.deleteProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@3"
         }
       ]
     }
