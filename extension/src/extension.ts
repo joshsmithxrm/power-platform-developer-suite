@@ -12,6 +12,7 @@ import {
     exportCellResults,
 } from './commands/notebookCommands.js';
 import { DataverseCompletionProvider } from './providers/completionProvider.js';
+import { QueryPanel } from './panels/QueryPanel.js';
 
 let daemonClient: DaemonClient | undefined;
 
@@ -68,8 +69,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('ppds.newNotebook', createNewNotebook),
         vscode.commands.registerCommand('ppds.toggleNotebookCellLanguage', () => toggleCellLanguage(daemonClient)),
         vscode.commands.registerCommand('ppds.openCellInDataExplorer', () => {
-            openCellInDataExplorer(() => {
-                vscode.window.showInformationMessage('Data Explorer will be available in a future update.');
+            openCellInDataExplorer((sql: string) => {
+                QueryPanel.show(context.extensionUri, daemonClient, sql);
             });
         }),
         vscode.commands.registerCommand('ppds.exportCellResultsCsv', () => exportCellResults(notebookController, 'csv')),
@@ -83,11 +84,18 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<'),
     );
 
+    // ── Data Explorer ─────────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.dataExplorer', () => {
+            QueryPanel.show(context.extensionUri, daemonClient);
+        })
+    );
+
     // ── Placeholder commands for tools tree items ───────────────────────
     // (will be implemented in later tasks)
 
     const openDataExplorerCmd = vscode.commands.registerCommand('ppds.openDataExplorer', () => {
-        vscode.window.showInformationMessage('Data Explorer will be available in a future update.');
+        QueryPanel.show(context.extensionUri, daemonClient);
     });
     context.subscriptions.push(openDataExplorerCmd);
 
