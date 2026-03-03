@@ -104,7 +104,7 @@ export function registerEnvironmentCommands(
 
                     const disposables: vscode.Disposable[] = [];
 
-                    disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
+                    disposables.push(quickPick.onDidTriggerItemButton(async (_e) => {
                         quickPick.hide();
                         await vscode.commands.executeCommand('ppds.configureEnvironment');
                     }));
