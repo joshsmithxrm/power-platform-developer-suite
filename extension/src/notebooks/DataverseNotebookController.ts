@@ -263,8 +263,8 @@ export class DataverseNotebookController implements vscode.Disposable {
                 if (action === 'Re-authenticate') {
                     try {
                         const who = await this.daemon.authWho();
-                        if (who.profileName) {
-                            await this.daemon.profilesInvalidate(who.profileName);
+                        if (who.name) {
+                            await this.daemon.profilesInvalidate(who.name);
                         }
                     } catch {
                         // If authWho fails, we can't invalidate - just proceed with re-auth
