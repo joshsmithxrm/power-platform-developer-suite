@@ -33,7 +33,7 @@ export class ToolTreeItem extends vscode.TreeItem {
  */
 export class ToolsTreeDataProvider implements vscode.TreeDataProvider<ToolTreeItem> {
     private static readonly tools: { label: string; commandId: string; icon: string }[] = [
-        { label: 'Data Explorer', commandId: 'ppds.openDataExplorer', icon: 'database' },
+        { label: 'Data Explorer', commandId: 'ppds.dataExplorer', icon: 'database' },
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
     ];
