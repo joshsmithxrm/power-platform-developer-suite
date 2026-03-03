@@ -200,6 +200,10 @@ export class DataverseNotebookController implements vscode.Disposable {
         execution.start(Date.now());
 
         const cellUri = cell.document.uri.toString();
+        const existing = this.activeExecutions.get(cellUri);
+        if (existing) {
+            existing.abort();
+        }
         const abortController = new AbortController();
         this.activeExecutions.set(cellUri, abortController);
 
