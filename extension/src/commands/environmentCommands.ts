@@ -2,6 +2,15 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 
 /**
+ * Extends vscode.QuickPickItem to carry the environment API URL alongside
+ * the display labels, so button handlers can pass it to commands without
+ * a separate lookup.
+ */
+interface EnvQuickPickItem extends vscode.QuickPickItem {
+    apiUrl: string;
+}
+
+/**
  * Registers all environment management commands and returns the environment
  * status bar item so the caller can add it to disposables.
  *
@@ -72,7 +81,7 @@ export function registerEnvironmentCommands(
                     tooltip: 'Configure environment',
                 };
 
-                const items = environments.map(env => ({
+                const items: EnvQuickPickItem[] = environments.map(env => ({
                     label: env.friendlyName,
                     description: env.type ? `[${env.type}]` : undefined,
                     detail: env.region
@@ -84,7 +93,7 @@ export function registerEnvironmentCommands(
                 }));
 
                 // Manual URL entry — always available, even when the list is empty
-                const manualEntry = {
+                const manualEntry: EnvQuickPickItem = {
                     label: '$(link) Enter URL manually...',
                     description: 'Connect to an environment not in the list',
                     detail: '',
@@ -94,8 +103,8 @@ export function registerEnvironmentCommands(
                 };
                 items.push(manualEntry);
 
-                const selected = await new Promise<typeof items[number] | undefined>(resolve => {
-                    const quickPick = vscode.window.createQuickPick<typeof items[number]>();
+                const selected = await new Promise<EnvQuickPickItem | undefined>(resolve => {
+                    const quickPick = vscode.window.createQuickPick<EnvQuickPickItem>();
                     quickPick.title = 'Select Dataverse Environment';
                     quickPick.placeholder = 'Choose an environment to connect to';
                     quickPick.matchOnDescription = true;
@@ -104,9 +113,10 @@ export function registerEnvironmentCommands(
 
                     const disposables: vscode.Disposable[] = [];
 
-                    disposables.push(quickPick.onDidTriggerItemButton(async (_e) => {
+                    disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
+                        const envItem = e.item as EnvQuickPickItem;
                         quickPick.hide();
-                        await vscode.commands.executeCommand('ppds.configureEnvironment');
+                        await vscode.commands.executeCommand('ppds.configureEnvironment', envItem.apiUrl);
                     }));
 
                     disposables.push(quickPick.onDidAccept(() => {
