@@ -26,7 +26,12 @@ interface HistoryQuickPickItem extends vscode.QuickPickItem {
  */
 export function buildHistoryItem(entry: QueryHistoryEntryDto): HistoryQuickPickItem {
     const date = new Date(entry.executedAt);
-    const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const dateStr = date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
     const sqlPreview = entry.sql.replace(/\s+/g, ' ').trim().substring(0, 50);
     const rowInfo = entry.rowCount !== null ? `(${entry.rowCount.toLocaleString()} rows)` : '';
 
@@ -60,6 +65,7 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
         quickPick.items = items;
         quickPick.matchOnDetail = true;
 
+        let resolved = false;
         const disposables: vscode.Disposable[] = [];
 
         disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
@@ -83,21 +89,21 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                     }
                 }
             } else if (e.button === RUN_BUTTON) {
-                resolve(entry.sql);
+                if (!resolved) { resolved = true; resolve(entry.sql); }
                 quickPick.hide();
             }
         }));
 
         disposables.push(quickPick.onDidAccept(() => {
             const selected = quickPick.selectedItems[0];
-            resolve(selected?.entry.sql);
+            if (!resolved) { resolved = true; resolve(selected?.entry.sql); }
             quickPick.hide();
         }));
 
         disposables.push(quickPick.onDidHide(() => {
             disposables.forEach(d => d.dispose());
             quickPick.dispose();
-            resolve(undefined);
+            if (!resolved) { resolved = true; resolve(undefined); }
         }));
 
         quickPick.show();

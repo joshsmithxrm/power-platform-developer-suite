@@ -61,17 +61,6 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Profile Commands ────────────────────────────────────────────────
     registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
-    // ── Environment Commands ─────────────────────────────────────────────
-    const envStatusBar = registerEnvironmentCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
-
-    // Respect showEnvironmentInStatusBar setting
-    if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {
-        envStatusBar.hide();
-    }
-
-    // ── Environment Config Command ────────────────────────────────────
-    registerEnvironmentConfigCommand(context, client, () => profileTreeProvider.refresh());
-
     // ── Notebook Serializer ───────────────────────────────────────────
     context.subscriptions.push(
         vscode.workspace.registerNotebookSerializer('ppdsnb', new DataverseNotebookSerializer(), {
@@ -80,8 +69,27 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── Notebook Controller ───────────────────────────────────────────
+    // Declared before environment commands so the onEnvironmentChanged callback can sync it
     const notebookController = new DataverseNotebookController(client);
     context.subscriptions.push(notebookController);
+
+    // ── Environment Commands ─────────────────────────────────────────────
+    const envStatusBar = registerEnvironmentCommands(context, client, () => {
+        profileTreeProvider.refresh();
+        refreshToolsState();
+        // Sync notebook controller with new environment
+        client.envWho().then(who => {
+            if (who.url) notebookController.updateEnvironment(who.url);
+        }).catch(() => { /* environment may not be selected yet */ });
+    });
+
+    // Respect showEnvironmentInStatusBar setting
+    if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {
+        envStatusBar.hide();
+    }
+
+    // ── Environment Config Command ────────────────────────────────────
+    registerEnvironmentConfigCommand(context, client, () => profileTreeProvider.refresh());
 
     // Register environment selection command for notebooks
     context.subscriptions.push(
@@ -102,10 +110,11 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── IntelliSense Completion Provider ──────────────────────────────
+    // Register IntelliSense for SQL only (FetchXML completion not yet supported)
+    // TODO: Add FetchXML completion support when daemon's query/complete handles it
     const completionProvider = new DataverseCompletionProvider(client);
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
-        vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<'),
     );
 
     // ── Data Explorer ─────────────────────────────────────────────────

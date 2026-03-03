@@ -84,8 +84,9 @@ describe('buildHistoryItem', () => {
     it('builds label with formatted date and SQL preview', () => {
         const entry = makeEntry({ executedAt: '2026-03-03T10:30:00Z', sql: 'SELECT name FROM account' });
         const item = buildHistoryItem(entry);
-        // Label should contain formatted date and SQL preview
-        expect(item.label).toMatch(/\[\d{2}\/\d{2} \d{2}:\d{2}\]/);
+        // Label should contain a locale-formatted date (format varies by environment locale)
+        // and the SQL preview — just verify it starts with '[' and contains the SQL
+        expect(item.label).toMatch(/^\[.+\]/);
         expect(item.label).toContain('SELECT name FROM account');
     });
 
