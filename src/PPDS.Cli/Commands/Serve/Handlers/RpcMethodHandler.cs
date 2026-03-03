@@ -435,7 +435,7 @@ public class RpcMethodHandler
             if (!Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
             {
                 throw new RpcException(
-                    ErrorCodes.Validation.RequiredField,
+                    ErrorCodes.Validation.InvalidArguments,
                     $"Invalid environment type '{type}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentType>())}");
             }
             parsedType = t;
@@ -447,7 +447,7 @@ public class RpcMethodHandler
             if (!Enum.TryParse<EnvironmentColor>(color, ignoreCase: true, out var c))
             {
                 throw new RpcException(
-                    ErrorCodes.Validation.RequiredField,
+                    ErrorCodes.Validation.InvalidArguments,
                     $"Invalid environment color '{color}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentColor>())}");
             }
             parsedColor = c;
@@ -855,30 +855,7 @@ public class RpcMethodHandler
                 "TDS Read Replica mode is not yet implemented. Use the standard FetchXML execution path.");
         }
 
-        // Parse and transpile SQL to FetchXML
-        TSqlStatement stmt;
-        try
-        {
-            var parser = new QueryParser();
-            stmt = parser.ParseStatement(sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new RpcException(ErrorCodes.Query.ParseError, ex);
-        }
-
-        // Override top if specified
-        if (top.HasValue && stmt is SelectStatement selectStmt
-            && selectStmt.QueryExpression is QuerySpecification querySpec)
-        {
-            querySpec.TopRowFilter = new TopRowFilter
-            {
-                Expression = new IntegerLiteral { Value = top.Value.ToString() }
-            };
-        }
-
-        var generator = new FetchXmlGenerator();
-        var fetchXml = generator.Generate(stmt);
+        var fetchXml = TranspileSqlToFetchXml(sql, top);
 
         // If showFetchXml is true, just return the transpiled FetchXML
         if (showFetchXml)
@@ -1050,32 +1027,11 @@ public class RpcMethodHandler
                 $"Invalid format '{format}'. Valid values: csv, tsv, json");
         }
 
-        // Parse and transpile SQL to FetchXML (same pipeline as QuerySqlAsync)
-        TSqlStatement stmt;
-        try
-        {
-            var parser = new QueryParser();
-            stmt = parser.ParseStatement(sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new RpcException(ErrorCodes.Query.ParseError, ex);
-        }
-
-        // Override top if specified
-        if (top.HasValue && stmt is SelectStatement exportSelectStmt
-            && exportSelectStmt.QueryExpression is QuerySpecification exportQuerySpec)
-        {
-            exportQuerySpec.TopRowFilter = new TopRowFilter
-            {
-                Expression = new IntegerLiteral { Value = top.Value.ToString() }
-            };
-        }
-
-        var generator = new FetchXmlGenerator();
-        var fetchXml = generator.Generate(stmt);
+        var fetchXml = TranspileSqlToFetchXml(sql, top);
 
         // Execute the query
+        const int MaxExportRecords = 100_000;
+
         var queryResponse = await WithActiveProfileAsync(async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
@@ -1103,6 +1059,11 @@ public class RpcMethodHandler
                 pagingCookie = mapped.PagingCookie;
                 moreRecords = mapped.MoreRecords;
                 currentPage = (currentPage ?? 1) + 1;
+
+                if (allRecords.Count >= MaxExportRecords)
+                {
+                    break; // Safety cap to prevent OOM on very large exports
+                }
             } while (moreRecords);
 
             return (columns: columns ?? [], records: allRecords);
@@ -1142,7 +1103,21 @@ public class RpcMethodHandler
                 "The 'sql' parameter is required");
         }
 
-        // Parse and transpile SQL to FetchXML
+        var fetchXml = TranspileSqlToFetchXml(sql);
+
+        return Task.FromResult(new QueryExplainResponse
+        {
+            Plan = fetchXml,
+            Format = "fetchxml"
+        });
+    }
+
+    /// <summary>
+    /// Parses a SQL statement and transpiles it to FetchXML.
+    /// Optionally injects a TOP clause for row-limiting.
+    /// </summary>
+    private static string TranspileSqlToFetchXml(string sql, int? top = null)
+    {
         TSqlStatement stmt;
         try
         {
@@ -1154,14 +1129,16 @@ public class RpcMethodHandler
             throw new RpcException(ErrorCodes.Query.ParseError, ex);
         }
 
-        var generator = new FetchXmlGenerator();
-        var fetchXml = generator.Generate(stmt);
-
-        return Task.FromResult(new QueryExplainResponse
+        if (top.HasValue && stmt is SelectStatement selectStmt
+            && selectStmt.QueryExpression is QuerySpecification querySpec)
         {
-            Plan = fetchXml,
-            Format = "fetchxml"
-        });
+            querySpec.TopRowFilter = new TopRowFilter
+            {
+                Expression = new IntegerLiteral { Value = top.Value.ToString() }
+            };
+        }
+
+        return new FetchXmlGenerator().Generate(stmt);
     }
 
     private static string FormatExportContent(
