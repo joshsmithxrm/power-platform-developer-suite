@@ -161,7 +161,7 @@ export class DaemonClient implements vscode.Disposable {
 
         try {
             await Promise.race([
-                this.connection.sendRequest('auth/list', {}),
+                this.connection.sendRequest('auth/list'),
                 exitPromise,
                 timeoutPromise,
             ]);
