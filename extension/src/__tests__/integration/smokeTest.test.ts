@@ -177,6 +177,7 @@ vi.mock('vscode-jsonrpc/node', () => ({
 describe('Extension Smoke Tests', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.resetModules();
     });
 
     it('exports activate and deactivate functions', async () => {
