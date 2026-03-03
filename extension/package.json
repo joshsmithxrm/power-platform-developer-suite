@@ -126,6 +126,11 @@
         "command": "ppds.selectNotebookEnvironment",
         "title": "PPDS: Select Notebook Environment",
         "icon": "$(database)"
+      },
+      {
+        "command": "ppds.dataExplorer",
+        "title": "PPDS: Data Explorer",
+        "icon": "$(database)"
       }
     ],
     "menus": {
