@@ -85,8 +85,7 @@ export class DaemonClient implements vscode.Disposable {
 
         // Spawn the daemon process
         this.process = spawn('ppds', ['serve'], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            shell: true
+            stdio: ['pipe', 'pipe', 'pipe']
         });
 
         if (!this.process.stdout || !this.process.stdin) {
