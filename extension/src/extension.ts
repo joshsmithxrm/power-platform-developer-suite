@@ -47,11 +47,21 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(toolsTreeView);
 
+    // Sync tools tree disabled state with profile availability
+    const refreshToolsState = () => {
+        daemonClient.authList().then(result => {
+            toolsTreeProvider.setHasActiveProfile(result.activeProfile !== null);
+        }).catch(() => {
+            toolsTreeProvider.setHasActiveProfile(false);
+        });
+    };
+    refreshToolsState();
+
     // ── Profile Commands ────────────────────────────────────────────────
-    registerProfileCommands(context, daemonClient, () => profileTreeProvider.refresh());
+    registerProfileCommands(context, daemonClient, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
     // ── Environment Commands ─────────────────────────────────────────────
-    const envStatusBar = registerEnvironmentCommands(context, daemonClient, () => profileTreeProvider.refresh());
+    const envStatusBar = registerEnvironmentCommands(context, daemonClient, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
     // Respect showEnvironmentInStatusBar setting
     if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {

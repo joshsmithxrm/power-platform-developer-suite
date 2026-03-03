@@ -141,8 +141,6 @@ export function registerEnvironmentConfigCommand(
                     : colorPick.label.replace('$(circle-filled) ', '');
 
                 // Step 5: Save via daemon
-                // TODO: Wire to daemon when env/config/set TS types are finalized
-                // For now the daemon client methods are available, so we call them directly.
                 await daemonClient.envConfigSet({
                     environmentUrl,
                     label: label || undefined,
