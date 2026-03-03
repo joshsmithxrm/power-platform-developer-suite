@@ -757,12 +757,20 @@ describe('DaemonClient', () => {
             expect(mockConnection.onNotification).toHaveBeenCalledWith('auth/deviceCode', handler);
         });
 
-        it('should throw if called before connection is established', () => {
+        it('should queue handler if called before connection is established', async () => {
             const handler = vi.fn();
 
-            expect(() => client.onDeviceCode(handler)).toThrow(
-                'Cannot register notification handler: daemon is not connected'
-            );
+            // Should NOT throw — queues for deferred registration
+            expect(() => client.onDeviceCode(handler)).not.toThrow();
+
+            // Handler not yet registered (no connection)
+            expect(mockConnection.onNotification).not.toHaveBeenCalled();
+
+            // Now connect — handler should be flushed
+            mockConnection.sendRequest.mockResolvedValueOnce({ profiles: [] });
+            await client.authList();
+
+            expect(mockConnection.onNotification).toHaveBeenCalledWith('auth/deviceCode', handler);
         });
     });
 
