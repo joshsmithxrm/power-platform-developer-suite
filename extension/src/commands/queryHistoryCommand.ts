@@ -79,15 +79,15 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
                     });
                 }
             } else if (buttonTooltip === 'Run this query') {
-                quickPick.hide();
                 resolve(entry.sql);
+                quickPick.hide();
             }
         }));
 
         disposables.push(quickPick.onDidAccept(() => {
             const selected = quickPick.selectedItems[0];
-            quickPick.hide();
             resolve(selected?.entry.sql);
+            quickPick.hide();
         }));
 
         disposables.push(quickPick.onDidHide(() => {
