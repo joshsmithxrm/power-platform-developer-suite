@@ -80,6 +80,42 @@
 
 ---
 
+## Acceptance Criteria
+
+{Required. Every spec must have numbered, testable acceptance criteria before implementation begins. See [CONSTITUTION.md](./CONSTITUTION.md) I3.}
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-01 | {Specific, testable behavior} | `{TestClass.TestMethod}` | {status} |
+| AC-02 | {Specific, testable behavior} | `{TestClass.TestMethod}` | {status} |
+
+Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
+
+{Write criteria that are:}
+{- **Specific**: "Returns within 50ms" not "Performs well"}
+{- **Testable**: Can be proven true or false by a single test}
+{- **Independent**: Each criterion stands alone}
+{- **Traceable**: Test column links to exact test method}
+
+### Edge Cases
+
+| Scenario | Input | Expected Output |
+|----------|-------|-----------------|
+| {case} | {input} | {output} |
+
+### Test Examples
+
+```{language}
+// Example test showing expected behavior
+[Fact]
+public void Should_DoSomething_When_Condition()
+{
+    // Arrange, Act, Assert
+}
+```
+
+---
+
 ## Core Types
 
 ### {TypeName}
@@ -206,32 +242,6 @@ public class New{Thing} : I{Thing}
 | Setting | Type | Required | Default | Description |
 |---------|------|----------|---------|-------------|
 | {SettingName} | {type} | Yes/No | {default} | {What it controls} |
-
----
-
-## Testing
-
-### Acceptance Criteria
-
-- [ ] {Testable criterion}
-- [ ] {Testable criterion}
-
-### Edge Cases
-
-| Scenario | Input | Expected Output |
-|----------|-------|-----------------|
-| {case} | {input} | {output} |
-
-### Test Examples
-
-```{language}
-// Example test showing expected behavior
-[Fact]
-public void Should_DoSomething_When_Condition()
-{
-    // Arrange, Act, Assert
-}
-```
 
 ---
 
