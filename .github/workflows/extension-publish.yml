@@ -10,6 +10,14 @@ on:
         required: false
         default: true
         type: boolean
+      channel:
+        description: 'Release channel'
+        required: true
+        default: 'pre-release'
+        type: choice
+        options:
+          - pre-release
+          - stable
 
 jobs:
   publish:
@@ -38,13 +46,33 @@ jobs:
         working-directory: extension
         run: npm run lint
 
+      - name: Test
+        working-directory: extension
+        run: npm test
+
       - name: Build
         working-directory: extension
         run: npm run compile
 
-      - name: Package extension
+      - name: Determine release channel
+        id: channel
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "is_prerelease=${{ inputs.channel == 'pre-release' }}" >> $GITHUB_OUTPUT
+          else
+            # For tag-triggered releases, check the GitHub release prerelease flag
+            echo "is_prerelease=${{ github.event.release.prerelease }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package extension (pre-release)
+        if: steps.channel.outputs.is_prerelease == 'true'
         working-directory: extension
         run: npx vsce package --pre-release
+
+      - name: Package extension (stable)
+        if: steps.channel.outputs.is_prerelease != 'true'
+        working-directory: extension
+        run: npx vsce package
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v7
@@ -53,9 +81,20 @@ jobs:
           path: extension/*.vsix
           retention-days: 30
 
-      - name: Publish to VS Code Marketplace
-        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+      - name: Publish to VS Code Marketplace (pre-release)
+        if: |
+          steps.channel.outputs.is_prerelease == 'true' &&
+          (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         working-directory: extension
         run: npx vsce publish --pre-release -p ${{ secrets.ADO_MARKETPLACE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
+
+      - name: Publish to VS Code Marketplace (stable)
+        if: |
+          steps.channel.outputs.is_prerelease != 'true' &&
+          (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+        working-directory: extension
+        run: npx vsce publish -p ${{ secrets.ADO_MARKETPLACE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}

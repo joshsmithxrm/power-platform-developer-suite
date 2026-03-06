@@ -29,7 +29,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 - `src/PPDS.Cli/Services/` - Application Services
 - `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
-- `docs/specs/` - Feature specifications
+- `specs/` - Feature specifications
+- `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
 
 ## Commands
 
@@ -37,8 +38,22 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 |---------|---------|
 | `ppds --help` | Full CLI reference |
 | `ppds serve` | RPC server for IDE integration |
-| `/ship` | Validate, commit, PR, handle CI |
+| `/implement` | Execute implementation plan with spec-aware subagents |
+| `/spec` | Create or update a specification |
+| `/spec-audit` | Audit specs against code reality |
 | `/debug` | Interactive feedback loop for CLI/TUI/MCP |
+| `/automated-quality-gates` | Mechanical pass/fail build/test/lint checks |
+| `/impartial-code-review` | Bias-free code review against specs |
+| `/review-fix-converge` | Gates, review, fix loop with convergence tracking |
+
+## Spec Workflow
+
+- Constitution: `specs/CONSTITUTION.md` — non-negotiable principles
+- Template: `specs/SPEC-TEMPLATE.md` — required structure for all specs
+- New spec: `/spec {name}` — guided creation with cross-referencing
+- Audit: `/spec-audit` — compare all specs against code
+- Implement: `/implement` — loads constitution + relevant specs into subagent context
+- Review: `/review-fix-converge` — gates, impartial review, fix until converged
 
 ## Testing
 
