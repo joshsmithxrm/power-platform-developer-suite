@@ -282,6 +282,13 @@
         ]
       }
     ],
+    "grammars": [
+      {
+        "language": "fetchxml",
+        "scopeName": "text.xml.fetchxml",
+        "path": "./syntaxes/fetchxml.tmLanguage.json"
+      }
+    ],
     "configuration": {
       "title": "Power Platform Developer Suite",
       "properties": {
