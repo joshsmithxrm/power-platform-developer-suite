@@ -205,6 +205,7 @@ export class DataverseNotebookController implements vscode.Disposable {
             if (entry) {
                 entry.abort.abort();
                 entry.cts.cancel();
+                entry.cts.dispose();
                 this.activeExecutions.delete(cellUri);
             }
         }

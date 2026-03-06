@@ -328,7 +328,7 @@ describe('DaemonClient', () => {
             const params = { sql: 'SELECT name FROM account', top: 10 };
             const result = await client.querySql(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/sql', params);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/sql', params, undefined);
             expect(result.count).toBe(1);
             expect(result.records[0]).toEqual({ name: 'Contoso' });
         });
@@ -355,7 +355,7 @@ describe('DaemonClient', () => {
             const params = { fetchXml: '<fetch><entity name="contact" /></fetch>' };
             const result = await client.queryFetch(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/fetch', params);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/fetch', params, undefined);
             expect(result.success).toBe(true);
         });
     });
