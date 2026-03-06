@@ -61,6 +61,10 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - Integration (live): `--filter Category=Integration`
 - TUI: `--filter Category=TuiUnit`
 
+## Extension Versioning
+
+Odd/even minor convention: odd minor = pre-release, even minor = stable. See `docs/plans/2026-03-03-vscode-extension-prerelease-design.md`.
+
 ## Architecture
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
