@@ -17,7 +17,7 @@ test.describe('Extension Smoke Tests', () => {
     test('activity bar has PPDS section', async ({ page }) => {
         // Look for the PPDS activity bar icon
         // Note: This depends on VS Code's HTML structure which may change
-        const activityBar = page.locator('[id="workbench.parts.activitybar"]');
+        const activityBar = page.locator('[id="workbench.view.extension.ppds"]');
         await expect(activityBar).toBeVisible({ timeout: 30000 });
     });
 });

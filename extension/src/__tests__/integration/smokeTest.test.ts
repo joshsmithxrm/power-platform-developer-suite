@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock vscode module
 vi.mock('vscode', () => {
     const disposable = { dispose: vi.fn() };
-    const subscriptions: any[] = [];
+    const _subscriptions: any[] = [];
     return {
         commands: {
             registerCommand: vi.fn(() => disposable),
@@ -81,9 +81,9 @@ vi.mock('vscode', () => {
         },
         StatusBarAlignment: { Left: 1, Right: 2 },
         ViewColumn: { One: 1, Beside: 2 },
-        TreeItem: class { constructor(label: string, collapsibleState?: number) {} },
+        TreeItem: class { constructor(_label: string, _collapsibleState?: number) {} },
         TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-        ThemeIcon: class { constructor(id: string) {} },
+        ThemeIcon: class { constructor(_id: string) {} },
         EventEmitter: class {
             event = vi.fn();
             fire = vi.fn();

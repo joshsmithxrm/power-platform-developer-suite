@@ -1541,7 +1541,7 @@ public class RpcMethodHandler : IDisposable
         return new ProfileDeleteResponse
         {
             Deleted = deleted,
-            ProfileName = name ?? index?.ToString(),
+            ProfileName = nameOrIndex,
         };
     }
 

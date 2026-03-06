@@ -132,6 +132,10 @@ export async function exportCellResults(
                 const key = col.alias ?? col.logicalName;
                 const val = record[key];
                 if (val === null || val === undefined) return '';
+                if (typeof val === 'object' && val !== null && 'entityId' in val) {
+                    const lookup = val as { formatted?: string; value?: string };
+                    return String(lookup.formatted ?? lookup.value ?? '');
+                }
                 if (typeof val === 'object' && 'formatted' in val) return String((val as { formatted: string }).formatted ?? '');
                 return String(val);
             })

@@ -71,7 +71,7 @@ export class DaemonClient implements vscode.Disposable {
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
     private connectingPromise: Promise<void> | null = null;
-    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
+    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: unknown[]) => void }> = [];
     private outputChannel: vscode.OutputChannel;
     private _disposed = false;
 
@@ -323,9 +323,7 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         this.outputChannel.appendLine(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
-        const result = token
-            ? await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token)
-            : await this.connection!.sendRequest<QueryResultResponse>('query/sql', params);
+        const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token);
         this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
@@ -344,9 +342,7 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         this.outputChannel.appendLine('Calling query/fetch...');
-        const result = token
-            ? await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token)
-            : await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
+        const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token);
         this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;

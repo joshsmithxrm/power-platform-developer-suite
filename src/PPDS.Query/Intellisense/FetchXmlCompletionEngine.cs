@@ -235,7 +235,6 @@ public sealed class FetchXmlCompletionEngine
 
         // Walk backward through any identifier characters to find the last '<'
         var pos = textBefore.Length - 1;
-        var identStart = pos + 1;
 
         while (pos >= 0 && IsXmlNameChar(textBefore[pos]))
         {
