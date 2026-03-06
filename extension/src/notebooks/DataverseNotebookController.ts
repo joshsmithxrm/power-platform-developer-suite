@@ -91,6 +91,7 @@ export class DataverseNotebookController implements vscode.Disposable {
 
             const selected = await vscode.window.showQuickPick(items, {
                 placeHolder: 'Select Dataverse environment for this notebook',
+                ignoreFocusOut: true,
             });
 
             if (selected) {

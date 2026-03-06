@@ -93,6 +93,7 @@ export function registerProfileCommands(
                     placeHolder: result.activeProfile
                         ? `Active: ${result.activeProfile}`
                         : 'No active profile',
+                    ignoreFocusOut: true,
                 });
 
                 if (selected) {
@@ -259,6 +260,7 @@ async function showProfileDetails(who: AuthWhoResponse): Promise<void> {
         title: `Profile Details: ${who.name ?? `Profile ${who.index}`}`,
         placeHolder: 'Profile information (read-only)',
         canPickMany: false,
+        ignoreFocusOut: true,
     });
 }
 
@@ -348,6 +350,7 @@ async function runCreateProfileWizard(
     const selectedMethod = await vscode.window.showQuickPick(authMethods, {
         title: 'Create Profile (Step 1/3): Authentication Method',
         placeHolder: 'Select an authentication method',
+        ignoreFocusOut: true,
     });
 
     if (!selectedMethod) {
@@ -363,6 +366,7 @@ async function runCreateProfileWizard(
         title: 'Create Profile (Step 2/3): Profile Name',
         prompt: isSPN ? 'Enter a name for this profile (required for service principals)' : 'Enter a name for this profile (optional)',
         placeHolder: 'e.g., Dev Environment, Production SPN',
+        ignoreFocusOut: true,
         validateInput: (value) => {
             if (isSPN && !value.trim()) {
                 return 'Profile name is required for service principal authentication';
@@ -431,6 +435,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             ? 'Enter the Dataverse environment URL (optional — you can select one after)'
             : 'Enter the Dataverse environment URL',
         placeHolder: 'https://org.crm.dynamics.com',
+        ignoreFocusOut: true,
         validateInput: (value) => {
             if (!value.trim()) {
                 return isUserBased ? undefined : 'Environment URL is required';
@@ -462,6 +467,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Application ID is required',
             });
             if (appId === undefined) { return null; }
@@ -471,6 +477,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Client Secret',
                 prompt: 'Enter the client secret',
                 password: true,
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Client secret is required',
             });
             if (secret === undefined) { return null; }
@@ -480,6 +487,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Tenant ID',
                 prompt: 'Enter the Azure AD tenant ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
             });
             if (tenantId === undefined) { return null; }
@@ -492,6 +500,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Application ID is required',
             });
             if (appId === undefined) { return null; }
@@ -501,6 +510,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Certificate File Path',
                 prompt: 'Enter the path to the certificate file (.pfx)',
                 placeHolder: '/path/to/certificate.pfx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Certificate path is required',
             });
             if (certPath === undefined) { return null; }
@@ -510,6 +520,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Certificate Password',
                 prompt: 'Enter the certificate password (leave empty if none)',
                 password: true,
+                ignoreFocusOut: true,
             });
             if (certPassword === undefined) { return null; }
             if (certPassword) {
@@ -520,6 +531,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Tenant ID',
                 prompt: 'Enter the Azure AD tenant ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
             });
             if (tenantId === undefined) { return null; }
@@ -532,6 +544,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Application ID is required',
             });
             if (appId === undefined) { return null; }
@@ -541,6 +554,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Certificate Thumbprint',
                 prompt: 'Enter the certificate thumbprint from the Windows certificate store',
                 placeHolder: 'A1B2C3D4E5F6...',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Certificate thumbprint is required',
             });
             if (thumbprint === undefined) { return null; }
@@ -550,6 +564,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Tenant ID',
                 prompt: 'Enter the Azure AD tenant ID',
                 placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Tenant ID is required for service principal authentication',
             });
             if (tenantId === undefined) { return null; }
@@ -562,6 +577,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Username',
                 prompt: 'Enter the username (email)',
                 placeHolder: 'user@org.onmicrosoft.com',
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Username is required',
             });
             if (username === undefined) { return null; }
@@ -571,6 +587,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
                 title: 'Create Profile: Password',
                 prompt: 'Enter the password',
                 password: true,
+                ignoreFocusOut: true,
                 validateInput: (value) => value.trim() ? undefined : 'Password is required',
             });
             if (password === undefined) { return null; }
@@ -639,6 +656,7 @@ async function runRenameProfile(
         prompt: 'Enter a new name for this profile',
         value: name ?? '',
         placeHolder: 'New profile name',
+        ignoreFocusOut: true,
         validateInput: (value) => {
             if (!value.trim()) {
                 return 'Profile name cannot be empty';
