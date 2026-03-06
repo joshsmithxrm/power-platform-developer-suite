@@ -74,13 +74,11 @@ export class DaemonClient implements vscode.Disposable {
     private connection: MessageConnection | null = null;
     private connectingPromise: Promise<void> | null = null;
     private pendingNotificationHandlers: Array<{ method: string; handler: (...args: unknown[]) => void }> = [];
-    private outputChannel: vscode.OutputChannel;
     private _disposed = false;
     private extensionPath: string;
 
-    constructor(extensionPath: string) {
+    constructor(extensionPath: string, private readonly log: vscode.LogOutputChannel) {
         this.extensionPath = extensionPath;
-        this.outputChannel = vscode.window.createOutputChannel('PPDS Daemon');
     }
 
     /**
@@ -109,7 +107,7 @@ export class DaemonClient implements vscode.Disposable {
         }
 
         const ppdsPath = this.resolvePpdsPath();
-        this.outputChannel.appendLine(`Starting ppds serve daemon (${ppdsPath})...`);
+        this.log.info(`Starting ppds serve daemon (${ppdsPath})...`);
 
         // Spawn the daemon process
         this.process = spawn(ppdsPath, ['serve'], {
@@ -122,11 +120,11 @@ export class DaemonClient implements vscode.Disposable {
 
         // Log stderr for debugging
         this.process.stderr?.on('data', (data: Buffer) => {
-            this.outputChannel.appendLine(`[daemon stderr] ${data.toString()}`);
+            this.log.warn(`[daemon stderr] ${data.toString()}`);
         });
 
         this.process.on('error', (err) => {
-            this.outputChannel.appendLine(`Daemon error: ${err.message}`);
+            this.log.error(`Daemon error: ${err.message}`);
             vscode.window.showErrorMessage(`PPDS daemon error: ${err.message}`);
         });
 
@@ -138,7 +136,7 @@ export class DaemonClient implements vscode.Disposable {
         });
 
         const onStartupExit = (code: number | null) => {
-            this.outputChannel.appendLine(`Daemon exited during startup with code ${code}`);
+            this.log.error(`Daemon exited during startup with code ${code}`);
             this.connection = null;
             this.process = null;
             this.connectingPromise = null;
@@ -205,12 +203,12 @@ export class DaemonClient implements vscode.Disposable {
         this.process.removeListener('exit', onStartupExit);
 
         this.process.on('exit', (code: number | null) => {
-            this.outputChannel.appendLine(`Daemon exited with code ${code}`);
+            this.log.warn(`Daemon exited with code ${code}`);
             this.connection = null;
             this.process = null;
         });
 
-        this.outputChannel.appendLine('Daemon connection established');
+        this.log.info('Daemon connection established');
     }
 
     // ── Auth methods ────────────────────────────────────────────────────────
@@ -221,9 +219,9 @@ export class DaemonClient implements vscode.Disposable {
     async authList(): Promise<AuthListResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine('Calling auth/list...');
+        this.log.debug('Calling auth/list...');
         const result = await this.connection!.sendRequest<AuthListResponse>('auth/list');
-        this.outputChannel.appendLine(`Got ${result.profiles.length} profiles`);
+        this.log.debug(`Got ${result.profiles.length} profiles`);
 
         return result;
     }
@@ -234,9 +232,9 @@ export class DaemonClient implements vscode.Disposable {
     async authWho(): Promise<AuthWhoResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine('Calling auth/who...');
+        this.log.debug('Calling auth/who...');
         const result = await this.connection!.sendRequest<AuthWhoResponse>('auth/who');
-        this.outputChannel.appendLine(`auth/who returned profile index ${result.index}`);
+        this.log.debug(`auth/who returned profile index ${result.index}`);
 
         return result;
     }
@@ -247,9 +245,9 @@ export class DaemonClient implements vscode.Disposable {
     async authSelect(params: { index?: number; name?: string }): Promise<AuthSelectResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        this.log.debug(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<AuthSelectResponse>('auth/select', params);
-        this.outputChannel.appendLine(`Selected profile: ${result.name ?? result.identity}`);
+        this.log.debug(`Selected profile: ${result.name ?? result.identity}`);
 
         return result;
     }
@@ -263,9 +261,9 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         const params = filter !== undefined ? { filter } : {};
-        this.outputChannel.appendLine(`Calling env/list${filter ? ` with filter="${filter}"` : ''}...`);
+        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}...`);
         const result = await this.connection!.sendRequest<EnvListResponse>('env/list', params);
-        this.outputChannel.appendLine(`Got ${result.environments.length} environments`);
+        this.log.debug(`Got ${result.environments.length} environments`);
 
         return result;
     }
@@ -276,9 +274,9 @@ export class DaemonClient implements vscode.Disposable {
     async envSelect(environment: string): Promise<EnvSelectResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling env/select for "${environment}"...`);
+        this.log.debug(`Calling env/select for "${environment}"...`);
         const result = await this.connection!.sendRequest<EnvSelectResponse>('env/select', { environment });
-        this.outputChannel.appendLine(`Selected environment: ${result.displayName} (${result.url})`);
+        this.log.debug(`Selected environment: ${result.displayName} (${result.url})`);
 
         return result;
     }
@@ -290,9 +288,9 @@ export class DaemonClient implements vscode.Disposable {
     async envWho(): Promise<EnvWhoResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine('Calling env/who...');
+        this.log.debug('Calling env/who...');
         const result = await this.connection!.sendRequest<EnvWhoResponse>('env/who');
-        this.outputChannel.appendLine(`env/who: ${result.connectedAs} @ ${result.organizationName}`);
+        this.log.debug(`env/who: ${result.connectedAs} @ ${result.organizationName}`);
 
         return result;
     }
@@ -303,9 +301,9 @@ export class DaemonClient implements vscode.Disposable {
     async envConfigGet(environmentUrl: string): Promise<EnvConfigGetResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling env/config/get for "${environmentUrl}"...`);
+        this.log.debug(`Calling env/config/get for "${environmentUrl}"...`);
         const result = await this.connection!.sendRequest<EnvConfigGetResponse>('env/config/get', { environmentUrl });
-        this.outputChannel.appendLine(`Got config: label=${result.label ?? '(none)'}, type=${result.type ?? '(none)'}, color=${result.color ?? '(none)'}`);
+        this.log.debug(`Got config: label=${result.label ?? '(none)'}, type=${result.type ?? '(none)'}, color=${result.color ?? '(none)'}`);
 
         return result;
     }
@@ -321,9 +319,9 @@ export class DaemonClient implements vscode.Disposable {
     }): Promise<EnvConfigSetResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling env/config/set for "${params.environmentUrl}"...`);
+        this.log.debug(`Calling env/config/set for "${params.environmentUrl}"...`);
         const result = await this.connection!.sendRequest<EnvConfigSetResponse>('env/config/set', params);
-        this.outputChannel.appendLine(`Config saved: saved=${result.saved}`);
+        this.log.debug(`Config saved: saved=${result.saved}`);
 
         return result;
     }
@@ -344,9 +342,9 @@ export class DaemonClient implements vscode.Disposable {
     }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
+        this.log.debug(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
         const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token);
-        this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+        this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
     }
@@ -363,9 +361,9 @@ export class DaemonClient implements vscode.Disposable {
     }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine('Calling query/fetch...');
+        this.log.debug('Calling query/fetch...');
         const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token);
-        this.outputChannel.appendLine(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+        this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
     }
@@ -390,9 +388,9 @@ export class DaemonClient implements vscode.Disposable {
         const params: Record<string, unknown> = {};
         if (search !== undefined) params.search = search;
         if (limit !== undefined) params.limit = limit;
-        this.outputChannel.appendLine(`Calling query/history/list...`);
+        this.log.debug(`Calling query/history/list...`);
         const result = await this.connection!.sendRequest<QueryHistoryListResponse>('query/history/list', params);
-        this.outputChannel.appendLine(`Got ${result.entries.length} history entries`);
+        this.log.debug(`Got ${result.entries.length} history entries`);
         return result;
     }
 
@@ -401,9 +399,9 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryHistoryDelete(id: string): Promise<QueryHistoryDeleteResponse> {
         await this.ensureConnected();
-        this.outputChannel.appendLine(`Calling query/history/delete for "${id}"...`);
+        this.log.debug(`Calling query/history/delete for "${id}"...`);
         const result = await this.connection!.sendRequest<QueryHistoryDeleteResponse>('query/history/delete', { id });
-        this.outputChannel.appendLine(`Deleted: ${result.deleted}`);
+        this.log.debug(`Deleted: ${result.deleted}`);
         return result;
     }
 
@@ -420,9 +418,9 @@ export class DaemonClient implements vscode.Disposable {
         top?: number;
     }): Promise<QueryExportResponse> {
         await this.ensureConnected();
-        this.outputChannel.appendLine(`Calling query/export...`);
+        this.log.debug(`Calling query/export...`);
         const result = await this.connection!.sendRequest<QueryExportResponse>('query/export', params);
-        this.outputChannel.appendLine(`Exported ${result.rowCount} rows as ${result.format}`);
+        this.log.debug(`Exported ${result.rowCount} rows as ${result.format}`);
         return result;
     }
 
@@ -433,9 +431,9 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryExplain(sql: string): Promise<QueryExplainResponse> {
         await this.ensureConnected();
-        this.outputChannel.appendLine('Calling query/explain...');
+        this.log.debug('Calling query/explain...');
         const result = await this.connection!.sendRequest<QueryExplainResponse>('query/explain', { sql });
-        this.outputChannel.appendLine(`Got explain plan (${result.format})`);
+        this.log.debug(`Got explain plan (${result.format})`);
         return result;
     }
 
@@ -459,9 +457,9 @@ export class DaemonClient implements vscode.Disposable {
     }): Promise<ProfileCreateResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling profiles/create (method=${params.authMethod})...`);
+        this.log.debug(`Calling profiles/create (method=${params.authMethod})...`);
         const result = await this.connection!.sendRequest<ProfileCreateResponse>('profiles/create', params);
-        this.outputChannel.appendLine(`Profile created: index=${result.index}, name=${result.name ?? '(auto)'}`);
+        this.log.debug(`Profile created: index=${result.index}, name=${result.name ?? '(auto)'}`);
 
         return result;
     }
@@ -472,9 +470,9 @@ export class DaemonClient implements vscode.Disposable {
     async profilesDelete(params: { index?: number; name?: string }): Promise<ProfileDeleteResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        this.log.debug(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<ProfileDeleteResponse>('profiles/delete', params);
-        this.outputChannel.appendLine(`Profile deleted: ${result.deleted}`);
+        this.log.debug(`Profile deleted: ${result.deleted}`);
 
         return result;
     }
@@ -485,12 +483,12 @@ export class DaemonClient implements vscode.Disposable {
     async profilesRename(currentName: string, newName: string): Promise<ProfileRenameResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
+        this.log.debug(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
         const result = await this.connection!.sendRequest<ProfileRenameResponse>(
             'profiles/rename',
             { currentName, newName }
         );
-        this.outputChannel.appendLine(`Profile renamed: ${result.previousName} -> ${result.newName}`);
+        this.log.debug(`Profile renamed: ${result.previousName} -> ${result.newName}`);
 
         return result;
     }
@@ -501,12 +499,12 @@ export class DaemonClient implements vscode.Disposable {
     async profilesInvalidate(profileName: string): Promise<ProfilesInvalidateResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling profiles/invalidate for "${profileName}"...`);
+        this.log.debug(`Calling profiles/invalidate for "${profileName}"...`);
         const result = await this.connection!.sendRequest<ProfilesInvalidateResponse>(
             'profiles/invalidate',
             { profileName }
         );
-        this.outputChannel.appendLine(`Profile "${profileName}" invalidated: ${result.invalidated}`);
+        this.log.debug(`Profile "${profileName}" invalidated: ${result.invalidated}`);
 
         return result;
     }
@@ -527,9 +525,9 @@ export class DaemonClient implements vscode.Disposable {
             params.includeManaged = includeManaged;
         }
 
-        this.outputChannel.appendLine(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
+        this.log.debug(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
         const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
-        this.outputChannel.appendLine(`Got ${result.solutions.length} solutions`);
+        this.log.debug(`Got ${result.solutions.length} solutions`);
 
         return result;
     }
@@ -545,9 +543,9 @@ export class DaemonClient implements vscode.Disposable {
             params.componentType = componentType;
         }
 
-        this.outputChannel.appendLine(`Calling solutions/components for "${uniqueName}"...`);
+        this.log.debug(`Calling solutions/components for "${uniqueName}"...`);
         const result = await this.connection!.sendRequest<SolutionComponentsResponse>('solutions/components', params);
-        this.outputChannel.appendLine(`Got ${result.components.length} components`);
+        this.log.debug(`Got ${result.components.length} components`);
 
         return result;
     }
@@ -561,9 +559,9 @@ export class DaemonClient implements vscode.Disposable {
     async schemaEntities(): Promise<SchemaEntitiesResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine('Calling schema/entities...');
+        this.log.debug('Calling schema/entities...');
         const result = await this.connection!.sendRequest<SchemaEntitiesResponse>('schema/entities');
-        this.outputChannel.appendLine(`Got ${result.entities.length} entities`);
+        this.log.debug(`Got ${result.entities.length} entities`);
 
         return result;
     }
@@ -575,12 +573,12 @@ export class DaemonClient implements vscode.Disposable {
     async schemaAttributes(entity: string): Promise<SchemaAttributesResponse> {
         await this.ensureConnected();
 
-        this.outputChannel.appendLine(`Calling schema/attributes for "${entity}"...`);
+        this.log.debug(`Calling schema/attributes for "${entity}"...`);
         const result = await this.connection!.sendRequest<SchemaAttributesResponse>(
             'schema/attributes',
             { entity }
         );
-        this.outputChannel.appendLine(`Got ${result.attributes.length} attributes for ${result.entityName}`);
+        this.log.debug(`Got ${result.attributes.length} attributes for ${result.entityName}`);
 
         return result;
     }
@@ -598,7 +596,7 @@ export class DaemonClient implements vscode.Disposable {
         } else {
             this.pendingNotificationHandlers.push({ method, handler });
         }
-        this.outputChannel.appendLine('Registered auth/deviceCode notification handler');
+        this.log.debug('Registered auth/deviceCode notification handler');
     }
 
     // ── Connection management ───────────────────────────────────────────────
@@ -632,7 +630,7 @@ export class DaemonClient implements vscode.Disposable {
      * Stops the daemon and cleans up resources
      */
     dispose(): void {
-        this.outputChannel.appendLine('Disposing daemon client...');
+        this.log.info('Disposing daemon client...');
 
         this._disposed = true;
         this.connectingPromise = null;
@@ -646,7 +644,5 @@ export class DaemonClient implements vscode.Disposable {
             this.process.kill();
             this.process = null;
         }
-
-        this.outputChannel.dispose();
     }
 }

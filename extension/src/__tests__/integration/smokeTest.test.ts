@@ -12,7 +12,17 @@ vi.mock('vscode', () => {
             createTreeView: vi.fn(() => ({ ...disposable, onDidChangeVisibility: vi.fn() })),
             createOutputChannel: vi.fn(() => ({
                 appendLine: vi.fn(),
+                trace: vi.fn(),
+                debug: vi.fn(),
+                info: vi.fn(),
+                warn: vi.fn(),
+                error: vi.fn(),
+                append: vi.fn(),
+                clear: vi.fn(),
+                show: vi.fn(),
+                hide: vi.fn(),
                 dispose: vi.fn(),
+                replace: vi.fn(),
             })),
             createStatusBarItem: vi.fn(() => ({
                 show: vi.fn(),

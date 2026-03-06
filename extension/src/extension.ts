@@ -16,6 +16,7 @@ import { QueryPanel } from './panels/QueryPanel.js';
 import { SolutionsTreeDataProvider } from './views/solutionsTreeView.js';
 
 let daemonClient: DaemonClient | undefined;
+let logChannel: vscode.LogOutputChannel | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Power Platform Developer Suite is now active');
@@ -23,8 +24,12 @@ export function activate(context: vscode.ExtensionContext) {
     // Read extension settings
     const config = vscode.workspace.getConfiguration('ppds');
 
+    // Create structured log channel
+    logChannel = vscode.window.createOutputChannel('PPDS', { log: true });
+    context.subscriptions.push(logChannel);
+
     // Create the daemon client
-    daemonClient = new DaemonClient(context.extensionPath);
+    daemonClient = new DaemonClient(context.extensionPath, logChannel);
     const client = daemonClient; // Local const for type narrowing in closures
     context.subscriptions.push(client);
 
