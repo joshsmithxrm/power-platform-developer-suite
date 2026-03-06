@@ -162,6 +162,40 @@ export function registerProfileCommands(
             }
         }),
     );
+
+    // ── Invalidate Profile Tokens ──────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.invalidateProfile', async (item: unknown) => {
+            try {
+                const profileItem = item as { profile?: { index: number; name: string | null } } | undefined;
+                if (!profileItem?.profile) {
+                    vscode.window.showWarningMessage('No profile selected.');
+                    return;
+                }
+
+                const { name, index } = profileItem.profile;
+                const displayName = name ?? `Profile ${index}`;
+                const profileName = name ?? index.toString();
+
+                const confirm = await vscode.window.showWarningMessage(
+                    `Invalidate cached tokens for "${displayName}"? You will need to re-authenticate.`,
+                    { modal: true },
+                    'Invalidate',
+                );
+
+                if (confirm !== 'Invalidate') {
+                    return;
+                }
+
+                await daemonClient.profilesInvalidate(profileName);
+                refreshProfiles();
+                vscode.window.showInformationMessage(`Tokens invalidated for "${displayName}".`);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to invalidate tokens: ${message}`);
+            }
+        }),
+    );
 }
 
 // ── Profile Details ─────────────────────────────────────────────────────────
