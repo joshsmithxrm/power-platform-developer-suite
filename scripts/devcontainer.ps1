@@ -104,6 +104,15 @@ function Get-Worktrees {
     # 1. Get worktree names the HOST knows about
     $hostWorktreeNames = @()
     $hostRaw = git -C $WorkspaceFolder worktree list --porcelain 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "git worktree list failed — skipping stale worktree cleanup"
+        # Fall back to just listing container directories without cleanup
+        $containerRaw = devcontainer exec --workspace-folder $WorkspaceFolder sh -c 'ls -d .worktrees/*/ 2>/dev/null' 2>$null
+        if ($containerRaw) {
+            $containerRaw -split "`n" | ForEach-Object { ($_.Trim() -replace '/$','') -replace '^\.worktrees/','' } | Where-Object { $_ }
+        }
+        return
+    }
     if ($hostRaw) {
         $hostRaw -split "`n" | ForEach-Object {
             if ($_ -match '\.worktrees[/\\]([^\s]+)') {
