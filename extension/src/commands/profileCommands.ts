@@ -403,11 +403,47 @@ async function runCreateProfileWizard(
 
     refreshProfiles();
     vscode.window.showInformationMessage(
-        `Profile created successfully (${selectedMethod.authMethodId}, Name: "${profileName || '(auto)'}")`,
+        `Profile created successfully (${selectedMethod.authMethodId})`,
     );
 
-    // Auto-launch environment selector so user can pick an environment right away
-    await vscode.commands.executeCommand('ppds.selectEnvironment');
+    // For user-based auth, discover environments and let user pick inline
+    const isUserBased = selectedMethod.authMethodId === 'deviceCode'
+        || selectedMethod.authMethodId === 'interactive';
+
+    if (isUserBased) {
+        try {
+            const envResult = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Discovering environments...',
+                    cancellable: false,
+                },
+                () => daemonClient.envList(),
+            );
+
+            if (envResult.environments.length > 0) {
+                const envItems = envResult.environments.map(env => ({
+                    label: env.friendlyName,
+                    description: env.type ? `[${env.type}]` : undefined,
+                    detail: env.apiUrl,
+                    apiUrl: env.apiUrl,
+                }));
+
+                const selectedEnv = await vscode.window.showQuickPick(envItems, {
+                    title: 'Select Default Environment',
+                    placeHolder: 'Choose a Dataverse environment for this profile',
+                    ignoreFocusOut: true,
+                });
+
+                if (selectedEnv) {
+                    await daemonClient.envSelect(selectedEnv.apiUrl);
+                    refreshProfiles();
+                }
+            }
+        } catch {
+            // Environment discovery failed — not critical, user can select later
+        }
+    }
 }
 
 interface AuthParams {
@@ -425,35 +461,33 @@ interface AuthParams {
 async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams | null> {
     const params: AuthParams = {};
 
-    // Service principals always need an environment URL upfront.
-    // User-based flows (deviceCode, interactive) can set it later via environment selector.
     const isUserBased = authMethodId === 'deviceCode' || authMethodId === 'interactive';
 
-    const envUrl = await vscode.window.showInputBox({
-        title: 'Create Profile (Step 3): Environment URL',
-        prompt: isUserBased
-            ? 'Enter the Dataverse environment URL (optional — you can select one after)'
-            : 'Enter the Dataverse environment URL',
-        placeHolder: 'https://org.crm.dynamics.com',
-        ignoreFocusOut: true,
-        validateInput: (value) => {
-            if (!value.trim()) {
-                return isUserBased ? undefined : 'Environment URL is required';
-            }
-            try {
-                new URL(value);
-            } catch {
-                return 'Enter a valid URL (e.g., https://org.crm.dynamics.com)';
-            }
-            return undefined;
-        },
-    });
+    // User-based flows discover environments after authentication.
+    // SPNs require the URL upfront to scope the token.
+    if (!isUserBased) {
+        const envUrl = await vscode.window.showInputBox({
+            title: 'Create Profile: Environment URL',
+            prompt: 'Enter the Dataverse environment URL',
+            placeHolder: 'https://org.crm.dynamics.com',
+            ignoreFocusOut: true,
+            validateInput: (value) => {
+                if (!value.trim()) {
+                    return 'Environment URL is required for service principal authentication';
+                }
+                try {
+                    new URL(value);
+                } catch {
+                    return 'Enter a valid URL (e.g., https://org.crm.dynamics.com)';
+                }
+                return undefined;
+            },
+        });
 
-    if (envUrl === undefined) {
-        return null;
-    }
-    if (envUrl.trim()) {
-        params.environmentUrl = envUrl;
+        if (envUrl === undefined) {
+            return null;
+        }
+        params.environmentUrl = envUrl.trim();
     }
 
     switch (authMethodId) {
