@@ -7,6 +7,7 @@ vi.mock('vscode', () => {
     return {
         commands: {
             registerCommand: vi.fn(() => disposable),
+            executeCommand: vi.fn(),
         },
         window: {
             createTreeView: vi.fn(() => ({ ...disposable, onDidChangeVisibility: vi.fn() })),

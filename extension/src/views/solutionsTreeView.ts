@@ -100,7 +100,10 @@ export class SolutionsTreeDataProvider
 
     private includeManaged = false;
 
-    constructor(private readonly daemon: DaemonClient) {}
+    constructor(
+        private readonly daemon: DaemonClient,
+        private readonly log: vscode.LogOutputChannel,
+    ) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -139,7 +142,9 @@ export class SolutionsTreeDataProvider
         try {
             const result = await this.daemon.solutionsList(undefined, this.includeManaged);
             return result.solutions.map(s => new SolutionTreeItem(s));
-        } catch {
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log.error(`Failed to list solutions: ${msg}`);
             return [];
         }
     }
@@ -165,7 +170,9 @@ export class SolutionsTreeDataProvider
                 .map(([typeName, components]) =>
                     new ComponentGroupTreeItem(solutionUniqueName, typeName, components),
                 );
-        } catch {
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log.error(`Failed to list components for ${solutionUniqueName}: ${msg}`);
             return [];
         }
     }

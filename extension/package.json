@@ -310,7 +310,24 @@
           "description": "Show the active environment in the VS Code status bar"
         }
       }
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "ppds.profiles",
+        "contents": "Could not connect to the PPDS daemon.\n[Retry](command:ppds.refreshProfiles)\n[Show Logs](command:ppds.showLogs)",
+        "when": "ppds.daemonState == 'error'"
+      },
+      {
+        "view": "ppds.profiles",
+        "contents": "No authentication profiles found.\n[Create Profile](command:ppds.createProfile)",
+        "when": "ppds.daemonState == 'ready' && ppds.profileCount == 0"
+      },
+      {
+        "view": "ppds.solutions",
+        "contents": "Select a profile and environment to browse solutions.\n[Select Environment](command:ppds.selectEnvironment)",
+        "when": "ppds.daemonState != 'ready'"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
