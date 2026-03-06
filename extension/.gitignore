@@ -3,3 +3,5 @@ dist/
 bin/
 *.vsix
 .vscode-test/
+.dev-version
+package.json.backup
