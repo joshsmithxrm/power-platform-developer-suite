@@ -96,7 +96,7 @@ Changes to `specs/SPEC-TEMPLATE.md`:
 | AC-02 | Throttled client removed from rotation for backoff period | `ThrottleAwareStrategyTests.SelectConnection_SkipsThrottledConnection` | ✅ |
 | AC-03 | Dispose returns connection to pool for reuse | `PoolLifecycleTests.GetClientAsync_ReturnsToPool_OnDispose` | ❌ |
 
-Status: ✅ = covered by passing test, ⚠️ = test exists but failing, ❌ = no test yet
+Status: ✅ = covered by passing test, ⚠️ = test exists but failing, ❌ = no test yet, 🔲 = not yet implemented
 ```
 
 Why this matters: When `/implement` dispatches a subagent, it says "implement AC-01 through AC-05." When `/spec-audit` runs, it greps for referenced test methods and verifies they exist and pass. The convergence loop has concrete criteria — not "does this feel right" but "are AC-01 through AC-12 green."

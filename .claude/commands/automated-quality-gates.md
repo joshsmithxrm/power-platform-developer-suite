@@ -11,7 +11,7 @@ $ARGUMENTS = optional scope hint (e.g., `extension` for TypeScript-only, `dotnet
 ### Step 1: Detect What Changed
 
 ```bash
-git diff --name-only HEAD~1
+git diff --name-only main...HEAD
 ```
 
 Categorize changed files:
@@ -72,7 +72,8 @@ Fail: report failing test names and messages
 
 Read `specs/README.md` to map changed files to specs. For each relevant spec with ACs:
 - Extract test method names from the AC table
-- Run each: `dotnet test --filter "FullyQualifiedName~{method}" -v q --no-build`
+- For .NET tests: `dotnet test --filter "FullyQualifiedName~{method}" -v q --no-build`
+- For TypeScript tests: `npx vitest run -t "{method}" --prefix extension`
 - Report which ACs pass and which fail
 
 ### Step 3: Report

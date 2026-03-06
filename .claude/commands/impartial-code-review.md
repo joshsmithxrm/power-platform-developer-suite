@@ -19,8 +19,8 @@ $ARGUMENTS = optional scope (e.g., `src/PPDS.Cli/Tui/` to limit review). Default
 ### Step 1: Gather Review Material
 
 ```bash
-git diff HEAD~1 --stat
-git diff HEAD~1
+git diff main...HEAD --stat
+git diff main...HEAD
 ```
 
 If $ARGUMENTS specifies a scope, filter the diff to those paths only.
