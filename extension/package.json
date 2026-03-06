@@ -189,6 +189,11 @@
         "command": "ppds.toggleManagedSolutions",
         "title": "Toggle Managed Solutions",
         "icon": "$(filter)"
+      },
+      {
+        "command": "ppds.invalidateProfile",
+        "title": "PPDS: Invalidate Tokens",
+        "icon": "$(debug-disconnect)"
       }
     ],
     "menus": {
@@ -234,6 +239,11 @@
           "command": "ppds.deleteProfile",
           "when": "view == ppds.profiles && viewItem == profile",
           "group": "profile@3"
+        },
+        {
+          "command": "ppds.invalidateProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@4"
         }
       ],
       "notebook/cell/title": [
