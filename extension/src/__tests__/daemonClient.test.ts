@@ -2,14 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock: vscode ────────────────────────────────────────────────────────────
 
-const mockOutputChannel = {
+const mockLogChannel: Record<string, ReturnType<typeof vi.fn>> = {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    append: vi.fn(),
     appendLine: vi.fn(),
+    clear: vi.fn(),
+    show: vi.fn(),
+    hide: vi.fn(),
     dispose: vi.fn(),
+    replace: vi.fn(),
 };
 
 vi.mock('vscode', () => ({
     window: {
-        createOutputChannel: vi.fn(() => mockOutputChannel),
         showErrorMessage: vi.fn(),
     },
 }));
@@ -56,7 +65,7 @@ describe('DaemonClient', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks();
-        client = new DaemonClient('/test/extension');
+        client = new DaemonClient('/test/extension', mockLogChannel as any);
         // Pre-connect the client so individual tests don't trigger the startup
         // handshake and consume their own mocked responses.
         mockConnection.sendRequest.mockResolvedValue(HANDSHAKE_MOCK);
@@ -68,7 +77,7 @@ describe('DaemonClient', () => {
         // Tests in this block need an unconnected client to observe startup behaviour
         beforeEach(() => {
             vi.clearAllMocks();
-            client = new DaemonClient('/test/extension');
+            client = new DaemonClient('/test/extension', mockLogChannel as any);
         });
 
         it('should start the daemon on first RPC call', async () => {
@@ -182,7 +191,7 @@ describe('DaemonClient', () => {
             expect(mockConnection.sendRequest).toHaveBeenCalledWith('auth/list');
             expect(result).toEqual(mockResult);
             expect(result.profiles).toHaveLength(1);
-            expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('Calling auth/list...');
+            expect(mockLogChannel.debug).toHaveBeenCalledWith('Calling auth/list...');
         });
     });
 
@@ -209,7 +218,7 @@ describe('DaemonClient', () => {
 
             expect(mockConnection.sendRequest).toHaveBeenCalledWith('auth/who');
             expect(result).toEqual(mockResult);
-            expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('Calling auth/who...');
+            expect(mockLogChannel.debug).toHaveBeenCalledWith('Calling auth/who...');
         });
     });
 
@@ -379,7 +388,7 @@ describe('DaemonClient', () => {
 
             expect(mockConnection.sendRequest).toHaveBeenCalledWith('env/who');
             expect(result).toEqual(mockResult);
-            expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('Calling env/who...');
+            expect(mockLogChannel.debug).toHaveBeenCalledWith('Calling env/who...');
         });
     });
 
@@ -798,7 +807,7 @@ describe('DaemonClient', () => {
         it('should queue handler if called before connection is established', async () => {
             // Needs an unconnected client to test queuing behaviour
             vi.clearAllMocks();
-            const unconnectedClient = new DaemonClient('/test/extension');
+            const unconnectedClient = new DaemonClient('/test/extension', mockLogChannel as any);
             const handler = vi.fn();
 
             // Should NOT throw — queues for deferred registration
@@ -831,18 +840,16 @@ describe('DaemonClient', () => {
 
             expect(mockConnection.dispose).toHaveBeenCalled();
             expect(mockProcess.kill).toHaveBeenCalled();
-            expect(mockOutputChannel.dispose).toHaveBeenCalled();
         });
 
         it('should handle dispose when not connected', () => {
             // Needs a client that has never been connected
             vi.clearAllMocks();
-            const unconnectedClient = new DaemonClient('/test/extension');
+            const unconnectedClient = new DaemonClient('/test/extension', mockLogChannel as any);
 
             // Should not throw
             unconnectedClient.dispose();
 
-            expect(mockOutputChannel.dispose).toHaveBeenCalled();
             expect(mockConnection.dispose).not.toHaveBeenCalled();
             expect(mockProcess.kill).not.toHaveBeenCalled();
         });
