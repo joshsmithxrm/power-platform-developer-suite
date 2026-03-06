@@ -28,6 +28,9 @@ export function activate(context: vscode.ExtensionContext) {
     logChannel = vscode.window.createOutputChannel('PPDS', { log: true });
     context.subscriptions.push(logChannel);
 
+    void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'starting');
+    void vscode.commands.executeCommand('setContext', 'ppds.profileCount', 0);
+
     // Create the daemon client
     daemonClient = new DaemonClient(context.extensionPath, logChannel);
     const client = daemonClient; // Local const for type narrowing in closures
@@ -42,7 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // ── Profile Tree View ────────────────────────────────────────────────
-    const profileTreeProvider = new ProfileTreeDataProvider(client);
+    const profileTreeProvider = new ProfileTreeDataProvider(client, logChannel);
     const profileTreeView = vscode.window.createTreeView('ppds.profiles', {
         treeDataProvider: profileTreeProvider,
         showCollapseAll: false,
@@ -143,7 +146,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(openNotebooksCmd);
 
     // ── Solutions Tree View ─────────────────────────────────────────────
-    const solutionsTreeProvider = new SolutionsTreeDataProvider(client);
+    const solutionsTreeProvider = new SolutionsTreeDataProvider(client, logChannel);
     const solutionsTreeView = vscode.window.createTreeView('ppds.solutions', {
         treeDataProvider: solutionsTreeProvider,
         showCollapseAll: true,

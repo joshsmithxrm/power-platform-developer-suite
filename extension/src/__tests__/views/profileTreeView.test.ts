@@ -28,6 +28,9 @@ vi.mock('vscode', () => ({
         fire = mockFireFn;
         dispose = vi.fn();
     },
+    commands: {
+        executeCommand: vi.fn(),
+    },
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────────
@@ -58,6 +61,10 @@ function makeDaemonClient(profiles: ProfileInfo[] = []) {
     return {
         authList: vi.fn().mockResolvedValue({ activeProfile: null, activeProfileIndex: null, profiles }),
     };
+}
+
+function makeLogChannel() {
+    return { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
 // ── ProfileTreeItem tests ─────────────────────────────────────────────────────
@@ -141,7 +148,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('getTreeItem returns the element unchanged', async () => {
         const daemon = makeDaemonClient();
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
         const profile = makeProfile();
         const item = new ProfileTreeItem(profile);
         expect(provider.getTreeItem(item)).toBe(item);
@@ -149,7 +156,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('getChildren returns empty array for a child element (flat list)', async () => {
         const daemon = makeDaemonClient();
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
         const profile = makeProfile();
         const item = new ProfileTreeItem(profile);
         const children = await provider.getChildren(item);
@@ -162,7 +169,7 @@ describe('ProfileTreeDataProvider', () => {
             makeProfile({ index: 1, name: 'prod', isActive: true }),
         ];
         const daemon = makeDaemonClient(profiles);
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         const children = await provider.getChildren();
 
@@ -175,7 +182,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('getChildren returns empty array when no profiles', async () => {
         const daemon = makeDaemonClient([]);
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         const children = await provider.getChildren();
 
@@ -184,7 +191,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('getChildren returns empty array when daemon throws', async () => {
         const daemon = { authList: vi.fn().mockRejectedValue(new Error('daemon not available')) };
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         const children = await provider.getChildren();
 
@@ -193,7 +200,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('refresh fires onDidChangeTreeData event', () => {
         const daemon = makeDaemonClient();
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         provider.refresh();
 
@@ -202,7 +209,7 @@ describe('ProfileTreeDataProvider', () => {
 
     it('dispose cleans up the event emitter', () => {
         const daemon = makeDaemonClient();
-        const provider = new ProfileTreeDataProvider(daemon as any);
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
 
         // Should not throw
         expect(() => provider.dispose()).not.toThrow();

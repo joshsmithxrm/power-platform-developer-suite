@@ -52,7 +52,10 @@ export class ProfileTreeDataProvider
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<ProfileTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-    constructor(private readonly daemonClient: DaemonClient) {}
+    constructor(
+        private readonly daemonClient: DaemonClient,
+        private readonly log: vscode.LogOutputChannel,
+    ) {}
 
     /**
      * Triggers a refresh of the tree view by firing the change event.
@@ -73,13 +76,17 @@ export class ProfileTreeDataProvider
 
         try {
             const result = await this.daemonClient.authList();
+            void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'ready');
+            void vscode.commands.executeCommand('setContext', 'ppds.profileCount', result.profiles.length);
             if (result.profiles.length === 0) {
                 return [];
             }
             return result.profiles.map(p => new ProfileTreeItem(p));
-        } catch {
-            // If the daemon isn't available, show empty tree.
-            // The output channel already logs the error in daemonClient.
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log.error(`Failed to list profiles: ${msg}`);
+            void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'error');
+            void vscode.commands.executeCommand('setContext', 'ppds.profileCount', 0);
             return [];
         }
     }
