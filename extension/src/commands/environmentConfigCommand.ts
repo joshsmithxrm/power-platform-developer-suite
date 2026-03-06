@@ -86,6 +86,7 @@ export function registerEnvironmentConfigCommand(
                     prompt: 'Enter a short label for the status bar (leave empty to use default)',
                     value: currentLabel ?? '',
                     placeHolder: 'e.g., My Dev Org',
+                    ignoreFocusOut: true,
                 });
 
                 if (label === undefined) {
@@ -104,6 +105,7 @@ export function registerEnvironmentConfigCommand(
                     placeHolder: currentType
                         ? `Current type: ${currentType}`
                         : 'Select environment type',
+                    ignoreFocusOut: true,
                 });
 
                 if (typePick === undefined) {
@@ -129,6 +131,7 @@ export function registerEnvironmentConfigCommand(
                     placeHolder: currentColor
                         ? `Current color: ${currentColor}`
                         : 'Choose a color for this environment',
+                    ignoreFocusOut: true,
                 });
 
                 if (colorPick === undefined) {

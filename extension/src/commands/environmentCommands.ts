@@ -105,6 +105,7 @@ export function registerEnvironmentCommands(
 
                 const selected = await new Promise<EnvQuickPickItem | undefined>(resolve => {
                     const quickPick = vscode.window.createQuickPick<EnvQuickPickItem>();
+                    quickPick.ignoreFocusOut = true;
                     quickPick.title = 'Select Dataverse Environment';
                     quickPick.placeholder = 'Choose an environment to connect to';
                     quickPick.matchOnDescription = true;
@@ -144,6 +145,7 @@ export function registerEnvironmentCommands(
                         title: 'Dataverse Environment URL',
                         prompt: 'Enter the full URL (e.g., https://myorg.crm.dynamics.com)',
                         placeHolder: 'https://myorg.crm.dynamics.com',
+                        ignoreFocusOut: true,
                         validateInput: (value) => {
                             if (!value.trim()) {
                                 return 'URL is required';
