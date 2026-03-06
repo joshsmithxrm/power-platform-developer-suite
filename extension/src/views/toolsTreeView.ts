@@ -33,10 +33,11 @@ export class ToolTreeItem extends vscode.TreeItem {
  */
 export class ToolsTreeDataProvider
     implements vscode.TreeDataProvider<ToolTreeItem>, vscode.Disposable {
-    private static readonly tools: { label: string; commandId: string; icon: string }[] = [
+    private static readonly tools: { label: string; commandId: string; icon: string; alwaysEnabled?: boolean }[] = [
         { label: 'Data Explorer', commandId: 'ppds.dataExplorer', icon: 'database' },
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
+        { label: 'Show Logs', commandId: 'ppds.showLogs', icon: 'output', alwaysEnabled: true },
     ];
 
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<ToolTreeItem | undefined | void>();
@@ -63,7 +64,7 @@ export class ToolsTreeDataProvider
         }
 
         return ToolsTreeDataProvider.tools.map(
-            t => new ToolTreeItem(t.label, t.commandId, t.icon, !this.hasActiveProfile),
+            t => new ToolTreeItem(t.label, t.commandId, t.icon, !t.alwaysEnabled && !this.hasActiveProfile),
         );
     }
 
