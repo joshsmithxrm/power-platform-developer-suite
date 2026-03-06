@@ -194,6 +194,11 @@
         "command": "ppds.invalidateProfile",
         "title": "PPDS: Invalidate Tokens",
         "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "ppds.showLogs",
+        "title": "PPDS: Show Logs",
+        "icon": "$(output)"
       }
     ],
     "menus": {

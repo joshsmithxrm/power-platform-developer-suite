@@ -166,6 +166,13 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage(`Managed solutions: ${state}`);
         }),
     );
+
+    // ── Show Logs ───────────────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.showLogs', () => {
+            logChannel?.show();
+        }),
+    );
 }
 
 export function deactivate() {
