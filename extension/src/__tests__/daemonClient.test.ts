@@ -56,7 +56,7 @@ describe('DaemonClient', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks();
-        client = new DaemonClient();
+        client = new DaemonClient('/test/extension');
         // Pre-connect the client so individual tests don't trigger the startup
         // handshake and consume their own mocked responses.
         mockConnection.sendRequest.mockResolvedValue(HANDSHAKE_MOCK);
@@ -68,7 +68,7 @@ describe('DaemonClient', () => {
         // Tests in this block need an unconnected client to observe startup behaviour
         beforeEach(() => {
             vi.clearAllMocks();
-            client = new DaemonClient();
+            client = new DaemonClient('/test/extension');
         });
 
         it('should start the daemon on first RPC call', async () => {
@@ -798,7 +798,7 @@ describe('DaemonClient', () => {
         it('should queue handler if called before connection is established', async () => {
             // Needs an unconnected client to test queuing behaviour
             vi.clearAllMocks();
-            const unconnectedClient = new DaemonClient();
+            const unconnectedClient = new DaemonClient('/test/extension');
             const handler = vi.fn();
 
             // Should NOT throw — queues for deferred registration
@@ -837,7 +837,7 @@ describe('DaemonClient', () => {
         it('should handle dispose when not connected', () => {
             // Needs a client that has never been connected
             vi.clearAllMocks();
-            const unconnectedClient = new DaemonClient();
+            const unconnectedClient = new DaemonClient('/test/extension');
 
             // Should not throw
             unconnectedClient.dispose();

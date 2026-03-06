@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import {
     createMessageConnection,
@@ -74,9 +76,28 @@ export class DaemonClient implements vscode.Disposable {
     private pendingNotificationHandlers: Array<{ method: string; handler: (...args: unknown[]) => void }> = [];
     private outputChannel: vscode.OutputChannel;
     private _disposed = false;
+    private extensionPath: string;
 
-    constructor() {
+    constructor(extensionPath: string) {
+        this.extensionPath = extensionPath;
         this.outputChannel = vscode.window.createOutputChannel('PPDS Daemon');
+    }
+
+    /**
+     * Resolves the path to the ppds CLI binary.
+     * Prefers the bundled binary in the extension's bin/ directory (marketplace install).
+     * Falls back to PATH for local development (F5 debugging).
+     */
+    private resolvePpdsPath(): string {
+        const ext = process.platform === 'win32' ? '.exe' : '';
+        const bundledPath = path.join(this.extensionPath, 'bin', `ppds${ext}`);
+
+        try {
+            fs.accessSync(bundledPath, fs.constants.X_OK);
+            return bundledPath;
+        } catch {
+            return 'ppds';
+        }
     }
 
     /**
@@ -87,10 +108,11 @@ export class DaemonClient implements vscode.Disposable {
             return; // Already running
         }
 
-        this.outputChannel.appendLine('Starting ppds serve daemon...');
+        const ppdsPath = this.resolvePpdsPath();
+        this.outputChannel.appendLine(`Starting ppds serve daemon (${ppdsPath})...`);
 
         // Spawn the daemon process
-        this.process = spawn('ppds', ['serve'], {
+        this.process = spawn(ppdsPath, ['serve'], {
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
