@@ -313,7 +313,12 @@
     "lint": "eslint src",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "bundle:cli": "node scripts/bundle-cli.js",
+    "package:win32-x64": "npm run bundle:cli -- --rid win-x64 && vsce package --target win32-x64 --pre-release",
+    "package:linux-x64": "npm run bundle:cli -- --rid linux-x64 && vsce package --target linux-x64 --pre-release",
+    "package:darwin-x64": "npm run bundle:cli -- --rid osx-x64 && vsce package --target darwin-x64 --pre-release",
+    "package:darwin-arm64": "npm run bundle:cli -- --rid osx-arm64 && vsce package --target darwin-arm64 --pre-release"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",

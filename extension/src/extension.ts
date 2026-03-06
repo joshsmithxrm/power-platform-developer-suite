@@ -24,7 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('ppds');
 
     // Create the daemon client
-    daemonClient = new DaemonClient();
+    daemonClient = new DaemonClient(context.extensionPath);
     const client = daemonClient; // Local const for type narrowing in closures
     context.subscriptions.push(client);
 

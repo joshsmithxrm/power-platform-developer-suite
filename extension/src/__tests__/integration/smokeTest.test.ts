@@ -194,6 +194,7 @@ describe('Extension Smoke Tests', () => {
         const context = {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
+            extensionPath: '/test',
         } as any;
 
         ext.activate(context);
@@ -217,6 +218,7 @@ describe('Extension Smoke Tests', () => {
         const context = {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
+            extensionPath: '/test',
         } as any;
 
         ext.activate(context);
@@ -235,6 +237,7 @@ describe('Extension Smoke Tests', () => {
         const context = {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
+            extensionPath: '/test',
         } as any;
 
         ext.activate(context);
