@@ -5,6 +5,7 @@ import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentCommands } from './commands/environmentCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
+import { registerBrowserCommands } from './commands/browserCommands.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
 import {
@@ -102,6 +103,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Environment Config Command ────────────────────────────────────
     registerEnvironmentConfigCommand(context, client, () => profileTreeProvider.refresh());
+
+    // ── Browser Commands ──────────────────────────────────────────────
+    registerBrowserCommands(context, client);
 
     // Register environment selection command for notebooks
     context.subscriptions.push(
