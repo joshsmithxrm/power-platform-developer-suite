@@ -103,7 +103,8 @@ public class RpcMethodHandler : IDisposable
             Environment = p.Environment != null ? new EnvironmentSummary
             {
                 Url = p.Environment.Url,
-                DisplayName = p.Environment.DisplayName
+                DisplayName = p.Environment.DisplayName,
+                EnvironmentId = p.Environment.EnvironmentId
             } : null,
             IsActive = collection.ActiveProfile?.Index == p.Index,
             CreatedAt = p.CreatedAt,
@@ -1747,6 +1748,10 @@ public class EnvironmentSummary
 
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
 }
 
 /// <summary>
