@@ -26,6 +26,7 @@ export interface ProfileInfo {
 export interface EnvironmentSummary {
     url: string;
     displayName: string;
+    environmentId: string | null;
 }
 
 export interface AuthWhoResponse {
