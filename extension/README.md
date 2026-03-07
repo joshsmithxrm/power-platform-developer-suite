@@ -1,40 +1,77 @@
-# Power Platform Developer Suite - VS Code Extension
+# Power Platform Developer Suite
 
-VS Code extension for Power Platform development. Communicates with the `ppds` CLI via JSON-RPC for all operations.
+A comprehensive VS Code extension for Power Platform development and administration — your complete toolkit for Dynamics 365, Dataverse, and Power Platform solutions.
 
-## Development
+> **Pre-Release:** This is a pre-release version of the rebuilt extension. The stable version (0.3.x) remains available for users who prefer a production-ready experience. Switch between channels in the VS Code Extensions view.
 
-```bash
-cd extension
-npm install
-npm run compile
-```
+## Prerequisites
 
-## Publishing
+- [PPDS CLI](https://github.com/joshsmithxrm/power-platform-developer-suite) installed and on your PATH
+- At least one authentication profile configured (`ppds auth create`)
 
-The extension is published to the VS Code Marketplace under:
-- **Publisher:** JoshSmithXRM
-- **Extension ID:** JoshSmithXRM.power-platform-developer-suite
+## Features
 
-To publish a new version:
-1. Update version in `package.json`
-2. Run `vsce publish`
+### Profile Management
 
-## Architecture
+Create, select, rename, and delete authentication profiles directly from the VS Code sidebar. View profile details including identity, authentication method, cloud, and connected environment.
 
-The extension is a thin UI layer that delegates to `ppds serve` for all operations:
+### Environment Discovery
 
-```
-VS Code Extension (TypeScript)
-        │
-        ▼
-   JSON-RPC over stdio
-        │
-        ▼
-   ppds serve (CLI daemon)
-        │
-        ▼
-   Application Services
-```
+Browse and select Dataverse environments associated with your profile. The active environment is shown in the VS Code status bar.
 
-All business logic lives in Application Services, keeping the extension UI-agnostic.
+### Solutions Browser
+
+Explore solutions in your connected environment with expandable component groups. Toggle visibility of managed solutions.
+
+### Dataverse Notebooks (.ppdsnb)
+
+Query Dataverse using an SSMS-like notebook experience:
+
+- **SQL and FetchXML** — write queries in either language, toggle per cell
+- **IntelliSense** — autocomplete for tables, columns, and FetchXML elements
+- **Results** — inline display with virtual scrolling for large datasets
+- **Export** — save results as CSV or JSON
+- **History** — query history is saved automatically
+
+### Data Explorer
+
+Quick ad-hoc query panel for one-off Dataverse queries without creating a notebook.
+
+## Quick Start
+
+1. Install the extension (pre-release channel)
+2. Open the PPDS sidebar (activity bar icon)
+3. Create or select an authentication profile
+4. Select an environment
+5. Create a new notebook (`Ctrl+Shift+P` → "PPDS: New Notebook")
+6. Write a SQL query and execute the cell
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ppds.queryDefaultTop` | 100 | Default TOP value for SQL queries (1-5000) |
+| `ppds.autoStartDaemon` | true | Auto-start the ppds daemon on activation |
+| `ppds.showEnvironmentInStatusBar` | true | Show active environment in status bar |
+
+## Known Limitations (Pre-Release)
+
+The following features from the stable version are not yet available in this rebuild:
+
+- Plugin Trace viewer
+- Connection References viewer
+- Environment Variables viewer
+- Metadata Browser
+- Web Resources viewer
+- Import Job viewer
+
+These will be added in future pre-release updates before the next stable release.
+
+## Feedback
+
+- [Report issues](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
+- [Documentation](https://github.com/joshsmithxrm/power-platform-developer-suite)
+
+## License
+
+[MIT](LICENSE)

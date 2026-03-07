@@ -7,6 +7,7 @@ Give Claude an interactive feedback loop for CLI, TUI, Extension, and MCP develo
 `/debug` - Auto-detect component and run appropriate feedback loop
 `/debug cli` - Test CLI commands
 `/debug tui` - Run TUI and inspect state
+`/debug extension` - Build, install, and test VS Code extension locally
 `/debug mcp` - Test MCP tools
 
 ## Process
@@ -16,6 +17,7 @@ Give Claude an interactive feedback loop for CLI, TUI, Extension, and MCP develo
 Based on recent changes or explicit argument:
 - `src/PPDS.Cli/Commands/` → CLI mode
 - `src/PPDS.Cli/Tui/` → TUI mode
+- `extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
 - No clear match → Ask user
 
@@ -53,7 +55,17 @@ If visual issues, update snapshots:
 npm test --prefix tests/tui-e2e -- --update-snapshots
 ```
 
-### 4. MCP Mode
+### 4. Extension Mode
+
+Use the `/extension-dev` skill for the full workflow. Quick path:
+
+```bash
+cd <root>/extension && npm run lint && npm run compile && npm run test && npm run local
+```
+
+Then reload VS Code and verify manually. See `/extension-dev` for the complete test checklist and revert instructions.
+
+### 5. MCP Mode
 
 Test MCP tools via MCP client:
 

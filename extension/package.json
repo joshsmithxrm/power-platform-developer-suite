@@ -1,54 +1,406 @@
 {
   "name": "power-platform-developer-suite",
   "displayName": "Power Platform Developer Suite",
-  "description": "Comprehensive development tools for Microsoft Dataverse and Power Platform",
-  "version": "0.4.0-alpha.1",
+  "description": "A comprehensive VS Code extension for Power Platform development and administration - your complete toolkit for Dynamics 365, Dataverse, and Power Platform solutions",
+  "version": "0.5.0",
   "publisher": "JoshSmithXRM",
-  "preview": true,
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.109.0"
   },
   "categories": [
     "Azure",
     "Other"
   ],
   "keywords": [
-    "Power Platform",
-    "Dataverse",
-    "Dynamics 365",
-    "CRM",
-    "Microsoft"
+    "power platform",
+    "power-platform",
+    "dynamics 365",
+    "d365",
+    "dynamics365",
+    "dataverse",
+    "powerapps",
+    "power apps",
+    "power automate",
+    "powerautomate",
+    "crm",
+    "dynamics crm",
+    "common data service",
+    "cds",
+    "microsoft",
+    "development",
+    "admin",
+    "administration",
+    "devtools",
+    "developer tools",
+    "plugin",
+    "plugins",
+    "solution",
+    "solutions",
+    "metadata",
+    "import",
+    "export",
+    "environment",
+    "environments",
+    "connection references",
+    "environment variables",
+    "trace",
+    "debugging",
+    "toolkit",
+    "suite"
   ],
   "activationEvents": [
-    "onCommand:ppds.listProfiles"
+    "onView:ppds.profiles",
+    "onNotebook:ppdsnb"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ppds",
+          "title": "Power Platform Developer Suite",
+          "icon": "images/activity-bar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ppds": [
+        {
+          "id": "ppds.profiles",
+          "name": "Profiles"
+        },
+        {
+          "id": "ppds.tools",
+          "name": "Tools"
+        },
+        {
+          "id": "ppds.solutions",
+          "name": "Solutions"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ppds.listProfiles",
         "title": "PPDS: List Profiles"
+      },
+      {
+        "command": "ppds.refreshProfiles",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.selectProfile",
+        "title": "PPDS: Select Profile"
+      },
+      {
+        "command": "ppds.profileDetails",
+        "title": "PPDS: Profile Details"
+      },
+      {
+        "command": "ppds.createProfile",
+        "title": "PPDS: Create Profile",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ppds.deleteProfile",
+        "title": "PPDS: Delete Profile",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "ppds.renameProfile",
+        "title": "PPDS: Rename Profile",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "ppds.selectEnvironment",
+        "title": "PPDS: Select Environment"
+      },
+      {
+        "command": "ppds.environmentDetails",
+        "title": "PPDS: Environment Details"
+      },
+      {
+        "command": "ppds.refreshEnvironments",
+        "title": "PPDS: Refresh Environments",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.configureEnvironment",
+        "title": "PPDS: Configure Environment",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "ppds.newNotebook",
+        "title": "PPDS: New Notebook",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.toggleNotebookCellLanguage",
+        "title": "PPDS: Toggle SQL/FetchXML",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "ppds.openCellInDataExplorer",
+        "title": "PPDS: Open in Data Explorer",
+        "icon": "$(table)"
+      },
+      {
+        "command": "ppds.exportCellResultsCsv",
+        "title": "PPDS: Export Cell Results to CSV",
+        "icon": "$(file)"
+      },
+      {
+        "command": "ppds.exportCellResultsJson",
+        "title": "PPDS: Export Cell Results to JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "ppds.selectNotebookEnvironment",
+        "title": "PPDS: Select Notebook Environment",
+        "icon": "$(database)"
+      },
+      {
+        "command": "ppds.dataExplorer",
+        "title": "PPDS: Data Explorer",
+        "icon": "$(database)"
+      },
+      {
+        "command": "ppds.openQueryInNotebook",
+        "title": "PPDS: Open Query in Notebook",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.openNotebooks",
+        "title": "PPDS: Open Notebooks",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "ppds.openSolutions",
+        "title": "PPDS: Open Solutions",
+        "icon": "$(package)"
+      },
+      {
+        "command": "ppds.refreshSolutions",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ppds.toggleManagedSolutions",
+        "title": "Toggle Managed Solutions",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "ppds.invalidateProfile",
+        "title": "PPDS: Invalidate Tokens",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "ppds.showLogs",
+        "title": "PPDS: Show Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "ppds.openInMaker",
+        "title": "PPDS: Open in Maker Portal",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "ppds.openInDynamics",
+        "title": "PPDS: Open in Dynamics 365",
+        "icon": "$(link-external)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ppds.refreshProfiles",
+          "when": "view == ppds.profiles",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.createProfile",
+          "when": "view == ppds.profiles",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.refreshSolutions",
+          "when": "view == ppds.solutions",
+          "group": "navigation"
+        },
+        {
+          "command": "ppds.toggleManagedSolutions",
+          "when": "view == ppds.solutions",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ppds.selectProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "inline"
+        },
+        {
+          "command": "ppds.profileDetails",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@1"
+        },
+        {
+          "command": "ppds.renameProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@2"
+        },
+        {
+          "command": "ppds.deleteProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@3"
+        },
+        {
+          "command": "ppds.invalidateProfile",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@4"
+        },
+        {
+          "command": "ppds.openInMaker",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "open@1"
+        },
+        {
+          "command": "ppds.openInDynamics",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "open@2"
+        }
+      ],
+      "notebook/cell/title": [
+        {
+          "command": "ppds.toggleNotebookCellLanguage",
+          "when": "notebookType == ppdsnb",
+          "group": "inline@1"
+        },
+        {
+          "command": "ppds.openCellInDataExplorer",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
+          "group": "inline@2"
+        },
+        {
+          "command": "ppds.exportCellResultsCsv",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
+          "group": "export@1"
+        },
+        {
+          "command": "ppds.exportCellResultsJson",
+          "when": "notebookType == ppdsnb && notebookCellType == code",
+          "group": "export@2"
+        }
+      ]
+    },
+    "notebooks": [
+      {
+        "type": "ppdsnb",
+        "displayName": "Power Platform Developer Suite Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.ppdsnb"
+          }
+        ]
+      }
+    ],
+    "languages": [
+      {
+        "id": "fetchxml",
+        "aliases": [
+          "FetchXML",
+          "fetchxml"
+        ],
+        "extensions": [
+          ".fetchxml"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fetchxml",
+        "scopeName": "text.xml.fetchxml",
+        "path": "./syntaxes/fetchxml.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Power Platform Developer Suite",
+      "properties": {
+        "ppds.queryDefaultTop": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 5000,
+          "description": "Default TOP value for SQL queries when none specified"
+        },
+        "ppds.autoStartDaemon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the ppds serve daemon when the extension activates"
+        },
+        "ppds.showEnvironmentInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the active environment in the VS Code status bar"
+        }
+      }
+    },
+    "viewsWelcome": [
+      {
+        "view": "ppds.profiles",
+        "contents": "Could not connect to the PPDS daemon.\n[Retry](command:ppds.refreshProfiles)\n[Show Logs](command:ppds.showLogs)",
+        "when": "ppds.daemonState == 'error'"
+      },
+      {
+        "view": "ppds.profiles",
+        "contents": "No authentication profiles found.\n[Create Profile](command:ppds.createProfile)",
+        "when": "ppds.daemonState == 'ready' && ppds.profileCount == 0"
+      },
+      {
+        "view": "ppds.solutions",
+        "contents": "Select a profile and environment to browse solutions.\n[Select Environment](command:ppds.selectEnvironment)",
+        "when": "ppds.daemonState != 'ready'"
       }
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
     "lint": "eslint src",
-    "test": "echo \"No tests yet\"",
-    "package": "vsce package --pre-release"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "vsce-package": "vsce package --pre-release",
+    "install-local": "node scripts/install-local.js",
+    "uninstall-local": "code --uninstall-extension JoshSmithXRM.power-platform-developer-suite",
+    "revert-to-marketplace": "npm run uninstall-local && code --install-extension JoshSmithXRM.power-platform-developer-suite",
+    "local": "node scripts/build-local.js",
+    "marketplace": "npm run revert-to-marketplace",
+    "test-release": "npm run package && npm run vsce-package && npm run install-local",
+    "bundle:cli": "node scripts/bundle-cli.js",
+    "package:win32-x64": "npm run bundle:cli -- --rid win-x64 && vsce package --target win32-x64 --pre-release",
+    "package:linux-x64": "npm run bundle:cli -- --rid linux-x64 && vsce package --target linux-x64 --pre-release",
+    "package:darwin-x64": "npm run bundle:cli -- --rid osx-x64 && vsce package --target darwin-x64 --pre-release",
+    "package:darwin-arm64": "npm run bundle:cli -- --rid osx-arm64 && vsce package --target darwin-arm64 --pre-release"
   },
   "dependencies": {
-    "vscode-jsonrpc": "^8.2.0"
+    "@vscode/webview-ui-toolkit": "^1.4.0",
+    "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.3.3",
     "@types/vscode": "^1.109.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.27.3",
     "eslint": "^10.0.2",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
   },
   "repository": {
     "type": "git",

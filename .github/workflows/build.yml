@@ -139,10 +139,11 @@ jobs:
     steps:
       - name: Check build status
         run: |
-          if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]]; then
+          if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \
+             [[ "${{ needs.extension.result }}" == "success" || "${{ needs.extension.result }}" == "skipped" ]]; then
             echo "Build passed"
             exit 0
           else
-            echo "Build failed: ${{ needs.build.result }}"
+            echo "Build failed: build=${{ needs.build.result }}, extension=${{ needs.extension.result }}"
             exit 1
           fi
