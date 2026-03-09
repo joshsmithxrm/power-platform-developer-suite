@@ -73,7 +73,8 @@ export class DaemonClient implements vscode.Disposable {
     private process: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
     private connectingPromise: Promise<void> | null = null;
-    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: unknown[]) => void }> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
     private _disposed = false;
     private extensionPath: string;
 

@@ -56,7 +56,15 @@ public static class ServeCommand
         // SECURITY: TraceSource is intentionally NOT configured here. StreamJsonRpc trace logging
         // would capture full request payloads, including plain-text secrets passed to profiles/create
         // (clientSecret, password, certificatePassword). Keep trace logging disabled in production.
-        using var rpc = JsonRpc.Attach(duplexStream, handler);
+        //
+        // Use SystemTextJsonFormatter so that [JsonPropertyName] attributes on response DTOs are
+        // honored. The default JsonRpc.Attach(Stream) uses JsonMessageFormatter (Newtonsoft.Json)
+        // which ignores System.Text.Json attributes, producing PascalCase keys instead of camelCase.
+        var formatter = new SystemTextJsonFormatter();
+        var messageHandler = new HeaderDelimitedMessageHandler(duplexStream, duplexStream, formatter);
+        using var rpc = new JsonRpc(messageHandler);
+        rpc.AddLocalRpcTarget(handler);
+        rpc.StartListening();
 
         // Set RPC context for device code notifications
         handler.SetRpcContext(rpc);
