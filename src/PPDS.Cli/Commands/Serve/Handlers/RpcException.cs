@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using StreamJsonRpc;
 
 namespace PPDS.Cli.Commands.Serve.Handlers;
@@ -61,20 +62,24 @@ public class RpcErrorData
     /// <summary>
     /// Hierarchical error code for programmatic handling.
     /// </summary>
+    [JsonPropertyName("code")]
     public string Code { get; set; } = "";
 
     /// <summary>
     /// Human-readable error message.
     /// </summary>
+    [JsonPropertyName("message")]
     public string Message { get; set; } = "";
 
     /// <summary>
     /// Optional additional details (e.g., stack trace in debug mode).
     /// </summary>
+    [JsonPropertyName("details")]
     public string? Details { get; set; }
 
     /// <summary>
     /// Optional target of the error (e.g., parameter name, entity).
     /// </summary>
+    [JsonPropertyName("target")]
     public string? Target { get; set; }
 }

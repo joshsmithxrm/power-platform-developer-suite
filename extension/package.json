@@ -48,10 +48,7 @@
     "toolkit",
     "suite"
   ],
-  "activationEvents": [
-    "onView:ppds.profiles",
-    "onNotebook:ppdsnb"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {

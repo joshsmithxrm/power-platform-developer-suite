@@ -88,9 +88,9 @@ public class ProtocolContractTests : IClassFixture<DaemonTestFixture>
                 // The JsonElement should contain our RpcErrorData structure
                 jsonElement.ValueKind.Should().Be(JsonValueKind.Object, "error data should be an object");
 
-                // Verify the Code property exists and contains our error code
-                jsonElement.TryGetProperty("Code", out var codeElement).Should().BeTrue(
-                    "error data should have a 'Code' property (PascalCase from server)");
+                // Verify the code property exists and contains our error code
+                jsonElement.TryGetProperty("code", out var codeElement).Should().BeTrue(
+                    "error data should have a 'code' property (camelCase via [JsonPropertyName])");
                 codeElement.GetString().Should().Contain("Auth", "error code should indicate auth error");
             }
             else if (ex.ErrorData != null)

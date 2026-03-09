@@ -1,9 +1,13 @@
 {
   "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}/extension"
+  },
   "tasks": [
     {
       "type": "npm",
       "script": "compile",
+      "path": "extension",
       "problemMatcher": "$tsc",
       "label": "npm: compile",
       "group": {
@@ -18,6 +22,7 @@
     {
       "type": "npm",
       "script": "watch",
+      "path": "extension",
       "problemMatcher": "$tsc-watch",
       "label": "npm: watch",
       "isBackground": true,
@@ -29,6 +34,7 @@
     {
       "type": "npm",
       "script": "lint",
+      "path": "extension",
       "problemMatcher": "$eslint-stylish",
       "label": "npm: lint",
       "presentation": {
@@ -39,8 +45,10 @@
     {
       "type": "npm",
       "script": "package",
+      "path": "extension",
       "label": "npm: package",
       "detail": "Create .vsix package (pre-release)",
+      "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "shared"
@@ -52,6 +60,9 @@
       "command": "rm -rf dist",
       "windows": {
         "command": "if exist dist rmdir /s /q dist"
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/extension"
       },
       "problemMatcher": [],
       "presentation": {
@@ -70,6 +81,9 @@
       "label": "Install Dependencies",
       "type": "shell",
       "command": "npm ci",
+      "options": {
+        "cwd": "${workspaceFolder}/extension"
+      },
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -79,6 +93,7 @@
     {
       "type": "npm",
       "script": "local",
+      "path": "extension",
       "label": "npm: local",
       "detail": "Build and install dev extension to VS Code",
       "problemMatcher": [],
@@ -90,6 +105,7 @@
     {
       "type": "npm",
       "script": "test-release",
+      "path": "extension",
       "label": "npm: test-release",
       "detail": "Full package + .vsix + install (simulates release)",
       "problemMatcher": [],
@@ -101,6 +117,7 @@
     {
       "type": "npm",
       "script": "marketplace",
+      "path": "extension",
       "label": "npm: marketplace",
       "detail": "Revert to marketplace version",
       "problemMatcher": [],
@@ -112,6 +129,7 @@
     {
       "type": "npm",
       "script": "test",
+      "path": "extension",
       "label": "npm: test",
       "detail": "Run vitest unit tests",
       "problemMatcher": [],
@@ -123,6 +141,7 @@
     {
       "type": "npm",
       "script": "test:e2e",
+      "path": "extension",
       "label": "npm: test:e2e",
       "detail": "Run Playwright e2e tests",
       "problemMatcher": [],

@@ -72,8 +72,11 @@ public sealed class DaemonTestFixture : IAsyncLifetime, IAsyncDisposable
             _daemonProcess.StandardOutput.BaseStream,
             _daemonProcess.StandardInput.BaseStream);
 
-        // Attach JSON-RPC client
-        _rpc = JsonRpc.Attach(_duplexStream);
+        // Attach JSON-RPC client with SystemTextJsonFormatter to match the daemon's serialization
+        var formatter = new SystemTextJsonFormatter();
+        var messageHandler = new HeaderDelimitedMessageHandler(_duplexStream, _duplexStream, formatter);
+        _rpc = new JsonRpc(messageHandler);
+        _rpc.StartListening();
 
         // Brief delay to let daemon initialize
         await Task.Delay(500);
