@@ -351,33 +351,33 @@ async function runCreateProfileWizard(
         {
             label: '$(browser) Device Code',
             description: 'Authenticate via a code displayed in the terminal',
-            authMethodId: 'deviceCode',
+            authMethodId: 'DeviceCode',
         },
         {
             label: '$(globe) Interactive Browser',
             description: 'Opens a browser window for authentication',
-            authMethodId: 'interactive',
+            authMethodId: 'InteractiveBrowser',
         },
         {
             label: '$(lock) Client Secret',
             description: 'Service principal with client secret',
-            authMethodId: 'clientSecret',
+            authMethodId: 'ClientSecret',
         },
         {
             label: '$(file) Certificate File',
             description: 'Service principal with certificate file (.pfx)',
-            authMethodId: 'certificateFile',
+            authMethodId: 'CertificateFile',
         },
         // Certificate Store is only available on Windows
         ...(process.platform === 'win32' ? [{
             label: '$(shield) Certificate Store',
             description: 'Service principal with certificate from Windows certificate store',
-            authMethodId: 'certificateStore',
+            authMethodId: 'CertificateStore',
         }] : []),
         {
             label: '$(account) Username & Password',
             description: 'Resource owner password credentials (legacy)',
-            authMethodId: 'usernamePassword',
+            authMethodId: 'UsernamePassword',
         },
     ];
 
@@ -441,8 +441,8 @@ async function runCreateProfileWizard(
     );
 
     // For user-based auth, discover environments and let user pick inline
-    const isUserBased = selectedMethod.authMethodId === 'deviceCode'
-        || selectedMethod.authMethodId === 'interactive';
+    const isUserBased = selectedMethod.authMethodId === 'DeviceCode'
+        || selectedMethod.authMethodId === 'InteractiveBrowser';
 
     if (isUserBased) {
         try {
@@ -495,7 +495,7 @@ interface AuthParams {
 async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams | null> {
     const params: AuthParams = {};
 
-    const isUserBased = authMethodId === 'deviceCode' || authMethodId === 'interactive';
+    const isUserBased = authMethodId === 'DeviceCode' || authMethodId === 'InteractiveBrowser';
 
     // User-based flows discover environments after authentication.
     // SPNs require the URL upfront to scope the token.
@@ -525,12 +525,12 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
     }
 
     switch (authMethodId) {
-        case 'deviceCode':
-        case 'interactive':
+        case 'DeviceCode':
+        case 'InteractiveBrowser':
             // No additional params needed for user-based auth
             break;
 
-        case 'clientSecret': {
+        case 'ClientSecret': {
             const appId = await vscode.window.showInputBox({
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
@@ -563,7 +563,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             break;
         }
 
-        case 'certificateFile': {
+        case 'CertificateFile': {
             const appId = await vscode.window.showInputBox({
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
@@ -607,7 +607,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             break;
         }
 
-        case 'certificateStore': {
+        case 'CertificateStore': {
             const appId = await vscode.window.showInputBox({
                 title: 'Create Profile: Application (Client) ID',
                 prompt: 'Enter the Azure AD application (client) ID',
@@ -640,7 +640,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
             break;
         }
 
-        case 'usernamePassword': {
+        case 'UsernamePassword': {
             const username = await vscode.window.showInputBox({
                 title: 'Create Profile: Username',
                 prompt: 'Enter the username (email)',
