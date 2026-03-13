@@ -717,31 +717,22 @@ public class RpcMethodHandler : IDisposable
     /// Gets completion items at a given cursor position for SQL or FetchXML.
     /// Used by VS Code extension for IntelliSense in the query editor.
     /// </summary>
-    /// <param name="sql">The query text (SQL or FetchXML) being edited.</param>
-    /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
-    /// <param name="language">
-    /// The language of the query. Use <c>"fetchxml"</c> for FetchXML documents.
-    /// Defaults to SQL when null or omitted.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/complete")]
     public async Task<QueryCompleteResponse> QueryCompleteAsync(
-        string sql,
-        int cursorOffset,
-        string? language = null,
+        QueryCompleteRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(sql))
+        if (string.IsNullOrEmpty(request.Sql))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
                 "The 'sql' parameter is required");
         }
-        if (cursorOffset < 0 || cursorOffset > sql.Length)
+        if (request.CursorOffset < 0 || request.CursorOffset > request.Sql.Length)
         {
             throw new RpcException(
                 ErrorCodes.Validation.InvalidArguments,
-                $"cursorOffset must be between 0 and {sql.Length}");
+                $"cursorOffset must be between 0 and {request.Sql.Length}");
         }
 
         return await WithActiveProfileAsync(async (sp, ct) =>
@@ -750,15 +741,15 @@ public class RpcMethodHandler : IDisposable
 
             IReadOnlyList<PPDS.Dataverse.Sql.Intellisense.SqlCompletion> completions;
 
-            if (string.Equals(language, "fetchxml", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(request.Language, "fetchxml", StringComparison.OrdinalIgnoreCase))
             {
                 var engine = new FetchXmlCompletionEngine(metadataProvider);
-                completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+                completions = await engine.GetCompletionsAsync(request.Sql, request.CursorOffset, ct);
             }
             else
             {
                 var engine = new SqlCompletionEngine(metadataProvider);
-                completions = await engine.GetCompletionsAsync(sql, cursorOffset, ct);
+                completions = await engine.GetCompletionsAsync(request.Sql, request.CursorOffset, ct);
             }
 
             return new QueryCompleteResponse
@@ -782,14 +773,10 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("query/fetch")]
     public async Task<QueryResultResponse> QueryFetchAsync(
-        string fetchXml,
-        int? top = null,
-        int? page = null,
-        string? pagingCookie = null,
-        bool count = false,
+        QueryFetchRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(fetchXml))
+        if (string.IsNullOrWhiteSpace(request.FetchXml))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
@@ -797,10 +784,10 @@ public class RpcMethodHandler : IDisposable
         }
 
         // Inject top attribute if specified
-        var query = fetchXml;
-        if (top.HasValue)
+        var query = request.FetchXml;
+        if (request.Top.HasValue)
         {
-            query = InjectTopAttribute(query, top.Value);
+            query = InjectTopAttribute(query, request.Top.Value);
         }
 
         var response = await WithActiveProfileAsync(async (sp, ct) =>
@@ -808,16 +795,16 @@ public class RpcMethodHandler : IDisposable
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
                 query,
-                page,
-                pagingCookie,
-                count,
+                request.Page,
+                request.PagingCookie,
+                request.Count,
                 ct);
 
             return MapToResponse(result, query);
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(fetchXml, response);
+        FireAndForgetHistorySave(request.FetchXml, response);
 
         return response;
     }
@@ -828,23 +815,17 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("query/sql")]
     public async Task<QueryResultResponse> QuerySqlAsync(
-        string sql,
-        int? top = null,
-        int? page = null,
-        string? pagingCookie = null,
-        bool count = false,
-        bool showFetchXml = false,
-        bool useTds = false,
+        QuerySqlRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(sql))
+        if (string.IsNullOrWhiteSpace(request.Sql))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
                 "The 'sql' parameter is required");
         }
 
-        if (useTds)
+        if (request.UseTds)
         {
             var response = await WithActiveProfileAsync(async (sp, profile, env, ct) =>
             {
@@ -866,20 +847,20 @@ public class RpcMethodHandler : IDisposable
                     },
                     sp.GetService<ILogger<TdsQueryExecutor>>());
 
-                var result = await tdsExecutor.ExecuteSqlAsync(sql, top, ct);
+                var result = await tdsExecutor.ExecuteSqlAsync(request.Sql, request.Top, ct);
                 return MapToResponse(result, null);
             }, cancellationToken);
 
             // Auto-save to history (fire-and-forget)
-            FireAndForgetHistorySave(sql, response);
+            FireAndForgetHistorySave(request.Sql, response);
 
             return response;
         }
 
-        var fetchXml = TranspileSqlToFetchXml(sql, top);
+        var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
 
         // If showFetchXml is true, just return the transpiled FetchXML
-        if (showFetchXml)
+        if (request.ShowFetchXml)
         {
             return new QueryResultResponse
             {
@@ -893,16 +874,16 @@ public class RpcMethodHandler : IDisposable
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
                 fetchXml,
-                page,
-                pagingCookie,
-                count,
+                request.Page,
+                request.PagingCookie,
+                request.Count,
                 ct);
 
             return MapToResponse(result, fetchXml);
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(sql, fetchResponse);
+        FireAndForgetHistorySave(request.Sql, fetchResponse);
 
         return fetchResponse;
     }
@@ -911,16 +892,12 @@ public class RpcMethodHandler : IDisposable
     /// Lists query history entries for the active environment.
     /// Maps to: ppds query history list --json
     /// </summary>
-    /// <param name="search">Optional search pattern (case-insensitive substring match on SQL text).</param>
-    /// <param name="limit">Maximum number of entries to return (default 50).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/history/list")]
     public async Task<QueryHistoryListResponse> QueryHistoryListAsync(
-        string? search = null,
-        int limit = 50,
+        QueryHistoryListRequest request,
         CancellationToken cancellationToken = default)
     {
-        limit = Math.Min(limit, 1000);
+        var limit = Math.Min(request.Limit, 1000);
         var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
@@ -935,9 +912,9 @@ public class RpcMethodHandler : IDisposable
         var historyService = _authServices.GetRequiredService<IQueryHistoryService>();
 
         IReadOnlyList<QueryHistoryEntry> entries;
-        if (!string.IsNullOrWhiteSpace(search))
+        if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            entries = await historyService.SearchHistoryAsync(environment.Url, search, limit, cancellationToken);
+            entries = await historyService.SearchHistoryAsync(environment.Url, request.Search, limit, cancellationToken);
         }
         else
         {
@@ -962,14 +939,12 @@ public class RpcMethodHandler : IDisposable
     /// Deletes a query history entry by ID.
     /// Maps to: ppds query history delete --json
     /// </summary>
-    /// <param name="id">The history entry ID to delete.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/history/delete")]
     public async Task<QueryHistoryDeleteResponse> QueryHistoryDeleteAsync(
-        string id,
+        QueryHistoryDeleteRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(id))
+        if (string.IsNullOrWhiteSpace(request.Id))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
@@ -988,7 +963,7 @@ public class RpcMethodHandler : IDisposable
                 "No environment selected. Use env/select first.");
 
         var historyService = _authServices.GetRequiredService<IQueryHistoryService>();
-        var deleted = await historyService.DeleteEntryAsync(environment.Url, id, cancellationToken);
+        var deleted = await historyService.DeleteEntryAsync(environment.Url, request.Id, cancellationToken);
 
         return new QueryHistoryDeleteResponse
         {
@@ -1000,27 +975,19 @@ public class RpcMethodHandler : IDisposable
     /// Exports query results in the specified format (CSV, TSV, or JSON).
     /// Reuses the same SQL-to-FetchXML transpilation and execution pipeline as QuerySqlAsync.
     /// </summary>
-    /// <param name="sql">The SQL query to execute.</param>
-    /// <param name="format">Export format: "csv", "tsv", or "json" (default: "csv").</param>
-    /// <param name="includeHeaders">Whether to include column headers (default: true). Applies to CSV/TSV only.</param>
-    /// <param name="top">Optional row limit to inject into the query.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/export")]
     public async Task<QueryExportResponse> QueryExportAsync(
-        string sql,
-        string format = "csv",
-        bool includeHeaders = true,
-        int? top = null,
+        QueryExportRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(sql))
+        if (string.IsNullOrWhiteSpace(request.Sql))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
                 "The 'sql' parameter is required");
         }
 
-        format = format.ToLowerInvariant();
+        var format = request.Format.ToLowerInvariant();
         if (format is not ("csv" or "tsv" or "json"))
         {
             throw new RpcException(
@@ -1028,7 +995,7 @@ public class RpcMethodHandler : IDisposable
                 $"Invalid format '{format}'. Valid values: csv, tsv, json");
         }
 
-        var fetchXml = TranspileSqlToFetchXml(sql, top);
+        var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
 
         // Execute the query
         const int MaxExportRecords = 100_000;
@@ -1075,7 +1042,7 @@ public class RpcMethodHandler : IDisposable
             queryResponse.columns,
             queryResponse.records,
             format,
-            includeHeaders);
+            request.IncludeHeaders);
 
         return new QueryExportResponse
         {
@@ -1090,21 +1057,19 @@ public class RpcMethodHandler : IDisposable
     /// Since Dataverse SQL is always transpiled to FetchXML for execution,
     /// the FetchXML output serves as the execution plan.
     /// </summary>
-    /// <param name="sql">The SQL query to explain.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [JsonRpcMethod("query/explain")]
     public Task<QueryExplainResponse> QueryExplainAsync(
-        string sql,
+        QueryExplainRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(sql))
+        if (string.IsNullOrWhiteSpace(request.Sql))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
                 "The 'sql' parameter is required");
         }
 
-        var fetchXml = TranspileSqlToFetchXml(sql);
+        var fetchXml = TranspileSqlToFetchXml(request.Sql);
 
         return Task.FromResult(new QueryExplainResponse
         {
@@ -2514,6 +2479,82 @@ public class QueryExplainResponse
 {
     [JsonPropertyName("plan")] public string Plan { get; set; } = "";
     [JsonPropertyName("format")] public string Format { get; set; } = "fetchxml";
+}
+
+// ── Query Request DTOs ──────────────────────────────────────────────────────
+// These DTOs accept named JSON-RPC parameters from the TypeScript client
+// (e.g. { sql: "...", top: 100 }) instead of positional parameters.
+
+/// <summary>
+/// Request DTO for query/sql method.
+/// </summary>
+public class QuerySqlRequest
+{
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("top")] public int? Top { get; set; }
+    [JsonPropertyName("page")] public int? Page { get; set; }
+    [JsonPropertyName("pagingCookie")] public string? PagingCookie { get; set; }
+    [JsonPropertyName("count")] public bool Count { get; set; }
+    [JsonPropertyName("showFetchXml")] public bool ShowFetchXml { get; set; }
+    [JsonPropertyName("useTds")] public bool UseTds { get; set; }
+}
+
+/// <summary>
+/// Request DTO for query/fetch method.
+/// </summary>
+public class QueryFetchRequest
+{
+    [JsonPropertyName("fetchXml")] public string FetchXml { get; set; } = "";
+    [JsonPropertyName("top")] public int? Top { get; set; }
+    [JsonPropertyName("page")] public int? Page { get; set; }
+    [JsonPropertyName("pagingCookie")] public string? PagingCookie { get; set; }
+    [JsonPropertyName("count")] public bool Count { get; set; }
+}
+
+/// <summary>
+/// Request DTO for query/complete method.
+/// </summary>
+public class QueryCompleteRequest
+{
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("cursorOffset")] public int CursorOffset { get; set; }
+    [JsonPropertyName("language")] public string? Language { get; set; }
+}
+
+/// <summary>
+/// Request DTO for query/export method.
+/// </summary>
+public class QueryExportRequest
+{
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("format")] public string Format { get; set; } = "csv";
+    [JsonPropertyName("includeHeaders")] public bool IncludeHeaders { get; set; } = true;
+    [JsonPropertyName("top")] public int? Top { get; set; }
+}
+
+/// <summary>
+/// Request DTO for query/explain method.
+/// </summary>
+public class QueryExplainRequest
+{
+    [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+}
+
+/// <summary>
+/// Request DTO for query/history/list method.
+/// </summary>
+public class QueryHistoryListRequest
+{
+    [JsonPropertyName("search")] public string? Search { get; set; }
+    [JsonPropertyName("limit")] public int Limit { get; set; } = 50;
+}
+
+/// <summary>
+/// Request DTO for query/history/delete method.
+/// </summary>
+public class QueryHistoryDeleteRequest
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
 }
 
 #endregion

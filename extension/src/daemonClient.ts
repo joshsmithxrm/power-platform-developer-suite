@@ -84,19 +84,33 @@ export class DaemonClient implements vscode.Disposable {
 
     /**
      * Resolves the path to the ppds CLI binary.
-     * Prefers the bundled binary in the extension's bin/ directory (marketplace install).
-     * Falls back to PATH for local development (F5 debugging).
+     * Resolution order:
+     *   1. Bundled binary in extension/bin/ (marketplace install)
+     *   2. Debug build output from src/PPDS.Cli/ (F5 development)
+     *   3. PATH fallback (global dotnet tool)
      */
     private resolvePpdsPath(): string {
         const ext = process.platform === 'win32' ? '.exe' : '';
-        const bundledPath = path.join(this.extensionPath, 'bin', `ppds${ext}`);
 
+        // 1. Bundled binary (marketplace / bundle-cli.js output)
+        const bundledPath = path.join(this.extensionPath, 'bin', `ppds${ext}`);
         try {
             fs.accessSync(bundledPath, fs.constants.X_OK);
             return bundledPath;
-        } catch {
-            return 'ppds';
-        }
+        } catch { /* not bundled */ }
+
+        // 2. Debug build output (F5 development — extensionPath is extension/)
+        const debugPath = path.join(
+            this.extensionPath, '..', 'src', 'PPDS.Cli', 'bin', 'Debug', 'net8.0', `ppds${ext}`
+        );
+        try {
+            fs.accessSync(debugPath, fs.constants.X_OK);
+            this.log.info(`Using debug build: ${debugPath}`);
+            return debugPath;
+        } catch { /* no debug build */ }
+
+        // 3. PATH fallback
+        return 'ppds';
     }
 
     /**
@@ -249,7 +263,7 @@ export class DaemonClient implements vscode.Disposable {
     async authSelect(params: { index?: number; name?: string }): Promise<AuthSelectResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        this.log.info(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<AuthSelectResponse>('auth/select', params);
         this.log.debug(`Selected profile: ${result.name ?? result.identity}`);
 
@@ -278,7 +292,7 @@ export class DaemonClient implements vscode.Disposable {
     async envSelect(environment: string): Promise<EnvSelectResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling env/select for "${environment}"...`);
+        this.log.info(`Calling env/select for "${environment}"...`);
         const result = await this.connection!.sendRequest<EnvSelectResponse>('env/select', { environment });
         this.log.debug(`Selected environment: ${result.displayName} (${result.url})`);
 
@@ -346,7 +360,7 @@ export class DaemonClient implements vscode.Disposable {
     }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
+        this.log.info(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
         const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
@@ -365,7 +379,7 @@ export class DaemonClient implements vscode.Disposable {
     }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
-        this.log.debug('Calling query/fetch...');
+        this.log.info('Calling query/fetch...');
         const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
@@ -422,7 +436,7 @@ export class DaemonClient implements vscode.Disposable {
         top?: number;
     }): Promise<QueryExportResponse> {
         await this.ensureConnected();
-        this.log.debug(`Calling query/export...`);
+        this.log.info(`Calling query/export...`);
         const result = await this.connection!.sendRequest<QueryExportResponse>('query/export', params);
         this.log.debug(`Exported ${result.rowCount} rows as ${result.format}`);
         return result;
@@ -461,7 +475,7 @@ export class DaemonClient implements vscode.Disposable {
     }): Promise<ProfileCreateResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling profiles/create (method=${params.authMethod})...`);
+        this.log.info(`Calling profiles/create (method=${params.authMethod})...`);
         const result = await this.connection!.sendRequest<ProfileCreateResponse>('profiles/create', params);
         this.log.debug(`Profile created: index=${result.index}, name=${result.name ?? '(auto)'}`);
 
@@ -474,7 +488,7 @@ export class DaemonClient implements vscode.Disposable {
     async profilesDelete(params: { index?: number; name?: string }): Promise<ProfileDeleteResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        this.log.info(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
         const result = await this.connection!.sendRequest<ProfileDeleteResponse>('profiles/delete', params);
         this.log.debug(`Profile deleted: ${result.deleted}`);
 
@@ -487,7 +501,7 @@ export class DaemonClient implements vscode.Disposable {
     async profilesRename(currentName: string, newName: string): Promise<ProfileRenameResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
+        this.log.info(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
         const result = await this.connection!.sendRequest<ProfileRenameResponse>(
             'profiles/rename',
             { currentName, newName }
@@ -503,7 +517,7 @@ export class DaemonClient implements vscode.Disposable {
     async profilesInvalidate(profileName: string): Promise<ProfilesInvalidateResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling profiles/invalidate for "${profileName}"...`);
+        this.log.info(`Calling profiles/invalidate for "${profileName}"...`);
         const result = await this.connection!.sendRequest<ProfilesInvalidateResponse>(
             'profiles/invalidate',
             { profileName }
@@ -529,7 +543,7 @@ export class DaemonClient implements vscode.Disposable {
             params.includeManaged = includeManaged;
         }
 
-        this.log.debug(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
+        this.log.info(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
         const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
         this.log.debug(`Got ${result.solutions.length} solutions`);
 

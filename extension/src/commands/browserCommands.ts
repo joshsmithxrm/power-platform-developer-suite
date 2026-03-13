@@ -69,6 +69,39 @@ async function resolveProfile(
 }
 
 /**
+ * Resolves the environment ID for a profile, falling back to env/list lookup
+ * when the profile's cached data doesn't include it (older profiles).
+ */
+async function resolveEnvironmentId(
+    profile: ProfileInfo,
+    daemonClient: DaemonClient,
+): Promise<string | null> {
+    // Use cached value if available
+    if (profile.environment?.environmentId) {
+        return profile.environment.environmentId;
+    }
+
+    // Try to resolve by matching the environment URL against env/list
+    if (profile.environment?.url) {
+        try {
+            const envResult = await daemonClient.envList();
+            const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+            const profileUrl = normalise(profile.environment.url);
+            const match = envResult.environments.find(
+                e => normalise(e.apiUrl) === profileUrl || (e.url && normalise(e.url) === profileUrl)
+            );
+            if (match?.environmentId) {
+                return match.environmentId;
+            }
+        } catch {
+            // env/list may fail if no active profile or no network — fall through
+        }
+    }
+
+    return null;
+}
+
+/**
  * Registers browser navigation commands and returns the disposables.
  *
  * Commands registered:
@@ -94,9 +127,10 @@ export function registerBrowserCommands(
                     return;
                 }
 
-                const url = buildMakerUrl(profile.environment.environmentId ?? null);
+                const environmentId = await resolveEnvironmentId(profile, daemonClient);
+                const url = buildMakerUrl(environmentId);
 
-                if (!profile.environment.environmentId) {
+                if (!environmentId) {
                     vscode.window.showInformationMessage(
                         'Environment ID not available — opening Maker Portal home. Select the environment manually.'
                     );

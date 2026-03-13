@@ -5,6 +5,19 @@
   },
   "tasks": [
     {
+      "label": "Build CLI (Debug)",
+      "type": "shell",
+      "command": "dotnet build src/PPDS.Cli/PPDS.Cli.csproj -c Debug -f net8.0 --nologo -v q",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
       "type": "npm",
       "script": "compile",
       "path": "extension",
@@ -18,6 +31,14 @@
         "reveal": "silent",
         "panel": "shared"
       }
+    },
+    {
+      "label": "Build All",
+      "detail": "Build CLI daemon + TypeScript extension",
+      "dependsOn": ["Build CLI (Debug)", "npm: compile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
     },
     {
       "type": "npm",
