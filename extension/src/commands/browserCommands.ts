@@ -124,6 +124,11 @@ export function registerBrowserCommands(
                     return;
                 }
 
+                if (!profile.environment.url) {
+                    vscode.window.showInformationMessage('Environment URL not available.');
+                    return;
+                }
+
                 const url = buildDynamicsUrl(profile.environment.url);
                 await vscode.env.openExternal(vscode.Uri.parse(url));
             } catch (error) {

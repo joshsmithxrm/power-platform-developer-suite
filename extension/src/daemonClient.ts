@@ -135,6 +135,9 @@ export class DaemonClient implements vscode.Disposable {
         const exitPromise = new Promise<never>((_, reject) => {
             startupExitReject = reject;
         });
+        // Prevent unhandled rejection if daemon exits in the narrow window
+        // between handshake success and startupExitReject being nulled.
+        exitPromise.catch(() => {});
 
         const onStartupExit = (code: number | null) => {
             this.log.error(`Daemon exited during startup with code ${code}`);
