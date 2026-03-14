@@ -160,6 +160,10 @@ export class ProfileTreeDataProvider
             try {
                 const result = await this.daemonClient.envList();
                 for (const env of result.environments) {
+                    // Only show discovered environments in the tree — configured-only
+                    // entries from environments.json may be from other tenants/profiles
+                    if (env.source === 'configured') continue;
+
                     const normalizedUrl = env.apiUrl.replace(/\/+$/, '').toLowerCase();
                     const isDefault = savedUrl != null && normalizedUrl === savedUrl;
                     items.push(new EnvironmentTreeItem(
