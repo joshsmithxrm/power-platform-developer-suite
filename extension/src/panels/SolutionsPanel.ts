@@ -337,6 +337,7 @@ export class SolutionsPanel extends WebviewPanelBase {
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="managed-btn" appearance="secondary" title="Toggle managed solutions visibility">Managed: Off</vscode-button>
+    <input id="search-input" type="text" placeholder="Filter solutions..." style="flex: 1; min-width: 120px; max-width: 300px; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 12px; outline: none;" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
@@ -356,6 +357,7 @@ export class SolutionsPanel extends WebviewPanelBase {
     const statusText = document.getElementById('status-text');
     const refreshBtn = document.getElementById('refresh-btn');
     const managedBtn = document.getElementById('managed-btn');
+    const searchInput = document.getElementById('search-input');
 
     let solutions = [];
     let expandedSolutions = new Set();
@@ -375,6 +377,53 @@ export class SolutionsPanel extends WebviewPanelBase {
         managedBtn.setAttribute('appearance', managedOn ? 'primary' : 'secondary');
         vscode.postMessage({ command: 'toggleManaged' });
     });
+
+    let filterText = '';
+    let filterTimeout = null;
+
+    searchInput.addEventListener('input', () => {
+        clearTimeout(filterTimeout);
+        filterTimeout = setTimeout(() => {
+            filterText = searchInput.value.trim().toLowerCase();
+            applyFilter();
+        }, 150);
+    });
+
+    function applyFilter() {
+        if (!solutions.length) return;
+        const rows = content.querySelectorAll('.solution-list > li');
+        let visibleCount = 0;
+        rows.forEach((li, idx) => {
+            const sol = solutions[idx];
+            if (!sol) return;
+            const matches = !filterText ||
+                sol.friendlyName.toLowerCase().includes(filterText) ||
+                sol.uniqueName.toLowerCase().includes(filterText) ||
+                (sol.publisherName && sol.publisherName.toLowerCase().includes(filterText));
+            li.style.display = matches ? '' : 'none';
+            if (matches) visibleCount++;
+        });
+
+        if (filterText) {
+            statusText.textContent = visibleCount + ' of ' + solutions.length + ' solution' + (solutions.length !== 1 ? 's' : '');
+        } else {
+            let statusMsg = solutions.length + ' solution' + (solutions.length !== 1 ? 's' : '');
+            statusText.textContent = statusMsg;
+        }
+
+        if (filterText && visibleCount === 0) {
+            let emptyEl = content.querySelector('.filter-empty');
+            if (!emptyEl) {
+                emptyEl = document.createElement('div');
+                emptyEl.className = 'empty-state filter-empty';
+                emptyEl.textContent = 'No solutions match filter';
+                content.appendChild(emptyEl);
+            }
+        } else {
+            const emptyEl = content.querySelector('.filter-empty');
+            if (emptyEl) emptyEl.remove();
+        }
+    }
 
     // ── Delegated click handler for solution/component rows ──
     content.addEventListener('click', (e) => {
@@ -454,6 +503,8 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     function renderSolutions(sols, managedCount, includeManaged) {
         solutions = sols;
+        searchInput.value = '';
+        filterText = '';
 
         if (sols.length === 0) {
             content.innerHTML = '<div class="empty-state">No solutions found</div>';
