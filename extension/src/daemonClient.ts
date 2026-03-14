@@ -7,7 +7,9 @@ import {
     MessageConnection,
     StreamMessageReader,
     StreamMessageWriter,
-    CancellationToken
+    CancellationToken,
+    RequestType,
+    ParameterStructures,
 } from 'vscode-jsonrpc/node';
 import type {
     AuthListResponse,
@@ -68,6 +70,19 @@ export type {
  * process if it is not already running. If the daemon dies, the next RPC
  * call will automatically restart it (auto-reconnect).
  */
+// RequestTypes with positional parameter encoding for DTO-based RPC methods.
+// StreamJsonRpc binds positional params (JSON array) to a single DTO parameter,
+// but vscode-jsonrpc defaults to named params (JSON object) which StreamJsonRpc
+// interprets as individual method arguments. These force positional encoding.
+// RequestType<Params, Result, Error> with positional encoding for DTO-based methods
+const RPC_QUERY_SQL = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/sql', ParameterStructures.byPosition);
+const RPC_QUERY_FETCH = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/fetch', ParameterStructures.byPosition);
+const RPC_QUERY_COMPLETE = new RequestType<Record<string, unknown>, QueryCompleteResponse, void>('query/complete', ParameterStructures.byPosition);
+const RPC_QUERY_HISTORY_LIST = new RequestType<Record<string, unknown>, QueryHistoryListResponse, void>('query/history/list', ParameterStructures.byPosition);
+const RPC_QUERY_HISTORY_DELETE = new RequestType<Record<string, unknown>, QueryHistoryDeleteResponse, void>('query/history/delete', ParameterStructures.byPosition);
+const RPC_QUERY_EXPORT = new RequestType<Record<string, unknown>, QueryExportResponse, void>('query/export', ParameterStructures.byPosition);
+const RPC_QUERY_EXPLAIN = new RequestType<Record<string, unknown>, QueryExplainResponse, void>('query/explain', ParameterStructures.byPosition);
+
 export class DaemonClient implements vscode.Disposable {
     private static readonly STARTUP_TIMEOUT_MS = 30_000;
 
@@ -378,11 +393,9 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         this.log.info(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
-        // Wrap in array to send as positional param (StreamJsonRpc expects a single QuerySqlRequest object,
-        // not named params spread across method arguments)
         const result = token
-            ? await this.connection!.sendRequest<QueryResultResponse>('query/sql', [params], token)
-            : await this.connection!.sendRequest<QueryResultResponse>('query/sql', [params]);
+            ? await this.connection!.sendRequest(RPC_QUERY_SQL, params, token)
+            : await this.connection!.sendRequest(RPC_QUERY_SQL, params);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
@@ -403,8 +416,8 @@ export class DaemonClient implements vscode.Disposable {
 
         this.log.info('Calling query/fetch...');
         const result = token
-            ? await this.connection!.sendRequest<QueryResultResponse>('query/fetch', [params], token)
-            : await this.connection!.sendRequest<QueryResultResponse>('query/fetch', [params]);
+            ? await this.connection!.sendRequest(RPC_QUERY_FETCH, params, token)
+            : await this.connection!.sendRequest(RPC_QUERY_FETCH, params);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
@@ -417,7 +430,7 @@ export class DaemonClient implements vscode.Disposable {
      * on every keystroke.
      */
     async queryComplete(params: { sql: string; cursorOffset: number; language?: string }): Promise<QueryCompleteResponse> {
-        return this.sendRequestQuiet<QueryCompleteResponse>('query/complete', [params]);
+        return this.sendRequestQuiet(RPC_QUERY_COMPLETE, params);
     }
 
     // ── Query History ────────────────────────────────────────────────────────
@@ -431,7 +444,7 @@ export class DaemonClient implements vscode.Disposable {
         if (search !== undefined) params.search = search;
         if (limit !== undefined) params.limit = limit;
         this.log.debug(`Calling query/history/list...`);
-        const result = await this.connection!.sendRequest<QueryHistoryListResponse>('query/history/list', [params]);
+        const result = await this.connection!.sendRequest(RPC_QUERY_HISTORY_LIST, params);
         this.log.debug(`Got ${result.entries.length} history entries`);
         return result;
     }
@@ -442,7 +455,7 @@ export class DaemonClient implements vscode.Disposable {
     async queryHistoryDelete(id: string): Promise<QueryHistoryDeleteResponse> {
         await this.ensureConnected();
         this.log.debug(`Calling query/history/delete for "${id}"...`);
-        const result = await this.connection!.sendRequest<QueryHistoryDeleteResponse>('query/history/delete', [{ id }]);
+        const result = await this.connection!.sendRequest(RPC_QUERY_HISTORY_DELETE, { id });
         this.log.debug(`Deleted: ${result.deleted}`);
         return result;
     }
@@ -462,7 +475,7 @@ export class DaemonClient implements vscode.Disposable {
     }): Promise<QueryExportResponse> {
         await this.ensureConnected();
         this.log.info(`Calling query/export...`);
-        const result = await this.connection!.sendRequest<QueryExportResponse>('query/export', [params]);
+        const result = await this.connection!.sendRequest(RPC_QUERY_EXPORT, params);
         this.log.debug(`Exported ${result.rowCount} rows as ${result.format}`);
         return result;
     }
@@ -475,7 +488,7 @@ export class DaemonClient implements vscode.Disposable {
     async queryExplain(params: { sql: string; environmentUrl?: string }): Promise<QueryExplainResponse> {
         await this.ensureConnected();
         this.log.debug('Calling query/explain...');
-        const result = await this.connection!.sendRequest<QueryExplainResponse>('query/explain', [params]);
+        const result = await this.connection!.sendRequest(RPC_QUERY_EXPLAIN, params);
         this.log.debug(`Got explain plan (${result.format})`);
         return result;
     }
@@ -654,9 +667,11 @@ export class DaemonClient implements vscode.Disposable {
      * Sends an RPC request without logging, for high-frequency calls such as
      * IntelliSense completions that would otherwise flood the output channel.
      */
-    private async sendRequestQuiet<T>(method: string, params?: unknown): Promise<T> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private async sendRequestQuiet<T>(method: string | RequestType<any, T, any>, params?: unknown): Promise<T> {
         await this.ensureConnected();
-        return this.connection!.sendRequest<T>(method, params);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return this.connection!.sendRequest(method as any, params);
     }
 
     /**
