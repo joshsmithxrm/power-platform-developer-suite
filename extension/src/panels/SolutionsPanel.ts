@@ -23,13 +23,13 @@ export class SolutionsPanel extends WebviewPanelBase {
     private environmentDisplayName: string | undefined;
     private profileName: string | undefined;
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string): SolutionsPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string, globalState?: vscode.Memento): SolutionsPanel {
         if (SolutionsPanel.instances.length >= SolutionsPanel.MAX_PANELS) {
             const oldest = SolutionsPanel.instances[0];
             oldest.panel?.reveal();
             return oldest;
         }
-        const panel = new SolutionsPanel(extensionUri, daemon, envUrl, envDisplayName);
+        const panel = new SolutionsPanel(extensionUri, daemon, envUrl, envDisplayName, globalState);
         return panel;
     }
 
@@ -38,8 +38,11 @@ export class SolutionsPanel extends WebviewPanelBase {
         private readonly daemon: DaemonClient,
         initialEnvUrl?: string,
         initialEnvDisplayName?: string,
+        private readonly globalState?: vscode.Memento,
     ) {
         super();
+        // Restore managed toggle state
+        this.includeManaged = this.globalState?.get<boolean>('ppds.solutionsPanel.includeManaged') ?? false;
 
         if (initialEnvUrl) {
             this.environmentUrl = initialEnvUrl;
@@ -77,6 +80,7 @@ export class SolutionsPanel extends WebviewPanelBase {
                             break;
                         case 'toggleManaged':
                             this.includeManaged = !this.includeManaged;
+                            void this.globalState?.update('ppds.solutionsPanel.includeManaged', this.includeManaged);
                             await this.loadSolutions();
                             break;
                         case 'expandSolution':
@@ -112,6 +116,7 @@ export class SolutionsPanel extends WebviewPanelBase {
             }
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
+            this.postMessage({ command: 'updateManagedState', includeManaged: this.includeManaged });
             await this.loadSolutions();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -489,6 +494,11 @@ export class SolutionsPanel extends WebviewPanelBase {
                 break;
             case 'componentsLoaded':
                 renderComponents(msg.uniqueName, msg.groups);
+                break;
+            case 'updateManagedState':
+                managedOn = msg.includeManaged;
+                managedBtn.textContent = managedOn ? 'Managed: On' : 'Managed: Off';
+                managedBtn.setAttribute('appearance', managedOn ? 'primary' : 'secondary');
                 break;
             case 'loading':
                 content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading solutions...</div></div>';

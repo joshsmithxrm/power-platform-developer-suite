@@ -186,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
         // Open Solutions targeting this environment
         vscode.commands.registerCommand('ppds.openSolutionsForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
-            SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+            SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName, context.globalState);
         })),
 
         // Copy environment URL to clipboard
@@ -304,7 +304,7 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Solutions Panel ─────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.openSolutions', () => {
-            SolutionsPanel.show(context.extensionUri, client);
+            SolutionsPanel.show(context.extensionUri, client, undefined, undefined, context.globalState);
         }),
     );
 
