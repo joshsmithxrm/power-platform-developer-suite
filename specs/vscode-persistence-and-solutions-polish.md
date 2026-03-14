@@ -145,9 +145,9 @@ type ProfileSortOrder = Record<string, number>;
 
 #### Data Flow Changes
 
-The daemon RPC handler and TypeScript `SolutionInfoDto` already include `createdOn`, `modifiedOn`, `installedOn`, and `description`. The gap is only in `SolutionsPanel.loadSolutions()` which drops these fields when constructing the webview message (line ~162-174). Changes needed:
+The daemon RPC handler and TypeScript `SolutionInfoDto` already include `createdOn`, `modifiedOn`, `installedOn`, and `description`. The `description` field is already passed to the webview. The gap is only in `SolutionsPanel.loadSolutions()` which drops the **date fields** (`createdOn`, `modifiedOn`, `installedOn`) when constructing the webview message (line ~162-174). Changes needed:
 
-1. **`SolutionsPanel.loadSolutions()`**: include `createdOn`, `modifiedOn`, `installedOn`, `description` in the `solutionsLoaded` webview message payload
+1. **`SolutionsPanel.loadSolutions()`**: include `createdOn`, `modifiedOn`, `installedOn` in the `solutionsLoaded` webview message payload (description is already included)
 2. **Webview `renderSolutions()`**: render detail card HTML in each solution's expanded container, populated on load (data is already available from the message)
 
 #### Detail Card Layout
@@ -176,7 +176,7 @@ Styled as a `div` with `var(--vscode-textBlockQuote-background)` background, sub
 5. On failure, falls back to existing hardcoded `ComponentTypeNames` dictionary
 6. `GetComponentsAsync()` uses the resolved names from cache instead of only the hardcoded dictionary
 
-**Note:** The existing hardcoded `ComponentTypeNames` dictionary in `SolutionService.cs` has incorrect values for several component types (e.g., `65 → FieldSecurityProfile` should be `70`, `68 → PluginType` should be `90`). The generated `componenttype` enum is authoritative. The runtime metadata query will supersede the hardcoded dictionary, but the hardcoded values should also be corrected as part of this work to ensure the fallback path is accurate.
+**Note:** The existing hardcoded `ComponentTypeNames` dictionary in `SolutionService.cs` has incorrect values across a significant portion of entries — the entire 65-98+ range is shifted relative to the generated `componenttype` enum, which is authoritative. The runtime metadata query will supersede the hardcoded dictionary, but the hardcoded values should also be corrected to match the generated enum as part of this work to ensure the fallback path is accurate.
 
 #### Primary Flow
 
