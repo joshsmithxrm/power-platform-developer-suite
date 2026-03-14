@@ -34,6 +34,7 @@ export class QueryPanel extends WebviewPanelBase {
     private lastUseTds = false;
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
+    private profileName: string | undefined;
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -140,29 +141,27 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     private async initEnvironment(): Promise<void> {
-        // If environment was pre-set (from tree context menu), just update the UI
-        if (this.environmentUrl) {
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? this.environmentUrl });
-            this.updateTitle();
-            return;
-        }
+        // Always fetch profile name for the title
         try {
             const who = await this.daemon.authWho();
-            if (who.environment) {
+            this.profileName = who.name ?? `Profile ${who.index}`;
+            if (!this.environmentUrl && who.environment) {
                 this.environmentUrl = who.environment.url;
                 this.environmentDisplayName = who.environment.displayName;
-                this.postMessage({ command: 'updateEnvironment', name: who.environment.displayName });
-                this.updateTitle();
             }
         } catch {
-            // No active profile or environment — picker will show empty
+            // No active profile or environment
         }
+        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
+        this.updateTitle();
     }
 
     private updateTitle(): void {
-        if (this.panel && this.environmentDisplayName) {
-            this.panel.title = `Data Explorer #${this.panelId} — ${this.environmentDisplayName}`;
-        }
+        if (!this.panel) return;
+        const parts = [`Data Explorer #${this.panelId}`];
+        if (this.profileName) parts.push(this.profileName);
+        if (this.environmentDisplayName) parts.push(this.environmentDisplayName);
+        this.panel.title = parts.join(' — ');
     }
 
     private async executeQuery(sql: string, isRetry = false, useTds?: boolean): Promise<void> {
