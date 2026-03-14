@@ -103,14 +103,22 @@ export function registerEnvironmentConfigCommand(
                 }
 
                 // Step 3: Type (QuickPick)
-                // Pre-select: user's explicit type if set, otherwise the auto-detected type
+                // Pre-select: user's explicit type if set, otherwise the auto-detected type.
+                // showQuickPick auto-focuses the first item, so move the current selection to the top.
                 const effectiveType = currentType ?? resolvedType;
                 const typeItems: vscode.QuickPickItem[] = ENVIRONMENT_TYPES.map(t => ({
                     label: t,
                     description: t === currentType ? '(current)' :
                         (!currentType && t === resolvedType) ? '(detected)' : undefined,
-                    picked: t === effectiveType,
                 }));
+                // Move the active item to the top so VS Code auto-highlights it
+                if (effectiveType) {
+                    const activeIdx = typeItems.findIndex(t => t.label === effectiveType);
+                    if (activeIdx > 0) {
+                        const [active] = typeItems.splice(activeIdx, 1);
+                        typeItems.unshift(active);
+                    }
+                }
 
                 const typePick = await vscode.window.showQuickPick(typeItems, {
                     title: 'Configure Environment (2/3): Type',
@@ -127,6 +135,7 @@ export function registerEnvironmentConfigCommand(
                 const selectedType = typePick.label;
 
                 // Step 4: Color (QuickPick)
+                // Build list with current selection moved to top for auto-highlight
                 const colorItems: vscode.QuickPickItem[] = [
                     {
                         label: '$(circle-slash) (Use type default)',
@@ -137,6 +146,13 @@ export function registerEnvironmentConfigCommand(
                         description: c === currentColor ? '(current)' : undefined,
                     })),
                 ];
+                if (currentColor) {
+                    const activeIdx = colorItems.findIndex(c => c.label.includes(currentColor));
+                    if (activeIdx > 0) {
+                        const [active] = colorItems.splice(activeIdx, 1);
+                        colorItems.unshift(active);
+                    }
+                }
 
                 const colorPick = await vscode.window.showQuickPick(colorItems, {
                     title: 'Configure Environment (3/3): Color',
