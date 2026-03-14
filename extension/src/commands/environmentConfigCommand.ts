@@ -53,14 +53,22 @@ export function registerEnvironmentConfigCommand(
     onConfigChanged: () => void,
 ): void {
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.configureEnvironment', async (environmentUrl?: string) => {
+        vscode.commands.registerCommand('ppds.configureEnvironment', async (itemOrUrl?: unknown) => {
             try {
-                // If no URL passed, get from active environment
+                // Accept either a string URL or an EnvironmentTreeItem from context menu
+                let environmentUrl: string | undefined;
+                if (typeof itemOrUrl === 'string') {
+                    environmentUrl = itemOrUrl;
+                } else if (itemOrUrl && typeof itemOrUrl === 'object' && 'envUrl' in itemOrUrl) {
+                    environmentUrl = (itemOrUrl as { envUrl: string }).envUrl;
+                }
+
+                // If no URL resolved, get from active environment
                 if (!environmentUrl) {
                     const who = await daemonClient.authWho();
                     if (!who.environment?.url) {
                         vscode.window.showInformationMessage(
-                            'No environment is currently selected. Use "PPDS: Select Environment" first.',
+                            'No environment is currently selected. Select an environment first.',
                         );
                         return;
                     }
