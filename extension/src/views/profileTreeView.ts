@@ -15,7 +15,6 @@ export class ProfileTreeItem extends vscode.TreeItem {
         const label = profile.name ?? `Profile ${profile.index}`;
         super(label, vscode.TreeItemCollapsibleState.Collapsed);
 
-        // Show environment name in the description if set
         if (profile.environment) {
             this.description = profile.environment.displayName;
         } else {
@@ -25,7 +24,6 @@ export class ProfileTreeItem extends vscode.TreeItem {
         this.tooltip = buildTooltip(profile);
         this.contextValue = 'profile';
 
-        // Active profile gets a checkmark icon
         if (profile.isActive) {
             this.iconPath = new vscode.ThemeIcon('pass-filled');
         } else {
@@ -36,19 +34,22 @@ export class ProfileTreeItem extends vscode.TreeItem {
 
 /**
  * Tree item representing an environment under a profile.
- * Click to switch the profile's saved environment.
+ * Right-click for context menu: Set as Default, Open Data Explorer, Open Maker, etc.
+ * Click non-active env to set as default.
  */
 export class EnvironmentTreeItem extends vscode.TreeItem {
     constructor(
-        public readonly profileIndex: number,
         public readonly envUrl: string,
         public readonly envDisplayName: string,
+        public readonly envEnvironmentId: string | null,
         public readonly isActive: boolean,
+        public readonly source: string,
     ) {
         super(envDisplayName, vscode.TreeItemCollapsibleState.None);
 
         this.description = envUrl;
-        this.tooltip = `${envDisplayName}\n${envUrl}`;
+        this.tooltip = `${envDisplayName}\n${envUrl}${this.isActive ? '\n(default)' : ''}`;
+        // Use 'environment' for all — package.json handles remove visibility
         this.contextValue = 'environment';
 
         if (isActive) {
@@ -56,9 +57,9 @@ export class EnvironmentTreeItem extends vscode.TreeItem {
         } else {
             this.iconPath = new vscode.ThemeIcon('circle-outline');
             this.command = {
-                command: 'ppds.switchProfileEnvironment',
-                title: 'Switch Environment',
-                arguments: [envUrl, envDisplayName],
+                command: 'ppds.setDefaultEnvironment',
+                title: 'Set as Default',
+                arguments: [this],
             };
         }
     }
@@ -99,8 +100,7 @@ function buildTooltip(profile: ProfileInfo): string {
  * Tree data provider for the Profiles view in the PPDS activity bar.
  *
  * Top level: authentication profiles (expandable).
- * Second level: environments — saved environment (starred) + discovered environments.
- * Clicking a non-active environment switches the profile's default.
+ * Second level: environments — saved (starred), discovered, and configured.
  */
 export class ProfileTreeDataProvider
     implements vscode.TreeDataProvider<ProfileTreeElement>, vscode.Disposable {
@@ -152,48 +152,76 @@ export class ProfileTreeDataProvider
 
     private async getEnvironments(profile: ProfileInfo): Promise<ProfileTreeElement[]> {
         const items: ProfileTreeElement[] = [];
-        const savedUrl = profile.environment?.url;
+        const savedUrl = profile.environment?.url?.replace(/\/+$/, '').toLowerCase();
 
-        // Show saved environment first (starred)
-        if (profile.environment) {
-            items.push(new EnvironmentTreeItem(
-                profile.index,
-                profile.environment.url,
-                profile.environment.displayName,
-                true,
-            ));
-        }
-
-        // Discover available environments (only for active profile — needs auth)
+        // For the active profile, env/list returns discovered + configured (merged by daemon).
+        // For non-active profiles, we can only show the saved environment.
         if (profile.isActive) {
             try {
                 const result = await this.daemonClient.envList();
                 for (const env of result.environments) {
-                    // Skip the saved environment (already shown above)
-                    if (savedUrl && env.apiUrl.toLowerCase() === savedUrl.toLowerCase()) {
-                        continue;
-                    }
+                    const normalizedUrl = env.apiUrl.replace(/\/+$/, '').toLowerCase();
+                    const isDefault = savedUrl != null && normalizedUrl === savedUrl;
                     items.push(new EnvironmentTreeItem(
-                        profile.index,
                         env.apiUrl,
                         env.friendlyName,
-                        false,
+                        env.environmentId,
+                        isDefault,
+                        env.source,
+                    ));
+                }
+
+                // If the saved env wasn't in the list (shouldn't happen but defensive), add it
+                if (savedUrl && !items.some(i => i instanceof EnvironmentTreeItem && i.isActive)) {
+                    items.unshift(new EnvironmentTreeItem(
+                        profile.environment!.url,
+                        profile.environment!.displayName,
+                        profile.environment!.environmentId ?? null,
+                        true,
+                        'saved',
                     ));
                 }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                this.log.warn(`Failed to discover environments: ${msg}`);
+                this.log.warn(`Failed to list environments: ${msg}`);
+
+                // Fallback: show saved environment only
+                if (profile.environment) {
+                    items.push(new EnvironmentTreeItem(
+                        profile.environment.url,
+                        profile.environment.displayName,
+                        profile.environment.environmentId ?? null,
+                        true,
+                        'saved',
+                    ));
+                }
             }
 
             items.push(new ManualUrlTreeItem());
-        }
-
-        if (items.length === 0) {
-            // Non-active profile with no saved environment
+        } else {
+            // Non-active profile: show saved environment only
+            if (profile.environment) {
+                items.push(new EnvironmentTreeItem(
+                    profile.environment.url,
+                    profile.environment.displayName,
+                    profile.environment.environmentId ?? null,
+                    true,
+                    'saved',
+                ));
+            }
             items.push(new ManualUrlTreeItem());
         }
 
-        return items;
+        // Sort: active/default first, then alphabetical
+        const envItems = items.filter(i => i instanceof EnvironmentTreeItem) as EnvironmentTreeItem[];
+        const otherItems = items.filter(i => !(i instanceof EnvironmentTreeItem));
+        envItems.sort((a, b) => {
+            if (a.isActive && !b.isActive) return -1;
+            if (!a.isActive && b.isActive) return 1;
+            return a.envDisplayName.localeCompare(b.envDisplayName);
+        });
+
+        return [...envItems, ...otherItems];
     }
 
     dispose(): void {

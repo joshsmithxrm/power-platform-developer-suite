@@ -17,6 +17,7 @@ import type {
     EnvSelectResponse,
     EnvConfigGetResponse,
     EnvConfigSetResponse,
+    EnvConfigRemoveResponse,
     EnvWhoResponse,
     QueryResultResponse,
     QueryCompleteResponse,
@@ -273,13 +274,15 @@ export class DaemonClient implements vscode.Disposable {
     // ── Environment methods ─────────────────────────────────────────────────
 
     /**
-     * Lists available Dataverse environments, optionally filtered.
+     * Lists available Dataverse environments (discovered + configured), optionally filtered.
      */
-    async envList(filter?: string): Promise<EnvListResponse> {
+    async envList(filter?: string, forceRefresh?: boolean): Promise<EnvListResponse> {
         await this.ensureConnected();
 
-        const params = filter !== undefined ? { filter } : {};
-        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}...`);
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) params.filter = filter;
+        if (forceRefresh) params.forceRefresh = true;
+        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}${forceRefresh ? ' (force refresh)' : ''}...`);
         const result = await this.connection!.sendRequest<EnvListResponse>('env/list', params);
         this.log.debug(`Got ${result.environments.length} environments`);
 
@@ -340,6 +343,19 @@ export class DaemonClient implements vscode.Disposable {
         this.log.debug(`Calling env/config/set for "${params.environmentUrl}"...`);
         const result = await this.connection!.sendRequest<EnvConfigSetResponse>('env/config/set', params);
         this.log.debug(`Config saved: saved=${result.saved}`);
+
+        return result;
+    }
+
+    /**
+     * Removes a configured environment from environments.json.
+     */
+    async envConfigRemove(environmentUrl: string): Promise<EnvConfigRemoveResponse> {
+        await this.ensureConnected();
+
+        this.log.debug(`Calling env/config/remove for "${environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigRemoveResponse>('env/config/remove', { environmentUrl });
+        this.log.debug(`Removed: ${result.removed}`);
 
         return result;
     }

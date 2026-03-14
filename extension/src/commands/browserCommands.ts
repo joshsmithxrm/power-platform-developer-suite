@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
-import type { ProfileInfo } from '../types.js';
+import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
 
 const MAKER_BASE_URL = 'https://make.powerapps.com';
 
@@ -16,97 +16,34 @@ export function buildDynamicsUrl(environmentUrl: string): string {
 }
 
 /**
- * Shows a quick pick of profiles that have environments, pre-selecting the active one.
- * Returns the selected profile, or undefined if cancelled.
- */
-async function pickProfileWithEnvironment(daemonClient: DaemonClient): Promise<ProfileInfo | undefined> {
-    const result = await daemonClient.authList();
-
-    const profilesWithEnv = result.profiles.filter(p => p.environment != null);
-
-    if (profilesWithEnv.length === 0) {
-        vscode.window.showInformationMessage('No profiles have an environment selected. Use "PPDS: Select Environment" first.');
-        return undefined;
-    }
-
-    interface ProfileQuickPickItem extends vscode.QuickPickItem {
-        profile: ProfileInfo;
-    }
-
-    const items: ProfileQuickPickItem[] = profilesWithEnv.map(p => ({
-        label: p.name ?? `Profile ${p.index}`,
-        description: p.environment!.displayName,
-        detail: p.environment!.url,
-        picked: p.isActive,
-        profile: p,
-    }));
-
-    const selected = await vscode.window.showQuickPick(items, {
-        title: 'Select Profile',
-        placeHolder: 'Choose which environment to open',
-        ignoreFocusOut: true,
-    });
-
-    return selected?.profile;
-}
-
-/**
- * Resolves the target profile: uses the tree item's profile if provided,
- * otherwise shows a quick pick.
- */
-async function resolveProfile(
-    item: unknown,
-    daemonClient: DaemonClient,
-): Promise<ProfileInfo | undefined> {
-    // If invoked from tree context menu, item has the profile
-    const profileItem = item as { profile?: ProfileInfo } | undefined;
-    if (profileItem?.profile) {
-        return profileItem.profile;
-    }
-
-    // Otherwise show picker
-    return pickProfileWithEnvironment(daemonClient);
-}
-
-/**
- * Resolves the environment ID for a profile, falling back to env/list lookup
- * when the profile's cached data doesn't include it (older profiles).
+ * Resolves the environment ID, falling back to env/list lookup when the
+ * tree item's cached data doesn't include it.
  */
 async function resolveEnvironmentId(
-    profile: ProfileInfo,
+    envUrl: string,
+    envId: string | null,
     daemonClient: DaemonClient,
 ): Promise<string | null> {
-    // Use cached value if available
-    if (profile.environment?.environmentId) {
-        return profile.environment.environmentId;
-    }
+    if (envId) return envId;
 
-    // Try to resolve by matching the environment URL against env/list
-    if (profile.environment?.url) {
-        try {
-            const envResult = await daemonClient.envList();
-            const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
-            const profileUrl = normalise(profile.environment.url);
-            const match = envResult.environments.find(
-                e => normalise(e.apiUrl) === profileUrl || (e.url && normalise(e.url) === profileUrl)
-            );
-            if (match?.environmentId) {
-                return match.environmentId;
-            }
-        } catch {
-            // env/list may fail if no active profile or no network — fall through
-        }
+    try {
+        const envResult = await daemonClient.envList();
+        const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+        const targetUrl = normalise(envUrl);
+        const match = envResult.environments.find(
+            e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
+        );
+        return match?.environmentId ?? null;
+    } catch {
+        return null;
     }
-
-    return null;
 }
 
 /**
- * Registers browser navigation commands and returns the disposables.
+ * Registers browser navigation commands.
  *
- * Commands registered:
- * - ppds.openInMaker    — open Maker Portal for a profile's environment
- * - ppds.openInDynamics — open Dynamics 365 for a profile's environment
+ * Commands now accept EnvironmentTreeItem from tree context menu,
+ * or fall back to the active profile's environment when invoked from command palette.
  */
 export function registerBrowserCommands(
     context: vscode.ExtensionContext,
@@ -115,24 +52,31 @@ export function registerBrowserCommands(
 
     // ── Open in Maker Portal ─────────────────────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.openInMaker', async (item?: unknown) => {
+        vscode.commands.registerCommand('ppds.openInMaker', async (item?: EnvironmentTreeItem) => {
             try {
-                const profile = await resolveProfile(item, daemonClient);
-                if (!profile) return;
+                let envUrl: string;
+                let envId: string | null;
 
-                if (!profile.environment) {
-                    vscode.window.showInformationMessage(
-                        `No environment selected for "${profile.name ?? `Profile ${profile.index}`}".`
-                    );
-                    return;
+                if (item?.envUrl) {
+                    envUrl = item.envUrl;
+                    envId = item.envEnvironmentId;
+                } else {
+                    // Fallback: use active profile's environment
+                    const who = await daemonClient.authWho();
+                    if (!who.environment) {
+                        vscode.window.showInformationMessage('No environment selected.');
+                        return;
+                    }
+                    envUrl = who.environment.url;
+                    envId = who.environment.environmentId;
                 }
 
-                const environmentId = await resolveEnvironmentId(profile, daemonClient);
+                const environmentId = await resolveEnvironmentId(envUrl, envId, daemonClient);
                 const url = buildMakerUrl(environmentId);
 
                 if (!environmentId) {
                     vscode.window.showInformationMessage(
-                        'Environment ID not available — opening Maker Portal home. Select the environment manually.'
+                        'Environment ID not available — opening Maker Portal home.'
                     );
                 }
 
@@ -146,24 +90,22 @@ export function registerBrowserCommands(
 
     // ── Open in Dynamics 365 ──────────────────────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.openInDynamics', async (item?: unknown) => {
+        vscode.commands.registerCommand('ppds.openInDynamics', async (item?: EnvironmentTreeItem) => {
             try {
-                const profile = await resolveProfile(item, daemonClient);
-                if (!profile) return;
+                let envUrl: string;
 
-                if (!profile.environment) {
-                    vscode.window.showInformationMessage(
-                        `No environment selected for "${profile.name ?? `Profile ${profile.index}`}".`
-                    );
-                    return;
+                if (item?.envUrl) {
+                    envUrl = item.envUrl;
+                } else {
+                    const who = await daemonClient.authWho();
+                    if (!who.environment?.url) {
+                        vscode.window.showInformationMessage('No environment selected.');
+                        return;
+                    }
+                    envUrl = who.environment.url;
                 }
 
-                if (!profile.environment.url) {
-                    vscode.window.showInformationMessage('Environment URL not available.');
-                    return;
-                }
-
-                const url = buildDynamicsUrl(profile.environment.url);
+                const url = buildDynamicsUrl(envUrl);
                 await vscode.env.openExternal(vscode.Uri.parse(url));
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);

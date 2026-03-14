@@ -77,18 +77,60 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Profile Commands ────────────────────────────────────────────────
     registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
-    // ── Profile Environment Switching ─────────────────────────────────
+    // ── Environment Commands (tree context menu) ────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.switchProfileEnvironment', async (envUrl: string, envDisplayName: string) => {
+        // Set as Default — persists environment to profile
+        vscode.commands.registerCommand('ppds.setDefaultEnvironment', async (item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
             try {
-                await client.envSelect(envUrl);
+                await client.envSelect(item.envUrl);
                 profileTreeProvider.refresh();
-                vscode.window.showInformationMessage(`Environment switched to ${envDisplayName}`);
+                refreshToolsState();
+                vscode.window.showInformationMessage(`Default environment set to ${item.envDisplayName}`);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to switch environment: ${msg}`);
+                vscode.window.showErrorMessage(`Failed to set environment: ${msg}`);
             }
         }),
+
+        // Open Data Explorer targeting this environment
+        vscode.commands.registerCommand('ppds.openDataExplorerForEnv', (item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            QueryPanel.show(context.extensionUri, client, undefined, item.envUrl, item.envDisplayName);
+        }),
+
+        // Open Solutions targeting this environment
+        vscode.commands.registerCommand('ppds.openSolutionsForEnv', (item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        }),
+
+        // Copy environment URL to clipboard
+        vscode.commands.registerCommand('ppds.copyEnvironmentUrl', async (item: { envUrl: string }) => {
+            if (!item?.envUrl) return;
+            await vscode.env.clipboard.writeText(item.envUrl);
+            vscode.window.showInformationMessage('Environment URL copied to clipboard');
+        }),
+
+        // Remove configured environment from environments.json
+        vscode.commands.registerCommand('ppds.removeEnvironment', async (item: { envUrl: string; envDisplayName: string; source: string }) => {
+            if (!item?.envUrl) return;
+            const confirm = await vscode.window.showWarningMessage(
+                `Remove "${item.envDisplayName}" from saved environments?`,
+                { modal: true },
+                'Remove',
+            );
+            if (confirm !== 'Remove') return;
+            try {
+                await client.envConfigRemove(item.envUrl);
+                profileTreeProvider.refresh();
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to remove environment: ${msg}`);
+            }
+        }),
+
+        // Manual URL entry — saves to environments.json + sets as default
         vscode.commands.registerCommand('ppds.switchProfileEnvironmentManual', async () => {
             const url = await vscode.window.showInputBox({
                 title: 'Dataverse Environment URL',
@@ -102,13 +144,18 @@ export function activate(context: vscode.ExtensionContext) {
                 },
             });
             if (!url) return;
+            const trimmedUrl = url.trim();
             try {
-                await client.envSelect(url.trim());
+                // Save to environments.json so it persists
+                await client.envConfigSet({ environmentUrl: trimmedUrl });
+                // Set as default
+                await client.envSelect(trimmedUrl);
                 profileTreeProvider.refresh();
-                vscode.window.showInformationMessage(`Environment switched to ${url.trim()}`);
+                refreshToolsState();
+                vscode.window.showInformationMessage(`Environment set to ${trimmedUrl}`);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to switch environment: ${msg}`);
+                vscode.window.showErrorMessage(`Failed to set environment: ${msg}`);
             }
         }),
     );

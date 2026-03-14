@@ -172,13 +172,38 @@
       },
       {
         "command": "ppds.openInMaker",
-        "title": "PPDS: Open in Maker Portal",
+        "title": "Open in Maker Portal",
         "icon": "$(link-external)"
       },
       {
         "command": "ppds.openInDynamics",
-        "title": "PPDS: Open in Dynamics 365",
+        "title": "Open in Dynamics 365",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "ppds.setDefaultEnvironment",
+        "title": "Set as Default",
+        "icon": "$(star)"
+      },
+      {
+        "command": "ppds.openDataExplorerForEnv",
+        "title": "Open Data Explorer",
+        "icon": "$(database)"
+      },
+      {
+        "command": "ppds.openSolutionsForEnv",
+        "title": "Open Solutions",
+        "icon": "$(package)"
+      },
+      {
+        "command": "ppds.copyEnvironmentUrl",
+        "title": "Copy URL",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "ppds.removeEnvironment",
+        "title": "Remove Environment",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -221,14 +246,44 @@
           "group": "profile@4"
         },
         {
+          "command": "ppds.setDefaultEnvironment",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env@1"
+        },
+        {
+          "command": "ppds.openDataExplorerForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@1"
+        },
+        {
+          "command": "ppds.openSolutionsForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@2"
+        },
+        {
           "command": "ppds.openInMaker",
-          "when": "view == ppds.profiles && viewItem == profile",
-          "group": "open@1"
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-open@1"
         },
         {
           "command": "ppds.openInDynamics",
-          "when": "view == ppds.profiles && viewItem == profile",
-          "group": "open@2"
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-open@2"
+        },
+        {
+          "command": "ppds.configureEnvironment",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-config@1"
+        },
+        {
+          "command": "ppds.copyEnvironmentUrl",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-config@2"
+        },
+        {
+          "command": "ppds.removeEnvironment",
+          "when": "view == ppds.profiles && viewItem == environment && viewItem != activeEnvironment",
+          "group": "env-danger@1"
         }
       ],
       "notebook/cell/title": [

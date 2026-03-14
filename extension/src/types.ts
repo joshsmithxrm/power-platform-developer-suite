@@ -81,6 +81,11 @@ export interface EnvironmentInfo {
     region: string | null;
     version: string | null;
     isActive: boolean;
+    source: 'discovered' | 'configured' | 'both';
+}
+
+export interface EnvConfigRemoveResponse {
+    removed: boolean;
 }
 
 export interface EnvSelectResponse {
