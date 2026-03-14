@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -8,6 +9,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -19,6 +22,7 @@ public class SolutionService : ISolutionService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<SolutionService> _logger;
+    private readonly IMetadataService _metadataService;
 
     /// <summary>
     /// Component type names for common component types.
@@ -118,14 +122,24 @@ public class SolutionService : ISolutionService
     };
 
     /// <summary>
+    /// Per-environment cache for runtime-resolved component type names.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Dictionary<int, string>> _componentTypeCache = new();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="SolutionService"/> class.
     /// </summary>
     /// <param name="pool">The connection pool.</param>
     /// <param name="logger">The logger.</param>
-    public SolutionService(IDataverseConnectionPool pool, ILogger<SolutionService> logger)
+    /// <param name="metadataService">The metadata service for runtime option set resolution.</param>
+    public SolutionService(
+        IDataverseConnectionPool pool,
+        ILogger<SolutionService> logger,
+        IMetadataService metadataService)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
     }
 
     /// <inheritdoc />
@@ -294,10 +308,27 @@ public class SolutionService : ISolutionService
 
         var results = await client.RetrieveMultipleAsync(query, cancellationToken);
 
+        var envUrl = client.ConnectedOrgUniqueName ?? "default";
+
+        // Resolve component type names (uses cache after first call per env)
+        Dictionary<int, string> resolvedTypeNames;
+        try
+        {
+            resolvedTypeNames = await GetComponentTypeNamesAsync(envUrl, cancellationToken);
+        }
+        catch
+        {
+            resolvedTypeNames = ComponentTypeNames;
+        }
+
         return results.Entities.Select(e =>
         {
             var type = e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.ComponentType)?.Value ?? 0;
-            var typeName = ComponentTypeNames.TryGetValue(type, out var name) ? name : $"Unknown ({type})";
+            var typeName = resolvedTypeNames.TryGetValue(type, out var name)
+                ? name
+                : ComponentTypeNames.TryGetValue(type, out var fallback)
+                    ? fallback
+                    : $"Unknown ({type})";
 
             return new SolutionComponentInfo(
                 e.Id,
@@ -362,6 +393,36 @@ public class SolutionService : ISolutionService
 
         var request = new PublishAllXmlRequest();
         await client.ExecuteAsync(request, cancellationToken);
+    }
+
+    private async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
+        string envUrl,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = envUrl.TrimEnd('/').ToLowerInvariant();
+
+        if (_componentTypeCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            _logger.LogDebug("Fetching componenttype option set metadata for cache key: {EnvUrl}", cacheKey);
+            var optionSet = await _metadataService.GetOptionSetAsync("componenttype", cancellationToken);
+            var dict = new Dictionary<int, string>();
+            foreach (var option in optionSet.Options)
+            {
+                dict[option.Value] = option.Label;
+            }
+            _componentTypeCache.TryAdd(cacheKey, dict);
+            return dict;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch componenttype metadata, falling back to hardcoded dictionary");
+            return ComponentTypeNames;
+        }
     }
 
     private static SolutionInfo MapToSolutionInfo(Entity entity)
