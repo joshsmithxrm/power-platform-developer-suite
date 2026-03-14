@@ -395,6 +395,13 @@ public class SolutionService : ISolutionService
         await client.ExecuteAsync(request, cancellationToken);
     }
 
+    /// <summary>
+    /// Resolves component type names from the componenttype global option set metadata.
+    /// Note: componenttype is a global Dataverse option set — identical across all environments.
+    /// The per-env cache key is used for structural consistency, but the values will be the same.
+    /// The metadata service uses its own pool connection; this is acceptable because the option
+    /// set values are environment-independent. Do NOT copy this pattern for per-environment option sets.
+    /// </summary>
     private async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
         string envUrl,
         CancellationToken cancellationToken)

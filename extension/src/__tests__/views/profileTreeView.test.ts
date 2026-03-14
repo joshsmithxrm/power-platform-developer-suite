@@ -39,6 +39,7 @@ vi.mock('vscode', () => ({
 import {
     ProfileTreeItem,
     ProfileTreeDataProvider,
+    getProfileId,
 } from '../../views/profileTreeView.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,6 +68,21 @@ function makeDaemonClient(profiles: ProfileInfo[] = []) {
 function makeLogChannel() {
     return { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
+
+// ── getProfileId tests ───────────────────────────────────────────────────────
+
+describe('getProfileId', () => {
+    it('returns profile://identity//authMethod//cloud format', () => {
+        const profile = makeProfile({ identity: 'user@example.com', authMethod: 'DeviceCode', cloud: 'Public' });
+        expect(getProfileId(profile)).toBe('profile://user@example.com//DeviceCode//Public');
+    });
+
+    it('matches ProfileTreeItem.id for the same profile', () => {
+        const profile = makeProfile();
+        const item = new ProfileTreeItem(profile);
+        expect(getProfileId(profile)).toBe(item.id);
+    });
+});
 
 // ── ProfileTreeItem tests ─────────────────────────────────────────────────────
 
