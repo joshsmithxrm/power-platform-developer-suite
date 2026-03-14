@@ -56,10 +56,11 @@ export class EnvironmentTreeItem extends vscode.TreeItem {
             this.iconPath = new vscode.ThemeIcon('star-full');
         } else {
             this.iconPath = new vscode.ThemeIcon('circle-outline');
+            // Pass plain data to avoid circular reference (this.command.arguments[0] → this)
             this.command = {
                 command: 'ppds.setDefaultEnvironment',
                 title: 'Set as Default',
-                arguments: [this],
+                arguments: [{ envUrl, envDisplayName }],
             };
         }
     }
