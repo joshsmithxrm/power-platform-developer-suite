@@ -31,7 +31,7 @@ function findNewestVsix() {
 const vsixInfo = findNewestVsix();
 
 if (!vsixInfo) {
-	console.error('Error: No .vsix file found. Run "npm run vsce-package" first.');
+	console.error('Error: No .vsix file found. Run "npm run vsce:package" first.');
 	process.exit(1);
 }
 
