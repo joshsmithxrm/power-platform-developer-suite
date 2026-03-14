@@ -142,7 +142,7 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 **Component Type Fix:**
 
 1. **Diagnose**: Determine why `GetComponentTypeNamesAsync` falls back to hardcoded dictionary
-2. **Fix cache key**: `client.ConnectedOrgUniqueName` (line 311) may return null — use environment URL from the RPC request instead
+2. **Fix cache key**: `client.ConnectedOrgUniqueName` (line 311) may return null — use the `environmentUrl` parameter already passed to the RPC handler and threaded through to `SolutionService` method calls. Add an `environmentUrl` parameter to `GetComponentsAsync` (or use the pool's environment URL) so `GetComponentTypeNamesAsync` has a reliable cache key
 3. **Fix outer bare catch**: The bare `catch` at `GetComponentsAsync` line 319 swallows exceptions from `GetComponentTypeNamesAsync`. Replace with `catch (Exception ex)` and log the exception. Note: `GetComponentTypeNamesAsync` itself (line 428) already has proper `catch (Exception ex)` with `_logger.LogWarning` — the fix is specifically the outer catch that discards context
 
 **Webview Display:**
@@ -330,6 +330,8 @@ The existing `solutions/components` RPC method response gains name fields:
 ```
 
 No new RPC methods. No breaking changes — new fields are nullable and additive.
+
+The `SolutionComponentInfoDto` class in `RpcMethodHandler.cs` also needs three new nullable string fields (`logicalName`, `schemaName`, `displayName`) to carry names from the C# record through to the JSON-RPC response.
 
 ---
 
