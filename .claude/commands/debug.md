@@ -57,24 +57,49 @@ npm test --prefix tests/tui-e2e -- --update-snapshots
 
 ### 4. Extension Mode
 
-Use the `/extension-dev` skill for the full workflow. Quick path:
+**Build & install for manual testing:**
 
 ```bash
 cd <root>/extension && npm run lint && npm run compile && npm run test && npm run local
 ```
 
-Then reload VS Code and verify manually. See `/extension-dev` for the complete test checklist and revert instructions.
+Then reload VS Code (Ctrl+Shift+P -> Reload Window) and test manually.
+
+**Useful npm scripts** (run from repo root with `ext:` prefix, or from extension/ directly):
+
+| Request | Command |
+|---------|---------|
+| Build + install | `npm run ext:local` |
+| Just install existing build | `npm run ext:local:install` |
+| Revert to marketplace version | `npm run ext:local:revert` |
+| Uninstall local | `npm run ext:local:uninstall` |
+| Run unit tests only | `npm run ext:test` |
+| Run E2E tests | `npm run ext:test:e2e` |
+| Watch mode (hot reload) | `npm run ext:watch` |
+| Full release test | `npm run ext:release:test` |
+
+**F5 Launch Configurations** (from VS Code debug panel):
+
+| Configuration | When to use |
+|---------------|-------------|
+| Run Extension | Default — full build, then launch debug host |
+| Run Extension (Watch Mode) | Iterating — hot reloads on file changes |
+| Run Extension (No Build) | Quick — skip build, use existing compiled code |
+| Run Extension (Open Folder) | Testing with a specific project folder |
+| Run Extension Tests | Run VS Code extension integration tests |
+
+**For AI self-verification:** Use `/verify extension` to exercise commands,
+inspect state, and verify webview rendering via MCP tools.
 
 ### 5. MCP Mode
 
-Test MCP tools via MCP client:
+Test MCP tools via MCP Inspector:
 
 ```bash
-# Build MCP server
-dotnet build src/PPDS.Mcp/PPDS.Mcp.csproj
-
-# Test tools (use MCP client if available)
+npx @modelcontextprotocol/inspector --cli --server "ppds-mcp-server"
 ```
+
+Or use `/verify mcp` for structured verification.
 
 ## Iterative Fix Loop
 
