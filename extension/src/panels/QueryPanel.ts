@@ -369,7 +369,13 @@ export class QueryPanel extends WebviewPanelBase {
     .results-table td { padding: 6px 12px; white-space: nowrap; border-bottom: 1px solid var(--vscode-panel-border); }
     .results-table tr:nth-child(even) { background: var(--vscode-list-inactiveSelectionBackground); }
     .results-table tr:hover { background: var(--vscode-list-hoverBackground); }
-    .results-table td.selected { background: var(--vscode-editor-selectionBackground); }
+    .results-table td.cell-selected { background: var(--vscode-editor-selectionBackground) !important; }
+    .results-table td.cell-selected-top { border-top: 2px solid var(--vscode-focusBorder) !important; }
+    .results-table td.cell-selected-bottom { border-bottom: 2px solid var(--vscode-focusBorder) !important; }
+    .results-table td.cell-selected-left { border-left: 2px solid var(--vscode-focusBorder) !important; }
+    .results-table td.cell-selected-right { border-right: 2px solid var(--vscode-focusBorder) !important; }
+    tbody.selecting { cursor: cell !important; user-select: none !important; }
+    tbody.all-selected td { background: var(--vscode-editor-selectionBackground) !important; }
     .results-table td a { color: var(--vscode-textLink-foreground); text-decoration: none; }
     .results-table td a:hover { text-decoration: underline; }
     .context-menu { position: fixed; z-index: 1000; background: var(--vscode-menu-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); border-radius: 4px; padding: 4px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
@@ -425,6 +431,8 @@ export class QueryPanel extends WebviewPanelBase {
     <span id="status-text">Ready</span>
     <span id="row-count"></span>
     <span id="execution-time"></span>
+    <span class="toolbar-spacer"></span>
+    <span id="copy-hint"></span>
 </div>
 
 <script nonce="${nonce}">
@@ -455,10 +463,103 @@ export class QueryPanel extends WebviewPanelBase {
     let pagingCookie = null;
     let currentPage = 1;
     let moreRecords = false;
-    let selectedCells = new Set();
     let sortColumn = -1;
     let sortAsc = true;
     let useTds = false;
+
+    // ── Selection state (anchor+focus rectangle) ──
+    let anchor = null;   // {row, col} or null
+    let focus = null;    // {row, col} or null
+    let isDragging = false;
+    let displayedRows = []; // tracks the rows array last passed to renderTable
+    const copyHintEl = document.getElementById('copy-hint');
+
+    // ── Selection utilities ──
+    function getSelectionRect() {
+        if (!anchor || !focus) return null;
+        return {
+            minRow: Math.min(anchor.row, focus.row),
+            maxRow: Math.max(anchor.row, focus.row),
+            minCol: Math.min(anchor.col, focus.col),
+            maxCol: Math.max(anchor.col, focus.col),
+        };
+    }
+
+    function isSingleCell() {
+        if (!anchor || !focus) return false;
+        return anchor.row === focus.row && anchor.col === focus.col;
+    }
+
+    function clearSelection() {
+        anchor = null;
+        focus = null;
+        const tbody = resultsWrapper.querySelector('tbody');
+        if (tbody) tbody.classList.remove('all-selected');
+        resultsWrapper.querySelectorAll('td').forEach(td => {
+            td.classList.remove('cell-selected', 'cell-selected-top', 'cell-selected-bottom', 'cell-selected-left', 'cell-selected-right');
+        });
+        if (copyHintEl) copyHintEl.textContent = '';
+    }
+
+    function getCellDisplayValue(row, colIdx) {
+        const key = columns[colIdx].alias || columns[colIdx].logicalName;
+        const rawVal = row ? row[key] : undefined;
+        if (rawVal === null || rawVal === undefined) return '';
+        if (typeof rawVal === 'object' && 'formatted' in rawVal) return String(rawVal.formatted || rawVal.value || '');
+        if (typeof rawVal === 'object' && 'entityId' in rawVal) return String(rawVal.formatted || rawVal.value || '');
+        return String(rawVal);
+    }
+
+    function sanitizeValue(val) {
+        return val.replace(/\\t/g, ' ').replace(/\\r?\\n/g, ' ');
+    }
+
+    function updateCopyHint() {
+        if (!copyHintEl) return;
+        if (!anchor) { copyHintEl.textContent = ''; return; }
+        if (isSingleCell()) {
+            copyHintEl.textContent = 'Ctrl+C: copy value | Ctrl+Shift+C: with header';
+        } else {
+            copyHintEl.textContent = 'Ctrl+C: copy with headers | Ctrl+Shift+C: values only';
+        }
+    }
+
+    function updateSelectionVisuals() {
+        const rect = getSelectionRect();
+        const tbody = resultsWrapper.querySelector('tbody');
+        if (!tbody) return;
+
+        // Fast path for Ctrl+A (full table)
+        tbody.classList.remove('all-selected');
+        if (rect && rect.minRow === 0 && rect.minCol === 0 &&
+            rect.maxRow === displayedRows.length - 1 && rect.maxCol === columns.length - 1 &&
+            displayedRows.length > 0) {
+            tbody.classList.add('all-selected');
+            updateCopyHint();
+            return;
+        }
+
+        // Clear all selection classes
+        tbody.querySelectorAll('td').forEach(td => {
+            td.classList.remove('cell-selected', 'cell-selected-top', 'cell-selected-bottom', 'cell-selected-left', 'cell-selected-right');
+        });
+
+        if (!rect) { updateCopyHint(); return; }
+
+        // Apply selection classes
+        for (let r = rect.minRow; r <= rect.maxRow; r++) {
+            for (let c = rect.minCol; c <= rect.maxCol; c++) {
+                const td = tbody.querySelector('td[data-row="' + r + '"][data-col="' + c + '"]');
+                if (!td) continue;
+                td.classList.add('cell-selected');
+                if (r === rect.minRow) td.classList.add('cell-selected-top');
+                if (r === rect.maxRow) td.classList.add('cell-selected-bottom');
+                if (c === rect.minCol) td.classList.add('cell-selected-left');
+                if (c === rect.maxCol) td.classList.add('cell-selected-right');
+            }
+        }
+        updateCopyHint();
+    }
 
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
@@ -495,24 +596,52 @@ export class QueryPanel extends WebviewPanelBase {
         }
     });
 
-    // ── Delegated table event handlers (set up once, not per-render) ──
-    resultsWrapper.addEventListener('click', (e) => {
+    // ── Click + drag selection ──
+    resultsWrapper.addEventListener('mousedown', (e) => {
         const th = e.target.closest('th[data-col]');
         if (th) {
             const col = parseInt(th.dataset.col);
             if (sortColumn === col) { sortAsc = !sortAsc; }
             else { sortColumn = col; sortAsc = true; }
+            clearSelection();
             sortAndRender();
             return;
         }
         const td = e.target.closest('td[data-row]');
-        if (td) {
-            const cellId = td.dataset.row + ':' + td.dataset.col;
-            if (!e.ctrlKey && !e.metaKey) selectedCells.clear();
-            if (selectedCells.has(cellId)) selectedCells.delete(cellId);
-            else selectedCells.add(cellId);
-            updateCellSelection();
+        if (!td) return;
+
+        const row = parseInt(td.dataset.row);
+        const col = parseInt(td.dataset.col);
+
+        if (e.shiftKey && anchor) {
+            // Shift+click: extend selection from anchor
+            focus = { row, col };
+        } else {
+            // Normal click: new single-cell selection + start drag tracking
+            anchor = { row, col };
+            focus = { row, col };
+            isDragging = true;
+            const tbody = resultsWrapper.querySelector('tbody');
+            if (tbody) tbody.classList.add('selecting');
+
+            const onMouseMove = (ev) => {
+                const target = ev.target.closest ? ev.target.closest('td[data-row]') : null;
+                if (target) {
+                    focus = { row: parseInt(target.dataset.row), col: parseInt(target.dataset.col) };
+                    updateSelectionVisuals();
+                }
+            };
+            const onMouseUp = () => {
+                isDragging = false;
+                const tb = resultsWrapper.querySelector('tbody');
+                if (tb) tb.classList.remove('selecting');
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            };
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
         }
+        updateSelectionVisuals();
     });
 
     // ── Keyboard shortcuts ──
@@ -525,33 +654,63 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     document.addEventListener('keydown', (e) => {
+        // Filter toggle
         if (e.key === '/' && document.activeElement !== sqlEditor && document.activeElement !== filterInput) {
             e.preventDefault();
             toggleFilter();
+            return;
         }
-        if (e.key === 'Escape' && filterBar.classList.contains('visible')) {
-            hideFilter();
+
+        // Escape: filter bar takes precedence, then selection
+        if (e.key === 'Escape') {
+            if (filterBar.classList.contains('visible')) {
+                hideFilter();
+            } else if (anchor) {
+                clearSelection();
+            }
+            return;
         }
+
+        // Ctrl+A: select all (when not in text inputs)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a' &&
+            document.activeElement !== sqlEditor &&
+            document.activeElement !== filterInput) {
+            if (displayedRows.length > 0 && columns.length > 0) {
+                e.preventDefault();
+                anchor = { row: 0, col: 0 };
+                focus = { row: displayedRows.length - 1, col: columns.length - 1 };
+                updateSelectionVisuals();
+            }
+            return;
+        }
+
+        // Ctrl+C / Ctrl+Shift+C: copy selection
         if ((e.ctrlKey || e.metaKey) && e.key === 'c' &&
             document.activeElement !== sqlEditor &&
             document.activeElement !== filterInput) {
-            if (selectedCells.size > 0) {
+            if (anchor) {
                 e.preventDefault();
-                copySelectedCells(e.shiftKey);
+                copySelection(e.shiftKey);
             }
+            return;
         }
-        // Ctrl+Shift+F → FetchXML preview
+
+        // Ctrl+Shift+F: FetchXML preview
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
             e.preventDefault();
             const sql = sqlEditor.value.trim();
             if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
+            return;
         }
-        // Ctrl+E → Export
+
+        // Ctrl+E: Export
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'e') {
             e.preventDefault();
             vscode.postMessage({ command: 'exportResults' });
+            return;
         }
-        // Ctrl+Shift+H → History
+
+        // Ctrl+Shift+H: History
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') {
             e.preventDefault();
             vscode.postMessage({ command: 'showHistory' });
@@ -633,7 +792,6 @@ export class QueryPanel extends WebviewPanelBase {
         pagingCookie = data.pagingCookie || null;
         currentPage = 1;
         moreRecords = data.moreRecords || false;
-        selectedCells.clear();
         sortColumn = -1;
         renderTable(allRows);
         updateStatus(data);
@@ -667,6 +825,9 @@ export class QueryPanel extends WebviewPanelBase {
 
     // ── Rendering ──
     function renderTable(rows) {
+        displayedRows = rows;
+        clearSelection();
+
         if (rows.length === 0 && allRows.length === 0) {
             resultsWrapper.innerHTML = '<div class="empty-state">Run a query to see results</div>';
             return;
@@ -687,21 +848,7 @@ export class QueryPanel extends WebviewPanelBase {
         rows.forEach((row, rowIdx) => {
             html += '<tr>';
             columns.forEach((col, colIdx) => {
-                const key = col.alias || col.logicalName;
-                const rawVal = row[key];
-                const cellId = rowIdx + ':' + colIdx;
-                const isSelected = selectedCells.has(cellId) ? ' selected' : '';
-                let display = '';
-                if (rawVal !== null && rawVal !== undefined) {
-                    if (typeof rawVal === 'object' && 'formatted' in rawVal) {
-                        display = String(rawVal.formatted || rawVal.value || '');
-                    } else if (typeof rawVal === 'object' && 'entityId' in rawVal) {
-                        display = String(rawVal.formatted || rawVal.value || '');
-                    } else {
-                        display = String(rawVal);
-                    }
-                }
-                html += '<td class="' + isSelected + '" data-row="' + rowIdx + '" data-col="' + colIdx + '">' + escapeHtml(display) + '</td>';
+                html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '">' + escapeHtml(getCellDisplayValue(row, colIdx)) + '</td>';
             });
             html += '</tr>';
         });
@@ -724,107 +871,143 @@ export class QueryPanel extends WebviewPanelBase {
         renderTable(sorted);
     }
 
-    function updateCellSelection() {
-        resultsWrapper.querySelectorAll('td').forEach(td => {
-            const cellId = td.dataset.row + ':' + td.dataset.col;
-            td.classList.toggle('selected', selectedCells.has(cellId));
-        });
-    }
+    function copySelection(invertHeaders) {
+        if (!anchor) return;
+        const rect = getSelectionRect();
+        if (!rect) return;
 
-    function copySelectedCells(withHeaders) {
-        if (selectedCells.size === 0) return;
-        const cells = Array.from(selectedCells).map(id => {
-            const [r, c] = id.split(':').map(Number);
-            return { row: r, col: c };
-        });
-        const minRow = Math.min(...cells.map(c => c.row));
-        const maxRow = Math.max(...cells.map(c => c.row));
-        const minCol = Math.min(...cells.map(c => c.col));
-        const maxCol = Math.max(...cells.map(c => c.col));
+        const single = isSingleCell();
+        // Smart default: single cell = no headers; multi-cell = headers. invertHeaders flips it.
+        const withHeaders = single ? invertHeaders : !invertHeaders;
 
-        const includeHeaders = selectedCells.size === 1 ? withHeaders : !withHeaders;
         let text = '';
-        if (includeHeaders) {
+
+        if (withHeaders) {
             const headers = [];
-            for (let c = minCol; c <= maxCol; c++) {
+            for (let c = rect.minCol; c <= rect.maxCol; c++) {
                 headers.push(columns[c].alias || columns[c].logicalName);
             }
             text += headers.join('\\t') + '\\n';
         }
-        for (let r = minRow; r <= maxRow; r++) {
+
+        for (let r = rect.minRow; r <= rect.maxRow; r++) {
             const vals = [];
-            for (let c = minCol; c <= maxCol; c++) {
-                const key = columns[c].alias || columns[c].logicalName;
-                const val = allRows[r] ? allRows[r][key] : undefined;
-                let display = '';
-                if (val !== null && val !== undefined) {
-                    if (typeof val === 'object' && 'formatted' in val) display = String(val.formatted || val.value || '');
-                    else display = String(val);
-                }
-                vals.push(display);
+            for (let c = rect.minCol; c <= rect.maxCol; c++) {
+                vals.push(sanitizeValue(getCellDisplayValue(displayedRows[r], c)));
             }
             text += vals.join('\\t') + '\\n';
         }
+
         vscode.postMessage({ command: 'copyToClipboard', text: text.trim() });
+        showCopyFeedback(rect, single, withHeaders);
+    }
+
+    function showCopyFeedback(rect, single, withHeaders) {
+        if (!copyHintEl) return;
+        if (single) {
+            const val = getCellDisplayValue(displayedRows[rect.minRow], rect.minCol);
+            const truncated = val.length > 40 ? val.substring(0, 40) + '...' : val;
+            copyHintEl.textContent = 'Copied: ' + truncated;
+        } else {
+            const rowCount = rect.maxRow - rect.minRow + 1;
+            const colCount = rect.maxCol - rect.minCol + 1;
+            copyHintEl.textContent = 'Copied ' + rowCount + ' rows x ' + colCount + ' cols ' + (withHeaders ? 'with headers' : 'without headers');
+        }
+        setTimeout(() => { updateCopyHint(); }, 2000);
     }
 
     // ── Right-click context menu ──
     let contextMenu = null;
     document.addEventListener('contextmenu', (e) => {
-        const td = e.target.closest('td.selected, td[data-row]');
-        if (!td || !td.dataset.row) return;
+        const td = e.target.closest('td[data-row]');
+        if (!td) return;
         e.preventDefault();
         removeContextMenu();
-        // If right-clicked cell is not selected, select only it
-        const cellId = td.dataset.row + ':' + td.dataset.col;
-        if (!selectedCells.has(cellId)) {
-            selectedCells.clear();
-            selectedCells.add(cellId);
-            updateCellSelection();
+
+        const clickRow = parseInt(td.dataset.row);
+        const clickCol = parseInt(td.dataset.col);
+
+        // If right-clicked cell is outside current selection, move selection there
+        const rect = getSelectionRect();
+        if (!rect || clickRow < rect.minRow || clickRow > rect.maxRow ||
+            clickCol < rect.minCol || clickCol > rect.maxCol) {
+            anchor = { row: clickRow, col: clickCol };
+            focus = { row: clickRow, col: clickCol };
+            updateSelectionVisuals();
         }
+
+        const single = isSingleCell();
+        const inverseLabel = single ? 'Copy (with header)' : 'Copy (no headers)';
+
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
-        contextMenu.innerHTML =
-            '<div class="context-menu-item" data-action="cell">Copy Cell Value</div>' +
-            '<div class="context-menu-item" data-action="row">Copy Row</div>' +
-            '<div class="context-menu-item" data-action="all">Copy All Results</div>';
+
+        const items = [
+            { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
+            { label: inverseLabel, shortcut: 'Ctrl+Shift+C', action: 'copyInverse' },
+            { label: 'separator', shortcut: '', action: 'separator' },
+            { label: 'Copy Cell Value', shortcut: '', action: 'cell' },
+            { label: 'Copy Row', shortcut: '', action: 'row' },
+            { label: 'Copy All Results', shortcut: '', action: 'all' },
+        ];
+
+        let html = '';
+        for (const item of items) {
+            if (item.action === 'separator') {
+                html += '<div style="border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); margin: 4px 0;"></div>';
+            } else {
+                html += '<div class="context-menu-item" data-action="' + item.action + '" style="display:flex;align-items:center;">';
+                html += '<span>' + item.label + '</span>';
+                if (item.shortcut) html += '<span style="margin-left:auto;padding-left:24px;opacity:0.6;font-size:11px;">' + item.shortcut + '</span>';
+                html += '</div>';
+            }
+        }
+        contextMenu.innerHTML = html;
         contextMenu.style.left = e.clientX + 'px';
         contextMenu.style.top = e.clientY + 'px';
         document.body.appendChild(contextMenu);
+
         contextMenu.addEventListener('click', (ev) => {
-            const action = ev.target.dataset.action;
-            if (action === 'cell') {
-                const r = parseInt(td.dataset.row);
-                const c = parseInt(td.dataset.col);
-                const key = columns[c].alias || columns[c].logicalName;
-                const val = allRows[r] ? allRows[r][key] : '';
-                let display = '';
-                if (val !== null && val !== undefined) {
-                    display = typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
+            const actionEl = ev.target.closest('[data-action]');
+            if (!actionEl) return;
+            const action = actionEl.dataset.action;
+
+            if (action === 'copy') {
+                copySelection(false);
+            } else if (action === 'copyInverse') {
+                copySelection(true);
+            } else if (action === 'cell') {
+                const val = getCellDisplayValue(displayedRows[clickRow], clickCol);
+                vscode.postMessage({ command: 'copyToClipboard', text: sanitizeValue(val) });
+                if (copyHintEl) {
+                    copyHintEl.textContent = 'Copied: ' + (val.length > 40 ? val.substring(0, 40) + '...' : val);
+                    setTimeout(() => { updateCopyHint(); }, 2000);
                 }
-                vscode.postMessage({ command: 'copyToClipboard', text: display });
             } else if (action === 'row') {
-                const r = parseInt(td.dataset.row);
-                const vals = columns.map(col => {
-                    const key = col.alias || col.logicalName;
-                    const val = allRows[r] ? allRows[r][key] : '';
-                    if (val === null || val === undefined) return '';
-                    return typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
-                });
+                const vals = [];
+                for (let c = 0; c < columns.length; c++) {
+                    vals.push(sanitizeValue(getCellDisplayValue(displayedRows[clickRow], c)));
+                }
                 vscode.postMessage({ command: 'copyToClipboard', text: vals.join('\\t') });
+                if (copyHintEl) {
+                    copyHintEl.textContent = 'Copied row';
+                    setTimeout(() => { updateCopyHint(); }, 2000);
+                }
             } else if (action === 'all') {
                 const headers = columns.map(c => c.alias || c.logicalName);
                 let text = headers.join('\\t') + '\\n';
-                allRows.forEach(row => {
-                    const vals = columns.map(col => {
-                        const key = col.alias || col.logicalName;
-                        const val = row[key];
-                        if (val === null || val === undefined) return '';
-                        return typeof val === 'object' && 'formatted' in val ? String(val.formatted || val.value || '') : String(val);
-                    });
+                displayedRows.forEach(row => {
+                    const vals = [];
+                    for (let c = 0; c < columns.length; c++) {
+                        vals.push(sanitizeValue(getCellDisplayValue(row, c)));
+                    }
                     text += vals.join('\\t') + '\\n';
                 });
                 vscode.postMessage({ command: 'copyToClipboard', text: text.trim() });
+                if (copyHintEl) {
+                    copyHintEl.textContent = 'Copied all ' + displayedRows.length + ' rows';
+                    setTimeout(() => { updateCopyHint(); }, 2000);
+                }
             }
             removeContextMenu();
         });
