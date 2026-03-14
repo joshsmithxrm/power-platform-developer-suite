@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace PPDS.Auth.Profiles;
@@ -58,6 +59,13 @@ public sealed class EnvironmentConfig
     [JsonPropertyName("protection")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ProtectionLevel? Protection { get; set; }
+
+    /// <summary>
+    /// Profile names that have accessed this environment.
+    /// Used to filter environments per-profile in the VS Code tree and TUI selector.
+    /// </summary>
+    [JsonPropertyName("profiles")]
+    public List<string> Profiles { get; set; } = new();
 
     /// <summary>
     /// Normalizes a URL for use as a lookup key (lowercase, ensures trailing slash).
