@@ -21,6 +21,7 @@ export class SolutionsPanel extends WebviewPanelBase {
     private includeManaged = false;
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
+    private profileName: string | undefined;
 
     static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string): SolutionsPanel {
         if (SolutionsPanel.instances.length >= SolutionsPanel.MAX_PANELS) {
@@ -102,13 +103,12 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     private async initialize(): Promise<void> {
         try {
-            // If environment was pre-set (from tree context menu), skip authWho
-            if (!this.environmentUrl) {
-                const who = await this.daemon.authWho();
-                if (who.environment?.url) {
-                    this.environmentUrl = who.environment.url;
-                    this.environmentDisplayName = who.environment.displayName || who.environment.url;
-                }
+            // Always fetch profile name for the title
+            const who = await this.daemon.authWho();
+            this.profileName = who.name ?? `Profile ${who.index}`;
+            if (!this.environmentUrl && who.environment?.url) {
+                this.environmentUrl = who.environment.url;
+                this.environmentDisplayName = who.environment.displayName || who.environment.url;
             }
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
@@ -131,10 +131,11 @@ export class SolutionsPanel extends WebviewPanelBase {
     }
 
     private updatePanelTitle(): void {
-        if (this.panel) {
-            const envSuffix = this.environmentDisplayName ? ` \u2014 ${this.environmentDisplayName}` : '';
-            this.panel.title = `Solutions #${this.panelId}${envSuffix}`;
-        }
+        if (!this.panel) return;
+        const parts = [`Solutions #${this.panelId}`];
+        if (this.profileName) parts.push(this.profileName);
+        if (this.environmentDisplayName) parts.push(this.environmentDisplayName);
+        this.panel.title = parts.join(' \u2014 ');
     }
 
     private async loadSolutions(isRetry = false): Promise<void> {

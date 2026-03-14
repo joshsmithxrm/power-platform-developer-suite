@@ -6,7 +6,6 @@ import type { DaemonClient } from '../daemonClient.js';
  * in the C# backend.
  */
 const ENVIRONMENT_TYPES = [
-    'Unknown',
     'Production',
     'Sandbox',
     'Development',
@@ -79,11 +78,13 @@ export function registerEnvironmentConfigCommand(
                 let currentLabel: string | undefined;
                 let currentType: string | undefined;
                 let currentColor: string | undefined;
+                let resolvedType: string | undefined;
                 try {
                     const currentConfig = await daemonClient.envConfigGet(environmentUrl);
                     currentLabel = currentConfig.label ?? undefined;
                     currentType = currentConfig.type ?? undefined;
                     currentColor = currentConfig.color ?? undefined;
+                    resolvedType = currentConfig.resolvedType ?? undefined;
                 } catch {
                     // Config may not exist yet — proceed with defaults
                 }
@@ -102,17 +103,20 @@ export function registerEnvironmentConfigCommand(
                 }
 
                 // Step 3: Type (QuickPick)
+                // Pre-select: user's explicit type if set, otherwise the auto-detected type
+                const effectiveType = currentType ?? resolvedType;
                 const typeItems: vscode.QuickPickItem[] = ENVIRONMENT_TYPES.map(t => ({
                     label: t,
-                    description: t === currentType ? '(current)' : undefined,
-                    picked: t === currentType,
+                    description: t === currentType ? '(current)' :
+                        (!currentType && t === resolvedType) ? '(detected)' : undefined,
+                    picked: t === effectiveType,
                 }));
 
                 const typePick = await vscode.window.showQuickPick(typeItems, {
                     title: 'Configure Environment (2/3): Type',
                     placeHolder: currentType
                         ? `Current type: ${currentType}`
-                        : 'Select environment type',
+                        : 'Select environment type (or auto-detect)',
                     ignoreFocusOut: true,
                 });
 
