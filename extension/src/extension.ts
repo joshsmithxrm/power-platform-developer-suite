@@ -89,55 +89,44 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(profileTreeView, profileTreeProvider);
 
     // ── Profile Move Commands ────────────────────────────────────────────
+    async function moveProfile(
+        item: { profile: { identity: string; authMethod: string; cloud: string; index: number } },
+        direction: 'up' | 'down',
+    ): Promise<void> {
+        if (!item?.profile) return;
+        try {
+            const sortOrder = context.globalState.get<Record<string, number>>('ppds.profiles.sortOrder') ?? {};
+            const profiles = await client.authList();
+            const sorted = profiles.profiles.map(p => ({ id: getProfileId(p), profile: p }));
+
+            sorted.sort((a, b) => {
+                const orderA = sortOrder[a.id] ?? a.profile.index;
+                const orderB = sortOrder[b.id] ?? b.profile.index;
+                return orderA - orderB;
+            });
+
+            const targetId = getProfileId(item.profile as any);
+            const targetIdx = sorted.findIndex(i => i.id === targetId);
+            const swapIdx = direction === 'up' ? targetIdx - 1 : targetIdx + 1;
+
+            if (targetIdx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+
+            const newOrder: Record<string, number> = {};
+            sorted.forEach((it, idx) => { newOrder[it.id] = idx; });
+            newOrder[sorted[targetIdx].id] = swapIdx;
+            newOrder[sorted[swapIdx].id] = targetIdx;
+
+            await context.globalState.update('ppds.profiles.sortOrder', newOrder);
+            profileTreeProvider.refresh();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`Failed to move profile: ${msg}`);
+        }
+    }
+
     context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.moveProfileUp', async (item: { profile: { identity: string; authMethod: string; cloud: string; index: number } }) => {
-            if (!item?.profile) return;
-            const sortOrder = context.globalState.get<Record<string, number>>('ppds.profiles.sortOrder') ?? {};
-            const profiles = await client.authList();
-            const items = profiles.profiles.map(p => ({ id: getProfileId(p), profile: p }));
-
-            items.sort((a, b) => {
-                const orderA = sortOrder[a.id] ?? a.profile.index;
-                const orderB = sortOrder[b.id] ?? b.profile.index;
-                return orderA - orderB;
-            });
-
-            const targetId = getProfileId(item.profile as any);
-            const targetIdx = items.findIndex(i => i.id === targetId);
-            if (targetIdx <= 0) return;
-
-            const newOrder: Record<string, number> = {};
-            items.forEach((it, idx) => { newOrder[it.id] = idx; });
-            newOrder[items[targetIdx].id] = targetIdx - 1;
-            newOrder[items[targetIdx - 1].id] = targetIdx;
-
-            await context.globalState.update('ppds.profiles.sortOrder', newOrder);
-            profileTreeProvider.refresh();
-        }),
-        vscode.commands.registerCommand('ppds.moveProfileDown', async (item: { profile: { identity: string; authMethod: string; cloud: string; index: number } }) => {
-            if (!item?.profile) return;
-            const sortOrder = context.globalState.get<Record<string, number>>('ppds.profiles.sortOrder') ?? {};
-            const profiles = await client.authList();
-            const items = profiles.profiles.map(p => ({ id: getProfileId(p), profile: p }));
-
-            items.sort((a, b) => {
-                const orderA = sortOrder[a.id] ?? a.profile.index;
-                const orderB = sortOrder[b.id] ?? b.profile.index;
-                return orderA - orderB;
-            });
-
-            const targetId = getProfileId(item.profile as any);
-            const targetIdx = items.findIndex(i => i.id === targetId);
-            if (targetIdx < 0 || targetIdx >= items.length - 1) return;
-
-            const newOrder: Record<string, number> = {};
-            items.forEach((it, idx) => { newOrder[it.id] = idx; });
-            newOrder[items[targetIdx].id] = targetIdx + 1;
-            newOrder[items[targetIdx + 1].id] = targetIdx;
-
-            await context.globalState.update('ppds.profiles.sortOrder', newOrder);
-            profileTreeProvider.refresh();
-        }),
+        vscode.commands.registerCommand('ppds.moveProfileUp', (item) => moveProfile(item, 'up')),
+        vscode.commands.registerCommand('ppds.moveProfileDown', (item) => moveProfile(item, 'down')),
     );
 
     // ── Tools Tree View ──────────────────────────────────────────────────
