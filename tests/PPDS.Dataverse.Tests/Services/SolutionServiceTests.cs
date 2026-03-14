@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -104,5 +106,37 @@ public class SolutionServiceTests
 
         // Assert
         service1.Should().NotBeSameAs(service2);
+    }
+
+    [Theory]
+    [InlineData(1, "Entity")]
+    [InlineData(65, "HierarchyRule")]
+    [InlineData(66, "CustomControl")]
+    [InlineData(68, "CustomControlDefaultConfig")]
+    [InlineData(70, "FieldSecurityProfile")]
+    [InlineData(71, "FieldPermission")]
+    [InlineData(90, "PluginType")]
+    [InlineData(91, "PluginAssembly")]
+    [InlineData(92, "SDKMessageProcessingStep")]
+    [InlineData(93, "SDKMessageProcessingStepImage")]
+    [InlineData(95, "ServiceEndpoint")]
+    [InlineData(150, "RoutingRule")]
+    [InlineData(151, "RoutingRuleItem")]
+    [InlineData(152, "SLA")]
+    [InlineData(161, "MobileOfflineProfile")]
+    [InlineData(208, "ImportMap")]
+    [InlineData(300, "CanvasApp")]
+    [InlineData(372, "Connector")]
+    public void ComponentTypeNames_MatchesGeneratedEnum(int typeCode, string expectedName)
+    {
+        var dictField = typeof(SolutionService).GetField(
+            "ComponentTypeNames",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        dictField.Should().NotBeNull("ComponentTypeNames dictionary should exist");
+
+        var dict = dictField!.GetValue(null) as Dictionary<int, string>;
+        dict.Should().NotBeNull();
+        dict.Should().ContainKey(typeCode);
+        dict![typeCode].Should().Be(expectedName);
     }
 }
