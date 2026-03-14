@@ -7,8 +7,9 @@
       "command": "dotnet build ../src/PPDS.Cli/PPDS.Cli.csproj -v q",
       "problemMatcher": "$msCompile",
       "presentation": {
-        "reveal": "silent",
-        "panel": "shared"
+        "reveal": "never",
+        "panel": "shared",
+        "showReuseMessage": false
       }
     },
     {
