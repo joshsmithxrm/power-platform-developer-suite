@@ -98,23 +98,34 @@ public class RpcMethodHandler : IDisposable
         var store = _authServices.GetRequiredService<ProfileStore>();
         var collection = await store.LoadAsync(cancellationToken);
 
-        var profiles = collection.All.Select(p => new ProfileInfo
+        var profiles = new List<ProfileInfo>();
+        foreach (var p in collection.All)
         {
-            Index = p.Index,
-            Name = p.Name,
-            Identity = p.IdentityDisplay,
-            AuthMethod = p.AuthMethod.ToString(),
-            Cloud = p.Cloud.ToString(),
-            Environment = p.Environment != null ? new EnvironmentSummary
+            EnvironmentSummary? envSummary = null;
+            if (p.Environment != null)
             {
-                Url = p.Environment.Url,
-                DisplayName = p.Environment.DisplayName,
-                EnvironmentId = p.Environment.EnvironmentId
-            } : null,
-            IsActive = collection.ActiveProfile?.Index == p.Index,
-            CreatedAt = p.CreatedAt,
-            LastUsedAt = p.LastUsedAt
-        }).ToList();
+                var label = await ResolveEnvironmentLabelAsync(
+                    p.Environment.Url, p.Environment.DisplayName, cancellationToken);
+                envSummary = new EnvironmentSummary
+                {
+                    Url = p.Environment.Url,
+                    DisplayName = label,
+                    EnvironmentId = p.Environment.EnvironmentId
+                };
+            }
+            profiles.Add(new ProfileInfo
+            {
+                Index = p.Index,
+                Name = p.Name,
+                Identity = p.IdentityDisplay,
+                AuthMethod = p.AuthMethod.ToString(),
+                Cloud = p.Cloud.ToString(),
+                Environment = envSummary,
+                IsActive = collection.ActiveProfile?.Index == p.Index,
+                CreatedAt = p.CreatedAt,
+                LastUsedAt = p.LastUsedAt
+            });
+        }
 
         return new AuthListResponse
         {
@@ -172,7 +183,8 @@ public class RpcMethodHandler : IDisposable
             Environment = profile.Environment != null ? new EnvironmentDetails
             {
                 Url = profile.Environment.Url,
-                DisplayName = profile.Environment.DisplayName,
+                DisplayName = await ResolveEnvironmentLabelAsync(
+                    profile.Environment.Url, profile.Environment.DisplayName, cancellationToken),
                 UniqueName = profile.Environment.UniqueName,
                 EnvironmentId = profile.Environment.EnvironmentId,
                 OrganizationId = profile.Environment.OrganizationId,
@@ -429,7 +441,8 @@ public class RpcMethodHandler : IDisposable
         return new EnvSelectResponse
         {
             Url = resolved.Url,
-            DisplayName = resolved.DisplayName,
+            DisplayName = await ResolveEnvironmentLabelAsync(
+                resolved.Url, resolved.DisplayName, cancellationToken),
             UniqueName = resolved.UniqueName,
             EnvironmentId = resolved.EnvironmentId,
             ResolutionMethod = result.Method.ToString()
@@ -1474,6 +1487,22 @@ public class RpcMethodHandler : IDisposable
         => WithActiveProfileAsync<T>(
             (sp, _, _, ct) => action(sp, ct),
             cancellationToken);
+
+    /// <summary>
+    /// Resolves the display name for an environment URL, preferring the user's configured label
+    /// from environments.json over the raw discovery/profile display name.
+    /// </summary>
+    private async Task<string> ResolveEnvironmentLabelAsync(string url, string fallbackDisplayName, CancellationToken ct)
+    {
+        try
+        {
+            var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
+            var config = await configStore.GetConfigAsync(url, ct);
+            if (config?.Label != null) return config.Label;
+        }
+        catch { /* config lookup is best-effort */ }
+        return fallbackDisplayName;
+    }
 
     /// <summary>
     /// Executes an action with the active profile's credentials against a specific environment.
