@@ -5,6 +5,7 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { isAuthError } from '../utils/errorUtils.js';
+import { getEnvironmentPickerCss, getEnvironmentPickerHtml, getEnvironmentPickerJs, showEnvironmentPicker } from './environmentPicker.js';
 
 export class QueryPanel extends WebviewPanelBase {
     private static instances: QueryPanel[] = [];
@@ -33,6 +34,8 @@ export class QueryPanel extends WebviewPanelBase {
     private lastResult: QueryResultResponse | undefined;
     private lastSql: string | undefined;
     private lastUseTds = false;
+    private environmentUrl: string | undefined;
+    private environmentDisplayName: string | undefined;
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -93,7 +96,19 @@ export class QueryPanel extends WebviewPanelBase {
                             if (initialSql) {
                                 this.postMessage({ command: 'loadQuery', sql: initialSql });
                             }
+                            // Initialize environment from active profile
+                            this.initEnvironment();
                             break;
+                        case 'requestEnvironmentList': {
+                            const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
+                            if (env) {
+                                this.environmentUrl = env.url;
+                                this.environmentDisplayName = env.displayName;
+                                this.postMessage({ command: 'updateEnvironment', name: env.displayName });
+                                this.updateTitle();
+                            }
+                            break;
+                        }
                     }
                 }
             )
@@ -118,12 +133,32 @@ export class QueryPanel extends WebviewPanelBase {
         super.dispose();
     }
 
+    private async initEnvironment(): Promise<void> {
+        try {
+            const who = await this.daemon.authWho();
+            if (who.environment) {
+                this.environmentUrl = who.environment.url;
+                this.environmentDisplayName = who.environment.displayName;
+                this.postMessage({ command: 'updateEnvironment', name: who.environment.displayName });
+                this.updateTitle();
+            }
+        } catch {
+            // No active profile or environment — picker will show empty
+        }
+    }
+
+    private updateTitle(): void {
+        if (this.panel && this.environmentDisplayName) {
+            this.panel.title = `Data Explorer #${this.panelId} — ${this.environmentDisplayName}`;
+        }
+    }
+
     private async executeQuery(sql: string, isRetry = false, useTds?: boolean): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
             const tds = useTds ?? false;
-            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds });
+            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl });
             this.lastSql = sql;
             this.lastUseTds = tds;
             this.lastResult = result;
@@ -165,7 +200,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     private async showFetchXml(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql });
+            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
             if (result.plan) {
                 const doc = await vscode.workspace.openTextDocument({
                     content: result.plan,
@@ -181,7 +216,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     private async explainQuery(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain({ sql });
+            const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
             const language = result.format === 'fetchxml' ? 'xml' : 'text';
             const doc = await vscode.workspace.openTextDocument({
                 content: result.plan,
@@ -203,6 +238,7 @@ export class QueryPanel extends WebviewPanelBase {
                 page,
                 pagingCookie,
                 useTds: this.lastUseTds,
+                environmentUrl: this.environmentUrl,
             });
 
             if (this.allRecords.length + result.records.length > QueryPanel.MAX_CLIENT_RECORDS) {
@@ -256,6 +292,7 @@ export class QueryPanel extends WebviewPanelBase {
                 sql: this.lastSql,
                 format: formatPick.format,
                 includeHeaders: headersPick.includeHeaders,
+                environmentUrl: this.environmentUrl,
             });
 
             if (formatPick.isClipboard) {
@@ -329,6 +366,7 @@ export class QueryPanel extends WebviewPanelBase {
     .error-state { padding: 12px; background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1)); border: 1px solid var(--vscode-inputValidation-errorBorder, red); border-radius: 4px; margin: 8px 12px; color: var(--vscode-errorForeground); }
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--vscode-descriptionForeground); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    ${getEnvironmentPickerCss()}
 </style>
 
 <div class="toolbar">
@@ -340,6 +378,7 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
     <vscode-button id="tds-btn" appearance="secondary" title="Toggle TDS Read Replica mode (direct SQL via port 5558)">TDS: Off</vscode-button>
     <span class="toolbar-spacer"></span>
+    ${getEnvironmentPickerHtml()}
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
         <span class="codicon codicon-filter"></span>
     </vscode-button>
@@ -430,6 +469,7 @@ export class QueryPanel extends WebviewPanelBase {
         tdsBtn.textContent = useTds ? 'TDS: On' : 'TDS: Off';
         tdsBtn.setAttribute('appearance', useTds ? 'primary' : 'secondary');
     });
+    ${getEnvironmentPickerJs()}
     loadMoreBtn.addEventListener('click', () => {
         if (pagingCookie) {
             vscode.postMessage({ command: 'loadMore', pagingCookie, page: currentPage + 1 });
@@ -549,6 +589,9 @@ export class QueryPanel extends WebviewPanelBase {
                 break;
             case 'loadQuery':
                 sqlEditor.value = msg.sql;
+                break;
+            case 'updateEnvironment':
+                updateEnvironmentDisplay(msg.name);
                 break;
         }
     });
