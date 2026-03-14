@@ -1,4 +1,4 @@
-# Impartial Code Review
+# Review
 
 Code review with structural bias prevention. The reviewer gets NO implementation context — no plan, no task descriptions, no "what we were trying to do." They get ONLY: the diff, the file contents, the constitution, and relevant spec ACs. They read code and find bugs.
 

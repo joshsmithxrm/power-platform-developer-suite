@@ -32,34 +32,20 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - `specs/` - Feature specifications
 - `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
 
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `ppds --help` | Full CLI reference |
-| `ppds serve` | RPC server for IDE integration |
-| `/implement` | Execute implementation plan with spec-aware subagents |
-| `/spec` | Create or update a specification |
-| `/spec-audit` | Audit specs against code reality |
-| `/debug` | Interactive feedback loop for CLI/TUI/MCP |
-| `/automated-quality-gates` | Mechanical pass/fail build/test/lint checks |
-| `/impartial-code-review` | Bias-free code review against specs |
-| `/review-fix-converge` | Gates, review, fix loop with convergence tracking |
-
-## Spec Workflow
-
-- Constitution: `specs/CONSTITUTION.md` — non-negotiable principles
-- Template: `specs/SPEC-TEMPLATE.md` — required structure for all specs
-- New spec: `/spec {name}` — guided creation with cross-referencing
-- Audit: `/spec-audit` — compare all specs against code
-- Implement: `/implement` — loads constitution + relevant specs into subagent context
-- Review: `/review-fix-converge` — gates, impartial review, fix until converged
-
 ## Testing
 
-- Unit (default): `--filter Category!=Integration`
-- Integration (live): `--filter Category=Integration`
-- TUI: `--filter Category=TuiUnit`
+- .NET unit: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
+- .NET integration: `dotnet test PPDS.sln --filter "Category=Integration" -v q`
+- .NET TUI: `dotnet test --filter "Category=TuiUnit"`
+- Extension unit: `npm run ext:test`
+- Extension E2E: `npm run ext:test:e2e`
+- TUI snapshots: `npm run tui:test`
+
+## Specs
+
+- Constitution: `specs/CONSTITUTION.md` — read before any work
+- Template: `specs/SPEC-TEMPLATE.md`
+- Index: `specs/README.md`
 
 ## Extension Versioning
 
