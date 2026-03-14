@@ -65,6 +65,20 @@ git clone https://github.com/joshsmithxrm/ppds-tools.git {base}/ppds-tools
 git clone https://github.com/joshsmithxrm/ppds-demo.git {base}/ppds-demo
 ```
 
+#### Install CLI as Global Tool (if ppds selected)
+
+Run the existing installation script:
+
+```powershell
+.\scripts\Install-LocalCli.ps1
+```
+
+This script packs PPDS.Cli to `nupkgs/`, finds the latest package, uninstalls any existing version, and installs globally.
+
+If installation fails, **stop and prompt the user** — common causes are TUI running in another terminal (file lock), another CLI process active, or antivirus blocking.
+
+Verify: `ppds --version`
+
 #### Create VS Code Workspace (if selected)
 
 Generate `{base}/ppds.code-workspace`:

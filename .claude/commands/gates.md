@@ -1,4 +1,4 @@
-# Automated Quality Gates
+# Gates
 
 Mechanical pass/fail checks. No judgment, no opinions — compiler, linter, and tests either pass or they don't. Run this before code reviews, after fix batches, and before PRs.
 

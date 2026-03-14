@@ -1,4 +1,4 @@
-# Review Fix Converge
+# Converge
 
 Orchestration loop that converges to PR-ready code. Runs gates, then impartial review, then fix, then repeat until clean. Tracks issue counts per cycle to prove convergence — if counts aren't decreasing, something is wrong.
 
@@ -28,13 +28,13 @@ Cycle | Gate | Review Critical | Review Important | Regressions | Verdict
 ### Step 2: Run Cycle
 
 **A. Quality Gates**
-Invoke `/automated-quality-gates` (use the skill).
+Invoke `/gates` (use the skill).
 - If gates FAIL: fix the failures first (dispatch fix agent), re-run gates
 - Gates must PASS before proceeding to review
 - Record: did fixes introduce any new gate failures? (= regression)
 
 **B. Impartial Code Review**
-Invoke `/impartial-code-review` (use the skill).
+Invoke `/review` (use the skill).
 - Record: count of CRITICAL and IMPORTANT findings
 
 **C. Evaluate Convergence**
