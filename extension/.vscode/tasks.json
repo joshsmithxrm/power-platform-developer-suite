@@ -2,6 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Build Daemon",
+      "type": "shell",
+      "command": "dotnet build ../src/PPDS.Cli/PPDS.Cli.csproj -v q",
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
       "type": "npm",
       "script": "compile",
       "problemMatcher": "$tsc",
@@ -14,6 +24,13 @@
         "reveal": "silent",
         "panel": "shared"
       }
+    },
+    {
+      "label": "Build All",
+      "dependsOn": ["Build Daemon", "npm: compile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
     },
     {
       "type": "npm",
