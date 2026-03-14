@@ -4,12 +4,11 @@
     {
       "label": "Build Daemon",
       "type": "shell",
-      "command": "dotnet build ../src/PPDS.Cli/PPDS.Cli.csproj -v q",
+      "command": "dotnet build ${workspaceFolder}/../src/PPDS.Cli/PPDS.Cli.csproj -v q",
       "problemMatcher": "$msCompile",
       "presentation": {
-        "reveal": "never",
-        "panel": "shared",
-        "showReuseMessage": false
+        "reveal": "silent",
+        "panel": "shared"
       }
     },
     {
