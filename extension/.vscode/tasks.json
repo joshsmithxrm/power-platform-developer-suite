@@ -3,11 +3,9 @@
   "tasks": [
     {
       "label": "Build Daemon",
-      "type": "shell",
-      "command": "dotnet build src/PPDS.Cli/PPDS.Cli.csproj -v q",
-      "options": {
-        "cwd": "${workspaceFolder}/.."
-      },
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/../src/PPDS.Cli/PPDS.Cli.csproj", "-v", "q"],
       "problemMatcher": "$msCompile",
       "presentation": {
         "reveal": "silent",
