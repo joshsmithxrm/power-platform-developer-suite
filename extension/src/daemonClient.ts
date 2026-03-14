@@ -362,7 +362,9 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         this.log.info(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
-        const result = await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token);
+        const result = token
+            ? await this.connection!.sendRequest<QueryResultResponse>('query/sql', params, token)
+            : await this.connection!.sendRequest<QueryResultResponse>('query/sql', params);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
@@ -382,7 +384,9 @@ export class DaemonClient implements vscode.Disposable {
         await this.ensureConnected();
 
         this.log.info('Calling query/fetch...');
-        const result = await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token);
+        const result = token
+            ? await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params, token)
+            : await this.connection!.sendRequest<QueryResultResponse>('query/fetch', params);
         this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
 
         return result;
