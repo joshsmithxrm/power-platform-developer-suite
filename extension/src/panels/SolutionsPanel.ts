@@ -168,6 +168,9 @@ export class SolutionsPanel extends WebviewPanelBase {
                     publisherName: s.publisherName ?? '',
                     isManaged: s.isManaged,
                     description: s.description ?? '',
+                    createdOn: s.createdOn ?? null,
+                    modifiedOn: s.modifiedOn ?? null,
+                    installedOn: s.installedOn ?? null,
                 })),
                 managedCount,
                 includeManaged: this.includeManaged,
@@ -314,6 +317,21 @@ export class SolutionsPanel extends WebviewPanelBase {
     .loading-state .spinner { width: 24px; height: 24px; margin-bottom: 12px; }
 
     .components-loading { padding: 8px 16px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 8px; }
+
+    .detail-card {
+        margin: 8px 12px; padding: 8px 12px;
+        background: var(--vscode-textBlockQuote-background);
+        border-left: 3px solid var(--vscode-textBlockQuote-border);
+        border-radius: 2px; font-size: 12px;
+        display: grid; grid-template-columns: auto 1fr; gap: 2px 12px;
+    }
+    .detail-card .detail-label { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+    .detail-card .detail-value { overflow: hidden; text-overflow: ellipsis; }
+    .detail-card .detail-description {
+        grid-column: 1 / -1; margin-top: 4px; padding-top: 4px;
+        border-top: 1px solid var(--vscode-panel-border);
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
 </style>
 
 <div class="toolbar">
@@ -462,6 +480,20 @@ export class SolutionsPanel extends WebviewPanelBase {
             }
             html += '</div>';
             html += '<div class="components-container' + (isExpanded ? ' expanded' : '') + '" id="components-' + escapeAttr(sol.uniqueName) + '">';
+            html += '<div class="detail-card">';
+            html += '<span class="detail-label">Unique Name</span><span class="detail-value">' + escapeHtml(sol.uniqueName) + '</span>';
+            html += '<span class="detail-label">Publisher</span><span class="detail-value">' + escapeHtml(sol.publisherName || '\u2014') + '</span>';
+            html += '<span class="detail-label">Type</span><span class="detail-value">' + (sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
+            if (sol.installedOn) {
+                html += '<span class="detail-label">Installed</span><span class="detail-value">' + formatDate(sol.installedOn) + '</span>';
+            }
+            if (sol.modifiedOn) {
+                html += '<span class="detail-label">Modified</span><span class="detail-value">' + formatDate(sol.modifiedOn) + '</span>';
+            }
+            if (sol.description) {
+                html += '<div class="detail-description">' + escapeHtml(sol.description) + '</div>';
+            }
+            html += '</div>';
             html += '<div class="components-loading"><span class="spinner"></span> Loading components...</div>';
             html += '</div>';
             html += '</li>';
@@ -548,6 +580,13 @@ export class SolutionsPanel extends WebviewPanelBase {
         return String(str).replace(/[^a-zA-Z0-9_-]/g, function(ch) {
             return '\\\\' + ch;
         });
+    }
+
+    function formatDate(isoString) {
+        if (!isoString) return '';
+        try {
+            return new Date(isoString).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch { return isoString; }
     }
 
     // Signal ready
