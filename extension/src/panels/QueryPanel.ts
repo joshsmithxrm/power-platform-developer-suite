@@ -165,7 +165,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     private async showFetchXml(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain(sql);
+            const result = await this.daemon.queryExplain({ sql });
             if (result.plan) {
                 const doc = await vscode.workspace.openTextDocument({
                     content: result.plan,
@@ -181,7 +181,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     private async explainQuery(sql: string): Promise<void> {
         try {
-            const result = await this.daemon.queryExplain(sql);
+            const result = await this.daemon.queryExplain({ sql });
             const language = result.format === 'fetchxml' ? 'xml' : 'text';
             const doc = await vscode.workspace.openTextDocument({
                 content: result.plan,

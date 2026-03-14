@@ -113,23 +113,6 @@ internal sealed class TabManager : ITuiStateCapture<TabManagerState>, IDisposabl
         return -1;
     }
 
-    /// <summary>
-    /// Closes all tabs, disposing their screens.
-    /// </summary>
-    public void CloseAllTabs()
-    {
-        foreach (var tab in _tabs)
-        {
-            try { tab.Screen.Dispose(); }
-            catch { /* continue */ }
-        }
-        _tabs.Clear();
-        _activeIndex = -1;
-
-        TabsChanged?.Invoke();
-        ActiveTabChanged?.Invoke();
-    }
-
     /// <summary>Cycles to the previous tab (wraps around).</summary>
     public void ActivatePrevious()
     {
