@@ -3,7 +3,6 @@ import { DaemonClient } from './daemonClient.js';
 import { ProfileTreeDataProvider } from './views/profileTreeView.js';
 import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
-import { registerEnvironmentCommands } from './commands/environmentCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 import { registerBrowserCommands } from './commands/browserCommands.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
@@ -14,13 +13,17 @@ import {
 } from './commands/notebookCommands.js';
 import { DataverseCompletionProvider } from './providers/completionProvider.js';
 import { QueryPanel } from './panels/QueryPanel.js';
-import { SolutionsTreeDataProvider } from './views/solutionsTreeView.js';
+import { SolutionsPanel } from './panels/SolutionsPanel.js';
+import { migrateLegacyState } from './migration/legacyState.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Power Platform Developer Suite is now active');
+
+    // ── Legacy State Migration ────────────────────────────────────────
+    migrateLegacyState(context);
 
     // Read extension settings
     const config = vscode.workspace.getConfiguration('ppds');
@@ -82,24 +85,8 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── Notebook Controller ───────────────────────────────────────────
-    // Declared before environment commands so the onEnvironmentChanged callback can sync it
     const notebookController = new DataverseNotebookController(client);
     context.subscriptions.push(notebookController);
-
-    // ── Environment Commands ─────────────────────────────────────────────
-    const envStatusBar = registerEnvironmentCommands(context, client, () => {
-        profileTreeProvider.refresh();
-        refreshToolsState();
-        // Sync notebook controller with new environment
-        client.envWho().then(who => {
-            if (who.url) notebookController.updateEnvironment(who.url);
-        }).catch(() => { /* environment may not be selected yet */ });
-    });
-
-    // Respect showEnvironmentInStatusBar setting
-    if (!config.get<boolean>('showEnvironmentInStatusBar', true)) {
-        envStatusBar.hide();
-    }
 
     // ── Environment Config Command ────────────────────────────────────
     registerEnvironmentConfigCommand(context, client, () => profileTreeProvider.refresh());
@@ -126,8 +113,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // ── IntelliSense Completion Provider ──────────────────────────────
-    // Register IntelliSense for both SQL and FetchXML.
-    // The language is forwarded to the daemon which routes to the appropriate engine.
     const completionProvider = new DataverseCompletionProvider(client);
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
@@ -149,25 +134,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(openNotebooksCmd);
 
-    // ── Solutions Tree View ─────────────────────────────────────────────
-    const solutionsTreeProvider = new SolutionsTreeDataProvider(client, logChannel);
-    const solutionsTreeView = vscode.window.createTreeView('ppds.solutions', {
-        treeDataProvider: solutionsTreeProvider,
-        showCollapseAll: true,
-    });
-    context.subscriptions.push(solutionsTreeView, solutionsTreeProvider);
-
+    // ── Solutions Panel ─────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.openSolutions', () => {
-            void vscode.commands.executeCommand('ppds.solutions.focus');
-        }),
-        vscode.commands.registerCommand('ppds.refreshSolutions', () => {
-            solutionsTreeProvider.refresh();
-        }),
-        vscode.commands.registerCommand('ppds.toggleManagedSolutions', () => {
-            solutionsTreeProvider.toggleManaged();
-            const state = solutionsTreeProvider.getIncludeManaged() ? 'shown' : 'hidden';
-            vscode.window.showInformationMessage(`Managed solutions: ${state}`);
+            SolutionsPanel.show(context.extensionUri, client);
         }),
     );
 
