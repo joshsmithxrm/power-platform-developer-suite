@@ -20,6 +20,7 @@
     "ext:package:linux-x64": "npm run package:linux-x64 --prefix extension",
     "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix extension",
     "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix extension",
+    "ext:dev:webview": "npm run dev:webview --prefix extension",
     "tui:test": "npm test --prefix tests/tui-e2e",
     "tui:test:update": "npm run test:update --prefix tests/tui-e2e",
     "tui:test:headed": "npm run test:headed --prefix tests/tui-e2e"
