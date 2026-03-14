@@ -360,7 +360,7 @@ export class QueryPanel extends WebviewPanelBase {
     .editor-container { padding: 8px 12px; flex-shrink: 0; }
     #sql-editor { width: 100%; min-height: 120px; max-height: 300px; resize: vertical; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 8px; border-radius: 2px; outline: none; tab-size: 4; }
     #sql-editor:focus { border-color: var(--vscode-focusBorder); }
-    .results-wrapper { flex: 1; overflow: auto; position: relative; }
+    .results-wrapper { flex: 1; overflow: auto; position: relative; min-height: 0; }
     .results-table { width: max-content; min-width: 100%; border-collapse: collapse; }
     .results-table thead { position: sticky; top: 0; z-index: 1; }
     .results-table th { padding: 6px 12px; text-align: left; font-weight: 600; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-bottom: 2px solid var(--vscode-panel-border); border-right: 1px solid rgba(255,255,255,0.1); white-space: nowrap; cursor: pointer; user-select: none; }
@@ -431,8 +431,7 @@ export class QueryPanel extends WebviewPanelBase {
     <span id="status-text">Ready</span>
     <span id="row-count"></span>
     <span id="execution-time"></span>
-    <span class="toolbar-spacer"></span>
-    <span id="copy-hint"></span>
+    <span id="copy-hint" style="margin-left:auto;"></span>
 </div>
 
 <script nonce="${nonce}">
