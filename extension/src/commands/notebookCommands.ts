@@ -56,7 +56,7 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
 
     try {
         if (currentLanguage !== 'fetchxml' && !content.startsWith('<')) {
-            const result = await daemon.queryExplain(content);
+            const result = await daemon.queryExplain({ sql: content });
             if (result.plan) {
                 const edit = new vscode.WorkspaceEdit();
                 const fullRange = new vscode.Range(

@@ -351,6 +351,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async querySql(params: {
         sql: string;
+        environmentUrl?: string;
         top?: number;
         page?: number;
         pagingCookie?: string;
@@ -372,6 +373,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryFetch(params: {
         fetchXml: string;
+        environmentUrl?: string;
         top?: number;
         page?: number;
         pagingCookie?: string;
@@ -431,6 +433,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryExport(params: {
         sql: string;
+        environmentUrl?: string;
         format?: string;
         includeHeaders?: boolean;
         top?: number;
@@ -447,10 +450,10 @@ export class DaemonClient implements vscode.Disposable {
      * Since Dataverse SQL is transpiled to FetchXML, the transpiled FetchXML
      * serves as the execution plan.
      */
-    async queryExplain(sql: string): Promise<QueryExplainResponse> {
+    async queryExplain(params: { sql: string; environmentUrl?: string }): Promise<QueryExplainResponse> {
         await this.ensureConnected();
         this.log.debug('Calling query/explain...');
-        const result = await this.connection!.sendRequest<QueryExplainResponse>('query/explain', { sql });
+        const result = await this.connection!.sendRequest<QueryExplainResponse>('query/explain', params);
         this.log.debug(`Got explain plan (${result.format})`);
         return result;
     }
@@ -532,7 +535,7 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists solutions in the active Dataverse environment.
      */
-    async solutionsList(filter?: string, includeManaged?: boolean): Promise<SolutionsListResponse> {
+    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string): Promise<SolutionsListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
@@ -541,6 +544,9 @@ export class DaemonClient implements vscode.Disposable {
         }
         if (includeManaged !== undefined) {
             params.includeManaged = includeManaged;
+        }
+        if (environmentUrl !== undefined) {
+            params.environmentUrl = environmentUrl;
         }
 
         this.log.info(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
@@ -553,12 +559,15 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists components for a specific solution.
      */
-    async solutionsComponents(uniqueName: string, componentType?: number): Promise<SolutionComponentsResponse> {
+    async solutionsComponents(uniqueName: string, componentType?: number, environmentUrl?: string): Promise<SolutionComponentsResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = { uniqueName };
         if (componentType !== undefined) {
             params.componentType = componentType;
+        }
+        if (environmentUrl !== undefined) {
+            params.environmentUrl = environmentUrl;
         }
 
         this.log.debug(`Calling solutions/components for "${uniqueName}"...`);

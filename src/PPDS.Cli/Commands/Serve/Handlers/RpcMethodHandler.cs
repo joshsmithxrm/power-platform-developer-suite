@@ -790,7 +790,7 @@ public class RpcMethodHandler : IDisposable
             query = InjectTopAttribute(query, request.Top.Value);
         }
 
-        var response = await WithActiveProfileAsync(async (sp, ct) =>
+        var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -827,7 +827,7 @@ public class RpcMethodHandler : IDisposable
 
         if (request.UseTds)
         {
-            var response = await WithActiveProfileAsync(async (sp, profile, env, ct) =>
+            var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
             {
                 using var credentialProvider = CredentialProviderFactory.Create(
                     profile,
@@ -869,7 +869,7 @@ public class RpcMethodHandler : IDisposable
             };
         }
 
-        var fetchResponse = await WithActiveProfileAsync(async (sp, ct) =>
+        var fetchResponse = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
             var result = await queryExecutor.ExecuteFetchXmlAsync(
@@ -1000,7 +1000,7 @@ public class RpcMethodHandler : IDisposable
         // Execute the query
         const int MaxExportRecords = 100_000;
 
-        var queryResponse = await WithActiveProfileAsync(async (sp, ct) =>
+        var queryResponse = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
         {
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
 
@@ -1368,6 +1368,64 @@ public class RpcMethodHandler : IDisposable
             (sp, _, _, ct) => action(sp, ct),
             cancellationToken);
 
+    /// <summary>
+    /// Executes an action with the active profile's credentials against a specific environment.
+    /// If environmentUrl is provided, uses it; otherwise falls back to the active profile's saved environment.
+    /// </summary>
+    private async Task<T> WithProfileAndEnvironmentAsync<T>(
+        string? environmentUrl,
+        Func<IServiceProvider, AuthProfile, PPDS.Auth.Profiles.EnvironmentInfo, CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var store = _authServices.GetRequiredService<ProfileStore>();
+        var collection = await store.LoadAsync(cancellationToken);
+
+        var profile = collection.ActiveProfile
+            ?? throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
+
+        // Resolve environment: explicit URL wins, else profile's saved environment
+        string resolvedUrl;
+        if (!string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            resolvedUrl = environmentUrl;
+        }
+        else
+        {
+            var env = profile.Environment
+                ?? throw new RpcException(
+                    ErrorCodes.Connection.EnvironmentNotFound,
+                    "No environment selected. Use env/select first.");
+            resolvedUrl = env.Url;
+        }
+
+        // Build an EnvironmentInfo for the resolved URL
+        var resolvedEnvironment = profile.Environment?.Url?.Equals(resolvedUrl, StringComparison.OrdinalIgnoreCase) == true
+            ? profile.Environment
+            : new PPDS.Auth.Profiles.EnvironmentInfo { Url = resolvedUrl, DisplayName = resolvedUrl };
+
+        var serviceProvider = await _poolManager.GetOrCreateServiceProviderAsync(
+            new[] { profile.Name ?? profile.DisplayIdentifier },
+            resolvedUrl,
+            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+            cancellationToken: cancellationToken);
+
+        return await action(serviceProvider, profile, resolvedEnvironment, cancellationToken);
+    }
+
+    /// <summary>
+    /// Convenience overload for actions that only need the service provider and cancellation token.
+    /// </summary>
+    private Task<T> WithProfileAndEnvironmentAsync<T>(
+        string? environmentUrl,
+        Func<IServiceProvider, CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+        => WithProfileAndEnvironmentAsync<T>(
+            environmentUrl,
+            (sp, _, _, ct) => action(sp, ct),
+            cancellationToken);
+
     #endregion
 
     #region Profile Invalidation
@@ -1565,9 +1623,10 @@ public class RpcMethodHandler : IDisposable
     public async Task<SolutionsListResponse> SolutionsListAsync(
         string? filter = null,
         bool includeManaged = false,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
             var solutions = await solutionService.ListAsync(filter, includeManaged, ct);
@@ -1603,6 +1662,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<SolutionComponentsResponse> SolutionsComponentsAsync(
         string uniqueName,
         int? componentType = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(uniqueName))
@@ -1612,7 +1672,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'uniqueName' parameter is required");
         }
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
 
@@ -2497,6 +2557,7 @@ public class QuerySqlRequest
     [JsonPropertyName("count")] public bool Count { get; set; }
     [JsonPropertyName("showFetchXml")] public bool ShowFetchXml { get; set; }
     [JsonPropertyName("useTds")] public bool UseTds { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
 }
 
 /// <summary>
@@ -2509,6 +2570,7 @@ public class QueryFetchRequest
     [JsonPropertyName("page")] public int? Page { get; set; }
     [JsonPropertyName("pagingCookie")] public string? PagingCookie { get; set; }
     [JsonPropertyName("count")] public bool Count { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
 }
 
 /// <summary>
@@ -2530,6 +2592,7 @@ public class QueryExportRequest
     [JsonPropertyName("format")] public string Format { get; set; } = "csv";
     [JsonPropertyName("includeHeaders")] public bool IncludeHeaders { get; set; } = true;
     [JsonPropertyName("top")] public int? Top { get; set; }
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
 }
 
 /// <summary>
@@ -2538,6 +2601,7 @@ public class QueryExportRequest
 public class QueryExplainRequest
 {
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
 }
 
 /// <summary>

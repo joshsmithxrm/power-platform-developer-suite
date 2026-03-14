@@ -449,8 +449,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.SelectedProfile != null)
         {
-            // Profile change invalidates all connections — close all tabs
-            CloseAllTabs();
             _errorService.FireAndForget(SetActiveProfileAsync(dialog.SelectedProfile), "SwitchProfile");
         }
         else if (dialog.CreateNewSelected)
@@ -461,24 +459,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         {
             RefreshProfileState();
         }
-    }
-
-    /// <summary>
-    /// Deactivates the current screen and closes all tabs.
-    /// OnActiveTabChanged will show the splash home when no tabs remain.
-    /// </summary>
-    private void CloseAllTabs()
-    {
-        if (_currentScreen != null)
-        {
-            _currentScreen.CloseRequested -= OnScreenCloseRequested;
-            _currentScreen.MenuStateChanged -= OnScreenMenuStateChanged;
-            _currentScreen.OnDeactivating();
-            _contentArea.Remove(_currentScreen.Content);
-            _currentScreen = null;
-        }
-
-        _tabManager.CloseAllTabs();
     }
 
     private void ShowEnvironmentSelector()
@@ -595,9 +575,6 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
         if (dialog.CreatedProfile != null)
         {
-            // New profile = new credentials — close all tabs
-            CloseAllTabs();
-
             var envUrl = dialog.SelectedEnvironmentUrl ?? dialog.CreatedProfile.EnvironmentUrl;
             var envName = dialog.SelectedEnvironmentName ?? dialog.CreatedProfile.EnvironmentName;
 
