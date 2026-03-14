@@ -112,6 +112,20 @@ export class QueryPanel extends WebviewPanelBase {
                         case 'copyToClipboard':
                             await vscode.env.clipboard.writeText(message.text as string);
                             break;
+                        case 'requestCompletions': {
+                            const requestId = message.requestId as number;
+                            try {
+                                const result = await this.daemon.queryComplete({
+                                    sql: message.sql as string,
+                                    cursorOffset: message.cursorOffset as number,
+                                    language: message.language as string,
+                                });
+                                this.postMessage({ command: 'completionResult', requestId, items: result.items });
+                            } catch {
+                                this.postMessage({ command: 'completionResult', requestId, items: [] });
+                            }
+                            break;
+                        }
                         case 'ready':
                             if (initialSql) {
                                 this.postMessage({ command: 'loadQuery', sql: initialSql });
@@ -649,6 +663,48 @@ export class QueryPanel extends WebviewPanelBase {
         },
     });
 
+    // ── Completion provider bridge ──
+    let completionRequestId = 0;
+    const pendingCompletions = new Map();
+
+    function requestCompletions(model, position, language) {
+        return new Promise((resolve) => {
+            const id = ++completionRequestId;
+            const cursorOffset = model.getOffsetAt(position);
+            pendingCompletions.set(id, resolve);
+            vscode.postMessage({ command: 'requestCompletions', requestId: id, sql: model.getValue(), cursorOffset, language });
+            setTimeout(() => {
+                if (pendingCompletions.has(id)) {
+                    pendingCompletions.delete(id);
+                    resolve({ suggestions: [] });
+                }
+            }, 3000);
+        });
+    }
+
+    function mapKind(kind) {
+        switch (kind) {
+            case 'entity': return monaco.languages.CompletionItemKind.Class;
+            case 'attribute': return monaco.languages.CompletionItemKind.Field;
+            case 'keyword': return monaco.languages.CompletionItemKind.Keyword;
+            default: return monaco.languages.CompletionItemKind.Text;
+        }
+    }
+
+    monaco.languages.registerCompletionItemProvider('sql', {
+        triggerCharacters: [' ', ',', '.'],
+        provideCompletionItems: async (model, position) => {
+            return await requestCompletions(model, position, 'sql');
+        },
+    });
+
+    monaco.languages.registerCompletionItemProvider('xml', {
+        triggerCharacters: [' ', '<', '"'],
+        provideCompletionItems: async (model, position) => {
+            return await requestCompletions(model, position, 'fetchxml');
+        },
+    });
+
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
         const sql = editor.getValue().trim();
@@ -858,6 +914,22 @@ export class QueryPanel extends WebviewPanelBase {
             case 'updateEnvironment':
                 updateEnvironmentDisplay(msg.name);
                 break;
+            case 'completionResult': {
+                const resolver = pendingCompletions.get(msg.requestId);
+                if (resolver) {
+                    pendingCompletions.delete(msg.requestId);
+                    const suggestions = (msg.items || []).map(item => ({
+                        label: item.label,
+                        insertText: item.insertText,
+                        kind: mapKind(item.kind),
+                        detail: item.detail || '',
+                        sortText: String(item.sortOrder || 0).padStart(5, '0'),
+                        range: undefined,
+                    }));
+                    resolver({ suggestions });
+                }
+                break;
+            }
         }
     });
 
