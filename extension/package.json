@@ -69,10 +69,6 @@
         {
           "id": "ppds.tools",
           "name": "Tools"
-        },
-        {
-          "id": "ppds.solutions",
-          "name": "Solutions"
         }
       ]
     },
@@ -108,19 +104,6 @@
         "command": "ppds.renameProfile",
         "title": "PPDS: Rename Profile",
         "icon": "$(edit)"
-      },
-      {
-        "command": "ppds.selectEnvironment",
-        "title": "PPDS: Select Environment"
-      },
-      {
-        "command": "ppds.environmentDetails",
-        "title": "PPDS: Environment Details"
-      },
-      {
-        "command": "ppds.refreshEnvironments",
-        "title": "PPDS: Refresh Environments",
-        "icon": "$(refresh)"
       },
       {
         "command": "ppds.configureEnvironment",
@@ -178,16 +161,6 @@
         "icon": "$(package)"
       },
       {
-        "command": "ppds.refreshSolutions",
-        "title": "Refresh",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "ppds.toggleManagedSolutions",
-        "title": "Toggle Managed Solutions",
-        "icon": "$(filter)"
-      },
-      {
         "command": "ppds.invalidateProfile",
         "title": "PPDS: Invalidate Tokens",
         "icon": "$(debug-disconnect)"
@@ -218,16 +191,6 @@
         {
           "command": "ppds.createProfile",
           "when": "view == ppds.profiles",
-          "group": "navigation"
-        },
-        {
-          "command": "ppds.refreshSolutions",
-          "when": "view == ppds.solutions",
-          "group": "navigation"
-        },
-        {
-          "command": "ppds.toggleManagedSolutions",
-          "when": "view == ppds.solutions",
           "group": "navigation"
         }
       ],
@@ -335,11 +298,6 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start the ppds serve daemon when the extension activates"
-        },
-        "ppds.showEnvironmentInStatusBar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the active environment in the VS Code status bar"
         }
       }
     },
@@ -353,11 +311,6 @@
         "view": "ppds.profiles",
         "contents": "No authentication profiles found.\n[Create Profile](command:ppds.createProfile)",
         "when": "ppds.daemonState == 'ready' && ppds.profileCount == 0"
-      },
-      {
-        "view": "ppds.solutions",
-        "contents": "Select a profile and environment to browse solutions.\n[Select Environment](command:ppds.selectEnvironment)",
-        "when": "ppds.daemonState != 'ready'"
       }
     ]
   },
