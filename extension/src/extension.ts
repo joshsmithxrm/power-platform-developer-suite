@@ -77,6 +77,42 @@ export function activate(context: vscode.ExtensionContext) {
     // ── Profile Commands ────────────────────────────────────────────────
     registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
 
+    // ── Profile Environment Switching ─────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.switchProfileEnvironment', async (envUrl: string, envDisplayName: string) => {
+            try {
+                await client.envSelect(envUrl);
+                profileTreeProvider.refresh();
+                vscode.window.showInformationMessage(`Environment switched to ${envDisplayName}`);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to switch environment: ${msg}`);
+            }
+        }),
+        vscode.commands.registerCommand('ppds.switchProfileEnvironmentManual', async () => {
+            const url = await vscode.window.showInputBox({
+                title: 'Dataverse Environment URL',
+                prompt: 'Enter the full URL (e.g., https://myorg.crm.dynamics.com)',
+                placeHolder: 'https://myorg.crm.dynamics.com',
+                ignoreFocusOut: true,
+                validateInput: (value) => {
+                    if (!value.trim()) return 'URL is required';
+                    try { new URL(value.trim()); return undefined; }
+                    catch { return 'Enter a valid URL'; }
+                },
+            });
+            if (!url) return;
+            try {
+                await client.envSelect(url.trim());
+                profileTreeProvider.refresh();
+                vscode.window.showInformationMessage(`Environment switched to ${url.trim()}`);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to switch environment: ${msg}`);
+            }
+        }),
+    );
+
     // ── Notebook Serializer ───────────────────────────────────────────
     context.subscriptions.push(
         vscode.workspace.registerNotebookSerializer('ppdsnb', new DataverseNotebookSerializer(), {
