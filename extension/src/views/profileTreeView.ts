@@ -119,6 +119,7 @@ export class ProfileTreeDataProvider
         private readonly daemonClient: DaemonClient,
         private readonly log: vscode.LogOutputChannel,
         private readonly globalState?: vscode.Memento,
+        private readonly stateTracker?: { daemonState: string; profileCount: number },
     ) {}
 
     refresh(): void {
@@ -146,6 +147,10 @@ export class ProfileTreeDataProvider
             const result = await this.daemonClient.authList();
             void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'ready');
             void vscode.commands.executeCommand('setContext', 'ppds.profileCount', result.profiles.length);
+            if (this.stateTracker) {
+                this.stateTracker.daemonState = 'ready';
+                this.stateTracker.profileCount = result.profiles.length;
+            }
             if (result.profiles.length === 0) {
                 return [];
             }
@@ -167,6 +172,10 @@ export class ProfileTreeDataProvider
             this.log.error(`Failed to list profiles: ${msg}`);
             void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'error');
             void vscode.commands.executeCommand('setContext', 'ppds.profileCount', 0);
+            if (this.stateTracker) {
+                this.stateTracker.daemonState = 'error';
+                this.stateTracker.profileCount = 0;
+            }
             return [];
         }
     }

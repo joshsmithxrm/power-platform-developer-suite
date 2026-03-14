@@ -23,6 +23,14 @@ export class SolutionsPanel extends WebviewPanelBase {
     private environmentDisplayName: string | undefined;
     private profileName: string | undefined;
 
+    /**
+     * Returns the number of open SolutionsPanel instances.
+     * Used by diagnostic commands for panel state inspection.
+     */
+    static get instanceCount(): number {
+        return SolutionsPanel.instances.length;
+    }
+
     static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string, globalState?: vscode.Memento): SolutionsPanel {
         if (SolutionsPanel.instances.length >= SolutionsPanel.MAX_PANELS) {
             const oldest = SolutionsPanel.instances[0];
