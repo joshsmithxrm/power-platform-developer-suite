@@ -40,6 +40,8 @@ export class QueryPanel extends WebviewPanelBase {
     private lastResult: QueryResultResponse | undefined;
     private lastSql: string | undefined;
     private lastUseTds = false;
+    /** Language used for the last query (for loadMore to use the same execution path). */
+    private lastLanguage = 'sql';
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
     private profileName: string | undefined;
@@ -69,7 +71,10 @@ export class QueryPanel extends WebviewPanelBase {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'node_modules')],
+                localResourceRoots: [
+                    vscode.Uri.joinPath(extensionUri, 'node_modules'),
+                    vscode.Uri.joinPath(extensionUri, 'dist'),
+                ],
             }
         );
 
@@ -80,7 +85,7 @@ export class QueryPanel extends WebviewPanelBase {
                 async (message: { command: string; [key: string]: unknown }) => {
                     switch (message.command) {
                         case 'executeQuery':
-                            await this.executeQuery(message.sql as string, false, message.useTds as boolean | undefined);
+                            await this.executeQuery(message.sql as string, false, message.useTds as boolean | undefined, message.language as string | undefined);
                             break;
                         case 'showFetchXml':
                             await this.showFetchXml(message.sql as string);
@@ -172,14 +177,21 @@ export class QueryPanel extends WebviewPanelBase {
         this.panel.title = parts.join(' — ');
     }
 
-    private async executeQuery(sql: string, isRetry = false, useTds?: boolean): Promise<void> {
+    private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string): Promise<void> {
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
             const tds = useTds ?? false;
-            const result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl });
+
+            let result: QueryResultResponse;
+            if (language === 'xml') {
+                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl });
+            } else {
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl });
+            }
             this.lastSql = sql;
             this.lastUseTds = tds;
+            this.lastLanguage = language ?? 'sql';
             this.lastResult = result;
             this.allRecords = [...result.records];
             this.postMessage({
@@ -252,13 +264,24 @@ export class QueryPanel extends WebviewPanelBase {
         if (!this.lastResult || !this.lastSql) return;
         try {
             this.postMessage({ command: 'executionStarted' });
-            const result = await this.daemon.querySql({
-                sql: this.lastSql,
-                page,
-                pagingCookie,
-                useTds: this.lastUseTds,
-                environmentUrl: this.environmentUrl,
-            });
+
+            let result: QueryResultResponse;
+            if (this.lastLanguage === 'xml') {
+                result = await this.daemon.queryFetch({
+                    fetchXml: this.lastSql,
+                    page,
+                    pagingCookie,
+                    environmentUrl: this.environmentUrl,
+                });
+            } else {
+                result = await this.daemon.querySql({
+                    sql: this.lastSql,
+                    page,
+                    pagingCookie,
+                    useTds: this.lastUseTds,
+                    environmentUrl: this.environmentUrl,
+                });
+            }
 
             if (this.allRecords.length + result.records.length > QueryPanel.MAX_CLIENT_RECORDS) {
                 this.postMessage({
@@ -341,6 +364,12 @@ export class QueryPanel extends WebviewPanelBase {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
         );
+        const monacoUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'monaco-editor.js')
+        );
+        const workerUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'editor.worker.js')
+        );
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -348,18 +377,19 @@ export class QueryPanel extends WebviewPanelBase {
 <head>
     <meta charset="UTF-8">
     <!-- 'unsafe-inline' is required by @vscode/webview-ui-toolkit for dynamic styles -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; worker-src blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="module" nonce="${nonce}" src="${toolkitUri}"></script>
+    <script nonce="${nonce}">self.__MONACO_WORKER_URL__ = '${workerUri}';</script>
+    <script nonce="${nonce}" src="${monacoUri}"></script>
 </head>
 <body>
 <style>
     body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
     .toolbar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; align-items: center; }
     .toolbar-spacer { flex: 1; }
-    .editor-container { padding: 8px 12px; flex-shrink: 0; }
-    #sql-editor { width: 100%; min-height: 120px; max-height: 300px; resize: vertical; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 8px; border-radius: 2px; outline: none; tab-size: 4; }
-    #sql-editor:focus { border-color: var(--vscode-focusBorder); }
+    .editor-container { flex-shrink: 0; border-bottom: 1px solid var(--vscode-panel-border); }
+    .editor-wrapper { height: 150px; min-height: 120px; max-height: 300px; overflow: hidden; resize: vertical; }
     .results-wrapper { flex: 1; overflow: auto; position: relative; min-height: 0; }
     .results-table { width: max-content; min-width: 100%; border-collapse: collapse; }
     .results-table thead { position: sticky; top: 0; z-index: 1; }
@@ -402,6 +432,7 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
     <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
     <vscode-button id="tds-btn" appearance="secondary" title="Toggle TDS Read Replica mode (direct SQL via port 5558)">TDS: Off</vscode-button>
+    <vscode-button id="lang-btn" appearance="secondary" title="Toggle SQL / FetchXML language">SQL</vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
@@ -410,7 +441,9 @@ export class QueryPanel extends WebviewPanelBase {
 </div>
 
 <div class="editor-container">
-    <textarea id="sql-editor" placeholder="SELECT TOP 10 * FROM account" spellcheck="false"></textarea>
+    <div class="editor-wrapper">
+        <div id="sql-editor" style="width:100%;height:100%;"></div>
+    </div>
 </div>
 
 <div class="filter-bar" id="filter-bar">
@@ -437,7 +470,25 @@ export class QueryPanel extends WebviewPanelBase {
 <script nonce="${nonce}">
 (function() {
     const vscode = acquireVsCodeApi();
-    const sqlEditor = document.getElementById('sql-editor');
+
+    // ── Monaco Editor initialization ──
+    const monacoTheme = document.body.classList.contains('vscode-light') || document.body.classList.contains('vscode-high-contrast-light') ? 'vs' : 'vs-dark';
+    const editor = monaco.editor.create(document.getElementById('sql-editor'), {
+        language: 'sql',
+        theme: monacoTheme,
+        value: '',
+        minimap: { enabled: false },
+        lineNumbers: 'on',
+        scrollBeyondLastLine: false,
+        wordWrap: 'on',
+        fontSize: 13,
+        automaticLayout: true,
+        suggestOnTriggerCharacters: true,
+    });
+
+    let currentLanguage = 'sql';
+    let manualOverride = false;
+
     const executeBtn = document.getElementById('execute-btn');
     const fetchxmlBtn = document.getElementById('fetchxml-btn');
     const explainBtn = document.getElementById('explain-btn');
@@ -445,6 +496,7 @@ export class QueryPanel extends WebviewPanelBase {
     const historyBtn = document.getElementById('history-btn');
     const notebookBtn = document.getElementById('notebook-btn');
     const tdsBtn = document.getElementById('tds-btn');
+    const langBtn = document.getElementById('lang-btn');
     const filterBtn = document.getElementById('filter-btn');
     const filterBar = document.getElementById('filter-bar');
     const filterInput = document.getElementById('filter-input');
@@ -560,17 +612,54 @@ export class QueryPanel extends WebviewPanelBase {
         updateCopyHint();
     }
 
+    // ── Language auto-detection ──
+    function detectLang(content) {
+        const trimmed = content.trimStart();
+        return trimmed.startsWith('<') ? 'xml' : 'sql';
+    }
+
+    function updateLanguage(lang) {
+        if (lang !== currentLanguage) {
+            currentLanguage = lang;
+            monaco.editor.setModelLanguage(editor.getModel(), lang);
+            langBtn.textContent = lang === 'xml' ? 'FetchXML' : 'SQL';
+        }
+    }
+
+    editor.onDidChangeModelContent(() => {
+        if (!manualOverride) {
+            const detected = detectLang(editor.getValue());
+            updateLanguage(detected);
+        }
+    });
+
+    langBtn.addEventListener('click', () => {
+        manualOverride = true;
+        updateLanguage(currentLanguage === 'sql' ? 'xml' : 'sql');
+    });
+
+    // ── Monaco keybinding: Ctrl+Enter to execute ──
+    editor.addAction({
+        id: 'ppds.executeQuery',
+        label: 'Execute Query',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+        run: () => {
+            const sql = editor.getValue().trim();
+            if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
+        },
+    });
+
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
-        const sql = sqlEditor.value.trim();
-        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
+        const sql = editor.getValue().trim();
+        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
     });
     fetchxmlBtn.addEventListener('click', () => {
-        const sql = sqlEditor.value.trim();
+        const sql = editor.getValue().trim();
         if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
     });
     explainBtn.addEventListener('click', () => {
-        const sql = sqlEditor.value.trim();
+        const sql = editor.getValue().trim();
         if (sql) vscode.postMessage({ command: 'explainQuery', sql });
     });
     exportBtn.addEventListener('click', () => {
@@ -580,7 +669,7 @@ export class QueryPanel extends WebviewPanelBase {
         vscode.postMessage({ command: 'showHistory' });
     });
     notebookBtn.addEventListener('click', () => {
-        const sql = sqlEditor.value.trim();
+        const sql = editor.getValue().trim();
         if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
     });
     tdsBtn.addEventListener('click', () => {
@@ -644,17 +733,9 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     // ── Keyboard shortcuts ──
-    sqlEditor.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            e.preventDefault();
-            const sql = sqlEditor.value.trim();
-            if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds });
-        }
-    });
-
     document.addEventListener('keydown', (e) => {
         // Filter toggle
-        if (e.key === '/' && document.activeElement !== sqlEditor && document.activeElement !== filterInput) {
+        if (e.key === '/' && !editor.hasTextFocus() && document.activeElement !== filterInput) {
             e.preventDefault();
             toggleFilter();
             return;
@@ -672,7 +753,7 @@ export class QueryPanel extends WebviewPanelBase {
 
         // Ctrl+A: select all (when not in text inputs)
         if ((e.ctrlKey || e.metaKey) && e.key === 'a' &&
-            document.activeElement !== sqlEditor &&
+            !editor.hasTextFocus() &&
             document.activeElement !== filterInput) {
             if (displayedRows.length > 0 && columns.length > 0) {
                 e.preventDefault();
@@ -685,7 +766,7 @@ export class QueryPanel extends WebviewPanelBase {
 
         // Ctrl+C / Ctrl+Shift+C: copy selection
         if ((e.ctrlKey || e.metaKey) && e.key === 'c' &&
-            document.activeElement !== sqlEditor &&
+            !editor.hasTextFocus() &&
             document.activeElement !== filterInput) {
             if (anchor) {
                 e.preventDefault();
@@ -697,7 +778,7 @@ export class QueryPanel extends WebviewPanelBase {
         // Ctrl+Shift+F: FetchXML preview
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
             e.preventDefault();
-            const sql = sqlEditor.value.trim();
+            const sql = editor.getValue().trim();
             if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
             return;
         }
@@ -771,7 +852,8 @@ export class QueryPanel extends WebviewPanelBase {
                 executionTimeEl.textContent = '';
                 break;
             case 'loadQuery':
-                sqlEditor.value = msg.sql;
+                editor.setValue(msg.sql);
+                manualOverride = false;
                 break;
             case 'updateEnvironment':
                 updateEnvironmentDisplay(msg.name);
