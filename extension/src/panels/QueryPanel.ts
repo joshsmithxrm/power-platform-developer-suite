@@ -596,7 +596,13 @@ export class QueryPanel extends WebviewPanelBase {
                 showError(msg.error);
                 break;
             case 'executionStarted':
+                executeBtn.setAttribute('disabled', '');
+                executeBtn.textContent = 'Executing...';
+                resultsWrapper.innerHTML = '<div class="empty-state"><div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div><div>Executing query...</div></div>';
                 statusText.innerHTML = '<span class="spinner"></span> Executing...';
+                loadMoreBar.style.display = 'none';
+                rowCountEl.textContent = '';
+                executionTimeEl.textContent = '';
                 break;
             case 'loadQuery':
                 sqlEditor.value = msg.sql;
@@ -607,7 +613,13 @@ export class QueryPanel extends WebviewPanelBase {
         }
     });
 
+    function resetExecuteBtn() {
+        executeBtn.removeAttribute('disabled');
+        executeBtn.textContent = 'Execute';
+    }
+
     function handleQueryResult(data) {
+        resetExecuteBtn();
         columns = data.columns || [];
         allRows = data.records || [];
         pagingCookie = data.pagingCookie || null;
@@ -621,6 +633,7 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     function handleAppendResults(data) {
+        resetExecuteBtn();
         const newRecords = data.records || [];
         allRows = allRows.concat(newRecords);
         pagingCookie = data.pagingCookie || null;
@@ -632,6 +645,7 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     function showError(error) {
+        resetExecuteBtn();
         resultsWrapper.innerHTML = '<div class="error-state">' + escapeHtml(error) + '</div>';
         statusText.textContent = 'Error';
         loadMoreBar.style.display = 'none';
