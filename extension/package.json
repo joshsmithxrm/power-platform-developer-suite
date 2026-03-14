@@ -204,6 +204,16 @@
         "command": "ppds.removeEnvironment",
         "title": "Remove Environment",
         "icon": "$(trash)"
+      },
+      {
+        "command": "ppds.moveProfileUp",
+        "title": "Move Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "ppds.moveProfileDown",
+        "title": "Move Down",
+        "icon": "$(arrow-down)"
       }
     ],
     "menus": {
@@ -244,6 +254,16 @@
           "command": "ppds.invalidateProfile",
           "when": "view == ppds.profiles && viewItem == profile",
           "group": "profile@4"
+        },
+        {
+          "command": "ppds.moveProfileUp",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@5"
+        },
+        {
+          "command": "ppds.moveProfileDown",
+          "when": "view == ppds.profiles && viewItem == profile",
+          "group": "profile@6"
         },
         {
           "command": "ppds.setDefaultEnvironment",
