@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Services;
 using Xunit;
@@ -19,9 +20,10 @@ public class SolutionServiceTests
     {
         // Arrange
         var logger = new NullLogger<SolutionService>();
+        var metadataService = new Mock<IMetadataService>().Object;
 
         // Act
-        var act = () => new SolutionService(null!, logger);
+        var act = () => new SolutionService(null!, logger, metadataService);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -33,13 +35,29 @@ public class SolutionServiceTests
     {
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
+        var metadataService = new Mock<IMetadataService>().Object;
 
         // Act
-        var act = () => new SolutionService(pool, null!);
+        var act = () => new SolutionService(pool, null!, metadataService);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("logger");
+    }
+
+    [Fact]
+    public void Constructor_ThrowsOnNullMetadataService()
+    {
+        // Arrange
+        var pool = new Mock<IDataverseConnectionPool>().Object;
+        var logger = new NullLogger<SolutionService>();
+
+        // Act
+        var act = () => new SolutionService(pool, logger, null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("metadataService");
     }
 
     [Fact]
@@ -48,9 +66,10 @@ public class SolutionServiceTests
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
+        var metadataService = new Mock<IMetadataService>().Object;
 
         // Act
-        var service = new SolutionService(pool, logger);
+        var service = new SolutionService(pool, logger, metadataService);
 
         // Assert
         service.Should().NotBeNull();
