@@ -79,9 +79,9 @@ The VS Code extension's profile tree view loses expansion state on every refresh
 | `ProfileTreeItem` | Set stable `id` for VS Code expansion persistence |
 | `ProfileTreeDataProvider` | Apply user sort order from `globalState` |
 | `globalState` keys | Persist sort order + managed toggle |
-| `SolutionService.GetComponentTypeNamesAsync()` | Query `componenttype` option set metadata at runtime |
-| `SolutionService` component type cache | In-memory cache per environment URL |
-| RPC `solutions/list` handler | Pass through all solution fields (dates, description) |
+| `IMetadataService.GetOptionSetAsync()` | Existing service — query `componenttype` global option set |
+| `SolutionService` component type cache | In-memory cache per environment URL, delegates to `IMetadataService` |
+| `SolutionsPanel.loadSolutions()` | Pass through date/description fields already returned by RPC |
 | RPC `solutions/components` handler | Return resolved component type names |
 | `SolutionsPanel` webview | Detail card, search filter, display format |
 
@@ -98,7 +98,7 @@ The VS Code extension's profile tree view loses expansion state on every refresh
 
 #### Core Requirements
 
-1. `ProfileTreeItem` sets `this.id` to a stable, unique string: `` `profile:${profile.identity}:${profile.authMethod}:${profile.cloud}` ``
+1. `ProfileTreeItem` sets `this.id` to a stable, unique string: `` `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}` ``
 2. VS Code's built-in `TreeView` expansion persistence handles the rest — no custom event handlers needed
 3. Expansion state survives `refresh()` calls, window reloads, and VS Code restarts
 
@@ -139,23 +139,23 @@ type ProfileSortOrder = Record<string, number>;
 #### Core Requirements
 
 1. When a solution is expanded, a styled detail card appears above the component groups
-2. Detail card fields: Unique Name, Publisher (with prefix), Type (Managed/Unmanaged), Installed date, Modified date, Description
+2. Detail card fields: Unique Name, Publisher, Type (Managed/Unmanaged), Installed date, Modified date, Description
 3. Dates formatted as locale-appropriate short dates
 4. Description truncated to 3 lines with "..." if longer
 
 #### Data Flow Changes
 
-1. **Daemon RPC handler** (`solutions/list`): include `createdOn`, `modifiedOn`, `installedOn`, `description` in the response — these fields already exist on `SolutionInfo` but are not passed through
-2. **Extension `SolutionInfoDto`** type: add `createdOn`, `modifiedOn`, `installedOn`, `description` fields
-3. **`SolutionsPanel.loadSolutions()`**: pass new fields through to webview `solutionsLoaded` message
-4. **Webview `renderSolutions()`**: include detail card HTML in each solution's expanded container, populated on load (not on expand — data is already available)
+The daemon RPC handler and TypeScript `SolutionInfoDto` already include `createdOn`, `modifiedOn`, `installedOn`, and `description`. The gap is only in `SolutionsPanel.loadSolutions()` which drops these fields when constructing the webview message (line ~162-174). Changes needed:
+
+1. **`SolutionsPanel.loadSolutions()`**: include `createdOn`, `modifiedOn`, `installedOn`, `description` in the `solutionsLoaded` webview message payload
+2. **Webview `renderSolutions()`**: render detail card HTML in each solution's expanded container, populated on load (data is already available from the message)
 
 #### Detail Card Layout
 
 ```
 ┌──────────────────────────────────────────┐
 │  Unique Name   contoso_mysolution        │
-│  Publisher      Contoso (contoso)         │
+│  Publisher      Contoso                   │
 │  Type           Unmanaged                 │
 │  Installed      2026-01-15                │
 │  Modified       2026-03-12                │
@@ -169,33 +169,36 @@ Styled as a `div` with `var(--vscode-textBlockQuote-background)` background, sub
 
 #### Core Requirements
 
-1. New method `SolutionService.GetComponentTypeNamesAsync()` queries the `componenttype` global option set metadata via `RetrieveOptionSetRequest`
-2. Returns `Dictionary<int, string>` mapping all type codes to display names, including 10000+ range
-3. Results cached in-memory per environment URL (keyed by normalized URL)
+1. `SolutionService` delegates to the existing `IMetadataService.GetOptionSetAsync("componenttype")` to query the global option set metadata at runtime
+2. Returns `Dictionary<int, string>` mapping all type codes to display names, including the 10000+ range
+3. Results cached in-memory per environment URL in `SolutionService` (keyed by normalized URL)
 4. Cache lifetime: duration of the daemon process (component types don't change during a session)
 5. On failure, falls back to existing hardcoded `ComponentTypeNames` dictionary
 6. `GetComponentsAsync()` uses the resolved names from cache instead of only the hardcoded dictionary
 
+**Note:** The existing hardcoded `ComponentTypeNames` dictionary in `SolutionService.cs` has incorrect values for several component types (e.g., `65 → FieldSecurityProfile` should be `70`, `68 → PluginType` should be `90`). The generated `componenttype` enum is authoritative. The runtime metadata query will supersede the hardcoded dictionary, but the hardcoded values should also be corrected as part of this work to ensure the fallback path is accurate.
+
 #### Primary Flow
 
 1. **First `solutions/components` call for an environment** triggers metadata query
-2. **`RetrieveOptionSetRequest`** with `Name = "componenttype"` returns all option values
-3. **Cache** the result in a `ConcurrentDictionary<string, Dictionary<int, string>>` keyed by environment URL
+2. **`IMetadataService.GetOptionSetAsync("componenttype")`** returns option set metadata with all values
+3. **Parse** option values into `Dictionary<int, string>` and **cache** in a `ConcurrentDictionary<string, Dictionary<int, string>>` keyed by environment URL
 4. **Subsequent calls** for the same environment use cached mapping
-5. **Component type name resolution** in `GetComponentsAsync()` checks cache first, then hardcoded dictionary, then falls back to `Unknown ({type})`
+5. **Component type name resolution** in `GetComponentsAsync()` checks runtime cache first, then corrected hardcoded dictionary, then falls back to `Unknown ({type})`
 
 #### Implementation Detail
 
 ```csharp
-// In SolutionService
+// In SolutionService — inject IMetadataService via constructor
+private readonly IMetadataService _metadataService;
 private static readonly ConcurrentDictionary<string, Dictionary<int, string>> _componentTypeCache = new();
 
-public async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
+private async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
     CancellationToken cancellationToken = default)
 {
-    // Get environment URL from pool for cache key
-    // Query RetrieveOptionSetRequest for "componenttype"
-    // Parse OptionMetadata[] into Dictionary<int, string>
+    // Check cache by environment URL
+    // If miss: call _metadataService.GetOptionSetAsync("componenttype")
+    // Parse OptionSetMetadataDto values into Dictionary<int, string>
     // Cache and return
 }
 ```
@@ -217,9 +220,8 @@ public async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
 #### Core Requirements
 
 1. Component type group headers: display the resolved type name as-is (e.g., `Entity`, `WebResource`, `CanvasApp`)
-2. Individual component items: `logicalName (DisplayName)` where both are available
-3. Where only objectId (GUID) is available: show the GUID (current behavior, unchanged)
-4. This format applies throughout the Solutions panel — group headers and individual items
+2. Individual component items: show the objectId (GUID) as currently — resolving GUIDs to friendly names (e.g., entity display names) is deferred to a future enhancement (see Non-Goals)
+3. The `logicalName (DisplayName)` format is the target convention for when individual component name resolution is implemented; this spec establishes the convention but only applies it where data is available (group headers)
 
 ### 7. Solutions Panel — Managed Toggle Persistence
 
@@ -230,6 +232,19 @@ public async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
 3. Panel initializes with the persisted value (or `false` if not set)
 4. The `globalState` key is shared across all Solutions panel instances
 
+### Validation Rules
+
+| Field | Rule | Error |
+|-------|------|-------|
+| `ppds.profiles.sortOrder` globalState | Must be `Record<string, number>` or absent | Reset to `{}` on parse error |
+| `ppds.solutionsPanel.includeManaged` globalState | Must be `boolean` or absent | Default to `false` on parse error |
+| Profile tree item `id` | Must be non-empty string | Fall back to label-based identity (VS Code default) |
+| Component type metadata cache | Keyed by normalized (lowercased, trailing-slash-stripped) env URL | Prevents duplicate cache entries for same environment |
+
+### Known Issues to Fix
+
+The current `SolutionsPanel.loadSolutions()` makes a **redundant second RPC call** when `includeManaged` is false (lines 148-159) solely to count managed solutions. This should be addressed: either have the daemon return `totalCount` alongside the filtered list, or accept the double-call as a known cost. The search/filter status bar ("5 of 23 solutions") will interact with this count display.
+
 ---
 
 ## Acceptance Criteria
@@ -237,26 +252,27 @@ public async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
 | AC-01 | ProfileTreeItem has stable `id` based on identity + authMethod + cloud | `profileTreeView.test.ts` | 🔲 |
-| AC-02 | Profile expansion state persists across `refresh()` calls | Manual verification | 🔲 |
-| AC-03 | Profile expansion state persists across VS Code restart | Manual verification | 🔲 |
+| AC-02 | `ProfileTreeItem.id` is consistent across multiple `getChildren()` calls for the same profile | `profileTreeView.test.ts` | 🔲 |
+| AC-03 | Profile expansion state persists across VS Code restart (depends on AC-01 + AC-02) | Manual verification | 🔲 |
 | AC-04 | Move Profile Up swaps sort position with adjacent profile and refreshes tree | `profileTreeView.test.ts` | 🔲 |
 | AC-05 | Move Profile Down swaps sort position with adjacent profile and refreshes tree | `profileTreeView.test.ts` | 🔲 |
 | AC-06 | Profile sort order persists in globalState and survives VS Code restart | `profileTreeView.test.ts` | 🔲 |
 | AC-07 | Solution detail card shows Unique Name, Publisher, Type, Installed, Modified, Description | Manual verification | 🔲 |
-| AC-08 | solutions/list RPC response includes createdOn, modifiedOn, installedOn, description | `daemonClient.test.ts` | 🔲 |
+| AC-08 | SolutionsPanel webview message includes createdOn, modifiedOn, installedOn, description from existing RPC data | `SolutionsPanel` manual verification | 🔲 |
 | AC-09 | Component types in 10000+ range resolve to display names via option set metadata query | `SolutionServiceTests.cs` | 🔲 |
 | AC-10 | Component type metadata is cached per environment URL | `SolutionServiceTests.cs` | 🔲 |
 | AC-11 | Component type resolution falls back to hardcoded dictionary on metadata query failure | `SolutionServiceTests.cs` | 🔲 |
 | AC-12 | Search input filters solution list by friendly name, unique name, and publisher | Manual verification | 🔲 |
 | AC-13 | Search shows "5 of 23 solutions" count in status bar when active | Manual verification | 🔲 |
 | AC-14 | Managed toggle state persists across panel close/reopen via globalState | Manual verification | 🔲 |
-| AC-15 | Display format for components is logicalName (DisplayName) | Manual verification | 🔲 |
+| AC-15 | Component type group headers show resolved type names (not "Unknown") for 10000+ range | Manual verification | 🔲 |
+| AC-16 | Hardcoded `ComponentTypeNames` dictionary values corrected to match generated `componenttype` enum | `SolutionServiceTests.cs` | 🔲 |
 
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
-| Profile identity contains special characters | `user@domain.com:interactive:commercial` | ID is URL-safe string, VS Code handles it |
+| Profile identity contains special characters | `user@domain.com` with `interactive` and `commercial` | ID uses `//` separator to avoid collision: `profile://identity//authMethod//cloud` |
 | Move up on first profile | User right-clicks top profile | Command is no-op (or hidden via `when` clause) |
 | Move down on last profile | User right-clicks bottom profile | Command is no-op (or hidden via `when` clause) |
 | No profiles exist | Empty profile list | No sort order stored, no move commands visible |
@@ -277,7 +293,7 @@ export class ProfileTreeItem extends vscode.TreeItem {
     constructor(public readonly profile: ProfileInfo) {
         const label = profile.name ?? `Profile ${profile.index}`;
         super(label, vscode.TreeItemCollapsibleState.Collapsed);
-        this.id = `profile:${profile.identity}:${profile.authMethod}:${profile.cloud}`;
+        this.id = `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}`;
         // ... existing constructor body
     }
 }
@@ -348,7 +364,7 @@ Component type names now include 10000+ range resolved from environment metadata
 
 | Error | Condition | Recovery |
 |-------|-----------|----------|
-| Metadata query failure | `RetrieveOptionSetRequest` fails (permissions, network) | Fall back to hardcoded `ComponentTypeNames` dictionary silently |
+| Metadata query failure | `IMetadataService.GetOptionSetAsync` fails (permissions, network) | Fall back to corrected hardcoded `ComponentTypeNames` dictionary silently |
 | globalState read failure | Corrupted state data | Use default values (empty sort order, managed = false) |
 | Profile ID collision | Two profiles with identical identity+authMethod+cloud | Extremely unlikely; append index as tiebreaker if needed |
 
@@ -376,19 +392,20 @@ Component type names now include 10000+ range resolved from environment metadata
 - Positive: ~1 line of code, zero maintenance, battle-tested mechanism
 - Negative: Slightly less explicit control; if profile identity changes, orphaned state (harmless)
 
-### Why runtime metadata query over expanding the hardcoded dictionary?
+### Why runtime metadata query via existing IMetadataService?
 
-**Context:** Component types 10000+ show as "Unknown" because they're not in the hardcoded `ComponentTypeNames` dictionary.
+**Context:** Component types 10000+ show as "Unknown" because they're not in the hardcoded `ComponentTypeNames` dictionary. The hardcoded dictionary also has incorrect values for several standard types (e.g., maps `65 → FieldSecurityProfile` when the actual Dataverse value is `70`).
 
-**Decision:** Query the `componenttype` global option set metadata from the environment at runtime.
+**Decision:** Query the `componenttype` global option set via the existing `IMetadataService.GetOptionSetAsync()`, cache in `SolutionService`, and correct the hardcoded fallback dictionary.
 
 **Alternatives considered:**
-- Expanding the hardcoded dictionary: Rejected because 10000+ component type codes vary by environment version and installed solutions. A hardcoded mapping would be incomplete and drift over time.
+- Expanding the hardcoded dictionary only: Rejected because 10000+ component type codes vary by environment version and installed solutions. A hardcoded mapping would be incomplete and drift over time.
+- New standalone metadata method in `SolutionService`: Rejected because `IMetadataService` already implements `RetrieveOptionSetRequest` with proper error handling. Duplicating that infrastructure violates the architecture's service reuse principle.
 - Client-side (extension) metadata query: Rejected because the daemon already has the authenticated connection and caching infrastructure.
 
 **Consequences:**
-- Positive: Resolves all component types for any environment, no maintenance burden
-- Negative: First call per environment adds latency for the metadata query (~200-500ms)
+- Positive: Resolves all component types for any environment, no maintenance burden, reuses existing service
+- Negative: First call per environment adds latency for the metadata query (~200-500ms); adds `IMetadataService` as a dependency of `SolutionService`
 
 ### Why logicalName (DisplayName) format?
 
