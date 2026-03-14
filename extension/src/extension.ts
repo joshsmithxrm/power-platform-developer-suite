@@ -15,6 +15,7 @@ import { DataverseCompletionProvider } from './providers/completionProvider.js';
 import { QueryPanel } from './panels/QueryPanel.js';
 import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
+import { registerDebugCommands } from './commands/debugCommands.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
@@ -80,8 +81,11 @@ export function activate(context: vscode.ExtensionContext) {
         });
     }
 
+    // ── Shared State Tracker (mutable, updated by tree provider) ────────
+    const extensionState = { daemonState: 'starting', profileCount: 0 };
+
     // ── Profile Tree View ────────────────────────────────────────────────
-    const profileTreeProvider = new ProfileTreeDataProvider(client, logChannel, context.globalState);
+    const profileTreeProvider = new ProfileTreeDataProvider(client, logChannel, context.globalState, extensionState);
     const profileTreeView = vscode.window.createTreeView('ppds.profiles', {
         treeDataProvider: profileTreeProvider,
         showCollapseAll: false,
@@ -249,6 +253,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Browser Commands ──────────────────────────────────────────────
     registerBrowserCommands(context, client);
+
+    // ── Debug / Diagnostic Commands ──────────────────────────────────
+    registerDebugCommands(context, client, profileTreeProvider, extensionState, {
+        queryPanelCount: () => QueryPanel.instanceCount,
+        solutionsPanelCount: () => SolutionsPanel.instanceCount,
+    });
 
     // Register environment selection command for notebooks
     context.subscriptions.push(

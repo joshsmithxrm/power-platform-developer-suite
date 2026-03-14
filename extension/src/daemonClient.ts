@@ -661,6 +661,24 @@ export class DaemonClient implements vscode.Disposable {
         this.log.debug('Registered auth/deviceCode notification handler');
     }
 
+    // ── Diagnostic accessors ────────────────────────────────────────────────
+
+    /**
+     * Returns true if the daemon process is running and the JSON-RPC
+     * connection is established. Used by diagnostic commands.
+     */
+    isReady(): boolean {
+        return this.connection !== null && this.process !== null;
+    }
+
+    /**
+     * Returns the PID of the daemon child process, or null if not running.
+     * Used by diagnostic commands for process inspection.
+     */
+    getProcessId(): number | null {
+        return this.process?.pid ?? null;
+    }
+
     // ── Connection management ───────────────────────────────────────────────
 
     /**
