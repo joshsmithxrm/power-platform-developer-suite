@@ -9,6 +9,7 @@ vi.mock('vscode', () => ({
     TreeItem: class TreeItem {
         label: string;
         collapsibleState: number;
+        id?: string;
         description?: string;
         tooltip?: string;
         contextValue?: string;
@@ -136,6 +137,29 @@ describe('ProfileTreeItem', () => {
         const profile = makeProfile({ name: null });
         const item = new ProfileTreeItem(profile);
         expect(item.tooltip).toContain('(unnamed)');
+    });
+
+    it('sets stable id based on identity, authMethod, and cloud', () => {
+        const profile = makeProfile({
+            identity: 'user@example.com',
+            authMethod: 'DeviceCode',
+            cloud: 'Public',
+        });
+        const item = new ProfileTreeItem(profile);
+        expect(item.id).toBe('profile://user@example.com//DeviceCode//Public');
+    });
+
+    it('produces consistent id across multiple instantiations', () => {
+        const profile = makeProfile();
+        const item1 = new ProfileTreeItem(profile);
+        const item2 = new ProfileTreeItem(profile);
+        expect(item1.id).toBe(item2.id);
+    });
+
+    it('produces different ids for different auth methods', () => {
+        const p1 = makeProfile({ authMethod: 'DeviceCode' });
+        const p2 = makeProfile({ authMethod: 'ClientSecret' });
+        expect(new ProfileTreeItem(p1).id).not.toBe(new ProfileTreeItem(p2).id);
     });
 });
 
