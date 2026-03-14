@@ -4,7 +4,10 @@
     {
       "label": "Build Daemon",
       "type": "shell",
-      "command": "dotnet build ${workspaceFolder}/../src/PPDS.Cli/PPDS.Cli.csproj -v q",
+      "command": "dotnet build src/PPDS.Cli/PPDS.Cli.csproj -v q",
+      "options": {
+        "cwd": "${workspaceFolder}/.."
+      },
       "problemMatcher": "$msCompile",
       "presentation": {
         "reveal": "silent",
