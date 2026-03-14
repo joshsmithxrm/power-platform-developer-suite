@@ -100,6 +100,10 @@ function buildTooltip(profile: ProfileInfo): string {
     return lines.join('\n');
 }
 
+export function getProfileId(profile: ProfileInfo): string {
+    return `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}`;
+}
+
 /**
  * Tree data provider for the Profiles view in the PPDS activity bar.
  *
@@ -114,6 +118,7 @@ export class ProfileTreeDataProvider
     constructor(
         private readonly daemonClient: DaemonClient,
         private readonly log: vscode.LogOutputChannel,
+        private readonly globalState?: vscode.Memento,
     ) {}
 
     refresh(): void {
@@ -144,7 +149,19 @@ export class ProfileTreeDataProvider
             if (result.profiles.length === 0) {
                 return [];
             }
-            return result.profiles.map(p => new ProfileTreeItem(p));
+            const items = result.profiles.map(p => new ProfileTreeItem(p));
+
+            // Apply user-defined sort order from globalState
+            const sortOrder = this.globalState?.get<Record<string, number>>('ppds.profiles.sortOrder');
+            if (sortOrder && Object.keys(sortOrder).length > 0) {
+                items.sort((a, b) => {
+                    const orderA = sortOrder[getProfileId(a.profile)] ?? Number.MAX_SAFE_INTEGER;
+                    const orderB = sortOrder[getProfileId(b.profile)] ?? Number.MAX_SAFE_INTEGER;
+                    return orderA - orderB;
+                });
+            }
+
+            return items;
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this.log.error(`Failed to list profiles: ${msg}`);

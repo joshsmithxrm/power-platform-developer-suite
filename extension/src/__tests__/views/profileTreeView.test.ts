@@ -238,4 +238,45 @@ describe('ProfileTreeDataProvider', () => {
         // Should not throw
         expect(() => provider.dispose()).not.toThrow();
     });
+
+    describe('profile ordering', () => {
+        it('applies sort order from globalState', async () => {
+            const profiles = [
+                makeProfile({ index: 0, name: 'alpha', identity: 'a@x.com', authMethod: 'DeviceCode', cloud: 'Public' }),
+                makeProfile({ index: 1, name: 'beta', identity: 'b@x.com', authMethod: 'DeviceCode', cloud: 'Public' }),
+                makeProfile({ index: 2, name: 'gamma', identity: 'c@x.com', authMethod: 'DeviceCode', cloud: 'Public' }),
+            ];
+            const daemon = makeDaemonClient(profiles);
+            const sortOrder: Record<string, number> = {
+                'profile://c@x.com//DeviceCode//Public': 0,
+                'profile://a@x.com//DeviceCode//Public': 1,
+                'profile://b@x.com//DeviceCode//Public': 2,
+            };
+            const globalState = { get: vi.fn().mockReturnValue(sortOrder), update: vi.fn() };
+            const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any, globalState as any);
+
+            const children = await provider.getChildren();
+
+            expect(children).toHaveLength(3);
+            expect(children[0].label).toBe('gamma');
+            expect(children[1].label).toBe('alpha');
+            expect(children[2].label).toBe('beta');
+        });
+
+        it('uses default order when no sort order in globalState', async () => {
+            const profiles = [
+                makeProfile({ index: 0, name: 'alpha' }),
+                makeProfile({ index: 1, name: 'beta' }),
+            ];
+            const daemon = makeDaemonClient(profiles);
+            const globalState = { get: vi.fn().mockReturnValue(undefined), update: vi.fn() };
+            const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any, globalState as any);
+
+            const children = await provider.getChildren();
+
+            expect(children).toHaveLength(2);
+            expect(children[0].label).toBe('alpha');
+            expect(children[1].label).toBe('beta');
+        });
+    });
 });
