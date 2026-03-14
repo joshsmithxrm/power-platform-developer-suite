@@ -19,6 +19,27 @@ import { migrateLegacyState } from './migration/legacyState.js';
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
 
+/**
+ * Wraps a command handler with error logging. All unhandled exceptions
+ * from command callbacks are logged to the PPDS output channel so they
+ * appear in user-submitted log files, not just the dev console.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return async (...args: any[]) => {
+        try {
+            await handler(...args);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const stack = err instanceof Error ? err.stack : undefined;
+            logChannel?.error(`Command error: ${msg}`);
+            if (stack) logChannel?.debug(stack);
+            vscode.window.showErrorMessage(`PPDS: ${msg}`);
+        }
+    };
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Power Platform Developer Suite is now active');
 
@@ -31,6 +52,17 @@ export function activate(context: vscode.ExtensionContext) {
     // Create structured log channel
     logChannel = vscode.window.createOutputChannel('PPDS', { log: true });
     context.subscriptions.push(logChannel);
+
+    // Global unhandled rejection logging — catches async errors that escape
+    // individual command handlers so they appear in the PPDS log for diagnostics
+    const rejectionHandler = (reason: unknown) => {
+        const msg = reason instanceof Error ? reason.message : String(reason);
+        const stack = reason instanceof Error ? reason.stack : undefined;
+        logChannel?.error(`Unhandled rejection: ${msg}`);
+        if (stack) logChannel?.debug(stack);
+    };
+    process.on('unhandledRejection', rejectionHandler);
+    context.subscriptions.push({ dispose: () => process.removeListener('unhandledRejection', rejectionHandler) });
 
     void vscode.commands.executeCommand('setContext', 'ppds.daemonState', 'starting');
     void vscode.commands.executeCommand('setContext', 'ppds.profileCount', 0);
@@ -94,16 +126,16 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         // Open Data Explorer targeting this environment
-        vscode.commands.registerCommand('ppds.openDataExplorerForEnv', (item: { envUrl: string; envDisplayName: string }) => {
+        vscode.commands.registerCommand('ppds.openDataExplorerForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
             QueryPanel.show(context.extensionUri, client, undefined, item.envUrl, item.envDisplayName);
-        }),
+        })),
 
         // Open Solutions targeting this environment
-        vscode.commands.registerCommand('ppds.openSolutionsForEnv', (item: { envUrl: string; envDisplayName: string }) => {
+        vscode.commands.registerCommand('ppds.openSolutionsForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
             SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
-        }),
+        })),
 
         // Copy environment URL to clipboard
         vscode.commands.registerCommand('ppds.copyEnvironmentUrl', async (item: { envUrl: string }) => {

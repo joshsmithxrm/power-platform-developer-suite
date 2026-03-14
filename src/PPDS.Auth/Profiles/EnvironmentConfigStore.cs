@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -56,6 +57,37 @@ public sealed class EnvironmentConfigStore : IDisposable
             var json = await File.ReadAllTextAsync(_filePath, ct).ConfigureAwait(false);
             _cached = JsonSerializer.Deserialize<EnvironmentConfigCollection>(json, JsonOptions)
                 ?? new EnvironmentConfigCollection();
+
+            // Dedup environments by normalized URL (keep first occurrence, merge profiles)
+            var seen = new Dictionary<string, EnvironmentConfig>();
+            foreach (var env in _cached.Environments)
+            {
+                var key = EnvironmentConfig.NormalizeUrl(env.Url);
+                if (seen.TryGetValue(key, out var existing))
+                {
+                    // Merge profiles from duplicate into the kept entry
+                    foreach (var p in env.Profiles)
+                    {
+                        if (!existing.Profiles.Contains(p, StringComparer.OrdinalIgnoreCase))
+                            existing.Profiles.Add(p);
+                    }
+                }
+                else
+                {
+                    env.Url = key; // Ensure stored URL is normalized
+                    seen[key] = env;
+                }
+            }
+            if (seen.Count != _cached.Environments.Count)
+            {
+                _cached.Environments = seen.Values.ToList();
+                // Persist the deduped version (fire-and-forget within the lock)
+                ProfilePaths.EnsureDirectoryExists();
+                _cached.Version = 1;
+                var cleanJson = JsonSerializer.Serialize(_cached, JsonOptions);
+                await File.WriteAllTextAsync(_filePath, cleanJson, ct).ConfigureAwait(false);
+            }
+
             return _cached;
         }
         finally
@@ -99,10 +131,11 @@ public sealed class EnvironmentConfigStore : IDisposable
 
     /// <summary>
     /// Saves or updates config for a specific environment. Merges non-null fields.
+    /// Optionally links the environment to a profile name.
     /// </summary>
     public async Task<EnvironmentConfig> SaveConfigAsync(
         string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null,
-        bool clearColor = false, string? discoveredType = null,
+        bool clearColor = false, string? discoveredType = null, string? profileName = null,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -131,6 +164,13 @@ public sealed class EnvironmentConfigStore : IDisposable
                 DiscoveredType = discoveredType
             };
             collection.Environments.Add(existing);
+        }
+
+        // Link to profile if specified
+        if (!string.IsNullOrWhiteSpace(profileName) &&
+            !existing.Profiles.Contains(profileName, StringComparer.OrdinalIgnoreCase))
+        {
+            existing.Profiles.Add(profileName);
         }
 
         await SaveAsync(collection, ct).ConfigureAwait(false);

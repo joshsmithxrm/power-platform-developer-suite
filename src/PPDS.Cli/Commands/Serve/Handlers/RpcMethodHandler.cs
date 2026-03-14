@@ -310,28 +310,43 @@ public class RpcMethodHandler : IDisposable
             _discoveredEnvCacheExpiry = DateTime.UtcNow + DiscoveryCacheTtl;
         }
 
-        // 2. Get configured environments from environments.json
-        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
-        var configuredEnvs = await configService.GetAllConfigsAsync(cancellationToken);
+        // 2. Get configured environments from environments.json and tag discovered envs with profile
+        var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
+        var configCollection = await configStore.LoadAsync(cancellationToken);
+        var profileName = profile.Name ?? profile.DisplayIdentifier;
 
-        // 3. Merge: start with discovered, add configured that aren't already in discovered
+        // Tag all discovered environments with this profile in environments.json
+        foreach (var env in discovered)
+        {
+            await configStore.SaveConfigAsync(
+                env.ApiUrl,
+                discoveredType: env.Type,
+                profileName: profileName,
+                ct: cancellationToken);
+        }
+
+        // Reload config after tagging
+        configStore.ClearCache();
+        configCollection = await configStore.LoadAsync(cancellationToken);
+
+        // 3. Merge: start with discovered, add configured that belong to this profile
         var merged = new List<EnvironmentInfo>(discovered);
         var discoveredUrls = new HashSet<string>(
-            discovered.Select(e => e.ApiUrl.TrimEnd('/').ToLowerInvariant()));
+            discovered.Select(e => EnvironmentConfig.NormalizeUrl(e.ApiUrl)));
 
-        foreach (var config in configuredEnvs)
+        foreach (var config in configCollection.Environments)
         {
-            var normalizedUrl = config.Url.TrimEnd('/').ToLowerInvariant();
+            var normalizedUrl = EnvironmentConfig.NormalizeUrl(config.Url);
             if (discoveredUrls.Contains(normalizedUrl))
             {
                 // Already in discovered — update source to "both" and apply config metadata
-                var existing = merged.First(e => e.ApiUrl.TrimEnd('/').ToLowerInvariant() == normalizedUrl);
+                var existing = merged.First(e => EnvironmentConfig.NormalizeUrl(e.ApiUrl) == normalizedUrl);
                 existing.Source = "both";
                 if (config.Label != null) existing.FriendlyName = config.Label;
             }
-            else
+            else if (config.Profiles.Contains(profileName, StringComparer.OrdinalIgnoreCase))
             {
-                // Only in config — add with source "configured"
+                // Only in config but linked to this profile — add with source "configured"
                 merged.Add(new EnvironmentInfo
                 {
                     Id = Guid.Empty,
