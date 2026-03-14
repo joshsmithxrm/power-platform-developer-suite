@@ -24,6 +24,7 @@ The Data Explorer's query results grid has basic cell selection and copy, but it
 - Column resize or reorder
 - Cell editing
 - Multi-region selection (Ctrl+click to add disjoint ranges)
+- Keyboard arrow navigation for selection (Shift+Arrow to extend by one cell) — potential future enhancement
 
 ---
 
@@ -78,14 +79,14 @@ QueryPanel.ts (webview)
 
 | Shortcut | Behavior |
 |----------|----------|
-| Ctrl+A | Set anchor = {0, 0}, focus = {lastRow, lastCol}. Full table selected. |
-| Escape | Clear selection (anchor = focus = null). Also closes filter bar if open (existing). |
+| Ctrl+A | Set anchor = {0, 0}, focus = {lastRow, lastCol}. Full table selected. For performance on large tables (5,000 rows), use a CSS class on tbody (`tbody.all-selected td`) instead of per-cell class application. |
+| Escape | If filter bar is open: close filter bar only. If filter bar is closed and selection exists: clear selection. (Filter bar takes precedence — matches existing behavior.) |
 
 #### Drag Details
 
 - On `mousedown` on a `td[data-row]`: set anchor, begin tracking. Add `selecting` class to tbody (changes cursor to `cell`, disables text selection).
 - On `mousemove` (while tracking): update focus to the cell under the mouse. Call `updateSelectionVisuals()`.
-- On `mouseup`: stop tracking. Remove `selecting` class from tbody.
+- On `mouseup`: stop tracking. Remove `selecting` class from tbody. **Remove the mousemove listener** (attach it on mousedown, remove on mouseup — do not leave a permanent global mousemove handler).
 - If mouse leaves the results wrapper during drag, clamp focus to nearest edge cell.
 
 ### 2. Copy Behavior
@@ -94,7 +95,7 @@ QueryPanel.ts (webview)
 
 | Selection | Ctrl+C (default) | Ctrl+Shift+C (inverted) |
 |-----------|-------------------|--------------------------|
-| Single cell | Copy raw value only | Copy value with column header above |
+| Single cell | Copy displayed (formatted) value only | Copy value with column header above |
 | Multi-cell | Copy selected rectangle WITH column headers | Copy selected rectangle WITHOUT headers |
 | Full table (Ctrl+A) | Copy all data WITH headers | Copy all data WITHOUT headers |
 
@@ -102,8 +103,17 @@ QueryPanel.ts (webview)
 
 - Tab-separated values (TSV) with `\n` row separators
 - Values sanitized: tabs replaced with spaces, newlines replaced with spaces
-- Formatted values used where available (same as current `renderTable` display logic)
+- All copy uses the **displayed (formatted) value** — same as what `renderTable` shows in the grid. For cells with `{value, formatted}` objects, the formatted string is used. This matches what users see.
 - Only columns within the selection rectangle are included (not all columns)
+- **Selection coordinates are relative to the currently rendered view** (which may be filtered or sorted), not the raw `allRows` array. The copy function reads from the same row array that `renderTable` used.
+
+#### Post-Copy Feedback
+
+After a successful copy, the status bar briefly shows confirmation matching the TUI pattern:
+- Single cell: `"Copied: {truncated_value}"`
+- Multi-cell: `"Copied {rowCount} rows x {colCount} cols with headers"` (or "without headers")
+
+The confirmation replaces the copy hint for 2 seconds, then the hint returns.
 
 #### Clipboard
 
@@ -194,7 +204,7 @@ The hint updates whenever the selection changes.
 | AC-03 | Shift+click extends selection from existing anchor | Manual | 🔲 |
 | AC-04 | Ctrl+A selects entire table | Manual | 🔲 |
 | AC-05 | Escape clears selection | Manual | 🔲 |
-| AC-06 | Ctrl+C on single cell copies raw value (no header) | Manual | 🔲 |
+| AC-06 | Ctrl+C on single cell copies displayed (formatted) value (no header) | Manual | 🔲 |
 | AC-07 | Ctrl+C on multi-cell copies with headers as TSV | Manual | 🔲 |
 | AC-08 | Ctrl+Shift+C inverts header behavior | Manual | 🔲 |
 | AC-09 | Context menu shows smart copy options with correct labels | Manual | 🔲 |
@@ -204,6 +214,12 @@ The hint updates whenever the selection changes.
 | AC-13 | Status bar shows copy hint based on selection state | Manual | 🔲 |
 | AC-14 | Right-clicking outside selection moves selection to that cell first | Manual | 🔲 |
 | AC-15 | Only columns within selection rectangle are copied (not all columns) | Manual | 🔲 |
+| AC-16 | Values with tabs/newlines are sanitized (replaced with spaces) in copy output | `getSelectionRect` / `copySelection` unit tests | 🔲 |
+| AC-17 | Copy on filtered/sorted view uses displayed row order, not raw allRows | Manual | 🔲 |
+| AC-18 | Post-copy confirmation appears in status bar for 2 seconds | Manual | 🔲 |
+| AC-19 | Escape with filter bar open closes filter bar only (does not clear selection) | Manual | 🔲 |
+
+**Testing approach:** Most ACs require manual verification since they involve webview DOM interaction. However, the pure-function logic (`getSelectionRect()` normalization, `copySelection()` TSV formatting, value sanitization) should be extracted as testable utility functions and covered with Vitest unit tests (AC-16). Mouse/keyboard interaction is manual-only.
 
 ### Edge Cases
 
@@ -217,6 +233,9 @@ The hint updates whenever the selection changes.
 | Selection persists after re-sort | Selection cleared on sort (anchor/focus reset) |
 | Selection persists after filter | Selection cleared on filter change |
 | Selection persists after new query | Selection cleared on new results |
+| Selection persists after Load More | Selection cleared on append results |
+| Copy while filtered | Copies from filtered/sorted view, not raw allRows |
+| Escape with filter open + selection | Closes filter bar only; second Escape clears selection |
 
 ---
 
