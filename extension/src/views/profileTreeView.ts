@@ -15,6 +15,9 @@ export class ProfileTreeItem extends vscode.TreeItem {
         const label = profile.name ?? `Profile ${profile.index}`;
         super(label, vscode.TreeItemCollapsibleState.Collapsed);
 
+        // Stable ID for VS Code's built-in expansion state persistence
+        this.id = `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}`;
+
         if (profile.environment) {
             this.description = profile.environment.displayName;
         } else {
