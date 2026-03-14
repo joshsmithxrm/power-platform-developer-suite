@@ -1,4 +1,7 @@
 {
+  "terminal.integrated.automationProfile.windows": {
+    "path": "cmd.exe"
+  },
   "dotnet.defaultSolution": "PPDS.sln",
   "files.exclude": {
     "**/bin": true,
