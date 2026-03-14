@@ -128,6 +128,8 @@ export async function showEnvironmentPicker(
         });
         if (!url) return undefined;
         const trimmed = url.trim();
+        // Auto-save manual URL to environments.json so it persists
+        try { await daemon.envConfigSet({ environmentUrl: trimmed }); } catch { /* best-effort */ }
         return { url: trimmed, displayName: trimmed };
     }
 

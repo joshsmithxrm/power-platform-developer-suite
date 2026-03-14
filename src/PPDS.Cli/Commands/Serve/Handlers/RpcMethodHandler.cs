@@ -43,6 +43,11 @@ public class RpcMethodHandler : IDisposable
     private readonly CancellationTokenSource _daemonCts = new();
     private JsonRpc? _rpc;
 
+    // Discovery cache for env/list
+    private List<EnvironmentInfo>? _discoveredEnvCache;
+    private DateTime _discoveredEnvCacheExpiry = DateTime.MinValue;
+    private static readonly TimeSpan DiscoveryCacheTtl = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RpcMethodHandler"/> class.
     /// </summary>
@@ -245,12 +250,14 @@ public class RpcMethodHandler : IDisposable
     #region Environment Methods
 
     /// <summary>
-    /// Lists available environments.
+    /// Lists available environments by merging discovered (Global Discovery API) and
+    /// configured (environments.json) environments. Discovery results are cached for 5 minutes.
     /// Maps to: ppds env list --json
     /// </summary>
     [JsonRpcMethod("env/list")]
     public async Task<EnvListResponse> EnvListAsync(
         string? filter = null,
+        bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
         var store = _authServices.GetRequiredService<ProfileStore>();
@@ -262,41 +269,102 @@ public class RpcMethodHandler : IDisposable
             throw new RpcException(ErrorCodes.Auth.NoActiveProfile, "No active profile configured");
         }
 
-        using var gds = GlobalDiscoveryService.FromProfile(profile);
-        var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
+        var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
 
-        // Apply filter if provided
-        IReadOnlyList<DiscoveredEnvironment> filtered = environments;
-        if (!string.IsNullOrWhiteSpace(filter))
+        // 1. Get discovered environments (cached, unless forceRefresh)
+        List<EnvironmentInfo> discovered;
+        if (!forceRefresh && _discoveredEnvCache != null && DateTime.UtcNow < _discoveredEnvCacheExpiry)
         {
-            filtered = environments.Where(e =>
-                e.FriendlyName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                e.UniqueName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                e.ApiUrl.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                (e.EnvironmentId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
-            ).ToList();
+            discovered = _discoveredEnvCache;
+        }
+        else
+        {
+            discovered = new List<EnvironmentInfo>();
+            try
+            {
+                using var gds = GlobalDiscoveryService.FromProfile(profile);
+                var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
+                discovered = environments.Select(e => new EnvironmentInfo
+                {
+                    Id = e.Id,
+                    EnvironmentId = e.EnvironmentId,
+                    FriendlyName = e.FriendlyName,
+                    UniqueName = e.UniqueName,
+                    ApiUrl = e.ApiUrl,
+                    Url = e.Url,
+                    Type = e.EnvironmentType,
+                    State = e.IsEnabled ? "Enabled" : "Disabled",
+                    Region = e.Region,
+                    Version = e.Version,
+                    IsActive = selectedUrl != null &&
+                        e.ApiUrl.TrimEnd('/').ToLowerInvariant() == selectedUrl,
+                    Source = "discovered"
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                // Discovery may fail for SPNs or when offline — continue with configured only
+                _logger.LogDebug(ex, "Environment discovery failed, using configured environments only");
+            }
+            _discoveredEnvCache = discovered;
+            _discoveredEnvCacheExpiry = DateTime.UtcNow + DiscoveryCacheTtl;
         }
 
-        var selectedUrl = profile.Environment?.Url?.TrimEnd('/').ToLowerInvariant();
+        // 2. Get configured environments from environments.json
+        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
+        var configuredEnvs = await configService.GetAllConfigsAsync(cancellationToken);
+
+        // 3. Merge: start with discovered, add configured that aren't already in discovered
+        var merged = new List<EnvironmentInfo>(discovered);
+        var discoveredUrls = new HashSet<string>(
+            discovered.Select(e => e.ApiUrl.TrimEnd('/').ToLowerInvariant()));
+
+        foreach (var config in configuredEnvs)
+        {
+            var normalizedUrl = config.Url.TrimEnd('/').ToLowerInvariant();
+            if (discoveredUrls.Contains(normalizedUrl))
+            {
+                // Already in discovered — update source to "both" and apply config metadata
+                var existing = merged.First(e => e.ApiUrl.TrimEnd('/').ToLowerInvariant() == normalizedUrl);
+                existing.Source = "both";
+                if (config.Label != null) existing.FriendlyName = config.Label;
+            }
+            else
+            {
+                // Only in config — add with source "configured"
+                merged.Add(new EnvironmentInfo
+                {
+                    Id = Guid.Empty,
+                    EnvironmentId = null,
+                    FriendlyName = config.Label ?? config.Url,
+                    UniqueName = "",
+                    ApiUrl = config.Url,
+                    Url = config.Url,
+                    Type = config.Type?.ToString(),
+                    State = "Unknown",
+                    Region = null,
+                    Version = null,
+                    IsActive = selectedUrl != null && normalizedUrl == selectedUrl,
+                    Source = "configured"
+                });
+            }
+        }
+
+        // 4. Apply filter if provided
+        IEnumerable<EnvironmentInfo> result = merged;
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            result = merged.Where(e =>
+                e.FriendlyName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                (e.UniqueName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                e.ApiUrl.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                (e.EnvironmentId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
 
         return new EnvListResponse
         {
             Filter = filter,
-            Environments = filtered.Select(e => new EnvironmentInfo
-            {
-                Id = e.Id,
-                EnvironmentId = e.EnvironmentId,
-                FriendlyName = e.FriendlyName,
-                UniqueName = e.UniqueName,
-                ApiUrl = e.ApiUrl,
-                Url = e.Url,
-                Type = e.EnvironmentType,
-                State = e.IsEnabled ? "Enabled" : "Disabled",
-                Region = e.Region,
-                Version = e.Version,
-                IsActive = selectedUrl != null &&
-                    e.ApiUrl.TrimEnd('/').ToLowerInvariant() == selectedUrl
-            }).ToList()
+            Environments = result.ToList()
         };
     }
 
@@ -340,6 +408,8 @@ public class RpcMethodHandler : IDisposable
         var resolved = result.Environment!;
         profile.Environment = resolved;
         await store.SaveAsync(collection, cancellationToken);
+
+        _discoveredEnvCache = null; // Invalidate env list cache
 
         return new EnvSelectResponse
         {
@@ -490,6 +560,28 @@ public class RpcMethodHandler : IDisposable
             Color = saved.Color?.ToString(),
             Saved = true
         };
+    }
+
+    /// <summary>
+    /// Removes a configured environment from environments.json.
+    /// Maps to: ppds env config remove --environment "url"
+    /// </summary>
+    [JsonRpcMethod("env/config/remove")]
+    public async Task<EnvConfigRemoveResponse> EnvConfigRemoveAsync(
+        string environmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(environmentUrl))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'environmentUrl' parameter is required");
+        }
+
+        var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
+        var removed = await configStore.RemoveConfigAsync(environmentUrl, cancellationToken);
+
+        return new EnvConfigRemoveResponse { Removed = removed };
     }
 
     #endregion
@@ -1941,6 +2033,9 @@ public class EnvironmentInfo
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; }
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "discovered";
 }
 
 /// <summary>
@@ -2017,6 +2112,15 @@ public class EnvConfigSetResponse
     [JsonPropertyName("type")] public string? Type { get; set; }
     [JsonPropertyName("color")] public string? Color { get; set; }
     [JsonPropertyName("saved")] public bool Saved { get; set; }
+}
+
+/// <summary>
+/// Response for env/config/remove method.
+/// </summary>
+public class EnvConfigRemoveResponse
+{
+    [JsonPropertyName("removed")]
+    public bool Removed { get; set; }
 }
 
 /// <summary>

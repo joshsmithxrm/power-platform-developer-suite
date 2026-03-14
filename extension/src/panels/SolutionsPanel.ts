@@ -22,21 +22,28 @@ export class SolutionsPanel extends WebviewPanelBase {
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient): SolutionsPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string): SolutionsPanel {
         if (SolutionsPanel.instances.length >= SolutionsPanel.MAX_PANELS) {
             const oldest = SolutionsPanel.instances[0];
             oldest.panel?.reveal();
             return oldest;
         }
-        const panel = new SolutionsPanel(extensionUri, daemon);
+        const panel = new SolutionsPanel(extensionUri, daemon, envUrl, envDisplayName);
         return panel;
     }
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly daemon: DaemonClient,
+        initialEnvUrl?: string,
+        initialEnvDisplayName?: string,
     ) {
         super();
+
+        if (initialEnvUrl) {
+            this.environmentUrl = initialEnvUrl;
+            this.environmentDisplayName = initialEnvDisplayName ?? initialEnvUrl;
+        }
 
         this.panelId = SolutionsPanel.nextId++;
         SolutionsPanel.instances.push(this);
@@ -95,10 +102,13 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     private async initialize(): Promise<void> {
         try {
-            const who = await this.daemon.authWho();
-            if (who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
+            // If environment was pre-set (from tree context menu), skip authWho
+            if (!this.environmentUrl) {
+                const who = await this.daemon.authWho();
+                if (who.environment?.url) {
+                    this.environmentUrl = who.environment.url;
+                    this.environmentDisplayName = who.environment.displayName || who.environment.url;
+                }
             }
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });

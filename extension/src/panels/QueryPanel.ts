@@ -15,9 +15,8 @@ export class QueryPanel extends WebviewPanelBase {
     private static readonly MAX_PANELS = 10;
     private static readonly MAX_CLIENT_RECORDS = 5_000;
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): QueryPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string, envUrl?: string, envDisplayName?: string): QueryPanel {
         if (QueryPanel.instances.length >= QueryPanel.MAX_PANELS) {
-            // Reuse the oldest (first) panel instead of creating a new one
             const oldest = QueryPanel.instances[0];
             oldest.panel?.reveal();
             if (initialSql) {
@@ -25,8 +24,7 @@ export class QueryPanel extends WebviewPanelBase {
             }
             return oldest;
         }
-        // Always create a new instance (no singleton reuse)
-        const panel = new QueryPanel(extensionUri, daemon, initialSql);
+        const panel = new QueryPanel(extensionUri, daemon, initialSql, envUrl, envDisplayName);
         return panel;
     }
 
@@ -41,8 +39,16 @@ export class QueryPanel extends WebviewPanelBase {
         private readonly extensionUri: vscode.Uri,
         private readonly daemon: DaemonClient,
         initialSql?: string,
+        initialEnvUrl?: string,
+        initialEnvDisplayName?: string,
     ) {
         super();
+
+        // Pre-set environment if provided (from tree context menu)
+        if (initialEnvUrl) {
+            this.environmentUrl = initialEnvUrl;
+            this.environmentDisplayName = initialEnvDisplayName ?? initialEnvUrl;
+        }
 
         this.panelId = QueryPanel.nextId++;
         QueryPanel.instances.push(this);
@@ -134,6 +140,12 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     private async initEnvironment(): Promise<void> {
+        // If environment was pre-set (from tree context menu), just update the UI
+        if (this.environmentUrl) {
+            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? this.environmentUrl });
+            this.updateTitle();
+            return;
+        }
         try {
             const who = await this.daemon.authWho();
             if (who.environment) {
