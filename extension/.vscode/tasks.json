@@ -5,10 +5,10 @@
       "label": "Build Daemon",
       "type": "process",
       "command": "dotnet",
-      "args": ["build", "${workspaceFolder}/../src/PPDS.Cli/PPDS.Cli.csproj", "-v", "q"],
+      "args": ["build", "../src/PPDS.Cli/PPDS.Cli.csproj", "-v", "q"],
       "problemMatcher": "$msCompile",
       "presentation": {
-        "reveal": "silent",
+        "reveal": "always",
         "panel": "shared"
       }
     },
