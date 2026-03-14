@@ -96,10 +96,10 @@ Solution panel components currently display as raw GUIDs, and component types in
 
 1. `SolutionComponentInfo` record gains three nullable fields: `LogicalName`, `SchemaName`, `DisplayName`
 2. `ComponentNameResolver` resolves names for all mapped component types via batch queries
-3. Entity-type (1) components resolve via `CachedMetadataProvider` — no additional Dataverse call
+3. Entity-type (1) components resolve via `CachedMetadataProvider` — requires adding `MetadataId` to `EntitySummary` (see below)
 4. Unmapped component types gracefully degrade to GUID display
 5. The `componenttype` option set query (Tier 1) bug is fixed so 10000+ range types resolve
-6. Daemon serve mode emits Information-level logs to stderr
+6. Daemon serve mode emits Information-level logs to stderr — requires passing a configured `ILoggerFactory` in `ServeCommand.cs` and lowering `DaemonConnectionPoolManager.ConfigureServices` from `LogLevel.Warning` to `LogLevel.Information`
 7. All name resolution queries are timed with `Stopwatch` and logged
 8. Webview displays names with priority: logicalName > schemaName > displayName > objectId
 9. Webview renders click-to-expand inline detail cards for components
@@ -121,7 +121,9 @@ Solution panel components currently display as raw GUIDs, and component types in
 | 380 | EnvironmentVariableDefinition | `environmentvariabledefinition` | schemaname, displayname |
 | 381 | EnvironmentVariableValue | `environmentvariablevalue` | schemaname |
 | 371 | Connector | `connector` | name, displayname |
-| 372 | Connector | `connector` | name, displayname |
+| 372 | Custom Connector | `connector` | name, displayname |
+
+Note: Types 371 (Connector) and 372 (Custom Connector) are distinct component types in the `componenttype` enum (`Connector` and `Connector1` respectively) but both map to the same `connector` table.
 
 For tables with a single `name` field, that value maps to `LogicalName` on `SolutionComponentInfo`. For tables with distinct schema/display fields, map accordingly.
 
@@ -132,7 +134,7 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 1. **Load components**: `GetComponentsAsync` queries `solutioncomponent` table (existing)
 2. **Group by type**: Group returned components by `componentType`
 3. **Resolve names**: For each type with a mapping, call `ComponentNameResolver.ResolveAsync(type, objectIds)`
-4. **Entity shortcut**: Type 1 uses `CachedMetadataProvider.GetEntitiesAsync()` (cached, no Dataverse call)
+4. **Entity shortcut**: Type 1 uses `CachedMetadataProvider.GetEntitiesAsync()` (cached, no Dataverse call). Matches `solutioncomponent.objectId` against `EntitySummary.MetadataId` (new field, see prerequisite below)
 5. **Table queries**: Other types batch-query their table: `WHERE <primarykey> IN (id1, id2, ...)`
 6. **Merge**: Attach resolved names to `SolutionComponentInfo` records
 7. **Log timing**: Log per-type and total resolution time
@@ -140,15 +142,17 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 **Component Type Fix:**
 
 1. **Diagnose**: Determine why `GetComponentTypeNamesAsync` falls back to hardcoded dictionary
-2. **Fix cache key**: `client.ConnectedOrgUniqueName` may return null — use environment URL from the RPC request instead
-3. **Improve error logging**: Replace bare `catch` with structured logging so failures are visible
+2. **Fix cache key**: `client.ConnectedOrgUniqueName` (line 311) may return null — use environment URL from the RPC request instead
+3. **Fix outer bare catch**: The bare `catch` at `GetComponentsAsync` line 319 swallows exceptions from `GetComponentTypeNamesAsync`. Replace with `catch (Exception ex)` and log the exception. Note: `GetComponentTypeNamesAsync` itself (line 428) already has proper `catch (Exception ex)` with `_logger.LogWarning` — the fix is specifically the outer catch that discards context
 
 **Webview Display:**
 
 1. **List item text**: `logicalName (displayName)` when both available, otherwise first available name, otherwise GUID
 2. **Click handler**: Clicking a component item expands an inline detail card below it
 3. **Single expand**: Clicking another component collapses the previously expanded one
-4. **Detail card fields**: Logical Name, Schema Name, Display Name, Object ID (with copy affordance), Root Behavior, Metadata flag
+4. **Detail card fields**: Logical Name, Schema Name, Display Name, Object ID (with copy button), Root Behavior, Metadata flag
+5. **Copy button**: Uses `navigator.clipboard.writeText()` for the Object ID. On success, briefly swap button text to a checkmark for visual feedback
+6. **Keyboard**: Component items are focusable (`tabindex="0"`). Enter/Space toggles the detail card. This is the same pattern used by solution row expansion
 
 ### Constraints
 
@@ -157,6 +161,13 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 - Connection pool clients disposed after each batch query (Constitution D2)
 - No new `ServiceClient` instances — use `IDataverseConnectionPool` (Constitution D1)
 - Component name resolution uses Application Service pattern (Constitution A1)
+- `ComponentNameResolver` wraps failures in `PpdsException` with `ErrorCode` (Constitution D4). However, `SolutionService` catches these per-type and degrades gracefully rather than propagating — the panel never breaks due to a name resolution failure
+- `IProgressReporter` (Constitution A3) is not required for `ComponentNameResolver`: individual type queries are simple IN-clause lookups on indexed primary keys (~50-200ms each), and types resolve sequentially so total wall-clock time for a typical solution stays under 1 second. If profiling shows otherwise, add progress reporting in a follow-up
+- Type resolution is sequential (not parallel) to avoid connection pool exhaustion — each `ResolveAsync` call acquires a pooled client
+
+### Host-Side Changes
+
+The extension host `SolutionsPanel.ts` must pass the three new name fields from `SolutionComponentInfoDto` through to the webview in the `componentsLoaded` message. Currently (line 242-244) only `objectId` and `isMetadata` are forwarded — add `logicalName`, `schemaName`, and `displayName`.
 
 ### Validation Rules
 
@@ -184,6 +195,8 @@ For tables with a single `name` field, that value maps to `LogicalName` on `Solu
 | AC-10 | Batch queries split at 100 IDs to avoid query length limits | `ComponentNameResolverTests.ResolveAsync_LargeBatch_Splits` | 🔲 |
 | AC-11 | All resolved name strings are escaped via escapeHtml before innerHTML | `ext:test SolutionsPanel escapes names` | 🔲 |
 | AC-12 | Name resolution failure for one type does not block other types | `ComponentNameResolverTests.ResolveAsync_PartialFailure_ContinuesOtherTypes` | 🔲 |
+| AC-13 | Enter/Space on a focused component item toggles the detail card | `ext:test SolutionsPanel detail card keyboard` | 🔲 |
+| AC-14 | EntitySummary includes MetadataId populated from RetrieveAllEntitiesRequest | `DataverseMetadataServiceTests.GetEntitiesAsync_IncludesMetadataId` | 🔲 |
 
 ### Edge Cases
 
@@ -220,31 +233,57 @@ public record ComponentNames(
     string? DisplayName);
 ```
 
+### Prerequisite: EntitySummary.MetadataId
+
+`EntitySummary` currently lacks a `MetadataId` field. For entity-type solution components, `solutioncomponent.objectId` is the entity's `MetadataId` (a GUID). Without this field, there is no way to match objectIds to entities from the cached entity list.
+
+```csharp
+// Add to EntitySummary.cs
+[JsonPropertyName("metadataId")]
+public Guid MetadataId { get; init; }
+```
+
+Populate in `DataverseMetadataService.MapToEntitySummary`:
+```csharp
+MetadataId = e.MetadataId ?? Guid.Empty,
+```
+
+The SDK's `EntityMetadata.MetadataId` is already available in the `RetrieveAllEntitiesRequest` response — it's just not currently mapped.
+
 ### Updated SolutionComponentInfo
+
+Three nullable name fields are appended to the existing positional record. The existing `Id` field name is preserved (not renamed).
 
 ```csharp
 public record SolutionComponentInfo(
-    Guid ComponentId,
+    Guid Id,
     Guid ObjectId,
     int ComponentType,
     string ComponentTypeName,
     int RootComponentBehavior,
     bool IsMetadata,
-    string? DisplayName,
-    string? LogicalName,
-    string? SchemaName);
+    string? DisplayName = null,
+    string? LogicalName = null,
+    string? SchemaName = null);
 ```
+
+The new fields use default values so existing construction sites (`SolutionService.cs:333`) continue to compile. The RPC handler at `RpcMethodHandler.cs:1832` maps `c.Id` — this is unchanged.
 
 ### Usage Pattern
 
 ```csharp
 // Inside SolutionService.GetComponentsAsync
 var resolver = _componentNameResolver;
-var grouped = components.GroupBy(c => c.ComponentType);
+var grouped = components.GroupBy(c => c.ComponentType).ToList();
 
-await Parallel.ForEachAsync(grouped, cancellationToken, async (group, ct) =>
+// Resolve types sequentially to avoid pool exhaustion.
+// Each ResolveAsync call acquires a pooled client; running all in parallel
+// could exhaust the pool. Sequential resolution is acceptable because
+// individual type queries are fast (simple IN-clause on indexed PKs).
+foreach (var group in grouped)
 {
-    var names = await resolver.ResolveAsync(group.Key, group.Select(c => c.ObjectId).ToList(), ct);
+    var names = await resolver.ResolveAsync(
+        group.Key, group.Select(c => c.ObjectId).ToList(), cancellationToken);
     foreach (var component in group)
     {
         if (names.TryGetValue(component.ObjectId, out var resolved))
@@ -252,7 +291,7 @@ await Parallel.ForEachAsync(grouped, cancellationToken, async (group, ct) =>
             // Attach names to component
         }
     }
-});
+}
 ```
 
 ---
@@ -265,7 +304,7 @@ The existing `solutions/components` RPC method response gains name fields:
 {
   "components": [
     {
-      "componentId": "...",
+      "id": "...",
       "objectId": "d8f9e4c2-3b1a-4e8c-9f7d-2c1a5e8b9f4d",
       "componentType": 61,
       "componentTypeName": "WebResource",
@@ -276,7 +315,7 @@ The existing `solutions/components` RPC method response gains name fields:
       "displayName": null
     },
     {
-      "componentId": "...",
+      "id": "...",
       "objectId": "a1b2c3d4-...",
       "componentType": 1,
       "componentTypeName": "Entity",
