@@ -126,9 +126,9 @@
     },
     {
       "type": "npm",
-      "script": "test-release",
+      "script": "release:test",
       "path": "extension",
-      "label": "npm: test-release",
+      "label": "npm: release:test",
       "detail": "Full package + .vsix + install (simulates release)",
       "problemMatcher": [],
       "presentation": {
@@ -138,9 +138,9 @@
     },
     {
       "type": "npm",
-      "script": "marketplace",
+      "script": "local:revert",
       "path": "extension",
-      "label": "npm: marketplace",
+      "label": "npm: local:revert",
       "detail": "Revert to marketplace version",
       "problemMatcher": [],
       "presentation": {

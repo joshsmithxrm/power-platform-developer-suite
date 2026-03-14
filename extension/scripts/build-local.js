@@ -97,14 +97,14 @@ async function main() {
 		setDevVersion(devVersion);
 
 		runCommand('npm run package', 'Building production bundle');
-		runCommand('npm run vsce-package', 'Creating .vsix package');
+		runCommand('npm run vsce:package', 'Creating .vsix package');
 
 		console.log('Restoring package.json...');
 		restorePackageJson();
 		restored = true;
 		console.log(`package.json restored to version ${currentVersion}`);
 
-		runCommand('npm run install-local', 'Installing extension locally');
+		runCommand('npm run local:install', 'Installing extension locally');
 
 		console.log(`\nSuccess! Extension ${devVersion} installed locally.`);
 		console.log(`Note: package.json remains at version ${currentVersion}`);
