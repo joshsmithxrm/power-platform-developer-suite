@@ -6,8 +6,9 @@
   "tasks": [
     {
       "label": "Build CLI (Debug)",
-      "type": "shell",
-      "command": "dotnet build src/PPDS.Cli/PPDS.Cli.csproj -c Debug -f net8.0 --nologo -v q",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "src/PPDS.Cli/PPDS.Cli.csproj", "-c", "Debug", "-f", "net8.0", "--nologo", "-v", "q"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
