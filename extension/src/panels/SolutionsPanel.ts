@@ -42,7 +42,7 @@ export class SolutionsPanel extends WebviewPanelBase {
         SolutionsPanel.instances.push(this);
 
         this.panel = vscode.window.createWebviewPanel(
-            'ppds.solutions',
+            'ppds.solutionsPanel',
             `Solutions #${this.panelId}`,
             vscode.ViewColumn.One,
             {
