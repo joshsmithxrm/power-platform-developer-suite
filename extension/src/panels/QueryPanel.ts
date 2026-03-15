@@ -787,6 +787,7 @@ export class QueryPanel extends WebviewPanelBase {
 
         const row = parseInt(td.dataset.row);
         const col = parseInt(td.dataset.col);
+        console.log('[PPDS Selection] mousedown on cell row:', row, 'col:', col, 'editorFocusAfterBlur:', editor.hasTextFocus());
 
         if (e.shiftKey && anchor) {
             // Shift+click: extend selection from anchor
@@ -852,10 +853,9 @@ export class QueryPanel extends WebviewPanelBase {
         }
 
         // Ctrl+C / Ctrl+Shift+C: copy selection
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' &&
-            !editor.hasTextFocus() &&
-            document.activeElement !== filterInput) {
-            if (anchor) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            console.log('[PPDS Copy] Ctrl+C pressed. editorFocus:', editor.hasTextFocus(), 'anchor:', anchor, 'activeElement:', document.activeElement?.tagName);
+            if (!editor.hasTextFocus() && document.activeElement !== filterInput && anchor) {
                 e.preventDefault();
                 copySelection(e.shiftKey);
             }
@@ -1056,13 +1056,16 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     function copySelection(invertHeaders) {
-        if (!anchor) return;
+        console.log('[PPDS Copy] copySelection called, anchor:', anchor, 'focus:', focus);
+        if (!anchor) { console.log('[PPDS Copy] No anchor, returning'); return; }
         const rect = getSelectionRect();
-        if (!rect) return;
+        if (!rect) { console.log('[PPDS Copy] No rect, returning'); return; }
 
         const single = isSingleCell();
-        // Smart default: single cell = no headers; multi-cell = headers. invertHeaders flips it.
         const withHeaders = single ? invertHeaders : !invertHeaders;
+
+        console.log('[PPDS Copy] rect:', rect, 'single:', single, 'withHeaders:', withHeaders);
+        console.log('[PPDS Copy] displayedRows.length:', displayedRows.length, 'columns.length:', columns.length);
 
         let text = '';
 
@@ -1077,11 +1080,14 @@ export class QueryPanel extends WebviewPanelBase {
         for (let r = rect.minRow; r <= rect.maxRow; r++) {
             const vals = [];
             for (let c = rect.minCol; c <= rect.maxCol; c++) {
-                vals.push(sanitizeValue(getCellDisplayValue(displayedRows[r], c)));
+                const cellVal = getCellDisplayValue(displayedRows[r], c);
+                console.log('[PPDS Copy] row', r, 'col', c, 'value:', cellVal);
+                vals.push(sanitizeValue(cellVal));
             }
             text += vals.join('\\t') + '\\n';
         }
 
+        console.log('[PPDS Copy] Final text to copy:', JSON.stringify(text.trim()));
         vscode.postMessage({ command: 'copyToClipboard', text: text.trim() });
         showCopyFeedback(rect, single, withHeaders);
     }
@@ -1162,6 +1168,7 @@ export class QueryPanel extends WebviewPanelBase {
                 copySelection(true);
             } else if (action === 'cell') {
                 const val = getCellDisplayValue(displayedRows[clickRow], clickCol);
+                console.log('[PPDS Copy] Context menu cell copy. row:', clickRow, 'col:', clickCol, 'val:', val, 'displayedRows.length:', displayedRows.length);
                 vscode.postMessage({ command: 'copyToClipboard', text: sanitizeValue(val) });
                 if (copyHintEl) {
                     copyHintEl.textContent = 'Copied: ' + (val.length > 40 ? val.substring(0, 40) + '...' : val);
