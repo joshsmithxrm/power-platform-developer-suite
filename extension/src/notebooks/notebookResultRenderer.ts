@@ -41,7 +41,8 @@ export function renderResultsHtml(result: QueryResultResponse, environmentUrl: s
 
     const rowData = prepareRowData(result, environmentUrl);
 
-    const summary = `<div class="results-summary">${result.count} row${result.count !== 1 ? 's' : ''} returned in ${result.executionTimeMs}ms${result.moreRecords ? ' (more available)' : ''}</div>`;
+    const modeLabel = result.queryMode === 'tds' ? ' via TDS' : result.queryMode === 'dataverse' ? ' via Dataverse' : '';
+    const summary = `<div class="results-summary">${result.count} row${result.count !== 1 ? 's' : ''} returned in ${result.executionTimeMs}ms${modeLabel}${result.moreRecords ? ' (more available)' : ''}</div>`;
 
     return `
         <style>${getNotebookStyles()}</style>
