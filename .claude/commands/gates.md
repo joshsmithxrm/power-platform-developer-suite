@@ -70,6 +70,24 @@ npm run lint --prefix src/extension
 Pass: 0 errors
 Fail: report lint violations
 
+**Gate 4.5: CSS Lint** (if CSS files changed)
+
+```bash
+npm run lint:css --prefix src/extension
+```
+
+Pass: 0 errors
+Fail: report CSS lint violations with file:line
+
+**Gate 4.6: Dead Code Analysis** (if TS/JS files changed)
+
+```bash
+npm run dead-code --prefix src/extension
+```
+
+Pass: 0 unused exports
+Fail: report unused exports/files
+
 **Gate 5: TypeScript Tests** (if TS/JS files changed)
 
 ```bash

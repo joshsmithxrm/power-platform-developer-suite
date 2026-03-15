@@ -21,6 +21,11 @@ src/panels/
   SolutionsPanel.ts                ← host-side panel
   WebviewPanelBase.ts              ← abstract base with typed postMessage + AbortSignal
   environmentPicker.ts             ← shared HTML generator + QuickPick helper
+  monacoUtils.ts                   ← detectLanguage, mapCompletionKind, mapCompletionItems
+  querySelectionUtils.ts           ← getSelectionRect, isSingleCell, sanitizeValue, buildTsv
+  webviewUtils.ts                  ← shared webview helper utilities
+  monaco-entry.ts                  ← Monaco editor browser entry (IIFE bundle)
+  monaco-worker.ts                 ← Monaco editor worker entry
 
   webview/                         ← browser-side TypeScript (tsconfig.webview.json)
     query-panel.ts                 ← Query Panel webview entry point
@@ -28,6 +33,7 @@ src/panels/
     shared/
       message-types.ts             ← discriminated unions for ALL panel messages
       dom-utils.ts                 ← escapeHtml, escapeAttr, cssEscape, formatDate, sanitizeValue
+      filter-bar.ts                ← generic FilterBar<T> — debounced text filtering with count
       vscode-api.ts                ← typed getVsCodeApi<T>() wrapper
       assert-never.ts              ← exhaustive switch helper
 
@@ -207,6 +213,9 @@ Add both to the `watch()`, `rebuild()`, and `dispose()` arrays.
 | Message type definitions | `webview/shared/message-types.ts` | Shared between host and webview |
 | Shared DOM utilities | `webview/shared/dom-utils.ts` | DRY across all panels |
 | Shared HTML generators | `environmentPicker.ts` | Reused across panels |
+| Debounced text filtering | `webview/shared/filter-bar.ts` | Generic, shared across panels |
+| Monaco utilities (detect lang, map completions) | `monacoUtils.ts` | Pure functions, host-side |
+| Selection/copy utilities | `querySelectionUtils.ts` | Pure functions, testable |
 
 ## Daemon Communication
 
@@ -221,7 +230,7 @@ const result = await this.daemon.querySql({
 }, token);
 ```
 
-Available methods are defined in `DaemonClient.ts`. Common ones: `querySql`, `queryFetch`, `queryExplain`, `queryExport`, `queryComplete`, `solutionsList`, `solutionsComponents`, `authWho`, `envList`.
+Available methods are defined in `daemonClient.ts`. Common ones: `querySql`, `queryFetch`, `queryExplain`, `queryExport`, `queryComplete`, `solutionsList`, `solutionsComponents`, `authWho`, `envList`.
 
 ### Handling daemon disconnection
 
