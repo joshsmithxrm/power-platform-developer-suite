@@ -1,7 +1,7 @@
 ---
 name: webview-cdp
-description: Interact with VS Code extension webview panels via Playwright Electron. Use when implementing or verifying webview UI — take screenshots, click elements, type text, send keyboard shortcuts, execute VS Code commands, read console logs. Triggers include any task involving VS Code extension webview panels, Data Explorer, plugin traces UI, or any panel built with WebviewPanelBase.
-allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*)
+description: Visual verification of VS Code extension webview panels via Playwright Electron — screenshots, clicks, typing, keyboard shortcuts, VS Code commands, console logs. Use after implementing or modifying any UI-affecting change (CSS, layout, HTML templates, message wiring). For non-visual changes (string constants, config, internal refactors), compile + test is sufficient.
+allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*), Bash(npm run * --prefix src/extension)
 ---
 
 # VS Code Webview CDP Tool (v2 — Playwright Electron)
@@ -245,6 +245,51 @@ node src/extension/tools/webview-cdp.mjs screenshot $TEMP/verification.png
 - Type definitions, interfaces, error codes
 
 Automated tests prove code compiles and logic is correct. Screenshots prove it renders correctly. CSS can silently break (specificity overrides, wrong variable, theme interaction). Message protocol wiring can compile perfectly and fail at runtime (wrong command string, missing switch case). If your change affects what users see, screenshot it before claiming done.
+
+## Error Recovery
+
+### `launch` fails or hangs
+
+```bash
+# Check for stale VS Code processes
+node src/extension/tools/webview-cdp.mjs close   # try graceful shutdown first
+
+# If still stuck, the daemon may hold the port
+node src/extension/tools/webview-cdp.mjs logs
+```
+
+Common causes:
+- **Stale process from prior session** — always `close` before `launch`
+- **Build failure** with `--build` — run `npm run compile --prefix src/extension` separately to see full error output
+- **Daemon won't start** — check `logs --channel "PPDS"` for startup errors
+
+### `wait` times out
+
+Check in order:
+1. **Was the command correct?** — `command` names are case-sensitive and must match package.json exactly
+2. **Did the extension activate?** — `logs --channel "PPDS"` for activation errors
+3. **Is the daemon running?** — extension panels depend on the daemon; check daemon output in logs
+4. **Increase timeout** — `wait 30000` for slow machines or first-run scenarios
+
+### Screenshot is blank or wrong panel
+
+- **Blank screenshot** — panel may not have finished rendering. Add `wait` before `screenshot`
+- **Wrong panel visible** — use `command` to focus the correct panel, then `screenshot`
+- **Stale content** — webview may show cached state. Reopen the panel
+
+### CSS-only changes
+
+CSS changes require `--build` because esbuild bundles CSS files:
+
+```bash
+node src/extension/tools/webview-cdp.mjs close
+node src/extension/tools/webview-cdp.mjs launch --build
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/css-verify.png
+```
+
+You cannot hot-reload CSS in VS Code webviews — a full rebuild + relaunch is required.
 
 ## Gap Protocol
 
