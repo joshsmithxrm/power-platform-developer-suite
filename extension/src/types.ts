@@ -111,6 +111,7 @@ export interface QueryResultResponse {
     isAggregate: boolean;
     executedFetchXml: string | null;
     executionTimeMs: number;
+    queryMode: 'tds' | 'dataverse' | null;
 }
 
 export interface QueryColumnInfo {
