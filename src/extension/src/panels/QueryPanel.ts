@@ -4,7 +4,8 @@ import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
-import { isAuthError } from '../utils/errorUtils.js';
+import { handleAuthError } from '../utils/errorUtils.js';
+import { queryDefaultTop } from '../utils/config.js';
 
 import { getNonce } from './webviewUtils.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -51,6 +52,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
     private profileName: string | undefined;
+    private readonly initialSql: string | undefined;
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
@@ -69,8 +71,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
         this.panelId = QueryPanel.nextId++;
         QueryPanel.instances.push(this);
+        this.initialSql = initialSql;
 
-        this.panel = vscode.window.createWebviewPanel(
+        const panel = vscode.window.createWebviewPanel(
             'ppds.dataExplorer',
             'Data Explorer #' + this.panelId,
             vscode.ViewColumn.One,
@@ -84,156 +87,141 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
         );
 
-        this.panel.webview.html = this.getHtmlContent(this.panel.webview);
-
-        this.disposables.push(
-            this.panel.webview.onDidReceiveMessage(
-                async (message: QueryPanelWebviewToHost) => {
-                    switch (message.command) {
-                        case 'executeQuery':
-                            await this.executeQuery(message.sql, false, message.useTds, message.language);
-                            break;
-                        case 'showFetchXml':
-                            await this.showFetchXml(message.sql);
-                            break;
-                        case 'loadMore':
-                            await this.loadMore(message.pagingCookie, message.page);
-                            break;
-                        case 'explainQuery':
-                            await this.explainQuery(message.sql);
-                            break;
-                        case 'exportResults':
-                            await this.exportResults(message.format);
-                            break;
-                        case 'saveQuery':
-                            await this.saveQuery(message.sql, message.language);
-                            break;
-                        case 'loadQueryFromFile':
-                            await this.loadQueryFromFile();
-                            break;
-                        case 'openInNotebook':
-                            await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql);
-                            break;
-                        case 'showHistory': {
-                            const sql = await showQueryHistory(this.daemon);
-                            if (sql) {
-                                this.postMessage({ command: 'loadQuery', sql });
-                            }
-                            break;
-                        }
-                        case 'copyToClipboard':
-                            await vscode.env.clipboard.writeText(message.text);
-                            break;
-                        case 'openRecordUrl': {
-                            const parsed = vscode.Uri.parse(message.url);
-                            if (parsed.scheme === 'https' || parsed.scheme === 'http') {
-                                await vscode.env.openExternal(parsed);
-                            }
-                            break;
-                        }
-                        case 'requestClipboard': {
-                            const clipText = await vscode.env.clipboard.readText();
-                            this.postMessage({ command: 'clipboardContent', text: clipText });
-                            break;
-                        }
-                        case 'requestCompletions': {
-                            const requestId = message.requestId;
-                            try {
-                                const result = await this.daemon.queryComplete({
-                                    sql: message.sql,
-                                    cursorOffset: message.cursorOffset,
-                                    language: message.language,
-                                });
-                                this.postMessage({ command: 'completionResult', requestId, items: result.items });
-                            } catch {
-                                this.postMessage({ command: 'completionResult', requestId, items: [] });
-                            }
-                            break;
-                        }
-                        case 'ready':
-                            if (initialSql) {
-                                this.postMessage({ command: 'loadQuery', sql: initialSql });
-                            }
-                            // Initialize environment from active profile
-                            void this.initEnvironment();
-                            break;
-                        case 'webviewError': {
-                            const errMsg = message.error;
-                            const errStack = message.stack;
-                            // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
-                            console.error(`[PPDS Webview] ${errMsg}`);
-                            // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
-                            if (errStack) console.error(`[PPDS Webview Stack] ${errStack}`);
-                            vscode.window.showErrorMessage(`PPDS Data Explorer: ${errMsg}`);
-                            break;
-                        }
-                        case 'cancelQuery':
-                            this.queryCts?.cancel();
-                            break;
-                        case 'convertQuery': {
-                            const { sql, toLanguage } = message;
-                            try {
-                                let converted: string;
-                                if (toLanguage === 'xml') {
-                                    // SQL → FetchXML: use daemon's explain endpoint (fetchXml field has clean XML)
-                                    const result = await this.daemon.queryExplain({
-                                        sql,
-                                        environmentUrl: this.environmentUrl ?? undefined,
-                                    });
-                                    converted = result.fetchXml ?? result.plan;
-                                } else {
-                                    // FetchXML → SQL: use client-side transpiler
-                                    const { FetchXmlToSqlTranspiler } = await import('../utils/fetchXmlToSql.js');
-                                    const transpiler = new FetchXmlToSqlTranspiler();
-                                    const result = transpiler.transpile(sql);
-                                    if (!result.success) {
-                                        throw new Error(result.error || 'Transpilation failed');
-                                    }
-                                    converted = result.sql;
-                                }
-                                this.panel?.webview.postMessage({
-                                    command: 'queryConverted',
-                                    content: converted,
-                                    language: toLanguage,
-                                });
-                            } catch (error) {
-                                const msg = error instanceof Error ? error.message : String(error);
-                                vscode.window.showWarningMessage(`Conversion failed: ${msg}`);
-                                this.panel?.webview.postMessage({
-                                    command: 'conversionFailed',
-                                    error: msg,
-                                    language: toLanguage,
-                                });
-                            }
-                            break;
-                        }
-                        case 'refresh':
-                            if (this.lastSql) {
-                                await this.executeQuery(this.lastSql, false, this.lastUseTds, this.lastLanguage);
-                            }
-                            break;
-                        case 'requestEnvironmentList': {
-                            const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
-                            if (env) {
-                                this.environmentUrl = env.url;
-                                this.environmentDisplayName = env.displayName;
-                                this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url });
-                                this.updateTitle();
-                            }
-                            break;
-                        }
-                        default:
-                            assertNever(message);
-                    }
-                }
-            )
-        );
-
-        this.disposables.push(
-            this.panel.onDidDispose(() => this.dispose())
-        );
-
+        panel.webview.html = this.getHtmlContent(panel.webview);
+        this.initPanel(panel);
         this.subscribeToDaemonReconnect(this.daemon);
+    }
+
+    protected async handleMessage(message: QueryPanelWebviewToHost): Promise<void> {
+        switch (message.command) {
+            case 'executeQuery':
+                await this.executeQuery(message.sql, false, message.useTds, message.language);
+                break;
+            case 'showFetchXml':
+                await this.showFetchXml(message.sql);
+                break;
+            case 'loadMore':
+                await this.loadMore(message.pagingCookie, message.page);
+                break;
+            case 'explainQuery':
+                await this.explainQuery(message.sql);
+                break;
+            case 'exportResults':
+                await this.exportResults(message.format);
+                break;
+            case 'saveQuery':
+                await this.saveQuery(message.sql, message.language);
+                break;
+            case 'loadQueryFromFile':
+                await this.loadQueryFromFile();
+                break;
+            case 'openInNotebook':
+                await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql);
+                break;
+            case 'showHistory': {
+                const sql = await showQueryHistory(this.daemon);
+                if (sql) {
+                    this.postMessage({ command: 'loadQuery', sql });
+                }
+                break;
+            }
+            case 'copyToClipboard':
+                await vscode.env.clipboard.writeText(message.text);
+                break;
+            case 'openRecordUrl': {
+                const parsed = vscode.Uri.parse(message.url);
+                if (parsed.scheme === 'https' || parsed.scheme === 'http') {
+                    await vscode.env.openExternal(parsed);
+                }
+                break;
+            }
+            case 'requestClipboard': {
+                const clipText = await vscode.env.clipboard.readText();
+                this.postMessage({ command: 'clipboardContent', text: clipText });
+                break;
+            }
+            case 'requestCompletions': {
+                const requestId = message.requestId;
+                try {
+                    const result = await this.daemon.queryComplete({
+                        sql: message.sql,
+                        cursorOffset: message.cursorOffset,
+                        language: message.language,
+                    });
+                    this.postMessage({ command: 'completionResult', requestId, items: result.items });
+                } catch {
+                    this.postMessage({ command: 'completionResult', requestId, items: [] });
+                }
+                break;
+            }
+            case 'ready':
+                if (this.initialSql) {
+                    this.postMessage({ command: 'loadQuery', sql: this.initialSql });
+                }
+                // Initialize environment from active profile
+                void this.initEnvironment();
+                break;
+            case 'webviewError':
+                this.logWebviewError(message.error, message.stack);
+                break;
+            case 'cancelQuery':
+                this.queryCts?.cancel();
+                break;
+            case 'convertQuery': {
+                const { sql, toLanguage } = message;
+                try {
+                    let converted: string;
+                    if (toLanguage === 'xml') {
+                        // SQL → FetchXML: use daemon's explain endpoint (fetchXml field has clean XML)
+                        const result = await this.daemon.queryExplain({
+                            sql,
+                            environmentUrl: this.environmentUrl ?? undefined,
+                        });
+                        converted = result.fetchXml ?? result.plan;
+                    } else {
+                        // FetchXML → SQL: use client-side transpiler
+                        const { FetchXmlToSqlTranspiler } = await import('../utils/fetchXmlToSql.js');
+                        const transpiler = new FetchXmlToSqlTranspiler();
+                        const result = transpiler.transpile(sql);
+                        if (!result.success) {
+                            throw new Error(result.error || 'Transpilation failed');
+                        }
+                        converted = result.sql;
+                    }
+                    this.postMessage({
+                        command: 'queryConverted',
+                        content: converted,
+                        language: toLanguage,
+                    });
+                } catch (error) {
+                    const msg = error instanceof Error ? error.message : String(error);
+                    vscode.window.showWarningMessage(`Conversion failed: ${msg}`);
+                    this.postMessage({
+                        command: 'conversionFailed',
+                        error: msg,
+                        language: toLanguage,
+                    });
+                }
+                break;
+            }
+            case 'refresh':
+                if (this.lastSql) {
+                    await this.executeQuery(this.lastSql, false, this.lastUseTds, this.lastLanguage);
+                }
+                break;
+            case 'requestEnvironmentList': {
+                const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
+                if (env) {
+                    this.environmentUrl = env.url;
+                    this.environmentDisplayName = env.displayName;
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url });
+                    this.updateTitle();
+                }
+                break;
+            }
+            default:
+                assertNever(message);
+        }
     }
 
     override dispose(): void {
@@ -284,7 +272,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
         try {
             this.postMessage({ command: 'executionStarted' });
-            const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
+            const defaultTop = queryDefaultTop();
             const tds = useTds ?? false;
 
             let result: QueryResultResponse;
@@ -337,28 +325,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             const msg = error instanceof Error ? error.message : String(error);
 
-            // Check for auth errors and offer re-authentication (only on first attempt)
-            if (isAuthError(error) && !isRetry) {
-                const action = await vscode.window.showErrorMessage(
-                    'Session expired. Re-authenticate?',
-                    'Re-authenticate', 'Cancel'
-                );
-                if (action === 'Re-authenticate') {
-                    try {
-                        const who = await this.daemon.authWho();
-                        const profileId = who.name ?? String(who.index);
-                        await this.daemon.profilesInvalidate(profileId);
-                    } catch {
-                        // If authWho fails, we can't invalidate - just proceed with re-auth
-                    }
-                    try {
-                        // Retry the query with isRetry=true to prevent recursive re-auth prompts
-                        await this.executeQuery(sql, true);
-                        return;
-                    } catch {
-                        // Fall through to show error
-                    }
-                }
+            if (await handleAuthError(this.daemon, error, isRetry, () =>
+                this.executeQuery(sql, true, useTds, language, isConfirmed)
+            )) {
+                return;
             }
 
             this.postMessage({ command: 'queryError', error: msg });
