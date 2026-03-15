@@ -101,6 +101,11 @@ function prepareRowData(result: QueryResultResponse, environmentUrl: string | un
                 return { text: stringValue, url };
             }
 
+            // Plain URL string — make clickable
+            if (isUrl(stringValue)) {
+                return { text: stringValue, url: stringValue };
+            }
+
             return { text: stringValue };
         });
     });
@@ -113,6 +118,10 @@ function buildRecordUrl(dataverseUrl: string, entityLogicalName: string, recordI
 
 function isGuid(value: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isUrl(value: string): boolean {
+    return /^https?:\/\/.+/i.test(value);
 }
 
 function escapeHtml(text: string): string {
