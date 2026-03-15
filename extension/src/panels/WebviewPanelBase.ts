@@ -5,12 +5,21 @@ import type { DaemonClient } from '../daemonClient.js';
  * Base class for webview panels with safe messaging.
  * Prevents "Webview is disposed" errors from async operations.
  */
-export abstract class WebviewPanelBase implements vscode.Disposable {
+export abstract class WebviewPanelBase<
+    TIncoming extends { command: string } = { command: string },
+    TOutgoing extends { command: string } = { command: string; [key: string]: unknown },
+> implements vscode.Disposable {
     protected panel: vscode.WebviewPanel | undefined;
     protected disposables: vscode.Disposable[] = [];
     private _disposed = false;
+    private readonly _abortController = new AbortController();
 
-    protected postMessage(message: unknown): void {
+    /** Fires when the panel is disposed. Pass to async operations so they can bail out early. */
+    protected get abortSignal(): AbortSignal {
+        return this._abortController.signal;
+    }
+
+    protected postMessage(message: TOutgoing): void {
         this.panel?.webview.postMessage(message);
     }
 
@@ -22,7 +31,10 @@ export abstract class WebviewPanelBase implements vscode.Disposable {
     protected subscribeToDaemonReconnect(client: DaemonClient): void {
         this.disposables.push(
             client.onDidReconnect(() => {
-                this.postMessage({ command: 'daemonReconnected' });
+                // Cast required: `daemonReconnected` is a shared protocol command that
+                // every panel's TOutgoing includes, but TypeScript can't verify that
+                // structurally from the base class.
+                this.postMessage({ command: 'daemonReconnected' } as TOutgoing);
                 this.onDaemonReconnected();
             })
         );
@@ -33,11 +45,19 @@ export abstract class WebviewPanelBase implements vscode.Disposable {
         // Default: no-op
     }
 
+    /** Override in subclasses to handle incoming messages from the webview. */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    protected handleMessage(_message: TIncoming): void {
+        // Default: no-op. Subclasses override to handle typed incoming messages.
+    }
+
     abstract getHtmlContent(webview: vscode.Webview): string;
 
     dispose(): void {
         if (this._disposed) return;
         this._disposed = true;
+
+        this._abortController.abort();
 
         this.panel?.dispose();
 
