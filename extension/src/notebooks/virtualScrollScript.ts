@@ -57,6 +57,13 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
         var scrollTop = container.scrollTop;
         var viewportHeight = container.clientHeight;
         var totalRows = allRows.length;
+        var totalContentHeight = totalRows * ROW_HEIGHT;
+
+        // When clientHeight is 0 (pre-layout) or content fits without scrollbar,
+        // use the total content height so all rows render immediately.
+        if (viewportHeight <= 0 || totalContentHeight <= viewportHeight) {
+            viewportHeight = totalContentHeight;
+        }
 
         var start = Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN;
         var end = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN;
@@ -97,6 +104,17 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(render);
     });
+
+    // Re-render when container resizes (handles delayed layout in notebook iframes
+    // where clientHeight is initially 0).
+    if (typeof ResizeObserver !== 'undefined') {
+        var resizeObserver = new ResizeObserver(function() {
+            lastStart = -1; lastEnd = -1;
+            render();
+        });
+        resizeObserver.observe(container);
+    }
+
     render();
 })();
 </script>`;
