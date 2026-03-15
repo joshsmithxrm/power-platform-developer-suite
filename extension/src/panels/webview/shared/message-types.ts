@@ -75,7 +75,6 @@ export type SolutionsPanelWebviewToHost =
     | { command: 'ready' }
     | { command: 'requestEnvironmentList' }
     | { command: 'refresh' }
-    | { command: 'toggleManaged' }
     | { command: 'expandSolution'; uniqueName: string }
     | { command: 'collapseSolution'; uniqueName: string }
     | { command: 'copyToClipboard'; text: string }
@@ -84,8 +83,7 @@ export type SolutionsPanelWebviewToHost =
 /** Messages the extension host sends to the Solutions Panel webview. */
 export type SolutionsPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string }
-    | { command: 'updateManagedState'; includeManaged: boolean }
-    | { command: 'solutionsLoaded'; solutions: SolutionViewDto[]; managedCount: number; includeManaged: boolean }
+    | { command: 'solutionsLoaded'; solutions: SolutionViewDto[] }
     | { command: 'componentsLoading'; uniqueName: string }
     | { command: 'componentsLoaded'; uniqueName: string; groups: ComponentGroupDto[] }
     | { command: 'loading' }
