@@ -1,12 +1,12 @@
 ---
 name: webview-cdp
-description: Interact with VS Code extension webview panels via Chrome DevTools Protocol. Use when implementing or verifying webview UI — take screenshots to see your work, click elements, type text, send keyboard shortcuts, inspect DOM state. Triggers include any task involving VS Code extension webview panels, Data Explorer, plugin traces UI, or any panel built with WebviewPanelBase.
+description: Interact with VS Code extension webview panels via Playwright Electron. Use when implementing or verifying webview UI — take screenshots, click elements, type text, send keyboard shortcuts, execute VS Code commands, read console logs. Triggers include any task involving VS Code extension webview panels, Data Explorer, plugin traces UI, or any panel built with WebviewPanelBase.
 allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*)
 ---
 
-# VS Code Webview CDP Tool
+# VS Code Webview CDP Tool (v2 — Playwright Electron)
 
-Interact with extension webview panels running inside VS Code. Take screenshots to see what you've built, click buttons, type text, test keyboard shortcuts, right-click context menus, and inspect DOM state.
+Interact with extension webview panels running inside VS Code. Take screenshots to see what you've built, click buttons, type text, test keyboard shortcuts, execute VS Code commands, right-click context menus, read console logs, and inspect DOM state.
 
 ## When to Use
 
@@ -14,128 +14,93 @@ Interact with extension webview panels running inside VS Code. Take screenshots 
 - Before claiming UI work is complete — always screenshot to verify
 - When debugging visual issues — screenshot to see the current state
 - When testing interactions — clicks, keyboard shortcuts, context menus, dropdowns
+- When checking for errors — read console logs and output channel content
 
 ## Setup
 
-The tool is at `extension/tools/webview-cdp.mjs`. No additional installation needed.
+The tool is at `extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies). First run downloads VS Code (~30-60 seconds, cached afterward).
 
 ## Core Workflow
 
 ```bash
-# 1. Launch an isolated VS Code instance with the extension loaded
-node extension/tools/webview-cdp.mjs launch 9223
+# 1. Launch VS Code with the extension (fully automated)
+node extension/tools/webview-cdp.mjs launch
 
-# 2. Open a panel by clicking VS Code's native UI (--page targets VS Code itself, not webviews)
-node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
-# Wait for the webview to load
-sleep 3
+# 2. Open a panel via command palette
+node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node extension/tools/webview-cdp.mjs wait
 
 # 3. Take a screenshot to see what you built
-node extension/tools/webview-cdp.mjs screenshot current-state.png
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/current-state.png
 # IMPORTANT: Actually look at the screenshot to verify the UI
 
-# 4. Interact with webview content (no --page = targets the webview)
+# 4. Interact with webview content
 node extension/tools/webview-cdp.mjs click "#execute-btn"
-node extension/tools/webview-cdp.mjs screenshot after-click.png
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/after-click.png
 
-# 5. When done
+# 5. Check for errors
+node extension/tools/webview-cdp.mjs logs
+
+# 6. When done
 node extension/tools/webview-cdp.mjs close
-```
-
-## Two Targets: `--page` vs default (webview)
-
-Every interaction command (`click`, `eval`, `type`, `key`, `screenshot`, `mouse`, `select`) works on **two targets**:
-
-| Flag | Target | Use for |
-|------|--------|---------|
-| *(none)* | Webview iframe content | Buttons, inputs, tables inside your extension's webview panels |
-| `--page` | VS Code's main UI | Sidebar items, tabs, menus, command palette, native VS Code elements |
-
-**You need `--page` to navigate VS Code's UI** (open panels, click sidebar items, switch tabs). Once a webview panel is open, drop `--page` to interact with its content.
-
-```bash
-# Click something in VS Code's sidebar (--page)
-node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
-
-# Click a button inside the webview panel (no --page)
-node extension/tools/webview-cdp.mjs click "#execute-btn"
-
-# Screenshot VS Code's full window (--page)
-node extension/tools/webview-cdp.mjs screenshot --page full-window.png
-
-# Screenshot just the webview content (no --page)
-node extension/tools/webview-cdp.mjs screenshot webview-only.png
-```
-
-## Connection Modes
-
-### `launch` — Self-contained (primary mode)
-
-Launches an isolated VS Code instance with the extension loaded. Fully automated, no user involvement.
-
-```bash
-node extension/tools/webview-cdp.mjs launch 9223
-# ... work ...
-node extension/tools/webview-cdp.mjs close
-```
-
-### `attach` — Connect to user's VS Code (when CDP is already enabled)
-
-Connects to the user's running VS Code. Use when the user has started VS Code with `--remote-debugging-port`. Useful for debugging issues in the user's actual environment.
-
-```bash
-node extension/tools/webview-cdp.mjs attach        # auto-discovers port
-node extension/tools/webview-cdp.mjs attach 9223   # specific port
-# ... work ...
-node extension/tools/webview-cdp.mjs close         # detaches only, does NOT kill VS Code
 ```
 
 ## Commands
 
 | Command | Example | Purpose |
 |---------|---------|---------|
-| `launch [port] [workspace]` | `launch 9223` | Start isolated VS Code with extension |
-| `attach [port]` | `attach` | Connect to running VS Code |
-| `close` | `close` | Kill (launched) or detach (attached) |
-| `connect [port]` | `connect` | Test connectivity, list webview targets |
-| `screenshot <file>` | `screenshot result.png` | Capture as PNG |
-| `eval "<js>"` | `eval "document.title"` | Run JS, print result |
-| `click "<selector>" [--right]` | `click "#btn"` | Left or right click |
-| `type "<selector>" "<text>"` | `type "#input" "hello"` | Type text into element |
-| `select "<selector>" "<value>"` | `select "#dropdown" "opt1"` | Select dropdown option |
-| `key "<combo>"` | `key "ctrl+enter"` | Send keyboard shortcut |
-| `mouse <event> <x> <y>` | `mouse mousedown 150 200` | Raw mouse event |
+| `launch [workspace]` | `launch` | Start VS Code with extension (daemon manages lifecycle) |
+| `close` | `close` | Shut down VS Code and daemon |
+| `connect` | `connect` | List available webview frames |
+| `command "<cmd>"` | `command "PPDS: Data Explorer"` | Execute VS Code command via command palette |
+| `wait [timeout] [--ext id]` | `wait 10000` | Wait until webview appears |
+| `screenshot <file> [--page]` | `screenshot $TMPDIR/shot.png` | Capture webview (default) or full window (--page) |
+| `eval "<js>" [--page]` | `eval "document.title"` | Run JS in webview or page context |
+| `click "<selector>" [--right] [--page]` | `click "#btn"` | Click element |
+| `type "<selector>" "<text>" [--page]` | `type "#input" "hello"` | Type text into element |
+| `select "<selector>" "<value>" [--page]` | `select "#dropdown" "opt1"` | Select dropdown option |
+| `key "<combo>" [--page]` | `key "ctrl+enter"` | Send keyboard shortcut (works everywhere!) |
+| `mouse <event> <x> <y> [--page]` | `mouse mousedown 150 200` | Raw mouse event at coordinates |
+| `logs [--channel name]` | `logs --channel "PPDS"` | Read console logs or output channel |
 
-**Flags available on all interaction commands:**
-- `--page` — target VS Code's main UI instead of webview content
-- `--target N` — select specific webview when multiple are open
+**Flags:**
+- `--page` — target VS Code's native UI instead of webview content
+- `--target N` — select specific webview by index
+- `--ext "<id>"` — select webview by extension ID (more stable than index)
+
+## Two Targets: `--page` vs default
+
+| Flag | Target | Use for |
+|------|--------|---------|
+| *(none)* | Webview iframe content | Buttons, inputs, tables inside your extension's panels |
+| `--page` | VS Code's main UI | Sidebar, tabs, menus, command palette, native UI elements |
 
 ## Common Patterns
 
-### Open a webview panel
+### Open a panel and verify it loaded
 ```bash
-# Use --page to interact with VS Code's sidebar/UI
-node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
-sleep 2
-node extension/tools/webview-cdp.mjs screenshot panel-opened.png
+node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node extension/tools/webview-cdp.mjs wait
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/panel.png
 ```
 
-### Verify a button click
-```bash
-node extension/tools/webview-cdp.mjs click "#execute-btn"
-node extension/tools/webview-cdp.mjs screenshot after-execute.png
-```
-
-### Test a keyboard shortcut (inside webview)
+### Test a keyboard shortcut
 ```bash
 node extension/tools/webview-cdp.mjs key "ctrl+enter"
-node extension/tools/webview-cdp.mjs screenshot after-shortcut.png
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/after-shortcut.png
+```
+
+### Open the command palette
+```bash
+node extension/tools/webview-cdp.mjs key "ctrl+shift+p"
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/palette.png
+node extension/tools/webview-cdp.mjs key "Escape"
 ```
 
 ### Test a context menu
 ```bash
 node extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
-node extension/tools/webview-cdp.mjs screenshot context-menu.png
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/context-menu.png
 node extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
 ```
 
@@ -145,7 +110,16 @@ node extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector
 node extension/tools/webview-cdp.mjs mouse mousedown 150 200
 node extension/tools/webview-cdp.mjs mouse mousemove 300 250
 node extension/tools/webview-cdp.mjs mouse mouseup 300 250
-node extension/tools/webview-cdp.mjs screenshot after-drag.png
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/after-drag.png
+```
+
+### Check for errors
+```bash
+# Console output (captured continuously by daemon)
+node extension/tools/webview-cdp.mjs logs
+
+# Extension output channel logs
+node extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
 ### Check DOM state
@@ -154,10 +128,29 @@ node extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selecte
 node extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
 ```
 
-### Discover available elements on the page
+## Screenshots
+
+**Always save screenshots to a temp directory. NEVER save to the repo working tree.**
+
 ```bash
-# Find clickable elements in VS Code's sidebar
-node extension/tools/webview-cdp.mjs eval --page "Array.from(document.querySelectorAll('[aria-label]')).map(e => e.getAttribute('aria-label')).slice(0, 20).join('\\n')"
+# Good — uses temp directory
+node extension/tools/webview-cdp.mjs screenshot $TMPDIR/my-screenshot.png
+node extension/tools/webview-cdp.mjs screenshot /tmp/my-screenshot.png
+
+# BAD — creates untracked files in the repo
+node extension/tools/webview-cdp.mjs screenshot screenshot.png
+```
+
+## Bash Quoting for `eval`
+
+Bash expands `${}` and backticks in double-quoted strings. Use single quotes for eval expressions:
+
+```bash
+# Good — single quotes prevent bash expansion
+node extension/tools/webview-cdp.mjs eval 'document.querySelector("td").textContent'
+
+# BAD — bash expands ${} as a variable
+node extension/tools/webview-cdp.mjs eval "document.querySelector('td[data-row=\"${row}\"]')"
 ```
 
 ## Gap Protocol
@@ -171,25 +164,13 @@ If you encounter a webview interaction that this tool cannot handle:
 
 This ensures the tool evolves based on real needs.
 
-## Known Limitations
-
-**CDP cannot execute VS Code commands.** VS Code's renderer is fully sandboxed via Electron's contextBridge. There is no `require`, no command service access, and IPC channels have no handlers for command execution. Keyboard simulation (`key --page "ctrl+shift+p"`) does NOT trigger VS Code's keybinding system — VS Code intercepts input at the Electron `before-input-event` level, before CDP's synthetic events reach the DOM.
-
-**Do NOT attempt any of these — they will not work:**
-- `eval --page "require('vs/...')"` — require is not exposed
-- `eval --page "vscode.ipcRenderer.invoke('vscode:executeCommand', ...)"` — no handler registered
-- `key --page "ctrl+shift+p"` — does not open command palette
-- Any approach to programmatically invoke VS Code commands through CDP
-
-**What works instead:** Use `click --page` with CSS selectors or aria-labels to interact with VS Code's native UI. Click sidebar items to open panels, click buttons, click tabs. This is the only reliable path.
-
 ## Important
 
 - **Always screenshot after changes** — don't assume your code works, verify visually
-- **Use `click --page` to navigate VS Code UI** — open panels, click sidebar items, switch tabs
+- **Use `command` to open panels** — `command "PPDS: Data Explorer"` then `wait`
+- **Use `--page` for VS Code native UI** — sidebar, tabs, menus
 - **Drop `--page` for webview content** — buttons, inputs, tables inside extension panels
-- **NEVER close an attached instance** — `close` on attached sessions only cleans up the session file
+- **Save screenshots to temp dirs** — never create files in the repo working tree
+- **Check logs when debugging** — `logs` for console output, `logs --channel "PPDS"` for extension logs
 - **Do NOT use agent-browser for VS Code webviews** — it cannot reach webview iframe targets
-- **Do NOT use Playwright MCP for webview testing** — same limitation
-- **Do NOT skip visual verification** — the whole point of this tool is seeing your work
-- **Avoid eval expressions that read secrets** — auth tokens, cookies, etc. will appear in logs
+- **Do NOT use Playwright MCP for webview testing** — it doesn't support Electron
