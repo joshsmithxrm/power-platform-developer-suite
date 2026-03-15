@@ -439,6 +439,7 @@
     "watch": "node esbuild.js --watch",
     "package": "node esbuild.js --production",
     "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -471,6 +472,7 @@
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.2",
+    "eslint-plugin-import-x": "^4.16.2",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
