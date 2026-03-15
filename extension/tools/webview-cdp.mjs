@@ -49,7 +49,7 @@ export function parseArgs(argv) {
   if (!VALID_COMMANDS.includes(command)) throw new Error(`Unknown command: ${command}`);
 
   const rest = argv.slice(1);
-  let target, right = false, port = 9223;
+  let target, right = false, page = false, port = 9223;
   const args = [];
 
   for (let i = 0; i < rest.length; i++) {
@@ -57,6 +57,8 @@ export function parseArgs(argv) {
       target = parseInt(rest[++i], 10);
     } else if (rest[i] === '--right') {
       right = true;
+    } else if (rest[i] === '--page') {
+      page = true;
     } else if (rest[i] === '--port' && i + 1 < rest.length) {
       port = validatePort(parseInt(rest[++i], 10));
     } else {
@@ -74,7 +76,7 @@ export function parseArgs(argv) {
     return { command, port: attachPort, args: [] };
   }
 
-  const result = { command, port, args };
+  const result = { command, port, args, page };
   if (target !== undefined) result.target = target;
   if (command === 'click') result.right = right;
   return result;
@@ -201,6 +203,40 @@ async function withWebview(port, targetIndex, fn) {
   } finally {
     ws.close();
   }
+}
+
+async function withPage(port, fn) {
+  let allTargets;
+  try {
+    allTargets = await fetchTargets(port);
+  } catch {
+    throw new Error('Connection refused. VS Code may have closed.');
+  }
+
+  // Find the main VS Code page target
+  const pages = allTargets.filter(t => t.type === 'page');
+  if (pages.length === 0) {
+    throw new Error('No page target found. Is VS Code running?');
+  }
+
+  // Prefer the page with "Visual Studio Code" in the title, fall back to first page
+  const target = pages.find(t => t.title?.includes('Visual Studio Code')) || pages[0];
+  const ws = await connectWebSocket(target.webSocketDebuggerUrl);
+  try {
+    // No context discovery needed — use default context (no contextId = main frame)
+    return await fn(ws, undefined, target);
+  } finally {
+    ws.close();
+  }
+}
+
+// Helper to route through withPage or withWebview based on --page flag
+async function withTarget(parsed, fn) {
+  const session = readSession();
+  if (parsed.page) {
+    return withPage(session.port, fn);
+  }
+  return withWebview(session.port, parsed.target, fn);
 }
 
 // ── Command: launch ────────────────────────────────────────────────
@@ -462,8 +498,7 @@ async function cmdScreenshot(parsed) {
   const dir = dirname(resolve(filePath));
   if (!existsSync(dir)) throw new Error(`Cannot write to: ${filePath}`);
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+  await withTarget(parsed, async (ws, contextId) => {
     try {
       await sendCDP(ws, 'Page.enable');
       const result = await sendCDP(ws, 'Page.captureScreenshot', { format: 'png' });
@@ -475,6 +510,7 @@ async function cmdScreenshot(parsed) {
       // Page domain may not be available on iframe targets — fall back
     }
 
+    const session = readSession();
     const allTargets = await fetchTargets(session.port);
     const pageTargets = allTargets.filter(t => t.type === 'page' && t.title?.includes('Visual Studio Code'));
     if (pageTargets.length === 0) throw new Error('Cannot capture screenshot: no page target found');
@@ -498,14 +534,15 @@ async function cmdEval(parsed) {
   const expression = parsed.args[0];
   if (!expression) throw new Error('Empty expression');
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
-    const result = await sendCDP(ws, 'Runtime.evaluate', {
+  await withTarget(parsed, async (ws, contextId) => {
+    const evalParams = {
       expression,
-      contextId,
       returnByValue: true,
       awaitPromise: true,
-    });
+    };
+    if (contextId !== undefined) evalParams.contextId = contextId;
+
+    const result = await sendCDP(ws, 'Runtime.evaluate', evalParams);
 
     if (result.exceptionDetails) {
       const msg = result.exceptionDetails.exception?.description
@@ -525,19 +562,20 @@ async function cmdClick(parsed) {
   const selector = parsed.args[0];
   if (!selector) throw new Error('Empty selector');
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
-    const check = await sendCDP(ws, 'Runtime.evaluate', {
+  await withTarget(parsed, async (ws, contextId) => {
+    const evalParams = {
       expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
-      contextId,
       returnByValue: true,
-    });
+    };
+    if (contextId !== undefined) evalParams.contextId = contextId;
+
+    const check = await sendCDP(ws, 'Runtime.evaluate', evalParams);
     if (!check.result.value) {
       throw new Error(`Element not found: ${selector}`);
     }
 
     if (parsed.right) {
-      await sendCDP(ws, 'Runtime.evaluate', {
+      const rightParams = {
         expression: `(() => {
           const el = document.querySelector(${JSON.stringify(selector)});
           const rect = el.getBoundingClientRect();
@@ -547,16 +585,18 @@ async function cmdClick(parsed) {
             bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2
           }));
         })()`,
-        contextId,
         returnByValue: true,
         awaitPromise: true,
-      });
+      };
+      if (contextId !== undefined) rightParams.contextId = contextId;
+      await sendCDP(ws, 'Runtime.evaluate', rightParams);
     } else {
-      await sendCDP(ws, 'Runtime.evaluate', {
+      const clickParams = {
         expression: `document.querySelector(${JSON.stringify(selector)}).click()`,
-        contextId,
         returnByValue: true,
-      });
+      };
+      if (contextId !== undefined) clickParams.contextId = contextId;
+      await sendCDP(ws, 'Runtime.evaluate', clickParams);
     }
   });
 }
@@ -568,16 +608,16 @@ async function cmdType(parsed) {
   const text = parsed.args[1];
   if (!selector || text === undefined) throw new Error('Usage: type <selector> <text>');
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
-    const check = await sendCDP(ws, 'Runtime.evaluate', {
+  await withTarget(parsed, async (ws, contextId) => {
+    const checkParams = {
       expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
-      contextId,
       returnByValue: true,
-    });
+    };
+    if (contextId !== undefined) checkParams.contextId = contextId;
+    const check = await sendCDP(ws, 'Runtime.evaluate', checkParams);
     if (!check.result.value) throw new Error(`Element not found: ${selector}`);
 
-    await sendCDP(ws, 'Runtime.evaluate', {
+    const typeParams = {
       expression: `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         el.focus();
@@ -585,10 +625,11 @@ async function cmdType(parsed) {
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       })()`,
-      contextId,
       returnByValue: true,
       awaitPromise: true,
-    });
+    };
+    if (contextId !== undefined) typeParams.contextId = contextId;
+    await sendCDP(ws, 'Runtime.evaluate', typeParams);
   });
 }
 
@@ -599,9 +640,8 @@ async function cmdSelect(parsed) {
   const value = parsed.args[1];
   if (!selector || value === undefined) throw new Error('Usage: select <selector> <value>');
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
-    const result = await sendCDP(ws, 'Runtime.evaluate', {
+  await withTarget(parsed, async (ws, contextId) => {
+    const selectParams = {
       expression: `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) return { error: 'not_found' };
@@ -613,10 +653,11 @@ async function cmdSelect(parsed) {
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return { success: true, selected: option.value };
       })()`,
-      contextId,
       returnByValue: true,
       awaitPromise: true,
-    });
+    };
+    if (contextId !== undefined) selectParams.contextId = contextId;
+    const result = await sendCDP(ws, 'Runtime.evaluate', selectParams);
 
     const val = result.result.value;
     if (val?.error === 'not_found') throw new Error(`Element not found: ${selector}`);
@@ -631,8 +672,7 @@ async function cmdKey(parsed) {
   if (!combo) throw new Error('Empty key combo');
   const { key, modifiers } = parseKeyCombo(combo);
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+  await withTarget(parsed, async (ws, contextId) => {
     const dispatchParams = {
       type: 'keyDown',
       key,
@@ -670,8 +710,7 @@ async function cmdMouse(parsed) {
     mouseup: 'mouseReleased',
   };
 
-  const session = readSession();
-  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+  await withTarget(parsed, async (ws, contextId) => {
     await sendCDP(ws, 'Input.dispatchMouseEvent', {
       type: cdpTypeMap[event],
       x, y,
