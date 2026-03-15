@@ -16,7 +16,9 @@ export type QueryPanelWebviewToHost =
     | { command: 'showFetchXml'; sql: string }
     | { command: 'loadMore'; pagingCookie: string; page: number }
     | { command: 'explainQuery'; sql: string }
-    | { command: 'exportResults' }
+    | { command: 'exportResults'; format?: string }
+    | { command: 'saveQuery'; sql: string; language: string }
+    | { command: 'loadQueryFromFile' }
     | { command: 'openInNotebook'; sql: string }
     | { command: 'showHistory' }
     | { command: 'copyToClipboard'; text: string }

@@ -103,7 +103,13 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                             await this.explainQuery(message.sql);
                             break;
                         case 'exportResults':
-                            await this.exportResults();
+                            await this.exportResults(message.format);
+                            break;
+                        case 'saveQuery':
+                            await this.saveQuery(message.sql, message.language);
+                            break;
+                        case 'loadQueryFromFile':
+                            await this.loadQueryFromFile();
                             break;
                         case 'openInNotebook':
                             await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql);
@@ -459,6 +465,34 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         }
     }
 
+    private async saveQuery(sql: string, language: string): Promise<void> {
+        if (!sql.trim()) {
+            vscode.window.showWarningMessage('No query to save.');
+            return;
+        }
+        const ext = language === 'xml' ? 'xml' : 'sql';
+        const filterName = language === 'xml' ? 'FetchXML Files' : 'SQL Files';
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`query.${ext}`),
+            filters: { [filterName]: [ext] },
+        });
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(sql));
+            vscode.window.showInformationMessage(`Query saved to ${uri.fsPath}`);
+        }
+    }
+
+    private async loadQueryFromFile(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            filters: { 'Query Files': ['sql', 'xml', 'fetchxml'] },
+            canSelectMany: false,
+        });
+        if (uris && uris.length > 0) {
+            const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(uris[0]));
+            this.postMessage({ command: 'loadQuery', sql: content });
+        }
+    }
+
     getHtmlContent(webview: vscode.Webview): string {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
@@ -498,13 +532,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 <div class="toolbar">
     <vscode-button id="execute-btn" appearance="primary">Execute</vscode-button>
     <vscode-button id="cancel-btn" appearance="secondary" style="display:none;" title="Cancel query (Escape)">Cancel</vscode-button>
-    <vscode-button id="fetchxml-btn" appearance="secondary">FetchXML</vscode-button>
-    <vscode-button id="explain-btn" appearance="secondary">EXPLAIN</vscode-button>
-    <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
-    <vscode-button id="history-btn" appearance="secondary">History</vscode-button>
-    <vscode-button id="notebook-btn" appearance="secondary" title="Open in Notebook">Notebook</vscode-button>
-    <vscode-button id="tds-btn" appearance="secondary" title="Toggle TDS Read Replica mode (direct SQL via port 5558)">TDS: Off</vscode-button>
-    <vscode-button id="lang-btn" appearance="secondary" title="Toggle SQL / FetchXML language">SQL</vscode-button>
+    <vscode-button id="export-btn" appearance="secondary" title="Export results or save query">Export \u25BE</vscode-button>
+    <vscode-button id="history-btn" appearance="secondary" title="Query history (Ctrl+Shift+H)">History</vscode-button>
+    <vscode-button id="more-btn" appearance="icon" title="More actions">
+        <span class="codicon codicon-ellipsis"></span>
+    </vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
@@ -519,6 +551,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 <div class="editor-container">
     <div class="editor-wrapper">
         <div id="sql-editor"></div>
+        <div class="lang-toggle" id="lang-toggle">
+            <button class="lang-seg active" data-lang="sql">SQL</button>
+            <button class="lang-seg" data-lang="xml">FetchXML</button>
+        </div>
     </div>
 </div>
 
