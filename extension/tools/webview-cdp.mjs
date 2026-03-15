@@ -238,8 +238,14 @@ async function discoverCDPPort(pid, requestedPort, timeoutMs = 20000) {
     // On Windows, scan ports opened by the VS Code process tree
     if (process.platform === 'win32') {
       try {
+        // Use -EncodedCommand to avoid bash/shell escaping issues with $_ in PowerShell
+        const psScript = `
+          $procs = Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} -or $_.ProcessId -eq ${pid} } | Select-Object -ExpandProperty ProcessId
+          if ($procs) { Get-NetTCPConnection -State Listen -OwningProcess $procs -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort }
+        `;
+        const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
         const output = execSync(
-          `powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -OwningProcess (Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} -or $_.ProcessId -eq ${pid} } | Select-Object -ExpandProperty ProcessId) -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"`,
+          `powershell -NoProfile -EncodedCommand ${encoded}`,
           { encoding: 'utf-8', timeout: 5000 }
         );
         const ports = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
@@ -330,8 +336,14 @@ async function cmdAttach(parsed) {
   // On Windows, find all VS Code/Electron processes and their listening ports
   if (process.platform === 'win32') {
     try {
+      // Use -EncodedCommand to avoid bash/shell escaping issues with $_ in PowerShell
+      const psScript = `
+        $pids = Get-Process -Name Code, Electron -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+        if ($pids) { Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort }
+      `;
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
       const output = execSync(
-        `powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -OwningProcess (Get-Process -Name Code, Electron -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"`,
+        `powershell -NoProfile -EncodedCommand ${encoded}`,
         { encoding: 'utf-8', timeout: 5000 }
       );
       const discovered = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
