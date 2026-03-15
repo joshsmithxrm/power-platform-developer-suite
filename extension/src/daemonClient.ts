@@ -51,6 +51,24 @@ export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnec
  * process if it is not already running. If the daemon dies, the next RPC
  * call will automatically restart it (auto-reconnect).
  */
+/** Maps daemon stderr log-level tags to LogOutputChannel method names. */
+const DAEMON_LOG_LEVELS: Record<string, 'trace' | 'debug' | 'info' | 'warn' | 'error'> = {
+    TRC: 'trace',
+    DBG: 'debug',
+    INF: 'info',
+    WRN: 'warn',
+    ERR: 'error',
+    CRT: 'error',
+};
+
+const DAEMON_LOG_LEVEL_RE = /\]\s+\[(TRC|DBG|INF|WRN|ERR|CRT)\]/;
+
+/** Parses the log level from a daemon stderr line. Returns 'warn' for unrecognized formats. */
+export function parseDaemonLogLevel(line: string): 'trace' | 'debug' | 'info' | 'warn' | 'error' {
+    const match = DAEMON_LOG_LEVEL_RE.exec(line);
+    return match ? DAEMON_LOG_LEVELS[match[1]] : 'warn';
+}
+
 // RequestTypes with positional parameter encoding for DTO-based RPC methods.
 // StreamJsonRpc binds positional params (JSON array) to a single DTO parameter,
 // but vscode-jsonrpc defaults to named params (JSON object) which StreamJsonRpc
@@ -150,9 +168,15 @@ export class DaemonClient implements vscode.Disposable {
             throw new Error('Failed to create daemon process streams');
         }
 
-        // Log stderr for debugging
+        // Log stderr with parsed log levels
         this.process.stderr?.on('data', (data: Buffer) => {
-            this.log.warn(`[daemon stderr] ${data.toString()}`);
+            const text = data.toString().trimEnd();
+            for (const line of text.split('\n')) {
+                const trimmed = line.trimEnd();
+                if (!trimmed) continue;
+                const level = parseDaemonLogLevel(trimmed);
+                this.log[level](`[daemon] ${trimmed}`);
+            }
         });
 
         this.process.on('error', (err) => {
