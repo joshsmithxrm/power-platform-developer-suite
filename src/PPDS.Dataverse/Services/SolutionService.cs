@@ -24,6 +24,7 @@ public class SolutionService : ISolutionService
     private readonly ILogger<SolutionService> _logger;
     private readonly IMetadataService _metadataService;
     private readonly IComponentNameResolver _nameResolver;
+    private readonly ICachedMetadataProvider _cachedMetadata;
 
     /// <summary>
     /// Component type names for common component types.
@@ -135,16 +136,19 @@ public class SolutionService : ISolutionService
     /// <param name="logger">The logger.</param>
     /// <param name="metadataService">The metadata service for runtime option set resolution.</param>
     /// <param name="nameResolver">The component name resolver.</param>
+    /// <param name="cachedMetadata">The cached metadata provider for entity ObjectTypeCode resolution.</param>
     public SolutionService(
         IDataverseConnectionPool pool,
         ILogger<SolutionService> logger,
         IMetadataService metadataService,
-        IComponentNameResolver nameResolver)
+        IComponentNameResolver nameResolver,
+        ICachedMetadataProvider cachedMetadata)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _nameResolver = nameResolver ?? throw new ArgumentNullException(nameof(nameResolver));
+        _cachedMetadata = cachedMetadata ?? throw new ArgumentNullException(nameof(cachedMetadata));
     }
 
     /// <inheritdoc />
@@ -335,7 +339,7 @@ public class SolutionService : ISolutionService
                 : ComponentTypeNames.TryGetValue(type, out var fallback)
                     ? fallback
                     : type >= 10000
-                        ? $"Custom Component ({type})"
+                        ? $"Unknown ({type})"
                         : $"Component Type {type}";
 
             return new SolutionComponentInfo(
@@ -349,7 +353,7 @@ public class SolutionService : ISolutionService
 
         // Log any component types that couldn't be resolved from either the option set or hardcoded dictionary
         var unresolvedTypes = components
-            .Where(c => c.ComponentTypeName.StartsWith("Component Type ") || c.ComponentTypeName.StartsWith("Custom Component ("))
+            .Where(c => c.ComponentTypeName.StartsWith("Component Type ") || c.ComponentTypeName.StartsWith("Unknown ("))
             .Select(c => c.ComponentType)
             .Distinct()
             .OrderBy(t => t)
@@ -463,7 +467,10 @@ public class SolutionService : ISolutionService
     }
 
     /// <summary>
-    /// Resolves component type names from the componenttype global option set metadata.
+    /// Resolves component type names using a 3-tier approach:
+    /// Tier 1: componenttype global option set (covers types 1-432).
+    /// Tier 1.5: entity ObjectTypeCode lookup for custom types (&gt;= 10000) via the cached entity list —
+    ///           zero additional API calls.
     /// Note: componenttype is a global Dataverse option set — identical across all environments.
     /// The per-env cache key is used for structural consistency, but the values will be the same.
     /// The metadata service uses its own pool connection; this is acceptable because the option
@@ -480,23 +487,53 @@ public class SolutionService : ISolutionService
             return cached;
         }
 
+        var dict = new Dictionary<int, string>();
+
+        // Tier 1: componenttype global option set (covers types 1-432)
         try
         {
             _logger.LogDebug("Fetching componenttype option set metadata for cache key: {EnvUrl}", cacheKey);
             var optionSet = await _metadataService.GetOptionSetAsync("componenttype", cancellationToken);
-            var dict = new Dictionary<int, string>();
             foreach (var option in optionSet.Options)
             {
                 dict[option.Value] = option.Label;
             }
-            _componentTypeCache.TryAdd(cacheKey, dict);
-            return dict;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to fetch componenttype metadata, falling back to hardcoded dictionary");
-            return ComponentTypeNames;
+            _logger.LogWarning(ex, "Failed to fetch componenttype metadata, using hardcoded dictionary as base");
+            foreach (var kvp in ComponentTypeNames)
+            {
+                dict[kvp.Key] = kvp.Value;
+            }
         }
+
+        // Tier 1.5: Resolve custom types (>= 10000) via entity ObjectTypeCode lookup.
+        // These types correspond to Dataverse entity ObjectTypeCodes.
+        // The cached entity list is already populated — zero additional API calls.
+        try
+        {
+            var entities = await _cachedMetadata.GetEntitiesAsync(cancellationToken);
+            foreach (var entity in entities)
+            {
+                if (entity.ObjectTypeCode >= 10000 && !dict.ContainsKey(entity.ObjectTypeCode))
+                {
+                    var label = !string.IsNullOrWhiteSpace(entity.DisplayName)
+                        ? entity.DisplayName
+                        : entity.SchemaName ?? entity.LogicalName;
+                    dict[entity.ObjectTypeCode] = label;
+                }
+            }
+            _logger.LogDebug("Resolved {Count} custom component types via entity ObjectTypeCode lookup",
+                entities.Count(e => e.ObjectTypeCode >= 10000));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve custom component types via entity metadata");
+        }
+
+        _componentTypeCache.TryAdd(cacheKey, dict);
+        return dict;
     }
 
     private static SolutionInfo MapToSolutionInfo(Entity entity)

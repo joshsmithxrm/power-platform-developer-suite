@@ -22,9 +22,10 @@ public class SolutionServiceTests
         var logger = new NullLogger<SolutionService>();
         var metadataService = new Mock<IMetadataService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
+        var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
         // Act
-        var act = () => new SolutionService(null!, logger, metadataService, nameResolver);
+        var act = () => new SolutionService(null!, logger, metadataService, nameResolver, cachedMetadata);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -38,9 +39,10 @@ public class SolutionServiceTests
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var metadataService = new Mock<IMetadataService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
+        var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
         // Act
-        var act = () => new SolutionService(pool, null!, metadataService, nameResolver);
+        var act = () => new SolutionService(pool, null!, metadataService, nameResolver, cachedMetadata);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -54,13 +56,31 @@ public class SolutionServiceTests
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
         var nameResolver = new Mock<IComponentNameResolver>().Object;
+        var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
         // Act
-        var act = () => new SolutionService(pool, logger, null!, nameResolver);
+        var act = () => new SolutionService(pool, logger, null!, nameResolver, cachedMetadata);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("metadataService");
+    }
+
+    [Fact]
+    public void Constructor_ThrowsOnNullCachedMetadata()
+    {
+        // Arrange
+        var pool = new Mock<IDataverseConnectionPool>().Object;
+        var logger = new NullLogger<SolutionService>();
+        var metadataService = new Mock<IMetadataService>().Object;
+        var nameResolver = new Mock<IComponentNameResolver>().Object;
+
+        // Act
+        var act = () => new SolutionService(pool, logger, metadataService, nameResolver, null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("cachedMetadata");
     }
 
     [Fact]
@@ -71,9 +91,10 @@ public class SolutionServiceTests
         var logger = new NullLogger<SolutionService>();
         var metadataService = new Mock<IMetadataService>().Object;
         var nameResolver = new Mock<IComponentNameResolver>().Object;
+        var cachedMetadata = new Mock<ICachedMetadataProvider>().Object;
 
         // Act
-        var service = new SolutionService(pool, logger, metadataService, nameResolver);
+        var service = new SolutionService(pool, logger, metadataService, nameResolver, cachedMetadata);
 
         // Assert
         service.Should().NotBeNull();
