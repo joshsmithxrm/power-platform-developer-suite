@@ -64,6 +64,10 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 - Skills: @webview-panels (panel dev), @webview-cdp (visual verification)
 - Execution: commit after every task, verify with /gates before proceeding — don't ask, just do it
 
+## Git Hooks
+
+Pre-commit hook in `scripts/hooks/` runs `typecheck:all` on extension TS changes. Auto-configured by `npm install` via `prepare` script. Manual setup: `git config core.hooksPath scripts/hooks`.
+
 ## Gotchas
 
 - VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
