@@ -1055,6 +1055,7 @@ export class QueryPanel extends WebviewPanelBase {
                 break;
             case 'updateEnvironment':
                 updateEnvironmentDisplay(msg.name);
+                currentEnvironmentUrl = msg.url || null;
                 break;
             case 'clipboardContent':
                 if (msg.text && editor.hasTextFocus()) {
@@ -1258,6 +1259,8 @@ export class QueryPanel extends WebviewPanelBase {
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
 
+        var recordId = anchor ? getRecordId(allRows[anchor.row]) : null;
+
         const items = [
             { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
             { label: inverseLabel, shortcut: 'Ctrl+Shift+C', action: 'copyInverse' },
@@ -1266,6 +1269,12 @@ export class QueryPanel extends WebviewPanelBase {
             { label: 'Copy Row', shortcut: '', action: 'row' },
             { label: 'Copy All Results', shortcut: '', action: 'all' },
         ];
+
+        if (lastEntityName && recordId && !lastIsAggregate) {
+            items.push({ label: 'separator', shortcut: '', action: 'separator' });
+            items.push({ label: 'Open Record in Dynamics', shortcut: '', action: 'openRecord' });
+            items.push({ label: 'Copy Record URL', shortcut: '', action: 'copyRecordUrl' });
+        }
 
         let html = '';
         for (const item of items) {
@@ -1324,6 +1333,20 @@ export class QueryPanel extends WebviewPanelBase {
                 if (copyHintEl) {
                     copyHintEl.textContent = 'Copied all ' + displayedRows.length + ' rows';
                     setTimeout(() => { updateCopyHint(); }, 2000);
+                }
+            } else if (action === 'openRecord') {
+                var rid = getRecordId(allRows[clickRow]);
+                var url = buildRecordUrl(lastEntityName, rid);
+                if (url) vscode.postMessage({ command: 'openRecordUrl', url: url });
+            } else if (action === 'copyRecordUrl') {
+                var rid = getRecordId(allRows[clickRow]);
+                var url = buildRecordUrl(lastEntityName, rid);
+                if (url) {
+                    vscode.postMessage({ command: 'copyToClipboard', text: url });
+                    if (copyHintEl) {
+                        copyHintEl.textContent = 'Copied record URL';
+                        setTimeout(() => { updateCopyHint(); }, 2000);
+                    }
                 }
             }
             removeContextMenu();
