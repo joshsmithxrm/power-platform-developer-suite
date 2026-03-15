@@ -23,8 +23,8 @@ The tool is at `extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@
 ## Core Workflow
 
 ```bash
-# 1. Launch VS Code with the extension (fully automated)
-node extension/tools/webview-cdp.mjs launch
+# 1. Launch VS Code with the extension (--build ensures fresh compilation)
+node extension/tools/webview-cdp.mjs launch --build
 
 # 2. Open a panel via command palette
 node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
@@ -51,7 +51,7 @@ node extension/tools/webview-cdp.mjs close
 
 | Command | Example | Purpose |
 |---------|---------|---------|
-| `launch [workspace]` | `launch` | Start VS Code with extension (daemon manages lifecycle) |
+| `launch [workspace] [--build]` | `launch` or `launch --build` | Start VS Code with extension (--build compiles first) |
 | `close` | `close` | Shut down VS Code and daemon |
 | `connect` | `connect` | List available webview frames |
 | `command "<cmd>"` | `command "PPDS: Data Explorer"` | Execute VS Code command via command palette |
@@ -64,6 +64,9 @@ node extension/tools/webview-cdp.mjs close
 | `key "<combo>" [--page]` | `key "ctrl+enter"` | Send keyboard shortcut (works everywhere!) |
 | `mouse <event> <x> <y> [--page]` | `mouse mousedown 150 200` | Raw mouse event at coordinates |
 | `logs [--channel name]` | `logs --channel "PPDS"` | Read console logs or output channel |
+| `text "<selector>" [--page]` | `text "#status"` | Read textContent of element |
+| `notebook run` | `notebook run` | Execute focused cell (clicks run button) |
+| `notebook run-all` | `notebook run-all` | Execute all cells |
 
 **Flags:**
 - `--page` — target VS Code's native UI instead of webview content
@@ -126,10 +129,40 @@ node extension/tools/webview-cdp.mjs logs
 node extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
+### Execute notebook cells
+```bash
+# Run the focused cell — clicks the run button (reliable, focus-independent)
+node extension/tools/webview-cdp.mjs notebook run
+node extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
+
+# Run all cells
+node extension/tools/webview-cdp.mjs notebook run-all
+node extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
+```
+
+**Avoid** using `command "Notebook: Execute Cell"` — opening the command palette steals focus from the cell, causing the command to silently fail. Similarly, `key "ctrl+enter"` may trigger `executeAndInsertBelow` (creates a duplicate cell) depending on VS Code's keybinding context.
+
+### Hide panel for notebook screenshots
+```bash
+# The output panel takes vertical space — hide it to see cell output clearly
+node extension/tools/webview-cdp.mjs command "View: Toggle Panel Visibility"
+node extension/tools/webview-cdp.mjs screenshot $TEMP/notebook-clean.png
+```
+
 ### Check DOM state
 ```bash
 node extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selected') !== null"
 node extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
+```
+
+### Read element text
+```bash
+# Quick read of an element's text content
+node extension/tools/webview-cdp.mjs text "#execution-time" --ext "power-platform-developer-suite"
+# Returns: "in 298ms via Dataverse"
+
+# Equivalent eval (more verbose, same result):
+node extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-time")?.textContent'
 ```
 
 ## Monaco Editor
