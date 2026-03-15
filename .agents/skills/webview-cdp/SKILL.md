@@ -171,10 +171,22 @@ If you encounter a webview interaction that this tool cannot handle:
 
 This ensures the tool evolves based on real needs.
 
+## Known Limitations
+
+**CDP cannot execute VS Code commands.** VS Code's renderer is fully sandboxed via Electron's contextBridge. There is no `require`, no command service access, and IPC channels have no handlers for command execution. Keyboard simulation (`key --page "ctrl+shift+p"`) does NOT trigger VS Code's keybinding system — VS Code intercepts input at the Electron `before-input-event` level, before CDP's synthetic events reach the DOM.
+
+**Do NOT attempt any of these — they will not work:**
+- `eval --page "require('vs/...')"` — require is not exposed
+- `eval --page "vscode.ipcRenderer.invoke('vscode:executeCommand', ...)"` — no handler registered
+- `key --page "ctrl+shift+p"` — does not open command palette
+- Any approach to programmatically invoke VS Code commands through CDP
+
+**What works instead:** Use `click --page` with CSS selectors or aria-labels to interact with VS Code's native UI. Click sidebar items to open panels, click buttons, click tabs. This is the only reliable path.
+
 ## Important
 
 - **Always screenshot after changes** — don't assume your code works, verify visually
-- **Use `--page` to navigate VS Code UI** — open panels, click sidebar items, switch tabs
+- **Use `click --page` to navigate VS Code UI** — open panels, click sidebar items, switch tabs
 - **Drop `--page` for webview content** — buttons, inputs, tables inside extension panels
 - **NEVER close an attached instance** — `close` on attached sessions only cleans up the session file
 - **Do NOT use agent-browser for VS Code webviews** — it cannot reach webview iframe targets
