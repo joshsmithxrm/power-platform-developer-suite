@@ -5,12 +5,22 @@ import { parseArgs, parseKeyCombo } from './webview-cdp.mjs';
 describe('parseArgs', () => {
   it('parses launch with defaults', () => {
     const result = parseArgs(['launch']);
-    expect(result).toEqual({ command: 'launch', workspace: undefined });
+    expect(result).toEqual({ command: 'launch', workspace: undefined, build: false });
   });
 
   it('parses launch with workspace', () => {
     const result = parseArgs(['launch', '/my/workspace']);
-    expect(result).toEqual({ command: 'launch', workspace: '/my/workspace' });
+    expect(result).toEqual({ command: 'launch', workspace: '/my/workspace', build: false });
+  });
+
+  it('parses launch with --build', () => {
+    const result = parseArgs(['launch', '--build']);
+    expect(result).toEqual({ command: 'launch', workspace: undefined, build: true });
+  });
+
+  it('parses launch with workspace and --build', () => {
+    const result = parseArgs(['launch', '/my/workspace', '--build']);
+    expect(result).toEqual({ command: 'launch', workspace: '/my/workspace', build: true });
   });
 
   it('parses close', () => {
@@ -106,6 +116,16 @@ describe('parseArgs', () => {
   it('parses select with selector and value', () => {
     const result = parseArgs(['select', '#dropdown', 'option1']);
     expect(result).toEqual({ command: 'select', args: ['#dropdown', 'option1'], page: false, target: undefined, ext: undefined });
+  });
+
+  it('parses text with selector', () => {
+    const result = parseArgs(['text', '#status']);
+    expect(result).toEqual({ command: 'text', args: ['#status'], page: false, target: undefined, ext: undefined });
+  });
+
+  it('parses text with --ext', () => {
+    const result = parseArgs(['text', '#status', '--ext', 'ppds']);
+    expect(result).toEqual({ command: 'text', args: ['#status'], page: false, target: undefined, ext: 'ppds' });
   });
 
   it('errors on empty args', () => {
