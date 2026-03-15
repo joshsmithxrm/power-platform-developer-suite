@@ -444,18 +444,22 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             isClipboard = formatPick.isClipboard;
         }
 
-        // Headers toggle
-        const headersPick = await vscode.window.showQuickPick([
-            { label: 'Include column headers', includeHeaders: true },
-            { label: 'Data only (no headers)', includeHeaders: false },
-        ], {
-            title: 'Column Headers',
-            placeHolder: 'Include headers in export?',
-        });
-        if (!headersPick) return;
+        // Headers toggle — skip for JSON (always keyed objects)
+        let includeHeaders = true;
+        if (format !== 'json') {
+            const headersPick = await vscode.window.showQuickPick([
+                { label: 'Include column headers', includeHeaders: true },
+                { label: 'Data only (no headers)', includeHeaders: false },
+            ], {
+                title: 'Column Headers',
+                placeHolder: 'Include headers in export?',
+            });
+            if (!headersPick) return;
+            includeHeaders = headersPick.includeHeaders;
+        }
 
         try {
-            const exportParams = this.buildExportParams(format, headersPick.includeHeaders);
+            const exportParams = this.buildExportParams(format, includeHeaders);
             const result = await this.daemon.queryExport(exportParams);
 
             if (isClipboard) {
