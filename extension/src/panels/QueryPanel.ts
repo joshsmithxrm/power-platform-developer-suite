@@ -656,6 +656,11 @@ export class QueryPanel extends WebviewPanelBase {
         }
     }
 
+    // Clear table selection when user clicks into the editor
+    editor.onDidFocusEditorText(() => {
+        if (anchor) clearSelection();
+    });
+
     editor.onDidChangeModelContent(() => {
         if (!manualOverride) {
             const detected = detectLang(editor.getValue());
@@ -826,7 +831,9 @@ export class QueryPanel extends WebviewPanelBase {
     // from the grid — not from Monaco's editor. Monaco would otherwise intercept
     // the event and copy its own (empty) selection.
     document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && anchor) {
+        // Only intercept Ctrl+C for table copy when Monaco does NOT have focus.
+        // If Monaco has focus, let it handle copy/paste normally.
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && anchor && !editor.hasTextFocus()) {
             e.preventDefault();
             e.stopPropagation();
             copySelection(e.shiftKey);
