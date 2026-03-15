@@ -7,3 +7,4 @@ bin/
 package.json.backup
 tools/.webview-cdp-session.json
 tools/.webview-cdp-profile/
+tools/.webview-cdp-console.log
