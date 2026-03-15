@@ -744,14 +744,14 @@ export class SolutionsPanel extends WebviewPanelBase {
     }
 
     function showComponentsLoading(uniqueName) {
-        const container = document.getElementById('components-' + cssEscape(uniqueName));
+        const container = document.getElementById('components-' + uniqueName);
         if (container) {
             container.innerHTML = '<div class="components-loading"><span class="spinner"></span> Loading components...</div>';
         }
     }
 
     function renderComponents(uniqueName, groups) {
-        const container = document.getElementById('components-' + cssEscape(uniqueName));
+        const container = document.getElementById('components-' + uniqueName);
         if (!container) return;
 
         if (!groups || groups.length === 0) {
@@ -824,10 +824,7 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     function cssEscape(str) {
         if (str === null || str === undefined) return '';
-        // Escape characters that are special in CSS selectors / getElementById
-        return String(str).replace(/[^a-zA-Z0-9_-]/g, function(ch) {
-            return '\\\\' + ch;
-        });
+        return CSS.escape(String(str));
     }
 
     function formatDate(isoString) {
