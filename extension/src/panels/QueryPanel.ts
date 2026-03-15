@@ -610,9 +610,6 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     </vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
-    <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
-        <span class="codicon codicon-filter"></span>
-    </vscode-button>
 </div>
 
 <div id="reconnect-banner" style="display:none; background: var(--vscode-inputValidation-infoBackground, #063b49); color: var(--vscode-foreground); padding: 6px 12px; text-align: center; font-size: 12px;">

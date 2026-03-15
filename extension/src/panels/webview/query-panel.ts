@@ -75,7 +75,6 @@ const cancelBtn = document.getElementById('cancel-btn') as HTMLElement;
 const exportBtn = document.getElementById('export-btn') as HTMLElement;
 const historyBtn = document.getElementById('history-btn') as HTMLElement;
 const moreBtn = document.getElementById('more-btn') as HTMLElement;
-const filterBtn = document.getElementById('filter-btn') as HTMLElement;
 const langToggle = document.getElementById('lang-toggle') as HTMLElement;
 const filterBar = document.getElementById('filter-bar') as HTMLElement;
 const filterInput = document.getElementById('filter-input') as HTMLInputElement;
@@ -644,17 +643,18 @@ document.addEventListener('keydown', (e) => {
 }, true); // capture phase — fires before Monaco's handlers
 
 document.addEventListener('keydown', (e) => {
-    // Filter toggle
+    // Filter focus
     if (e.key === '/' && (!editor || !editor.hasTextFocus()) && document.activeElement !== filterInput) {
         e.preventDefault();
-        toggleFilter();
+        filterInput.focus();
         return;
     }
 
-    // Escape: filter bar takes precedence, then selection
+    // Escape: blur filter input, then clear selection
     if (e.key === 'Escape') {
-        if (filterBar.classList.contains('visible')) {
+        if (document.activeElement === filterInput) {
             hideFilter();
+            filterInput.blur();
         } else if (anchor) {
             clearSelection();
         }
@@ -697,17 +697,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Filter ──
-filterBtn.addEventListener('click', toggleFilter);
-function toggleFilter(): void {
-    if (filterBar.classList.contains('visible')) {
-        hideFilter();
-    } else {
-        filterBar.classList.add('visible');
-        filterInput.focus();
-    }
-}
 function hideFilter(): void {
-    filterBar.classList.remove('visible');
     filterInput.value = '';
     renderTable(allRows);
     filterCount.textContent = '';
@@ -828,6 +818,7 @@ function handleQueryResult(data: QueryResultResponse): void {
     renderTable(allRows);
     updateStatus(data);
     loadMoreBar.style.display = moreRecords ? '' : 'none';
+    filterBar.classList.add('visible');
 }
 
 function handleAppendResults(data: QueryResultResponse): void {
