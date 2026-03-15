@@ -79,7 +79,7 @@ async function main() {
 
     // Build 5: Solutions panel webview script (browser, IIFE)
     const solutionsPanelCtx = await esbuild.context({
-        entryPoints: ['src/panels/solutions-panel-webview.js'],
+        entryPoints: ['src/panels/webview/solutions-panel.ts'],
         bundle: true,
         format: 'iife',
         minify: production,

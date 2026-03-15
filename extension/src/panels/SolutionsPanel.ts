@@ -1,24 +1,14 @@
 import * as vscode from 'vscode';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerCss, getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
 import type { DaemonClient } from '../daemonClient.js';
 import type { SolutionComponentInfoDto } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
+import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, ComponentGroupDto } from './webview/shared/message-types.js';
+import { assertNever } from './webview/shared/assert-never.js';
 
-interface ComponentGroup {
-    typeName: string;
-    components: {
-        objectId: string;
-        isMetadata: boolean;
-        logicalName?: string;
-        schemaName?: string;
-        displayName?: string;
-        rootComponentBehavior: number;
-    }[];
-}
-
-export class SolutionsPanel extends WebviewPanelBase {
+export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview> {
     private static instances: SolutionsPanel[] = [];
     private static nextId = 1;
     private readonly panelId: number;
@@ -86,7 +76,7 @@ export class SolutionsPanel extends WebviewPanelBase {
 
         this.disposables.push(
             this.panel.webview.onDidReceiveMessage(
-                async (message: { command: string; [key: string]: unknown }) => {
+                async (message: SolutionsPanelWebviewToHost) => {
                     switch (message.command) {
                         case 'ready':
                             await this.initialize();
@@ -103,13 +93,13 @@ export class SolutionsPanel extends WebviewPanelBase {
                             await this.loadSolutions();
                             break;
                         case 'expandSolution':
-                            await this.loadComponents(message.uniqueName as string);
+                            await this.loadComponents(message.uniqueName);
                             break;
                         case 'collapseSolution':
                             // No-op on host side; collapse is handled in webview JS
                             break;
                         case 'copyToClipboard':
-                            await vscode.env.clipboard.writeText(message.text as string);
+                            await vscode.env.clipboard.writeText(message.text);
                             break;
                         case 'openInMaker': {
                             if (this.environmentId && message.solutionId) {
@@ -123,6 +113,8 @@ export class SolutionsPanel extends WebviewPanelBase {
                             }
                             break;
                         }
+                        default:
+                            assertNever(message);
                     }
                 }
             )
@@ -283,7 +275,7 @@ export class SolutionsPanel extends WebviewPanelBase {
             }
 
             // Sort groups by name
-            const groups: ComponentGroup[] = Array.from(groupMap.entries())
+            const groups: ComponentGroupDto[] = Array.from(groupMap.entries())
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([typeName, components]) => ({
                     typeName,
@@ -311,6 +303,9 @@ export class SolutionsPanel extends WebviewPanelBase {
         const solutionsPanelJsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'solutions-panel.js')
         );
+        const solutionsPanelCssUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'solutions-panel.css')
+        );
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -320,126 +315,10 @@ export class SolutionsPanel extends WebviewPanelBase {
     <!-- 'unsafe-inline' is required by @vscode/webview-ui-toolkit for dynamic styles -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="${solutionsPanelCssUri}">
     <script type="module" nonce="${nonce}" src="${toolkitUri}"></script>
 </head>
 <body>
-<style>
-    body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-
-    .toolbar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; align-items: center; }
-    .toolbar-spacer { flex: 1; }
-
-    ${getEnvironmentPickerCss()}
-
-    .content { flex: 1; overflow: auto; }
-
-    .solution-list { list-style: none; margin: 0; padding: 0; }
-
-    .solution-row {
-        display: flex; align-items: center; gap: 6px;
-        padding: 6px 12px; cursor: pointer; user-select: none;
-        border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .solution-row:hover { background: var(--vscode-list-hoverBackground); }
-    .solution-row .chevron { width: 16px; text-align: center; flex-shrink: 0; font-size: 10px; transition: transform 0.15s; }
-    .solution-row .chevron.expanded { transform: rotate(90deg); }
-    .solution-row .icon { flex-shrink: 0; font-size: 14px; }
-    .solution-row .name { font-weight: 500; }
-    .solution-row .version { color: var(--vscode-descriptionForeground); font-size: 12px; }
-    .solution-row .publisher { color: var(--vscode-descriptionForeground); font-size: 12px; margin-left: 4px; }
-    .solution-row .managed-badge { font-size: 10px; padding: 1px 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-
-    .open-maker-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        opacity: 0.5;
-        padding: 2px 4px;
-        font-size: 12px;
-        color: var(--vscode-foreground);
-    }
-    .open-maker-btn:hover { opacity: 1; }
-
-    .components-container { display: none; padding-left: 22px; border-bottom: 1px solid var(--vscode-panel-border); }
-    .components-container.expanded { display: block; }
-
-    .component-group {
-        padding: 4px 12px 4px 16px; cursor: pointer; user-select: none;
-        display: flex; align-items: center; gap: 6px;
-    }
-    .component-group:hover { background: var(--vscode-list-hoverBackground); }
-    .component-group .chevron { width: 16px; text-align: center; flex-shrink: 0; font-size: 10px; transition: transform 0.15s; }
-    .component-group .chevron.expanded { transform: rotate(90deg); }
-    .component-group .group-name { font-size: 13px; }
-    .component-group .group-count { color: var(--vscode-descriptionForeground); font-size: 12px; }
-
-    .component-items { display: none; padding-left: 22px; }
-    .component-items.expanded { display: block; }
-
-    .component-item {
-        padding: 3px 12px 3px 16px; font-size: 12px;
-        color: var(--vscode-foreground);
-        display: flex; align-items: center; gap: 6px;
-    }
-    .component-item:hover { background: var(--vscode-list-hoverBackground); }
-    .component-item .metadata-badge { font-size: 10px; color: var(--vscode-descriptionForeground); }
-
-    .component-detail-card {
-        display: none;
-        margin: 0 12px 4px 28px;
-        padding: 6px 10px;
-        background: var(--vscode-textBlockQuote-background);
-        border-left: 3px solid var(--vscode-textBlockQuote-border);
-        border-radius: 2px;
-        font-size: 12px;
-    }
-    .component-detail-card.expanded {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 2px 12px;
-    }
-    .component-detail-card .detail-label { color: var(--vscode-descriptionForeground); white-space: nowrap; }
-    .component-detail-card .detail-value { overflow: hidden; text-overflow: ellipsis; }
-    .component-item { cursor: pointer; }
-    .component-item:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-    .copy-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 0 2px;
-        color: var(--vscode-descriptionForeground);
-        font-size: 11px;
-    }
-    .copy-btn:hover { color: var(--vscode-textLink-foreground); }
-
-    .status-bar { display: flex; gap: 16px; padding: 4px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
-
-    .empty-state { padding: 40px; text-align: center; color: var(--vscode-descriptionForeground); font-style: italic; }
-    .error-state { padding: 12px; background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1)); border: 1px solid var(--vscode-inputValidation-errorBorder, red); border-radius: 4px; margin: 8px 12px; color: var(--vscode-errorForeground); }
-
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--vscode-descriptionForeground); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .loading-state { padding: 40px; text-align: center; color: var(--vscode-descriptionForeground); }
-    .loading-state .spinner { width: 24px; height: 24px; margin-bottom: 12px; }
-
-    .components-loading { padding: 8px 16px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 8px; }
-
-    .detail-card {
-        margin: 8px 12px; padding: 8px 12px;
-        background: var(--vscode-textBlockQuote-background);
-        border-left: 3px solid var(--vscode-textBlockQuote-border);
-        border-radius: 2px; font-size: 12px;
-        display: grid; grid-template-columns: auto 1fr; gap: 2px 12px;
-    }
-    .detail-card .detail-label { color: var(--vscode-descriptionForeground); white-space: nowrap; }
-    .detail-card .detail-value { overflow: hidden; text-overflow: ellipsis; }
-    .detail-card .detail-description {
-        grid-column: 1 / -1; margin-top: 4px; padding-top: 4px;
-        border-top: 1px solid var(--vscode-panel-border);
-        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-    }
-</style>
 
 <div id="reconnect-banner" style="display:none; background: var(--vscode-inputValidation-infoBackground, #063b49); color: var(--vscode-foreground); padding: 6px 12px; text-align: center; font-size: 12px;">
     Connection restored. Data may be stale. <a href="#" id="reconnect-refresh" style="color: var(--vscode-textLink-foreground);">Refresh</a>
