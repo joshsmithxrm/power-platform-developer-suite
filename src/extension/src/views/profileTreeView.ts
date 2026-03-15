@@ -119,6 +119,11 @@ export class ProfileTreeDataProvider
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<ProfileTreeElement | undefined | null | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+    /** Cached env list to avoid re-fetching on every tree expand. Cleared on refresh(). */
+    private envCache: Awaited<ReturnType<DaemonClient['envList']>> | null = null;
+    private envCacheTime = 0;
+    private static readonly ENV_CACHE_TTL_MS = 30_000; // 30 seconds
+
     constructor(
         private readonly daemonClient: DaemonClient,
         private readonly log: vscode.LogOutputChannel,
@@ -127,7 +132,19 @@ export class ProfileTreeDataProvider
     ) {}
 
     refresh(): void {
+        this.envCache = null;
         this._onDidChangeTreeData.fire();
+    }
+
+    private async getCachedEnvList(): Promise<Awaited<ReturnType<DaemonClient['envList']>>> {
+        const now = Date.now();
+        if (this.envCache && (now - this.envCacheTime) < ProfileTreeDataProvider.ENV_CACHE_TTL_MS) {
+            return this.envCache;
+        }
+        const result = await this.daemonClient.envList();
+        this.envCache = result;
+        this.envCacheTime = now;
+        return result;
     }
 
     getTreeItem(element: ProfileTreeElement): vscode.TreeItem {
@@ -200,7 +217,7 @@ export class ProfileTreeDataProvider
         // For non-active profiles, we can only show the saved environment.
         if (profile.isActive) {
             try {
-                const result = await this.daemonClient.envList();
+                const result = await this.getCachedEnvList();
                 for (const env of result.environments) {
                     // Only show discovered environments in the tree — configured-only
                     // entries from environments.json may be from other tenants/profiles
