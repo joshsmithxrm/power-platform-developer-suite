@@ -187,10 +187,9 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
     private updatePanelTitle(): void {
         if (!this.panel) return;
-        const parts = [`Solutions #${this.panelId}`];
-        if (this.profileName) parts.push(this.profileName);
-        if (this.environmentDisplayName) parts.push(this.environmentDisplayName);
-        this.panel.title = parts.join(' \u2014 ');
+        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
+        const suffix = SolutionsPanel.instances.length > 1 ? ` ${this.panelId}` : '';
+        this.panel.title = context ? `${context} \u2014 Solutions${suffix}` : `Solutions${suffix}`;
     }
 
     private async loadSolutions(isRetry = false): Promise<void> {
