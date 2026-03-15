@@ -10,10 +10,7 @@
 
 .editor-wrapper {
     height: 150px;
-    min-height: 120px;
-    max-height: 300px;
     overflow: hidden;
-    resize: vertical;
     position: relative;
 }
 
@@ -22,16 +19,16 @@
     inset: 0;
 }
 
-/* Visible resize grab handle */
-.editor-container::after {
-    content: '';
-    display: block;
+/* Draggable resize handle between editor and results */
+.resize-handle {
     height: 4px;
     cursor: ns-resize;
     background: transparent;
     transition: background 0.15s;
+    flex-shrink: 0;
 }
-.editor-container:hover::after {
+.resize-handle:hover,
+.resize-handle.dragging {
     background: var(--vscode-focusBorder);
 }
 
