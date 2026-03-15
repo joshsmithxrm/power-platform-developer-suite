@@ -259,7 +259,12 @@ async function runDaemon(workspace) {
     switch (action) {
       case 'screenshot': {
         const target = await resolveTarget(params);
-        await target.screenshot({ path: resolve(params.file) });
+        // Page has .screenshot(), frames don't — use locator for frames
+        if (typeof target.screenshot === 'function') {
+          await target.screenshot({ path: resolve(params.file) });
+        } else {
+          await target.locator('body').screenshot({ path: resolve(params.file) });
+        }
         return { path: resolve(params.file) };
       }
       case 'eval': {
@@ -276,7 +281,15 @@ async function runDaemon(workspace) {
       }
       case 'type': {
         const target = await resolveTarget(params);
-        await target.fill(params.selector, params.text);
+        // Try fill() first (works on input/textarea/select/contenteditable)
+        // Fall back to click + keyboard.type() for custom elements (e.g., Monaco editor)
+        try {
+          await target.fill(params.selector, params.text);
+        } catch {
+          await target.click(params.selector);
+          await page.keyboard.press('Control+A'); // select all existing text
+          await page.keyboard.type(params.text, { delay: 10 });
+        }
         return {};
       }
       case 'select': {
