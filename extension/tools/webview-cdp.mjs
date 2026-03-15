@@ -188,21 +188,40 @@ async function runDaemon(workspace) {
   async function resolveWebviewFrame(targetIndex, extFilter) {
     const allFrames = page.frames();
 
-    // Webview frames have URLs starting with vscode-webview://
-    // The inner (active-frame) is the one we want — it's nested inside the wrapper
-    // We identify it by checking that it has real DOM content (body.children.length > 0)
-    const candidates = [];
+    // VS Code webview structure: each webview panel has two frames:
+    //   - index.html (wrapper — bootstrap code with extensionId in URL)
+    //   - fake.html? (inner active-frame — extension's actual DOM, NO extensionId)
+    // We want the inner frame. Strategy:
+    //   1. Find all fake.html frames (inner frames)
+    //   2. For --ext filter, check the PARENT frame's URL for the extensionId
+    //   3. Fall back to any webview frame if no fake.html frames found
+    const innerFrames = [];
+
     for (const frame of allFrames) {
       const url = frame.url();
       if (!url.startsWith('vscode-webview://')) continue;
-      if (extFilter && !url.includes(extFilter)) continue;
+      if (!url.includes('fake.html')) continue; // only inner frames
 
-      // Check if this frame has real content (inner active-frame, not wrapper)
-      try {
-        const hasContent = await frame.evaluate(() => document.body && document.body.children.length > 0);
-        if (hasContent) candidates.push(frame);
-      } catch {
-        // Frame may be detached or navigating — skip
+      // For --ext filter, check parent's URL (that's where extensionId lives)
+      if (extFilter) {
+        const parentUrl = frame.parentFrame()?.url() || '';
+        if (!parentUrl.includes(extFilter)) continue;
+      }
+
+      innerFrames.push(frame);
+    }
+
+    // Fall back to any webview frame with content if no inner frames found
+    let candidates = innerFrames;
+    if (candidates.length === 0) {
+      for (const frame of allFrames) {
+        const url = frame.url();
+        if (!url.startsWith('vscode-webview://')) continue;
+        if (extFilter && !url.includes(extFilter)) continue;
+        try {
+          const hasContent = await frame.evaluate(() => document.body && document.body.children.length > 0);
+          if (hasContent) candidates.push(frame);
+        } catch { /* skip */ }
       }
     }
 
@@ -327,17 +346,16 @@ async function runDaemon(workspace) {
         return {};
       }
       case 'connect': {
-        // Use page.frames() for consistency with resolveWebviewFrame
+        // List only inner frames (fake.html) — same logic as resolveWebviewFrame
         const allFrames = page.frames();
         const targets = [];
         for (const frame of allFrames) {
           const url = frame.url();
           if (!url.startsWith('vscode-webview://')) continue;
-          try {
-            const hasContent = await frame.evaluate(() => document.body && document.body.children.length > 0);
-            if (!hasContent) continue;
-          } catch { continue; }
-          const extMatch = url.match(/extensionId=([^&]*)/);
+          if (!url.includes('fake.html')) continue;
+          // Extension ID is in the parent (wrapper) frame's URL
+          const parentUrl = frame.parentFrame()?.url() || '';
+          const extMatch = parentUrl.match(/extensionId=([^&]*)/);
           targets.push({ ext: extMatch?.[1] || 'unknown', src: url });
         }
         return { targets };
