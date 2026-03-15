@@ -1,9 +1,14 @@
 /**
- * Monaco Editor entry point for webview bundles.
- * This file is the esbuild entry for the browser-targeted Monaco bundle.
- * It configures the Monaco environment (workers) and re-exports monaco.
+ * Monaco Editor entry point — selective language bundling.
+ * Only SQL and XML languages are included to reduce bundle size.
  */
-import * as monaco from 'monaco-editor';
+
+// Core editor API
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+
+// Language contributions — only SQL and XML
+import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js';
+import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js';
 
 // Configure Monaco to use inline workers (blob URLs)
 (self as any).MonacoEnvironment = {
