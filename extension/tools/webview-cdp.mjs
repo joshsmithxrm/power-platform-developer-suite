@@ -11,7 +11,7 @@ const SESSION_FILE = resolve(__dirname, '.webview-cdp-session.json');
 const LOG_FILE = resolve(__dirname, '.webview-cdp-console.log');
 const PROFILE_DIR = resolve(__dirname, '.webview-cdp-profile');
 const VALID_COMMANDS = ['launch', 'close', 'connect', 'command', 'wait',
-  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs'];
+  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs', 'text'];
 const VALID_MODIFIERS = ['ctrl', 'shift', 'alt', 'meta'];
 const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
@@ -48,7 +48,12 @@ export function parseArgs(argv) {
 
   // Simple commands with no interaction flags
   if (command === 'launch') {
-    return { command, workspace: rest[0] };
+    let workspace, build = false;
+    for (const arg of rest) {
+      if (arg === '--build') build = true;
+      else if (!workspace) workspace = arg;
+    }
+    return { command, workspace, build };
   }
   if (command === 'close' || command === 'connect') {
     return { command };
@@ -303,6 +308,14 @@ async function runDaemon(workspace) {
         const value = await target.evaluate(params.expression);
         return { value };
       }
+      case 'text': {
+        const target = await resolveTarget(params);
+        const text = await target.evaluate(
+          (sel) => document.querySelector(sel)?.textContent ?? '',
+          params.selector
+        );
+        return { text };
+      }
       case 'click': {
         const target = await resolveTarget(params);
         const opts = {};
@@ -465,6 +478,13 @@ async function runDaemon(workspace) {
 // ── Caller command handlers ────────────────────────────────────────
 
 async function cmdLaunch(parsed) {
+  if (parsed.build) {
+    const extDir = resolve(__dirname, '..');
+    console.log('Building extension...');
+    execSync('npm run compile', { cwd: extDir, stdio: 'inherit' });
+    console.log('Build complete');
+  }
+
   if (existsSync(SESSION_FILE)) {
     const session = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
     try {
@@ -535,6 +555,15 @@ async function cmdEval(parsed) {
     expression: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
   console.log(JSON.stringify(result.value));
+}
+
+async function cmdText(parsed) {
+  if (!parsed.args[0]) throw new Error('Usage: text <selector>');
+  const session = readSession();
+  const result = await sendToDaemon(session, 'text', {
+    selector: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
+  });
+  console.log(result.text);
 }
 
 async function cmdClick(parsed) {
@@ -631,6 +660,7 @@ async function main() {
     case 'wait': await cmdWait(parsed); break;
     case 'screenshot': await cmdScreenshot(parsed); break;
     case 'eval': await cmdEval(parsed); break;
+    case 'text': await cmdText(parsed); break;
     case 'click': await cmdClick(parsed); break;
     case 'type': await cmdType(parsed); break;
     case 'select': await cmdSelect(parsed); break;
