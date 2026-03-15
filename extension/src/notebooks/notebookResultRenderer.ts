@@ -92,9 +92,9 @@ function prepareRowData(result: QueryResultResponse, environmentUrl: string | un
                 return { text: String(formatted.formatted ?? formatted.value ?? '') };
             }
 
-            // Primary key column — make GUID clickable
+            // Primary key column — make GUID clickable (skip aggregates)
             const stringValue = String(rawValue);
-            if (primaryKeyColumn && environmentUrl && result.entityName
+            if (primaryKeyColumn && environmentUrl && result.entityName && !result.isAggregate
                 && col.logicalName.toLowerCase() === primaryKeyColumn.toLowerCase()
                 && isGuid(stringValue)) {
                 const url = buildRecordUrl(environmentUrl, result.entityName, stringValue);

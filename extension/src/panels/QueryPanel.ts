@@ -116,7 +116,10 @@ export class QueryPanel extends WebviewPanelBase {
                             break;
                         case 'openRecordUrl':
                             if (message.url) {
-                                await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+                                const parsed = vscode.Uri.parse(message.url as string);
+                                if (parsed.scheme === 'https' || parsed.scheme === 'http') {
+                                    await vscode.env.openExternal(parsed);
+                                }
                             }
                             break;
                         case 'requestClipboard': {
@@ -684,12 +687,7 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     function getCellDisplayValue(row, colIdx) {
-        const key = columns[colIdx].alias || columns[colIdx].logicalName;
-        const rawVal = row ? row[key] : undefined;
-        if (rawVal === null || rawVal === undefined) return '';
-        if (typeof rawVal === 'object' && 'formatted' in rawVal) return String(rawVal.formatted || rawVal.value || '');
-        if (typeof rawVal === 'object' && 'entityId' in rawVal) return String(rawVal.formatted || rawVal.value || '');
-        return String(rawVal);
+        return getCellRichValue(row, colIdx).text;
     }
 
     /** Returns { text, url?, entityType?, entityId? } for rendering and context menu */
@@ -982,6 +980,9 @@ export class QueryPanel extends WebviewPanelBase {
             sortAndRender();
             return;
         }
+        // Skip selection when clicking a link — let the click handler open it
+        if (e.target.closest('a[href]')) return;
+
         const td = e.target.closest('td[data-row]');
         if (!td) return;
 
