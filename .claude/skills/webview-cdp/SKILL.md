@@ -11,7 +11,6 @@ Interact with extension webview panels running inside VS Code. Take screenshots 
 ## When to Use
 
 - After implementing or modifying any webview panel UI
-- Before claiming UI work is complete — always screenshot to verify
 - When debugging visual issues — screenshot to see the current state
 - When testing interactions — clicks, keyboard shortcuts, context menus, dropdowns
 - When checking for errors — read console logs and output channel content
@@ -220,6 +219,33 @@ node extension/tools/webview-cdp.mjs eval 'document.querySelector("td").textCont
 node extension/tools/webview-cdp.mjs eval "document.querySelector('td[data-row=\"${row}\"]')"
 ```
 
+## Verification Before Completion
+
+Not every change needs a screenshot. Match verification to the risk profile:
+
+**Screenshot required** — any change affecting rendered UI:
+- CSS, layout, styling, theme variables
+- Message protocol wiring (postMessage/onMessage handlers)
+- HTML templates, component rendering, DOM structure
+- Anything that changes what the user sees in a webview panel or notebook output
+
+```bash
+# After implementation + tests pass, verify visually
+node extension/tools/webview-cdp.mjs launch --build
+node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node extension/tools/webview-cdp.mjs screenshot $TEMP/verification.png
+# LOOK at the screenshot — don't just take it
+```
+
+**Compile + test sufficient** — structural changes with no visual impact:
+- String constants, config flags, package.json metadata
+- Command registration, URL handlers, enablement conditions
+- Internal refactors that don't change rendered output
+- Type definitions, interfaces, error codes
+
+Automated tests prove code compiles and logic is correct. Screenshots prove it renders correctly. CSS can silently break (specificity overrides, wrong variable, theme interaction). Message protocol wiring can compile perfectly and fail at runtime (wrong command string, missing switch case). If your change affects what users see, screenshot it before claiming done.
+
 ## Gap Protocol
 
 If you encounter a webview interaction that this tool cannot handle:
@@ -233,7 +259,7 @@ This ensures the tool evolves based on real needs.
 
 ## Important
 
-- **Always screenshot after changes** — don't assume your code works, verify visually
+- **Screenshot after UI-affecting changes** — see "Verification Before Completion" for what requires screenshots vs compile+test
 - **Use `command` to open panels** — `command "PPDS: Data Explorer"` then `wait`
 - **Use `--page` for VS Code native UI** — sidebar, tabs, menus
 - **Drop `--page` for webview content** — buttons, inputs, tables inside extension panels
