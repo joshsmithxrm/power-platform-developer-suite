@@ -32,7 +32,7 @@ For each spec, check these categories:
 **A. Acceptance Criteria Coverage**
 - Does the spec have an `## Acceptance Criteria` section with numbered IDs?
 - For each AC that references a test method: does that test file/method exist? (use Grep to search for the method name)
-- For each AC with status marked passing: is the status accurate? (run the specific test if possible — .NET: `dotnet test --filter "FullyQualifiedName~{TestMethod}" -v q`, TypeScript: `npx vitest run -t "{TestMethod}" --prefix extension`)
+- For each AC with status marked passing: is the status accurate? (run the specific test if possible — .NET: `dotnet test --filter "FullyQualifiedName~{TestMethod}" -v q`, TypeScript: `npx vitest run -t "{TestMethod}" --prefix src/PPDS.Extension`)
 - Report: verified, test exists but status wrong, test not found, or no AC section
 
 **B. Code-to-Spec Alignment**

@@ -96,6 +96,12 @@ internal sealed class ExportDialog : TuiDialog, ITuiStateCapture<ExportDialogSta
             Checked = true
         };
 
+        _formatGroup.SelectedItemChanged += (_) =>
+        {
+            // JSON always exports keyed objects — headers toggle is meaningless
+            _includeHeadersCheck.Visible = _formatGroup.SelectedItem != FormatJson;
+        };
+
         // Status
         _statusLabel = new Label
         {

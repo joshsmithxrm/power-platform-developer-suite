@@ -587,7 +587,7 @@ Fail: report failing test names and assertion messages
 **Gate 3: TypeScript Build** (if TS/JS files changed)
 
 ```bash
-npm run compile --prefix extension
+npm run compile --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -596,7 +596,7 @@ Fail: report exact error messages with file:line
 **Gate 4: TypeScript Lint** (if TS/JS files changed)
 
 ```bash
-npm run lint --prefix extension
+npm run lint --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -605,7 +605,7 @@ Fail: report lint violations
 **Gate 5: TypeScript Tests** (if TS/JS files changed)
 
 ```bash
-npm test --prefix extension
+npm test --prefix src/PPDS.Extension
 ```
 
 Pass: 0 failures

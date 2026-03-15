@@ -4,11 +4,26 @@
 
 **Goal:** Build a production-ready VS Code extension with full feature parity to the TUI: authentication, environment management, SQL query execution with results, query history, FetchXML preview, export, and .ppdsnb notebook support — all powered by the `ppds serve` JSON-RPC daemon.
 
-**Architecture:** Thin TypeScript UI shell → `ppds serve` daemon via JSON-RPC over stdio. All business logic stays in the .NET Application Services layer. The extension has zero direct Dataverse access. Webview panels use `@vscode/webview-ui-toolkit` web components for native VS Code look and feel. Notebooks use the VS Code Notebook API with cells executing via daemon RPC calls.
+**Architecture:** Thin TypeScript UI shell → `ppds serve` daemon via JSON-RPC over stdio. All business logic stays in the .NET Application Services layer. The extension has zero direct Dataverse access. Webview Data Explorer panel for quick ad-hoc queries. Notebooks (.ppdsnb) as the primary SSMS-like experience with full IntelliSense via daemon-powered `query/complete`. Both experiences complement each other: Data Explorer for exploration, notebooks for persistent workflows.
 
-**Tech Stack:** TypeScript 5+, VS Code Extension API, `@vscode/webview-ui-toolkit`, `vscode-jsonrpc`, esbuild (bundler), Jest (tests)
+**Tech Stack:** TypeScript 5+, VS Code Extension API, `@vscode/webview-ui-toolkit`, `vscode-jsonrpc`, esbuild (bundler), Vitest (tests)
 
 **Reference Implementation:** `C:\VS\ppdsw\ppds-extension-archived\` — archived extension with notebook support, webview patterns, and virtual scrolling. Adapt patterns but route all execution through daemon RPC instead of direct API calls.
+
+---
+
+## Revision Log (2026-03-02)
+
+Changes from brainstorming review session:
+
+1. **Phase reorder:** Notebooks promoted to Phase 3 (primary SSMS experience). Query panel demoted to Phase 4 (secondary quick-query tool). Query features moved to Phase 5.
+2. **IntelliSense via daemon:** Added `query/complete` RPC endpoint (wraps existing `SqlCompletionEngine`), `schema/entities` + `schema/attributes` endpoints (implements stubbed `schema/list`), and VS Code `CompletionItemProvider` for 'sql'/'fetchxml' languages. Works natively in notebook cells.
+3. **Multi-tab query panels:** Removed singleton pattern from QueryPanel. Support multiple instances.
+4. **TDS Read Replica toggle:** Added to query panel toolbar.
+5. **Auto-save history in daemon:** `query/sql` and `query/fetch` auto-save to history service internally. Removed need for explicit `query/history/save` RPC call.
+6. **UX philosophy:** Data Explorer webview = quick exploration. Notebooks = SSMS-like power experience. Both valid, complementary. TUI and VS Code intentionally feel different (platform-native) but share capabilities via shared Application Services.
+7. **Testing:** Vitest instead of Jest (matches existing project conventions). Playwright E2E as Phase 6 task.
+8. **MCP:** Already complete and separate (`ppds-mcp-server`). No work needed.
 
 ---
 
@@ -51,12 +66,12 @@
 
 | Phase | Scope | Tasks |
 |-------|-------|-------|
-| **Phase 1** | Foundation | Build infrastructure, daemon client, activity bar, profile tree view |
+| **Phase 1** | Foundation | Build infrastructure, daemon client, activity bar, profile tree view, IntelliSense daemon endpoints |
 | **Phase 2** | Auth & Environments | Profile management, environment discovery/selection, device code flow |
-| **Phase 3** | Query Panel | SQL editor webview, query execution, results table, status bar |
-| **Phase 4** | Query Features | History, FetchXML preview, export, EXPLAIN |
-| **Phase 5** | Notebooks | .ppdsnb serializer, controller, cell execution, export |
-| **Phase 6** | Polish | Error handling, re-auth flow, keyboard shortcuts, settings |
+| **Phase 3** | Notebooks (Primary Experience) | .ppdsnb serializer, controller, cell execution, export, CompletionItemProvider |
+| **Phase 4** | Query Panel (Secondary Experience) | Webview Data Explorer, results grid, multi-tab, TDS toggle |
+| **Phase 5** | Query Features | History (auto-saved by daemon), FetchXML preview, export, EXPLAIN |
+| **Phase 6** | Polish | Re-auth flow, keyboard shortcuts, settings, Playwright E2E |
 
 ---
 
@@ -73,7 +88,7 @@
 **Step 1: Install dependencies**
 
 ```bash
-cd extension
+cd src/PPDS.Extension
 npm install @vscode/webview-ui-toolkit vscode-jsonrpc@^8.2.0
 npm install -D esbuild @types/vscode@^1.85.0 @vscode/test-electron jest ts-jest @types/jest
 ```
@@ -152,14 +167,14 @@ Update `extension/package.json` scripts to use esbuild:
 **Step 5: Verify build works**
 
 ```bash
-cd extension && npm run compile
+cd src/PPDS.Extension && npm run compile
 ```
 Expected: `dist/extension.js` created without errors.
 
 **Step 6: Commit**
 
 ```bash
-git add extension/package.json extension/esbuild.js extension/tsconfig.json extension/package-lock.json
+git add src/PPDS.Extension/package.json extension/esbuild.js extension/tsconfig.json src/PPDS.Extension/package-lock.json
 git commit -m "build(extension): switch to esbuild bundler and add toolkit dependency"
 ```
 
@@ -170,13 +185,13 @@ git commit -m "build(extension): switch to esbuild bundler and add toolkit depen
 Expand `DaemonClient` from 1 method to cover all existing daemon RPC methods, plus the new methods needed for TUI parity.
 
 **Files:**
-- Modify: `extension/src/daemonClient.ts`
-- Create: `extension/src/types.ts` (shared TypeScript interfaces for all RPC responses)
-- Create: `extension/src/__tests__/daemonClient.test.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts`
+- Create: `src/PPDS.Extension/src/types.ts` (shared TypeScript interfaces for all RPC responses)
+- Create: `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`
 
 **Step 1: Create shared types file**
 
-Create `extension/src/types.ts` with TypeScript interfaces mirroring the C# response DTOs in `RpcMethodHandler.cs:877-1531`. Every `[JsonPropertyName]` attribute maps to a TS property.
+Create `src/PPDS.Extension/src/types.ts` with TypeScript interfaces mirroring the C# response DTOs in `RpcMethodHandler.cs:877-1531`. Every `[JsonPropertyName]` attribute maps to a TS property.
 
 Key interfaces to define:
 ```typescript
@@ -215,7 +230,7 @@ export interface ExportResponse { content: string; format: string; rowCount: num
 
 **Step 2: Expand DaemonClient with all RPC methods**
 
-Modify `extension/src/daemonClient.ts` to add:
+Modify `src/PPDS.Extension/src/daemonClient.ts` to add:
 ```typescript
 // Auth methods
 async authList(): Promise<AuthListResponse>
@@ -246,7 +261,7 @@ Add auto-reconnect logic: if the daemon process dies, the next RPC call should r
 
 **Step 3: Write daemon client unit tests**
 
-Create `extension/src/__tests__/daemonClient.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`:
 - Test that `ensureConnected()` is called before each RPC method
 - Test that `onDeviceCode` registers notification handler
 - Test dispose cleanup
@@ -254,7 +269,7 @@ Create `extension/src/__tests__/daemonClient.test.ts`:
 **Step 4: Commit**
 
 ```bash
-git add extension/src/types.ts extension/src/daemonClient.ts extension/src/__tests__/
+git add src/PPDS.Extension/src/types.ts src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/src/__tests__/
 git commit -m "feat(extension): expand daemon client with full RPC surface"
 ```
 
@@ -264,9 +279,9 @@ git commit -m "feat(extension): expand daemon client with full RPC surface"
 
 **Files:**
 - Modify: `extension/package.json` (contributes section)
-- Create: `extension/src/views/profileTreeView.ts`
-- Create: `extension/src/views/toolsTreeView.ts`
-- Modify: `extension/src/extension.ts`
+- Create: `src/PPDS.Extension/src/views/profileTreeView.ts`
+- Create: `src/PPDS.Extension/src/views/toolsTreeView.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Update package.json with activity bar contributions**
 
@@ -291,7 +306,7 @@ Add to `extension/package.json` contributes:
 
 **Step 2: Create ProfileTreeView**
 
-Create `extension/src/views/profileTreeView.ts`:
+Create `src/PPDS.Extension/src/views/profileTreeView.ts`:
 - Implements `vscode.TreeDataProvider<ProfileTreeItem>`
 - Calls `daemonClient.authList()` to populate tree
 - Shows profile name, identity, auth method, environment
@@ -301,7 +316,7 @@ Create `extension/src/views/profileTreeView.ts`:
 
 **Step 3: Create ToolsTreeView**
 
-Create `extension/src/views/toolsTreeView.ts`:
+Create `src/PPDS.Extension/src/views/toolsTreeView.ts`:
 - Static tree with items: Data Explorer, Notebooks, Solutions
 - Each item opens the corresponding panel/command
 - Disabled state if no profile/environment selected
@@ -316,7 +331,7 @@ Replace the single-command activation in `extension.ts` with:
 **Step 5: Commit**
 
 ```bash
-git add extension/src/views/ extension/src/extension.ts extension/package.json
+git add src/PPDS.Extension/src/views/ src/PPDS.Extension/src/extension.ts src/PPDS.Extension/package.json
 git commit -m "feat(extension): add activity bar with profile and tools tree views"
 ```
 
@@ -327,9 +342,9 @@ git commit -m "feat(extension): add activity bar with profile and tools tree vie
 ### Task 4: Profile Management Commands
 
 **Files:**
-- Create: `extension/src/commands/profileCommands.ts`
+- Create: `src/PPDS.Extension/src/commands/profileCommands.ts`
 - Modify: `extension/package.json` (commands section)
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Register profile management commands in package.json**
 
@@ -348,7 +363,7 @@ git commit -m "feat(extension): add activity bar with profile and tools tree vie
 
 **Step 2: Implement profile commands**
 
-Create `extension/src/commands/profileCommands.ts`:
+Create `src/PPDS.Extension/src/commands/profileCommands.ts`:
 
 - `selectProfile`: QuickPick with all profiles → calls `daemonClient.authSelect()`
 - `profileDetails`: Shows `authWho()` result in a multi-section QuickPick detail view:
@@ -390,7 +405,7 @@ Register all commands and connect to tree view context menu.
 **Step 4: Commit**
 
 ```bash
-git add extension/src/commands/profileCommands.ts extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/src/commands/profileCommands.ts src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add profile management commands"
 ```
 
@@ -475,9 +490,9 @@ git commit -m "feat(daemon): add profiles/create, profiles/delete, profiles/rena
 ### Task 6: Environment Management Commands
 
 **Files:**
-- Create: `extension/src/commands/environmentCommands.ts`
+- Create: `src/PPDS.Extension/src/commands/environmentCommands.ts`
 - Modify: `extension/package.json`
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Register environment commands**
 
@@ -493,7 +508,7 @@ git commit -m "feat(daemon): add profiles/create, profiles/delete, profiles/rena
 
 **Step 2: Implement environment commands**
 
-Create `extension/src/commands/environmentCommands.ts`:
+Create `src/PPDS.Extension/src/commands/environmentCommands.ts`:
 
 - `selectEnvironment`:
   1. Show progress notification while loading
@@ -523,7 +538,7 @@ Update when environment changes.
 **Step 4: Commit**
 
 ```bash
-git add extension/src/commands/environmentCommands.ts extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/src/commands/environmentCommands.ts src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add environment selection and status bar"
 ```
 
@@ -580,7 +595,7 @@ git commit -m "feat(daemon): add env/who RPC method for WhoAmI details"
 The TUI has `EnvironmentConfigDialog` that lets users set custom Label, Type, and Color for each environment. This persists and affects display everywhere.
 
 **Files:**
-- Create: `extension/src/commands/environmentConfigCommand.ts`
+- Create: `src/PPDS.Extension/src/commands/environmentConfigCommand.ts`
 - Modify: `extension/package.json` (add command)
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` (add daemon endpoints)
 
@@ -611,7 +626,7 @@ Use existing `IEnvironmentConfigService` from Application Services.
 
 **Step 3: Implement environment config command**
 
-Create `extension/src/commands/environmentConfigCommand.ts`:
+Create `src/PPDS.Extension/src/commands/environmentConfigCommand.ts`:
 
 Multi-step InputBox flow:
 1. Show current config (if any) as placeholder text
@@ -631,23 +646,23 @@ In the environment QuickPick (Task 6), add a "Configure" action button that open
 **Step 5: Commit**
 
 ```bash
-git add extension/src/commands/environmentConfigCommand.ts extension/package.json src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
+git add src/PPDS.Extension/src/commands/environmentConfigCommand.ts src/PPDS.Extension/package.json src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
 git commit -m "feat: add environment configuration with custom label, type, and color"
 ```
 
 ---
 
-## Phase 3: Query Panel (Webview)
+## Phase 4: Query Panel — Secondary Experience (Webview)
 
 ### Task 8: Webview Infrastructure
 
 **Files:**
-- Create: `extension/src/panels/WebviewPanelBase.ts`
-- Create: `extension/src/panels/getWebviewContent.ts`
+- Create: `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`
+- Create: `src/PPDS.Extension/src/panels/getWebviewContent.ts`
 
 **Step 1: Create base webview panel class**
 
-Create `extension/src/panels/WebviewPanelBase.ts`:
+Create `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`:
 ```typescript
 /**
  * Base class for webview panels with safe messaging (adapted from archived SafeWebviewPanel).
@@ -670,7 +685,7 @@ export abstract class WebviewPanelBase implements vscode.Disposable {
 
 **Step 2: Create webview HTML helper**
 
-Create `extension/src/panels/getWebviewContent.ts`:
+Create `src/PPDS.Extension/src/panels/getWebviewContent.ts`:
 - Helper that generates HTML with `@vscode/webview-ui-toolkit` loaded
 - Injects VS Code Toolkit `<script>` tag
 - Sets Content-Security-Policy
@@ -699,7 +714,7 @@ export function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.
 **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/
+git add src/PPDS.Extension/src/panels/
 git commit -m "feat(extension): add webview panel base infrastructure"
 ```
 
@@ -710,11 +725,11 @@ git commit -m "feat(extension): add webview panel base infrastructure"
 This is the core panel, equivalent to the TUI's `SqlQueryScreen`.
 
 **Files:**
-- Create: `extension/src/panels/QueryPanel.ts`
-- Create: `extension/src/panels/webview/queryPanel.ts` (client-side script)
-- Create: `extension/src/panels/webview/queryPanel.css`
+- Create: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/queryPanel.ts` (client-side script)
+- Create: `src/PPDS.Extension/src/panels/webview/queryPanel.css`
 - Modify: `extension/package.json` (add command)
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Register Data Explorer command**
 
@@ -725,7 +740,7 @@ Add to `extension/package.json`:
 
 **Step 2: Create QueryPanel class**
 
-Create `extension/src/panels/QueryPanel.ts`:
+Create `src/PPDS.Extension/src/panels/QueryPanel.ts`:
 
 ```typescript
 export class QueryPanel extends WebviewPanelBase {
@@ -751,7 +766,7 @@ export class QueryPanel extends WebviewPanelBase {
 
 **Step 3: Create client-side webview script**
 
-Create `extension/src/panels/webview/queryPanel.ts`:
+Create `src/PPDS.Extension/src/panels/webview/queryPanel.ts`:
 
 The webview HTML layout (using VS Code Toolkit components):
 ```html
@@ -824,7 +839,7 @@ context.subscriptions.push(
 **Step 6: Commit**
 
 ```bash
-git add extension/src/panels/ extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/src/panels/ src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add SQL query panel with execution and results"
 ```
 
@@ -833,8 +848,8 @@ git commit -m "feat(extension): add SQL query panel with execution and results"
 ### Task 10: Results Table — Data Grid with Sorting, Copy & Filter
 
 **Files:**
-- Modify: `extension/src/panels/webview/queryPanel.ts`
-- Modify: `extension/src/panels/webview/queryPanel.css`
+- Modify: `src/PPDS.Extension/src/panels/webview/queryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/queryPanel.css`
 
 **Step 1: Implement data grid rendering**
 
@@ -893,13 +908,13 @@ Add filter input above results (toggle with "/" key or Filter button):
 **Step 5: Commit**
 
 ```bash
-git add extension/src/panels/webview/
+git add src/PPDS.Extension/src/panels/webview/
 git commit -m "feat(extension): add results grid with sorting, multi-mode copy, pagination, and filtering"
 ```
 
 ---
 
-## Phase 4: Query Features
+## Phase 5: Query Features
 
 ### Task 11: New Daemon Endpoints — Query History (List, Save, Delete)
 
@@ -918,18 +933,9 @@ public async Task<QueryHistoryListResponse> QueryHistoryListAsync(
 
 This should use the existing `IQueryHistoryService` from Application Services. Returns entries for the current environment (active profile's environment URL).
 
-**Step 2: Add `query/history/save` RPC method**
+**Step 2: ~~Add `query/history/save` RPC method~~ (REMOVED — see Task 28)**
 
-```csharp
-[JsonRpcMethod("query/history/save")]
-public async Task<QueryHistorySaveResponse> QueryHistorySaveAsync(
-    string sql,
-    int rowCount,
-    long executionTimeMs,
-    CancellationToken cancellationToken = default)
-```
-
-The TUI auto-saves every successful query execution. The extension needs this too. Saves to the active profile's environment-specific history.
+History is now auto-saved by the daemon during `query/sql` and `query/fetch` execution. No explicit save endpoint needed.
 
 **Step 3: Add `query/history/delete` RPC method**
 
@@ -952,8 +958,8 @@ git commit -m "feat(daemon): add query/history list, save, and delete RPC method
 ### Task 12: Query History Dialog in Extension
 
 **Files:**
-- Create: `extension/src/commands/queryHistoryCommand.ts`
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Create: `src/PPDS.Extension/src/commands/queryHistoryCommand.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Implement history as QuickPick with actions**
 
@@ -970,14 +976,9 @@ When user clicks History button or presses `Ctrl+Shift+H`:
    - Delete icon `$(trash)` → confirmation dialog → `daemonClient.queryHistoryDelete(id)` → refresh list
 5. Default action (Enter) on selected item → load SQL into query editor
 
-**Step 2: Auto-save queries on execution**
+**Step 2: History auto-save (handled by daemon — no extension code needed)**
 
-In `QueryPanel.ts`, after successful query execution:
-```typescript
-// Fire-and-forget — don't block the UI for history save
-daemon.queryHistorySave({ sql, rowCount: result.count, executionTimeMs: result.executionTimeMs })
-    .catch(() => { /* silently ignore history save failures */ });
-```
+The daemon auto-saves query history during `query/sql` and `query/fetch` execution (see Task 28). The extension does NOT need to call a separate save endpoint.
 
 **Step 3: Wire to query panel**
 
@@ -986,7 +987,7 @@ Handle `showHistory` message from webview → open QuickPick → send selected S
 **Step 4: Commit**
 
 ```bash
-git add extension/src/commands/queryHistoryCommand.ts extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/commands/queryHistoryCommand.ts src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): add query history with run, copy, and delete actions"
 ```
 
@@ -995,7 +996,7 @@ git commit -m "feat(extension): add query history with run, copy, and delete act
 ### Task 13: FetchXML Preview
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Implement FetchXML preview**
 
@@ -1014,7 +1015,7 @@ await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
 **Step 2: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): add FetchXML preview"
 ```
 
@@ -1065,8 +1066,8 @@ git commit -m "feat(daemon): add query/export RPC method"
 ### Task 15: Export Dialog in Extension
 
 **Files:**
-- Create: `extension/src/commands/exportCommand.ts`
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Create: `src/PPDS.Extension/src/commands/exportCommand.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Implement export flow**
 
@@ -1101,7 +1102,7 @@ The format QuickPick title should show: "Export {X} rows" so the user knows what
 **Step 3: Commit**
 
 ```bash
-git add extension/src/commands/exportCommand.ts extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/commands/exportCommand.ts src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): add export with format selection, header toggle, and clipboard"
 ```
 
@@ -1111,7 +1112,7 @@ git commit -m "feat(extension): add export with format selection, header toggle,
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` (add `query/explain`)
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Add `query/explain` daemon endpoint**
 
@@ -1131,13 +1132,13 @@ When clicked, show the execution plan in a read-only text document.
 **Step 3: Commit**
 
 ```bash
-git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs extension/src/panels/QueryPanel.ts
+git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat: add EXPLAIN query support to daemon and extension"
 ```
 
 ---
 
-## Phase 5: Notebooks
+## Phase 3: Notebooks — Primary Experience
 
 > **Reference Implementation:** `C:\VS\ppdsw\ppds-extension-archived\src\features\dataExplorer\notebooks\`
 > The archived extension has a complete, production-tested notebook implementation. Our version adapts these patterns but routes ALL execution through the `ppds serve` daemon instead of direct Dataverse API calls. This eliminates the need for TypeScript-side SQL parsers, FetchXML transpilers, metadata caches, and API services.
@@ -1145,10 +1146,10 @@ git commit -m "feat: add EXPLAIN query support to daemon and extension"
 ### Task 17: Notebook Serializer (.ppdsnb)
 
 **Files:**
-- Create: `extension/src/notebooks/DataverseNotebookSerializer.ts`
-- Create: `extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`
+- Create: `src/PPDS.Extension/src/notebooks/DataverseNotebookSerializer.ts`
+- Create: `src/PPDS.Extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`
 - Modify: `extension/package.json` (notebook + language contributions)
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Register notebook type and FetchXML language in package.json**
 
@@ -1177,7 +1178,7 @@ Also add activation event:
 
 **Step 2: Create serializer**
 
-Create `extension/src/notebooks/DataverseNotebookSerializer.ts`:
+Create `src/PPDS.Extension/src/notebooks/DataverseNotebookSerializer.ts`:
 
 The .ppdsnb file format is a JSON document with environment metadata and cells. This is a direct port from the archived reference (`C:\VS\ppdsw\ppds-extension-archived\src\features\dataExplorer\notebooks\DataverseNotebookSerializer.ts`).
 
@@ -1310,7 +1311,7 @@ context.subscriptions.push(
 
 **Step 4: Write serializer round-trip tests**
 
-Create `extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`:
+Create `src/PPDS.Extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`:
 
 ```typescript
 describe('DataverseNotebookSerializer', () => {
@@ -1342,7 +1343,7 @@ describe('DataverseNotebookSerializer', () => {
 **Step 5: Commit**
 
 ```bash
-git add extension/src/notebooks/ extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/src/notebooks/ src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add .ppdsnb notebook serializer with round-trip tests"
 ```
 
@@ -1353,10 +1354,10 @@ git commit -m "feat(extension): add .ppdsnb notebook serializer with round-trip 
 This is the most complex notebook task. The archived controller is 924 lines. Our version is simpler because execution goes through daemon RPC, but the rendering (virtual scrolling, clickable links, theme-aware CSS) is equally complex.
 
 **Files:**
-- Create: `extension/src/notebooks/DataverseNotebookController.ts`
-- Create: `extension/src/notebooks/notebookResultRenderer.ts`
-- Create: `extension/src/notebooks/virtualScrollScript.ts`
-- Modify: `extension/src/extension.ts`
+- Create: `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
+- Create: `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts`
+- Create: `src/PPDS.Extension/src/notebooks/virtualScrollScript.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Reference Files:**
 - Controller: `C:\VS\ppdsw\ppds-extension-archived\src\features\dataExplorer\notebooks\DataverseNotebookController.ts`
@@ -1364,7 +1365,7 @@ This is the most complex notebook task. The archived controller is 924 lines. Ou
 
 #### Step 1: Create virtual scroll script generator
 
-Create `extension/src/notebooks/virtualScrollScript.ts`:
+Create `src/PPDS.Extension/src/notebooks/virtualScrollScript.ts`:
 
 This generates inline JavaScript for virtual scrolling in notebook cell output. Only visible rows are rendered in the DOM — spacer rows create visual space above and below.
 
@@ -1447,7 +1448,7 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
 
 #### Step 2: Create result renderer
 
-Create `extension/src/notebooks/notebookResultRenderer.ts`:
+Create `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts`:
 
 Handles HTML generation for notebook cell outputs. Separated from controller for testability.
 
@@ -1642,7 +1643,7 @@ function getNotebookStyles(): string {
 
 #### Step 3: Create notebook controller
 
-Create `extension/src/notebooks/DataverseNotebookController.ts`:
+Create `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -2040,7 +2041,7 @@ context.subscriptions.push(
 #### Step 5: Commit
 
 ```bash
-git add extension/src/notebooks/ extension/src/extension.ts
+git add src/PPDS.Extension/src/notebooks/ src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add notebook controller with virtual scrolling, clickable links, and cancellation"
 ```
 
@@ -2049,9 +2050,9 @@ git commit -m "feat(extension): add notebook controller with virtual scrolling, 
 ### Task 19: Notebook Commands — New Notebook, Toggle Language, Export, Open in Data Explorer
 
 **Files:**
-- Create: `extension/src/commands/notebookCommands.ts`
+- Create: `src/PPDS.Extension/src/commands/notebookCommands.ts`
 - Modify: `extension/package.json` (commands + menus)
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Reference:** `C:\VS\ppdsw\ppds-extension-archived\src\features\dataExplorer\notebooks\registerNotebooks.ts:198-502`
 
@@ -2083,7 +2084,7 @@ Add to contributes.menus:
 
 #### Step 2: Implement notebook commands
 
-Create `extension/src/commands/notebookCommands.ts`:
+Create `src/PPDS.Extension/src/commands/notebookCommands.ts`:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -2310,7 +2311,7 @@ context.subscriptions.push(
 #### Step 4: Commit
 
 ```bash
-git add extension/src/commands/notebookCommands.ts extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/src/commands/notebookCommands.ts src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add notebook commands — new, toggle language, export, open in data explorer"
 ```
 
@@ -2321,7 +2322,7 @@ git commit -m "feat(extension): add notebook commands — new, toggle language, 
 ### Task 20: Device Code Flow UI
 
 **Files:**
-- Modify: `extension/src/commands/profileCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Step 1: Implement device code notification handling**
 
@@ -2351,7 +2352,7 @@ daemon.onDeviceCode(async ({ userCode, verificationUrl, message }) => {
 **Step 2: Commit**
 
 ```bash
-git add extension/src/commands/profileCommands.ts
+git add src/PPDS.Extension/src/commands/profileCommands.ts
 git commit -m "feat(extension): add device code flow UI with browser open and clipboard"
 ```
 
@@ -2360,8 +2361,8 @@ git commit -m "feat(extension): add device code flow UI with browser open and cl
 ### Task 21: Re-Authentication Flow
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
-- Modify: `extension/src/notebooks/DataverseNotebookController.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 
 **Step 1: Handle auth errors in query panel**
 
@@ -2379,7 +2380,7 @@ Same flow but using cell execution error output.
 **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts extension/src/notebooks/DataverseNotebookController.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts
 git commit -m "feat(extension): add re-authentication flow for expired sessions"
 ```
 
@@ -2408,7 +2409,7 @@ Note: `Ctrl+Enter` for query execution is handled inside the webview, not as a V
 **Step 2: Commit**
 
 ```bash
-git add extension/package.json
+git add src/PPDS.Extension/package.json
 git commit -m "feat(extension): add keyboard shortcuts"
 ```
 
@@ -2458,7 +2459,7 @@ const defaultTop = config.get<number>('queryDefaultTop', 100);
 **Step 3: Commit**
 
 ```bash
-git add extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): add configurable settings"
 ```
 
@@ -2466,11 +2467,11 @@ git commit -m "feat(extension): add configurable settings"
 
 ### Task 24: Update DaemonClient TypeScript Types
 
-Update `extension/src/daemonClient.ts` and `extension/src/types.ts` to include all new daemon RPC methods added in Tasks 5, 7, 11, 14, and 16.
+Update `src/PPDS.Extension/src/daemonClient.ts` and `src/PPDS.Extension/src/types.ts` to include all new daemon RPC methods added in Tasks 5, 7, 11, 14, and 16.
 
 **Files:**
-- Modify: `extension/src/daemonClient.ts`
-- Modify: `extension/src/types.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts`
+- Modify: `src/PPDS.Extension/src/types.ts`
 
 **Step 1: Add TypeScript methods for new RPC endpoints**
 
@@ -2495,7 +2496,7 @@ async queryExplain(sql: string): Promise<QueryExplainResponse>
 **Step 3: Commit**
 
 ```bash
-git add extension/src/daemonClient.ts extension/src/types.ts
+git add src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/src/types.ts
 git commit -m "feat(extension): add TypeScript types for all new daemon RPC methods"
 ```
 
@@ -2504,7 +2505,7 @@ git commit -m "feat(extension): add TypeScript types for all new daemon RPC meth
 ### Task 25: End-to-End Smoke Test
 
 **Files:**
-- Create: `extension/src/__tests__/integration/smokeTest.test.ts`
+- Create: `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts`
 
 **Step 1: Write smoke test**
 
@@ -2518,8 +2519,407 @@ Test that:
 **Step 2: Commit**
 
 ```bash
-git add extension/src/__tests__/
+git add src/PPDS.Extension/src/__tests__/
 git commit -m "test(extension): add end-to-end smoke tests"
+```
+
+---
+
+## New Tasks (Added 2026-03-02)
+
+### Task 26: Daemon IntelliSense Endpoints — `schema/entities`, `schema/attributes`, `query/complete`
+
+**Phase 1 (Foundation)** — These power IntelliSense in notebooks and .sql files.
+
+**Files:**
+- Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
+
+**Step 1: Implement `schema/entities` RPC method**
+
+Replace the stubbed `schema/list` with two focused endpoints. `schema/entities` returns all entity names for the current environment.
+
+```csharp
+[JsonRpcMethod("schema/entities")]
+public async Task<SchemaEntitiesResponse> SchemaEntitiesAsync(
+    CancellationToken cancellationToken = default)
+```
+
+Uses `ICachedMetadataProvider.GetEntitiesAsync()` from the daemon's service provider. Returns entity logical names, display names, and isCustom flag.
+
+```csharp
+public class SchemaEntitiesResponse
+{
+    [JsonPropertyName("entities")] public List<EntitySummaryDto> Entities { get; set; } = [];
+}
+public class EntitySummaryDto
+{
+    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
+    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
+    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
+}
+```
+
+**Step 2: Implement `schema/attributes` RPC method**
+
+```csharp
+[JsonRpcMethod("schema/attributes")]
+public async Task<SchemaAttributesResponse> SchemaAttributesAsync(
+    string entity,
+    CancellationToken cancellationToken = default)
+```
+
+Uses `ICachedMetadataProvider.GetAttributesAsync(entity)`. Returns attribute logical names, display names, data types, and isCustom flag.
+
+```csharp
+public class SchemaAttributesResponse
+{
+    [JsonPropertyName("entityName")] public string EntityName { get; set; } = "";
+    [JsonPropertyName("attributes")] public List<AttributeSummaryDto> Attributes { get; set; } = [];
+}
+public class AttributeSummaryDto
+{
+    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
+    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
+    [JsonPropertyName("dataType")] public string DataType { get; set; } = "";
+    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
+}
+```
+
+**Step 3: Implement `query/complete` RPC method**
+
+```csharp
+[JsonRpcMethod("query/complete")]
+public async Task<QueryCompleteResponse> QueryCompleteAsync(
+    string sql,
+    int cursorOffset,
+    CancellationToken cancellationToken = default)
+```
+
+Uses existing `SqlCompletionEngine.GetCompletionsAsync(sql, cursorOffset)` from `PPDS.Query.Intellisense`. Needs `ISqlLanguageService` wired into the daemon's service provider with a `CachedMetadataProvider` for the active environment.
+
+```csharp
+public class QueryCompleteResponse
+{
+    [JsonPropertyName("items")] public List<CompletionItemDto> Items { get; set; } = [];
+}
+public class CompletionItemDto
+{
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("insertText")] public string InsertText { get; set; } = "";
+    [JsonPropertyName("kind")] public string Kind { get; set; } = ""; // "keyword", "entity", "attribute"
+    [JsonPropertyName("detail")] public string? Detail { get; set; }
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    [JsonPropertyName("sortOrder")] public int SortOrder { get; set; }
+}
+```
+
+**Step 4: Run daemon tests**
+
+```bash
+dotnet test tests/PPDS.Cli.DaemonTests --filter Category!=Integration
+```
+
+**Step 5: Commit**
+
+```bash
+git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
+git commit -m "feat(daemon): add schema/entities, schema/attributes, and query/complete RPC endpoints for IntelliSense"
+```
+
+---
+
+### Task 27: VS Code CompletionItemProvider for SQL/FetchXML IntelliSense
+
+**Phase 3 (Notebooks)** — Register after notebooks are set up so IntelliSense works in notebook cells automatically.
+
+**Files:**
+- Create: `src/PPDS.Extension/src/providers/completionProvider.ts`
+- Modify: `src/PPDS.Extension/src/types.ts` (add completion types)
+- Modify: `src/PPDS.Extension/src/daemonClient.ts` (add queryComplete method)
+- Modify: `src/PPDS.Extension/src/extension.ts` (register provider)
+
+**Step 1: Add completion types and daemon client method**
+
+Add to `src/PPDS.Extension/src/types.ts`:
+```typescript
+export interface QueryCompleteResponse { items: CompletionItemDto[]; }
+export interface CompletionItemDto { label: string; insertText: string; kind: string; detail: string | null; description: string | null; sortOrder: number; }
+```
+
+Add to `src/PPDS.Extension/src/daemonClient.ts`:
+```typescript
+async queryComplete(params: { sql: string; cursorOffset: number }): Promise<QueryCompleteResponse>
+```
+
+**Step 2: Create CompletionItemProvider**
+
+Create `src/PPDS.Extension/src/providers/completionProvider.ts`:
+
+```typescript
+import * as vscode from 'vscode';
+import type { DaemonClient } from '../daemonClient';
+
+export class DataverseCompletionProvider implements vscode.CompletionItemProvider {
+    constructor(private readonly daemon: DaemonClient) {}
+
+    async provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        _token: vscode.CancellationToken,
+        _context: vscode.CompletionContext
+    ): Promise<vscode.CompletionItem[] | null> {
+        const text = document.getText();
+        const offset = document.offsetAt(position);
+
+        try {
+            const result = await this.daemon.queryComplete({ sql: text, cursorOffset: offset });
+            return result.items.map((item, index) => {
+                const kind = item.kind === 'entity' ? vscode.CompletionItemKind.Class
+                    : item.kind === 'attribute' ? vscode.CompletionItemKind.Field
+                    : vscode.CompletionItemKind.Keyword;
+
+                const completion = new vscode.CompletionItem(item.label, kind);
+                completion.insertText = item.insertText;
+                completion.detail = item.detail ?? undefined;
+                completion.documentation = item.description ?? undefined;
+                completion.sortText = String(item.sortOrder).padStart(4, '0') + String(index).padStart(4, '0');
+                return completion;
+            });
+        } catch {
+            return null; // Silently fail — no completions if daemon unavailable
+        }
+    }
+}
+```
+
+**Step 3: Register in extension.ts**
+
+```typescript
+import { DataverseCompletionProvider } from './providers/completionProvider';
+
+// In activate():
+const completionProvider = new DataverseCompletionProvider(daemonClient);
+context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completionProvider, ' ', ',', '.'),
+    vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<'),
+);
+```
+
+**Step 4: Commit**
+
+```bash
+git add src/PPDS.Extension/src/providers/ src/PPDS.Extension/src/types.ts src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/src/extension.ts
+git commit -m "feat(extension): add SQL/FetchXML IntelliSense via daemon query/complete"
+```
+
+---
+
+### Task 28: Auto-Save Query History in Daemon
+
+**Phase 5 (Query Features)** — Daemon auto-saves history during query/sql and query/fetch execution. No explicit client call needed.
+
+**Files:**
+- Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
+
+**Step 1: Add auto-save logic to QuerySqlAsync and QueryFetchAsync**
+
+After successful query execution, fire-and-forget save to `IQueryHistoryService`:
+
+```csharp
+// Inside QuerySqlAsync, after successful execution:
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await historyService.SaveAsync(new QueryHistoryEntry
+        {
+            Sql = sql,
+            RowCount = result.Count,
+            ExecutionTimeMs = result.ExecutionTimeMs,
+            EnvironmentUrl = environmentUrl,
+            ExecutedAt = DateTimeOffset.UtcNow
+        });
+    }
+    catch { /* silently ignore history save failures */ }
+});
+```
+
+This matches TUI behavior where `ISqlQueryService` auto-saves to history.
+
+**Step 2: Remove `query/history/save` endpoint from plan**
+
+The explicit save endpoint is no longer needed. `query/history/list` and `query/history/delete` remain.
+
+**Step 3: Commit**
+
+```bash
+git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
+git commit -m "feat(daemon): auto-save query history during query/sql and query/fetch execution"
+```
+
+---
+
+### Task 29: Multi-Tab Query Panel Support
+
+**Phase 4 (Query Panel)** — Remove singleton pattern, support multiple Data Explorer instances.
+
+**Files:**
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
+
+**Step 1: Replace singleton with instance tracking**
+
+```typescript
+export class QueryPanel extends WebviewPanelBase {
+    private static instances: QueryPanel[] = [];
+    private static nextId = 1;
+    private readonly panelId: number;
+
+    static create(extensionUri: vscode.Uri, daemon: DaemonClient, initialSql?: string): QueryPanel {
+        const panel = new QueryPanel(extensionUri, daemon, initialSql);
+        QueryPanel.instances.push(panel);
+        return panel;
+    }
+
+    constructor(private extensionUri: vscode.Uri, private daemon: DaemonClient, initialSql?: string) {
+        this.panelId = QueryPanel.nextId++;
+        // Create panel with title "Data Explorer #N"
+        // On dispose: remove from instances array
+    }
+}
+```
+
+**Step 2: Update command to create new instance**
+
+```typescript
+vscode.commands.registerCommand('ppds.dataExplorer', () => {
+    QueryPanel.create(context.extensionUri, daemonClient);
+});
+```
+
+**Step 3: Commit**
+
+```bash
+git add src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Extension/src/extension.ts
+git commit -m "feat(extension): support multiple Data Explorer panel instances"
+```
+
+---
+
+### Task 30: TDS Read Replica Toggle
+
+**Phase 4 (Query Panel)** — Add toggle button to query panel toolbar for TDS endpoint.
+
+**Files:**
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/queryPanel.ts` (client-side script)
+- Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` (add `useTds` param to query/sql)
+
+**Step 1: Add `useTds` parameter to query/sql daemon endpoint**
+
+```csharp
+[JsonRpcMethod("query/sql")]
+public async Task<QueryResultResponse> QuerySqlAsync(
+    string sql,
+    int? top = null,
+    int? page = null,
+    string? pagingCookie = null,
+    bool count = false,
+    bool showFetchXml = false,
+    bool useTds = false,  // NEW
+    CancellationToken cancellationToken = default)
+```
+
+When `useTds` is true, route query through TDS read replica endpoint instead of FetchXML.
+
+**Step 2: Add toggle button to webview toolbar**
+
+```html
+<vscode-button id="tds-toggle-btn" appearance="secondary" aria-pressed="false">
+    <span slot="start" class="codicon codicon-database"></span>
+    TDS Off
+</vscode-button>
+```
+
+Toggle state changes button text between "TDS Off" / "TDS On" and sends `useTds` flag with execute messages.
+
+**Step 3: Commit**
+
+```bash
+git add src/PPDS.Extension/src/panels/ src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
+git commit -m "feat: add TDS Read Replica toggle to query panel and daemon"
+```
+
+---
+
+### Task 31: Playwright E2E Test Infrastructure
+
+**Phase 6 (Polish)** — Set up Playwright for VS Code extension E2E testing.
+
+**Files:**
+- Create: `extension/e2e/smoke.spec.ts`
+- Create: `extension/e2e/fixtures.ts`
+- Create: `extension/playwright.config.ts`
+- Modify: `extension/package.json` (add playwright deps)
+
+**Step 1: Install Playwright**
+
+```bash
+cd src/PPDS.Extension
+npm install -D @playwright/test
+```
+
+**Step 2: Create test fixtures**
+
+Reference: `C:\VS\ppdsw\ppds-extension-archived\e2e\` for patterns.
+
+Create `extension/e2e/fixtures.ts`:
+```typescript
+import { test as base, _electron as electron } from '@playwright/test';
+
+export const test = base.extend<{ vscode: any }>({
+    vscode: async ({}, use) => {
+        const electronApp = await electron.launch({
+            executablePath: 'code',  // or path to VS Code insiders
+            args: ['--extensionDevelopmentPath=' + path.resolve(__dirname, '..')]
+        });
+        const window = await electronApp.firstWindow();
+        await use(window);
+        await electronApp.close();
+    }
+});
+```
+
+**Step 3: Create smoke test**
+
+Create `extension/e2e/smoke.spec.ts`:
+```typescript
+import { test } from './fixtures';
+import { expect } from '@playwright/test';
+
+test('extension activates and shows activity bar', async ({ vscode }) => {
+    // Verify PPDS activity bar icon is visible
+    const activityBar = vscode.locator('[aria-label="Power Platform Developer Suite"]');
+    await expect(activityBar).toBeVisible({ timeout: 10000 });
+});
+
+test('profile tree view loads', async ({ vscode }) => {
+    // Click PPDS activity bar icon
+    // Verify Profiles tree view is visible
+});
+```
+
+**Step 4: Add test script**
+
+```json
+{ "test:e2e": "playwright test --config e2e/playwright.config.ts" }
+```
+
+**Step 5: Commit**
+
+```bash
+git add extension/e2e/ extension/playwright.config.ts src/PPDS.Extension/package.json
+git commit -m "test(extension): add Playwright E2E test infrastructure with smoke tests"
 ```
 
 ---
@@ -2534,7 +2934,7 @@ git commit -m "test(extension): add end-to-end smoke tests"
 | `auth/select` | Ready |
 | `env/list` | Ready |
 | `env/select` | Ready |
-| `query/sql` | Ready |
+| `query/sql` | Ready (adding `useTds` param in Task 30) |
 | `query/fetch` | Ready |
 | `plugins/list` | Ready |
 | `solutions/list` | Ready |
@@ -2551,11 +2951,19 @@ git commit -m "test(extension): add end-to-end smoke tests"
 | `env/who` | Task 7 | WhoAmI environment details |
 | `env/config/get` | Task 7b | Get environment display config |
 | `env/config/set` | Task 7b | Set environment label/type/color |
+| `schema/entities` | Task 26 | List all entities (IntelliSense) |
+| `schema/attributes` | Task 26 | List entity attributes (IntelliSense) |
+| `query/complete` | Task 26 | SQL completion items (IntelliSense) |
 | `query/history/list` | Task 11 | List query history entries |
-| `query/history/save` | Task 11 | Auto-save executed query to history |
 | `query/history/delete` | Task 11 | Delete history entry |
 | `query/export` | Task 14 | Export query results |
 | `query/explain` | Task 16 | Show query execution plan |
+
+### Modified (existing endpoints updated)
+| Method | Task | Change |
+|--------|------|--------|
+| `query/sql` | Task 28, 30 | Auto-saves history + `useTds` parameter |
+| `query/fetch` | Task 28 | Auto-saves history |
 
 ---
 
@@ -2563,11 +2971,13 @@ git commit -m "test(extension): add end-to-end smoke tests"
 
 | TUI Feature | VS Code Equivalent | Task |
 |-------------|-------------------|------|
-| SqlQueryScreen | QueryPanel webview | Task 9-10 |
+| SqlQueryScreen | Data Explorer webview panel (multi-instance) | Task 9-10, 29 |
+| SqlQueryScreen TDS toggle | TDS Read Replica toggle button | Task 30 |
 | SqlQueryScreen streaming | Batch load + virtual scrolling (acceptable — archived extension also non-streaming) | Task 9 |
-| SqlQueryScreen auto-save to history | Fire-and-forget `query/history/save` after execution | Task 12 |
+| SqlQueryScreen auto-save to history | Daemon auto-saves internally during query/sql and query/fetch | Task 28 |
 | SqlQueryScreen copy (Ctrl+C/Ctrl+Shift+C) | Multi-mode copy with header toggling | Task 10 |
 | SqlQueryScreen filter (/) | Client-side filter with toggle visibility | Task 10 |
+| SqlQueryScreen IntelliSense | CompletionItemProvider via daemon query/complete (works in notebooks + .sql files) | Task 26-27 |
 | ProfileSelectorDialog | Profile tree view + QuickPick | Task 3-4 |
 | ProfileCreationDialog | Create profile command chain with method-specific fields | Task 4-5 |
 | ProfileDetailsDialog | auth/who multi-section detail view with token countdown | Task 4 |
@@ -2580,5 +2990,6 @@ git commit -m "test(extension): add end-to-end smoke tests"
 | ExportDialog (CSV/TSV/JSON/Clipboard + headers toggle) | Export command with format + header toggle QuickPicks | Task 15 |
 | FetchXmlPreviewDialog | Side-by-side XML document | Task 13 |
 | TuiStatusBar | VS Code status bar items | Task 6, 9 |
-| Keyboard shortcuts | VS Code keybindings + webview | Task 22 |
+| Tab management (Ctrl+T/W/Tab) | Multi-instance Data Explorer panels | Task 29 |
+| Keyboard shortcuts | VS Code keybindings + webview shortcuts | Task 22 |
 | N/A (new) | .ppdsnb notebooks with virtual scrolling + clickable links | Task 17-19 |

@@ -10,7 +10,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - 'nuget.config'
-      - 'extension/**'
+      - 'src/PPDS.Extension/**'
   pull_request:
     branches: [main]
     paths:
@@ -20,7 +20,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - 'nuget.config'
-      - 'extension/**'
+      - 'src/PPDS.Extension/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -104,10 +104,6 @@ jobs:
   # Extension build (TypeScript)
   extension:
     runs-on: ubuntu-latest
-    # Only run if extension files changed
-    if: |
-      github.event_name == 'push' && contains(github.event.head_commit.modified, 'extension/') ||
-      github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v6
@@ -117,19 +113,23 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: extension/package-lock.json
+          cache-dependency-path: src/PPDS.Extension/package-lock.json
 
       - name: Install dependencies
-        working-directory: extension
+        working-directory: src/PPDS.Extension
         run: npm ci
 
       - name: Lint
-        working-directory: extension
+        working-directory: src/PPDS.Extension
         run: npm run lint
 
       - name: Build
-        working-directory: extension
+        working-directory: src/PPDS.Extension
         run: npm run compile
+
+      - name: Test
+        working-directory: src/PPDS.Extension
+        run: npm test
 
   # Gate job for branch protection
   build-status:
@@ -139,10 +139,11 @@ jobs:
     steps:
       - name: Check build status
         run: |
-          if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]]; then
+          if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \
+             [[ "${{ needs.extension.result }}" == "success" || "${{ needs.extension.result }}" == "skipped" ]]; then
             echo "Build passed"
             exit 0
           else
-            echo "Build failed: ${{ needs.build.result }}"
+            echo "Build failed: build=${{ needs.build.result }}, extension=${{ needs.extension.result }}"
             exit 1
           fi

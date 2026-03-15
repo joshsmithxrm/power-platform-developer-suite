@@ -54,6 +54,7 @@ public static class ProfileServiceFactory
     public static ServiceProvider CreateLocalProvider()
     {
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddCliApplicationServices();
         return services.BuildServiceProvider();
     }

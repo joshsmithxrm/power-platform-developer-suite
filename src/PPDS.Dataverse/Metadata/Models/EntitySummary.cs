@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 namespace PPDS.Dataverse.Metadata.Models;
@@ -36,6 +37,12 @@ public sealed class EntitySummary
     /// </summary>
     [JsonPropertyName("objectTypeCode")]
     public int ObjectTypeCode { get; init; }
+
+    /// <summary>
+    /// Gets the entity metadata ID (used to match solutioncomponent.objectId for entity-type components).
+    /// </summary>
+    [JsonPropertyName("metadataId")]
+    public Guid MetadataId { get; init; }
 
     /// <summary>
     /// Gets whether this is a custom entity.

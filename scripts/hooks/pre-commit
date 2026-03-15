@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# pre-commit hook: run typecheck and lint on staged extension TS/JS files
+# Install: git config core.hooksPath scripts/hooks
+
+set -euo pipefail
+
+# Check if any staged files are in the extension TypeScript source
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACMR -- ':(glob)src/PPDS.Extension/**/*.ts' ':(glob)src/PPDS.Extension/**/*.tsx' ':(glob)src/PPDS.Extension/**/*.js')
+
+if [ -z "$STAGED_TS" ]; then
+    exit 0
+fi
+
+echo "[pre-commit] Extension TS files staged — running typecheck..."
+
+# Find the extension directory relative to the repo root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+EXT_DIR="$REPO_ROOT/src/PPDS.Extension"
+
+if [ ! -f "$EXT_DIR/package.json" ]; then
+    echo "[pre-commit] WARNING: src/PPDS.Extension/package.json not found, skipping typecheck"
+    exit 0
+fi
+
+# Check node_modules exist
+if [ ! -d "$EXT_DIR/node_modules" ]; then
+    echo "[pre-commit] WARNING: node_modules missing, skipping typecheck (run npm install)"
+    exit 0
+fi
+
+# Run typecheck
+if ! npm run typecheck:all --prefix "$EXT_DIR"; then
+    echo ""
+    echo "[pre-commit] BLOCKED: typecheck failed. Fix errors before committing."
+    exit 1
+fi
+
+echo "[pre-commit] typecheck passed."
+
+# Run lint (--quiet shows only errors, not warnings)
+echo "[pre-commit] Running lint..."
+if ! (cd "$EXT_DIR" && npx eslint src --quiet); then
+    echo ""
+    echo "[pre-commit] BLOCKED: lint errors found. Fix errors before committing."
+    exit 1
+fi
+
+echo "[pre-commit] lint passed."

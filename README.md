@@ -269,7 +269,7 @@ This provides:
 
 **Alternatives:**
 - Open root folder for .NET-only development
-- Open `extension/` folder for extension-only development
+- Open `src/PPDS.Extension/` folder for extension-only development
 
 ### Building
 
@@ -278,7 +278,7 @@ This provides:
 dotnet build PPDS.sln
 
 # Build extension
-cd extension && npm run compile
+cd src/PPDS.Extension && npm run compile
 
 # Or use VS Code tasks: Ctrl+Shift+B
 ```
