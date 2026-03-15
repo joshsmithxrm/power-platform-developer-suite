@@ -399,7 +399,7 @@ async function runDaemon(workspace) {
     }
   });
 
-  server.listen(0, '127.0.0.1'); // localhost only, random port
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const daemonPort = server.address().port;
 
   writeSession({ daemonPort, daemonPid: process.pid, userDataDir: PROFILE_DIR, logFile: LOG_FILE });
