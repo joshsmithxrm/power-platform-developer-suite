@@ -21,6 +21,11 @@ vi.mock('vscode', () => ({
     window: {
         showErrorMessage: vi.fn(),
     },
+    EventEmitter: class {
+        event = vi.fn();
+        fire = vi.fn();
+        dispose = vi.fn();
+    },
 }));
 
 // ── Mock: vscode-jsonrpc/node ───────────────────────────────────────────────
@@ -36,6 +41,8 @@ vi.mock('vscode-jsonrpc/node', () => ({
     createMessageConnection: vi.fn(() => mockConnection),
     StreamMessageReader: vi.fn(),
     StreamMessageWriter: vi.fn(),
+    RequestType: class { constructor(public method: string, public paramStructures?: unknown) {} },
+    ParameterStructures: { byPosition: 1, byName: 2, auto: 0 },
 }));
 
 // ── Mock: child_process ─────────────────────────────────────────────────────
@@ -337,7 +344,7 @@ describe('DaemonClient', () => {
             const params = { sql: 'SELECT name FROM account', top: 10 };
             const result = await client.querySql(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/sql', params, undefined);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/sql' }), params);
             expect(result.count).toBe(1);
             expect(result.records[0]).toEqual({ name: 'Contoso' });
         });
@@ -364,7 +371,7 @@ describe('DaemonClient', () => {
             const params = { fetchXml: '<fetch><entity name="contact" /></fetch>' };
             const result = await client.queryFetch(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/fetch', params, undefined);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/fetch' }), params);
             expect(result.success).toBe(true);
         });
     });
@@ -485,7 +492,7 @@ describe('DaemonClient', () => {
             const params = { sql: 'SELECT * FROM acc', cursorOffset: 18 };
             const result = await client.queryComplete(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/complete', params);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/complete' }), params);
             expect(result.items).toHaveLength(2);
         });
     });
@@ -499,7 +506,7 @@ describe('DaemonClient', () => {
 
             const result = await client.queryHistoryList();
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {});
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/history/list' }), {});
             expect(result.entries).toHaveLength(0);
         });
 
@@ -513,7 +520,7 @@ describe('DaemonClient', () => {
 
             const result = await client.queryHistoryList('account', 10);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/history/list' }), {
                 search: 'account',
                 limit: 10,
             });
@@ -528,7 +535,7 @@ describe('DaemonClient', () => {
 
             const result = await client.queryHistoryList('contact');
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/list', {
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/history/list' }), {
                 search: 'contact',
             });
             expect(result.entries).toHaveLength(0);
@@ -544,7 +551,7 @@ describe('DaemonClient', () => {
 
             const result = await client.queryHistoryDelete('h-123');
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/history/delete', {
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/history/delete' }), {
                 id: 'h-123',
             });
             expect(result.deleted).toBe(true);
@@ -563,7 +570,7 @@ describe('DaemonClient', () => {
             const params = { sql: 'SELECT name FROM account', format: 'csv', includeHeaders: true, top: 100 };
             const result = await client.queryExport(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/export', params);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/export' }), params);
             expect(result.rowCount).toBe(2);
             expect(result.format).toBe('csv');
         });
@@ -579,7 +586,7 @@ describe('DaemonClient', () => {
             const params = { sql: 'SELECT name FROM contact' };
             const result = await client.queryExport(params);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/export', params);
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/export' }), params);
             expect(result.rowCount).toBe(0);
         });
     });
@@ -592,9 +599,9 @@ describe('DaemonClient', () => {
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
-            const result = await client.queryExplain('SELECT name FROM account');
+            const result = await client.queryExplain({ sql: 'SELECT name FROM account' });
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('query/explain', {
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'query/explain' }), {
                 sql: 'SELECT name FROM account',
             });
             expect(result.format).toBe('fetchxml');
