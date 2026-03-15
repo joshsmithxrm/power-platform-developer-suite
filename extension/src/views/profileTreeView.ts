@@ -12,12 +12,15 @@ type ProfileTreeElement = ProfileTreeItem | EnvironmentTreeItem | ManualUrlTreeI
 export class ProfileTreeItem extends vscode.TreeItem {
     constructor(
         public readonly profile: ProfileInfo,
+        expandedIds?: ReadonlySet<string>,
     ) {
         const label = profile.name ?? `Profile ${profile.index}`;
-        super(label, vscode.TreeItemCollapsibleState.Collapsed);
+        const stableId = `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}`;
+        const isExpanded = expandedIds?.has(stableId) ?? false;
+        super(label, isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
 
         // Stable ID for VS Code's built-in expansion state persistence
-        this.id = `profile://${profile.identity}//${profile.authMethod}//${profile.cloud}`;
+        this.id = stableId;
 
         if (profile.environment) {
             this.description = profile.environment.displayName;
@@ -155,7 +158,8 @@ export class ProfileTreeDataProvider
             if (result.profiles.length === 0) {
                 return [];
             }
-            const items = result.profiles.map(p => new ProfileTreeItem(p));
+            const expandedIds = new Set(this.globalState?.get<string[]>('ppds.profiles.expandedIds') ?? []);
+            const items = result.profiles.map(p => new ProfileTreeItem(p, expandedIds));
 
             // Apply user-defined sort order from globalState
             const sortOrder = this.globalState?.get<Record<string, number>>('ppds.profiles.sortOrder');
