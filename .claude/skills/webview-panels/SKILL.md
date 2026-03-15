@@ -318,3 +318,87 @@ Before committing panel changes:
 
 - QueryPanel: `src/panels/QueryPanel.ts` + `src/panels/webview/query-panel.ts` + `src/panels/styles/query-panel.css`
 - SolutionsPanel: `src/panels/SolutionsPanel.ts` + `src/panels/webview/solutions-panel.ts` + `src/panels/styles/solutions-panel.css`
+
+## Design Guidance
+
+### Panel Anatomy
+
+Every panel follows the same three-zone layout defined in `shared.css`:
+
+```
+┌─────────────────────────────────────────┐
+│ Toolbar    [env picker] [actions]  [...] │  ← .toolbar (flex, 8px gap, border-bottom)
+├─────────────────────────────────────────┤
+│                                         │
+│              Content area               │  ← .content (flex: 1, overflow: auto)
+│         (table / tree / detail)         │
+│                                         │
+├─────────────────────────────────────────┤
+│ Status bar: record count, timing, etc.  │  ← .status-bar (border-top, 12px font)
+└─────────────────────────────────────────┘
+```
+
+**Rules:**
+- Toolbar always contains the environment picker (via `environmentPicker.ts`)
+- Content area gets `flex: 1` and handles its own scrolling
+- Status bar shows contextual counts/timing — never empty, show "Ready" as default
+- Empty state (`.empty-state`), error state (`.error-state`), and loading state (`.loading-state`) are in `shared.css` — use them, don't reinvent
+
+### Reusable CSS Patterns
+
+Before writing panel-specific CSS, check what already exists. Each pattern has a reference implementation — read it before building yours.
+
+| Pattern | CSS Source | Reference Panel | Use When |
+|---------|-----------|----------------|----------|
+| Data table (sticky header, sort, selection) | `query-panel.css` `.results-table` | QueryPanel | Tabular data with columns |
+| Tree/list (chevron expand, nested indent) | `solutions-panel.css` `.solution-list` | SolutionsPanel | Hierarchical browsing |
+| Detail card (standalone, label/value grid) | `solutions-panel.css` `.detail-card` | SolutionsPanel | Inline record details |
+| Detail card (nested, inside list items) | `solutions-panel.css` `.component-detail-card` | SolutionsPanel | Expandable item details |
+| Filter bar (debounced input, count badge) | `query-panel.css` `.filter-bar` | QueryPanel | Filtering loaded results |
+| Dropdown menu | `query-panel.css` `.dropdown-menu` | QueryPanel | Export, overflow actions |
+| Context menu | `query-panel.css` `.context-menu` | QueryPanel | Right-click actions |
+
+**Rules:**
+- `@import './shared.css'` as your first line — every panel gets toolbar, status bar, states for free
+- Copy the CSS pattern from the reference, don't `@import` panel-specific files into other panels
+- Use `var(--vscode-*)` tokens for all colors — never hardcode hex values
+- Spacing: 4/6/8/12/16/40px scale (match existing panels, don't introduce new values)
+- Font sizes: 11px (labels/badges), 12px (secondary text, detail cards), 13px (body/inputs)
+- Border radius: 2px (inputs, badges), 4px (menus, dropdowns)
+
+### Environment Theming
+
+Panels display a colored top-border accent on the toolbar based on environment type. This maps to the TUI's `StatusBar_Production/Sandbox/Development/Test/Trial` color schemes.
+
+The CSS rules are in `shared.css` using `[data-env-type]` attribute selectors:
+- Production → red, Sandbox → yellow, Development → green, Test → yellow, Trial → blue
+- Unknown/null → no attribute, no accent (natural default)
+
+**Implementation:** When the environment is selected (via picker or `authWho` on init), the host panel sends `envType` in the `updateEnvironment` message. The webview script sets `data-env-type` on the `.toolbar` element. See QueryPanel and SolutionsPanel for reference.
+
+### Keyboard Shortcuts
+
+All panels should support a standard set of keyboard shortcuts. Register in the webview script via `document.addEventListener('keydown', ...)`. Check `event.metaKey || event.ctrlKey` for cross-platform support.
+
+| Shortcut | Action | Notes |
+|----------|--------|-------|
+| `Ctrl/Cmd+R` | Refresh data | Re-fetch from daemon |
+| `Ctrl/Cmd+F` | Focus filter bar | If panel has filtering |
+| `Escape` | Close filter / deselect | Context-dependent |
+| `Ctrl/Cmd+Shift+E` | Export visible data | CSV or JSON, match query panel pattern |
+| `Ctrl/Cmd+C` | Copy selection | Tables: selected cells as TSV |
+
+### TUI Functional Parity
+
+When designing an extension panel, verify the equivalent TUI screen exposes the same capabilities. This is a functional check, not a visual one — the interfaces look different but should offer equivalent data and actions.
+
+**Before marking a panel complete, confirm:**
+- [ ] Same data fields visible (columns in table, fields in detail view)
+- [ ] Same filter/search capabilities
+- [ ] Same sort options
+- [ ] Same export formats available
+- [ ] Same drill-down / navigation paths (e.g., solution → components)
+- [ ] Same refresh behavior
+- [ ] Environment scoping works equivalently
+
+If the TUI screen doesn't exist yet, file or reference the corresponding wave:2 issue. Panels and screens can be built in parallel but should converge on the same RPC methods and data shapes.
