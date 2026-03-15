@@ -827,7 +827,9 @@ function showError(error: string): void {
 function updateStatus(data: QueryResultResponse): void {
     statusText.textContent = 'Ready';
     rowCountEl.textContent = allRows.length + ' row' + (allRows.length !== 1 ? 's' : '') + (moreRecords ? ' (more available)' : '');
-    executionTimeEl.textContent = data.executionTimeMs ? 'in ' + data.executionTimeMs + 'ms' : '';
+    const timeText = data.executionTimeMs ? 'in ' + data.executionTimeMs + 'ms' : '';
+    const modeText = data.queryMode === 'tds' ? ' via TDS' : data.queryMode === 'dataverse' ? ' via Dataverse' : '';
+    executionTimeEl.textContent = timeText + modeText;
 }
 
 // ── Rendering ──
