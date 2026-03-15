@@ -37,7 +37,7 @@ export function getEnvironmentPickerHtml(): string {
 /**
  * Represents an environment option for the picker.
  */
-export interface EnvironmentOption {
+interface EnvironmentOption {
     label: string;
     url: string;
     detail?: string;

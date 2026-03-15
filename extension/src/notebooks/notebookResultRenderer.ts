@@ -10,7 +10,7 @@ const CONTAINER_HEIGHT = 400;
  * text is always plain text (NOT pre-escaped).
  * url, if present, makes the cell a clickable link (for lookup fields and primary keys).
  */
-export interface CellData {
+interface CellData {
     text: string;
     url?: string;
 }

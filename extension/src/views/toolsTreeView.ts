@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 /**
  * Tree item representing a tool entry in the Tools view.
  */
-export class ToolTreeItem extends vscode.TreeItem {
+class ToolTreeItem extends vscode.TreeItem {
     constructor(
         label: string,
         public readonly commandId: string,
