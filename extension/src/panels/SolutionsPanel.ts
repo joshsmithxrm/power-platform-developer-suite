@@ -626,8 +626,14 @@ export class SolutionsPanel extends WebviewPanelBase {
 
             html += '<div class="component-items' + (isGroupExpanded ? ' expanded' : '') + '">';
             for (const comp of group.components) {
-                html += '<div class="component-item">';
-                html += escapeHtml(comp.objectId);
+                var name = comp.logicalName || comp.schemaName || comp.displayName || comp.objectId;
+                var subtitle = '';
+                if (comp.logicalName && comp.displayName && comp.displayName !== comp.logicalName) {
+                    subtitle = ' (' + escapeHtml(comp.displayName) + ')';
+                }
+
+                html += '<div class="component-item" tabindex="0" data-object-id="' + escapeAttr(comp.objectId) + '">';
+                html += '<span class="component-name">' + escapeHtml(name) + subtitle + '</span>';
                 if (comp.isMetadata) {
                     html += ' <span class="metadata-badge">metadata</span>';
                 }
