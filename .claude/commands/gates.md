@@ -50,6 +50,17 @@ npm run compile --prefix src/extension
 Pass: 0 errors
 Fail: report exact error messages with file:line
 
+**Gate 3.5: TypeScript Type Check** (if TS/JS files changed)
+
+```bash
+npm run typecheck:all --prefix src/extension
+```
+
+Pass: 0 errors across both host and webview tsconfigs
+Fail: report exact error messages with file:line
+
+Note: `compile` (Gate 3) only runs esbuild which does NOT type-check. This gate runs `tsc --noEmit` against both `tsconfig.json` (host) and `tsconfig.webview.json` (browser) to catch type errors.
+
 **Gate 4: TypeScript Lint** (if TS/JS files changed)
 
 ```bash
