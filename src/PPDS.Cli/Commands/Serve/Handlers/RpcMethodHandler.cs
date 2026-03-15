@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -951,6 +952,7 @@ public class RpcMethodHandler : IDisposable
         }
 
         // DML safety check: parse SQL and validate BEFORE any execution path (TDS or FetchXML)
+        var methodStopwatch = Stopwatch.StartNew();
         if (request.DmlSafety != null)
         {
             var parser = new TSql160Parser(initialQuotedIdentifiers: false);
@@ -997,6 +999,7 @@ public class RpcMethodHandler : IDisposable
                 }
             }
         }
+        _logger.LogDebug("query/sql: DML safety check completed in {ElapsedMs}ms", methodStopwatch.ElapsedMilliseconds);
 
         if (request.UseTds)
         {
@@ -1032,7 +1035,10 @@ public class RpcMethodHandler : IDisposable
             return response;
         }
 
+        var transpileStopwatch = Stopwatch.StartNew();
         var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
+        transpileStopwatch.Stop();
+        _logger.LogDebug("query/sql: transpiled SQL to FetchXML in {ElapsedMs}ms", transpileStopwatch.ElapsedMilliseconds);
 
         // If showFetchXml is true, just return the transpiled FetchXML
         if (request.ShowFetchXml)
