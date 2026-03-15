@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { DaemonClient } from '../daemonClient.js';
 
 /**
  * Base class for webview panels with safe messaging.
@@ -11,6 +12,25 @@ export abstract class WebviewPanelBase implements vscode.Disposable {
 
     protected postMessage(message: unknown): void {
         this.panel?.webview.postMessage(message);
+    }
+
+    /**
+     * Subscribes to daemon reconnect events. On reconnect, posts a
+     * `daemonReconnected` message to the webview (shows the stale-data
+     * banner) and calls the overridable `onDaemonReconnected` hook.
+     */
+    protected subscribeToDaemonReconnect(client: DaemonClient): void {
+        this.disposables.push(
+            client.onDidReconnect(() => {
+                this.postMessage({ command: 'daemonReconnected' });
+                this.onDaemonReconnected();
+            })
+        );
+    }
+
+    /** Override in subclasses to handle reconnection (e.g., auto-refresh). */
+    protected onDaemonReconnected(): void {
+        // Default: no-op
     }
 
     abstract getHtmlContent(webview: vscode.Webview): string;

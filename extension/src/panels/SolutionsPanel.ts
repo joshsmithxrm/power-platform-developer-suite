@@ -125,6 +125,12 @@ export class SolutionsPanel extends WebviewPanelBase {
         this.disposables.push(
             this.panel.onDidDispose(() => this.dispose())
         );
+
+        this.subscribeToDaemonReconnect(this.daemon);
+    }
+
+    protected override onDaemonReconnected(): void {
+        void this.loadSolutions();
     }
 
     override dispose(): void {
@@ -436,6 +442,10 @@ export class SolutionsPanel extends WebviewPanelBase {
     }
 </style>
 
+<div id="reconnect-banner" style="display:none; background: var(--vscode-inputValidation-infoBackground, #063b49); color: var(--vscode-foreground); padding: 6px 12px; text-align: center; font-size: 12px;">
+    Connection restored. Data may be stale. <a href="#" id="reconnect-refresh" style="color: var(--vscode-textLink-foreground);">Refresh</a>
+</div>
+
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="managed-btn" appearance="secondary" title="Toggle managed solutions visibility">Managed: Off</vscode-button>
@@ -478,6 +488,12 @@ export class SolutionsPanel extends WebviewPanelBase {
         managedBtn.textContent = managedOn ? 'Managed: On' : 'Managed: Off';
         managedBtn.setAttribute('appearance', managedOn ? 'primary' : 'secondary');
         vscode.postMessage({ command: 'toggleManaged' });
+    });
+
+    document.getElementById('reconnect-refresh').addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('reconnect-banner').style.display = 'none';
+        vscode.postMessage({ command: 'refresh' });
     });
 
     let filterText = '';
@@ -650,6 +666,9 @@ export class SolutionsPanel extends WebviewPanelBase {
             case 'error':
                 content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
                 statusText.textContent = 'Error';
+                break;
+            case 'daemonReconnected':
+                document.getElementById('reconnect-banner').style.display = '';
                 break;
         }
     });
