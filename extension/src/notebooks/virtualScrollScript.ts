@@ -43,6 +43,13 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
             .replace(/'/g, '&#039;');
     }
 
+    function escapeAttr(str) {
+        if (str === null || str === undefined) return '';
+        var s = String(str);
+        return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     var lastStart = -1, lastEnd = -1;
     var rafId = null;
 
@@ -73,7 +80,7 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
             for (var j = 0; j < allRows[i].length; j++) {
                 var cell = allRows[i][j];
                 if (cell.url) {
-                    html += '<td class="data-cell"><a href="' + escapeHtml(cell.url) + '" target="_blank">' + escapeHtml(cell.text) + '</a></td>';
+                    html += '<td class="data-cell"><a href="' + escapeAttr(cell.url) + '" target="_blank">' + escapeHtml(cell.text) + '</a></td>';
                 } else {
                     html += '<td class="data-cell">' + escapeHtml(cell.text) + '</td>';
                 }
