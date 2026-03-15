@@ -475,6 +475,7 @@ export class DaemonClient implements vscode.Disposable {
      */
     async queryExport(params: {
         sql: string;
+        fetchXml?: string;
         environmentUrl?: string;
         format?: string;
         includeHeaders?: boolean;

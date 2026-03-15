@@ -424,12 +424,18 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         if (!headersPick) return;
 
         try {
-            const result = await this.daemon.queryExport({
+            const exportParams: Parameters<typeof this.daemon.queryExport>[0] = {
                 sql: this.lastSql,
                 format: formatPick.format,
                 includeHeaders: headersPick.includeHeaders,
                 environmentUrl: this.environmentUrl,
-            });
+            };
+            // When language is FetchXML, send as fetchXml instead of sql
+            if (this.lastLanguage === 'xml') {
+                exportParams.fetchXml = this.lastSql;
+                exportParams.sql = '';
+            }
+            const result = await this.daemon.queryExport(exportParams);
 
             if (formatPick.isClipboard) {
                 await vscode.env.clipboard.writeText(result.content);
