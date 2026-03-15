@@ -132,9 +132,9 @@ export class DaemonClient implements vscode.Disposable {
             return bundledPath;
         } catch { /* not bundled */ }
 
-        // 2. Debug build output (F5 development — extensionPath is extension/)
+        // 2. Debug build output (F5 development — extensionPath is src/extension/)
         const debugPath = path.join(
-            this.extensionPath, '..', 'src', 'PPDS.Cli', 'bin', 'Debug', 'net8.0', `ppds${ext}`
+            this.extensionPath, '..', 'PPDS.Cli', 'bin', 'Debug', 'net8.0', `ppds${ext}`
         );
         try {
             fs.accessSync(debugPath, fs.constants.X_OK);
@@ -285,8 +285,15 @@ export class DaemonClient implements vscode.Disposable {
 
         this.log.debug('Calling auth/list...');
         const result = await this.connection!.sendRequest<AuthListResponse>('auth/list');
-        this.log.debug(`Got ${result.profiles.length} profiles`);
 
+        // Defensive: older daemon versions (pre-SystemTextJsonFormatter) return PascalCase keys
+        if (!result.profiles && (result as any).Profiles) {
+            result.profiles = (result as any).Profiles;
+            result.activeProfile = (result as any).ActiveProfile ?? result.activeProfile;
+            result.activeProfileIndex = (result as any).ActiveProfileIndex ?? result.activeProfileIndex;
+        }
+
+        this.log.debug(`Got ${result.profiles?.length ?? 0} profiles`);
         return result;
     }
 
