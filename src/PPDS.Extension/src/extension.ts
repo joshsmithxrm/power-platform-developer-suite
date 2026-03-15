@@ -253,7 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
                             top: 1,
                             environmentUrl: item.envUrl,
                         });
-                        const orgName = result.records[0]?.['name'] ?? 'unknown';
+                        const orgName = String(result.records[0]?.['name'] ?? 'unknown');
                         vscode.window.showInformationMessage(
                             `Connection successful \u2014 ${orgName} (${result.executionTimeMs}ms)`,
                         );
