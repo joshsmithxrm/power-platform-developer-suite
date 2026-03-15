@@ -48,7 +48,7 @@ async function main() {
     // Build 4: Query panel webview script (browser, IIFE)
     // Extracted from inline <script> to avoid VS Code's ~32KB inline script limit.
     const queryPanelCtx = await esbuild.context({
-        entryPoints: ['src/panels/query-panel-webview.js'],
+        entryPoints: ['src/panels/webview/query-panel.ts'],
         bundle: true,
         format: 'iife',
         minify: production,
@@ -56,6 +56,24 @@ async function main() {
         sourcesContent: false,
         platform: 'browser',
         outfile: 'dist/query-panel.js',
+        logLevel: 'warning',
+    });
+
+    // Build 6: Query panel CSS
+    const queryPanelCssCtx = await esbuild.context({
+        entryPoints: ['src/panels/styles/query-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/query-panel.css',
+        logLevel: 'warning',
+    });
+
+    // Build 7: Solutions panel CSS
+    const solutionsPanelCssCtx = await esbuild.context({
+        entryPoints: ['src/panels/styles/solutions-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/solutions-panel.css',
         logLevel: 'warning',
     });
 
@@ -73,10 +91,10 @@ async function main() {
     });
 
     if (process.argv.includes('--watch')) {
-        await Promise.all([extCtx.watch(), monacoCtx.watch(), workerCtx.watch(), queryPanelCtx.watch(), solutionsPanelCtx.watch()]);
+        await Promise.all([extCtx.watch(), monacoCtx.watch(), workerCtx.watch(), queryPanelCtx.watch(), solutionsPanelCtx.watch(), queryPanelCssCtx.watch(), solutionsPanelCssCtx.watch()]);
     } else {
-        await Promise.all([extCtx.rebuild(), monacoCtx.rebuild(), workerCtx.rebuild(), queryPanelCtx.rebuild(), solutionsPanelCtx.rebuild()]);
-        await Promise.all([extCtx.dispose(), monacoCtx.dispose(), workerCtx.dispose(), queryPanelCtx.dispose(), solutionsPanelCtx.dispose()]);
+        await Promise.all([extCtx.rebuild(), monacoCtx.rebuild(), workerCtx.rebuild(), queryPanelCtx.rebuild(), solutionsPanelCtx.rebuild(), queryPanelCssCtx.rebuild(), solutionsPanelCssCtx.rebuild()]);
+        await Promise.all([extCtx.dispose(), monacoCtx.dispose(), workerCtx.dispose(), queryPanelCtx.dispose(), solutionsPanelCtx.dispose(), queryPanelCssCtx.dispose(), solutionsPanelCssCtx.dispose()]);
     }
 }
 main().catch(e => { console.error(e); process.exit(1); });

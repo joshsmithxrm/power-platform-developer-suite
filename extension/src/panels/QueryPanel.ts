@@ -6,9 +6,11 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { isAuthError } from '../utils/errorUtils.js';
-import { getEnvironmentPickerCss, getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './webview/shared/message-types.js';
+import { assertNever } from './webview/shared/assert-never.js';
 
-export class QueryPanel extends WebviewPanelBase {
+export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryPanelHostToWebview> {
     private static instances: QueryPanel[] = [];
     private static nextId = 1;
     private readonly panelId: number;
@@ -84,25 +86,25 @@ export class QueryPanel extends WebviewPanelBase {
 
         this.disposables.push(
             this.panel.webview.onDidReceiveMessage(
-                async (message: { command: string; [key: string]: unknown }) => {
+                async (message: QueryPanelWebviewToHost) => {
                     switch (message.command) {
                         case 'executeQuery':
-                            await this.executeQuery(message.sql as string, false, message.useTds as boolean | undefined, message.language as string | undefined);
+                            await this.executeQuery(message.sql, false, message.useTds, message.language);
                             break;
                         case 'showFetchXml':
-                            await this.showFetchXml(message.sql as string);
+                            await this.showFetchXml(message.sql);
                             break;
                         case 'loadMore':
-                            await this.loadMore(message.pagingCookie as string, message.page as number);
+                            await this.loadMore(message.pagingCookie, message.page);
                             break;
                         case 'explainQuery':
-                            await this.explainQuery(message.sql as string);
+                            await this.explainQuery(message.sql);
                             break;
                         case 'exportResults':
                             await this.exportResults();
                             break;
                         case 'openInNotebook':
-                            await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql as string);
+                            await vscode.commands.executeCommand('ppds.openQueryInNotebook', message.sql);
                             break;
                         case 'showHistory': {
                             const sql = await showQueryHistory(this.daemon);
@@ -112,28 +114,27 @@ export class QueryPanel extends WebviewPanelBase {
                             break;
                         }
                         case 'copyToClipboard':
-                            await vscode.env.clipboard.writeText(message.text as string);
+                            await vscode.env.clipboard.writeText(message.text);
                             break;
-                        case 'openRecordUrl':
-                            if (message.url) {
-                                const parsed = vscode.Uri.parse(message.url as string);
-                                if (parsed.scheme === 'https' || parsed.scheme === 'http') {
-                                    await vscode.env.openExternal(parsed);
-                                }
+                        case 'openRecordUrl': {
+                            const parsed = vscode.Uri.parse(message.url);
+                            if (parsed.scheme === 'https' || parsed.scheme === 'http') {
+                                await vscode.env.openExternal(parsed);
                             }
                             break;
+                        }
                         case 'requestClipboard': {
                             const clipText = await vscode.env.clipboard.readText();
                             this.postMessage({ command: 'clipboardContent', text: clipText });
                             break;
                         }
                         case 'requestCompletions': {
-                            const requestId = message.requestId as number;
+                            const requestId = message.requestId;
                             try {
                                 const result = await this.daemon.queryComplete({
-                                    sql: message.sql as string,
-                                    cursorOffset: message.cursorOffset as number,
-                                    language: message.language as string,
+                                    sql: message.sql,
+                                    cursorOffset: message.cursorOffset,
+                                    language: message.language,
                                 });
                                 this.postMessage({ command: 'completionResult', requestId, items: result.items });
                             } catch {
@@ -149,8 +150,8 @@ export class QueryPanel extends WebviewPanelBase {
                             this.initEnvironment();
                             break;
                         case 'webviewError': {
-                            const errMsg = message.error as string;
-                            const errStack = message.stack as string | undefined;
+                            const errMsg = message.error;
+                            const errStack = message.stack;
                             console.error(`[PPDS Webview] ${errMsg}`);
                             if (errStack) console.error(`[PPDS Webview Stack] ${errStack}`);
                             vscode.window.showErrorMessage(`PPDS Data Explorer: ${errMsg}`);
@@ -174,6 +175,8 @@ export class QueryPanel extends WebviewPanelBase {
                             }
                             break;
                         }
+                        default:
+                            assertNever(message);
                     }
                 }
             )
@@ -463,6 +466,9 @@ export class QueryPanel extends WebviewPanelBase {
         const queryPanelJsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'query-panel.js')
         );
+        const queryPanelCssUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'query-panel.css')
+        );
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -472,52 +478,13 @@ export class QueryPanel extends WebviewPanelBase {
     <!-- 'unsafe-inline' is required by @vscode/webview-ui-toolkit for dynamic styles -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; worker-src blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="${queryPanelCssUri}">
     <script type="module" nonce="${nonce}" src="${toolkitUri}"></script>
     <link rel="stylesheet" href="${monacoCssUri}">
     <script nonce="${nonce}">self.__MONACO_WORKER_URL__ = '${workerUri}';</script>
     <script nonce="${nonce}" src="${monacoUri}"></script>
 </head>
 <body>
-<style>
-    body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-    .toolbar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; align-items: center; }
-    .toolbar-spacer { flex: 1; }
-    .editor-container { flex-shrink: 0; border-bottom: 1px solid var(--vscode-panel-border); }
-    .editor-wrapper { height: 150px; min-height: 120px; max-height: 300px; overflow: hidden; resize: vertical; position: relative; }
-    #sql-editor { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
-    .results-wrapper { flex: 1; overflow: auto; position: relative; min-height: 0; }
-    .results-table { width: max-content; min-width: 100%; border-collapse: collapse; }
-    .results-table thead { position: sticky; top: 0; z-index: 1; }
-    .results-table th { padding: 6px 12px; text-align: left; font-weight: 600; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-bottom: 2px solid var(--vscode-panel-border); border-right: 1px solid rgba(255,255,255,0.1); white-space: nowrap; cursor: pointer; user-select: none; }
-    .results-table th:last-child { border-right: none; }
-    .results-table th .sort-indicator { margin-left: 4px; opacity: 0.7; }
-    .results-table td { padding: 6px 12px; white-space: nowrap; border-bottom: 1px solid var(--vscode-panel-border); user-select: none; }
-    .results-table tr:nth-child(even) { background: var(--vscode-list-inactiveSelectionBackground); }
-    .results-table tr:hover { background: var(--vscode-list-hoverBackground); }
-    .results-table td.cell-selected { background: var(--vscode-editor-selectionBackground) !important; }
-    .results-table td.cell-selected-top { border-top: 2px solid var(--vscode-focusBorder) !important; }
-    .results-table td.cell-selected-bottom { border-bottom: 2px solid var(--vscode-focusBorder) !important; }
-    .results-table td.cell-selected-left { border-left: 2px solid var(--vscode-focusBorder) !important; }
-    .results-table td.cell-selected-right { border-right: 2px solid var(--vscode-focusBorder) !important; }
-    tbody.selecting { cursor: cell !important; user-select: none !important; }
-    tbody.all-selected td { background: var(--vscode-editor-selectionBackground) !important; }
-    .results-table td a { color: var(--vscode-textLink-foreground); text-decoration: none; }
-    .results-table td a:hover { text-decoration: underline; }
-    .context-menu { position: fixed; z-index: 1000; background: var(--vscode-menu-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); border-radius: 4px; padding: 4px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
-    .context-menu-item { padding: 4px 16px; cursor: pointer; font-size: 13px; color: var(--vscode-menu-foreground, var(--vscode-foreground)); white-space: nowrap; }
-    .context-menu-item:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
-    .status-bar { display: flex; gap: 16px; padding: 4px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
-    .filter-bar { display: none; padding: 4px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
-    .filter-bar.visible { display: flex; align-items: center; gap: 8px; }
-    .filter-bar input { flex: 1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 4px 8px; font-size: 13px; border-radius: 2px; outline: none; }
-    .filter-bar input:focus { border-color: var(--vscode-focusBorder); }
-    .load-more-bar { padding: 8px 12px; text-align: center; border-top: 1px solid var(--vscode-panel-border); }
-    .empty-state { padding: 40px; text-align: center; color: var(--vscode-descriptionForeground); font-style: italic; }
-    .error-state { padding: 12px; background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1)); border: 1px solid var(--vscode-inputValidation-errorBorder, red); border-radius: 4px; margin: 8px 12px; color: var(--vscode-errorForeground); }
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--vscode-descriptionForeground); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    ${getEnvironmentPickerCss()}
-</style>
 
 <div class="toolbar">
     <vscode-button id="execute-btn" appearance="primary">Execute</vscode-button>

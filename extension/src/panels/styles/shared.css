@@ -1,0 +1,111 @@
+/* shared.css — Common styles for all PPDS webview panels. */
+
+body {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+}
+
+.toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+.status-bar {
+    display: flex;
+    gap: 16px;
+    padding: 4px 12px;
+    border-top: 1px solid var(--vscode-panel-border);
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    flex-shrink: 0;
+}
+
+.empty-state {
+    padding: 40px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.error-state {
+    padding: 12px;
+    background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1));
+    border: 1px solid var(--vscode-inputValidation-errorBorder, red);
+    border-radius: 4px;
+    margin: 8px 12px;
+    color: var(--vscode-errorForeground);
+}
+
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--vscode-descriptionForeground);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-state {
+    padding: 40px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.loading-state .spinner {
+    width: 24px;
+    height: 24px;
+    margin-bottom: 12px;
+}
+
+/* ── Environment picker ─────────────────────────────────────────────────── */
+
+.env-picker-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.env-picker-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    padding: 2px 8px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.env-picker-btn:hover {
+    border-color: var(--vscode-focusBorder);
+}
+
+.env-picker-label {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+}
