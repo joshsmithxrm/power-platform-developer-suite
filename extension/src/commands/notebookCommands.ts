@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { DataverseNotebookController } from '../notebooks/DataverseNotebookController.js';
 import type { DaemonClient } from '../daemonClient.js';
+import { FetchXmlToSqlTranspiler } from '../utils/fetchXmlToSql.js';
 
 /**
  * Creates a new .ppdsnb notebook with example cells.
@@ -55,18 +56,36 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
     }
 
     try {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+            cell.document.positionAt(0),
+            cell.document.positionAt(cell.document.getText().length)
+        );
+
         if (currentLanguage !== 'fetchxml' && !content.startsWith('<')) {
+            // SQL → FetchXML: use daemon transpiler
             const result = await daemon.queryExplain({ sql: content });
             if (result.plan) {
-                const edit = new vscode.WorkspaceEdit();
-                const fullRange = new vscode.Range(
-                    cell.document.positionAt(0),
-                    cell.document.positionAt(cell.document.getText().length)
-                );
                 edit.replace(cell.document.uri, fullRange, result.plan);
                 await vscode.workspace.applyEdit(edit);
                 await vscode.languages.setTextDocumentLanguage(cell.document, 'fetchxml');
                 return;
+            }
+        } else if (currentLanguage === 'fetchxml' || content.startsWith('<')) {
+            // FetchXML → SQL: use client-side transpiler
+            const transpiler = new FetchXmlToSqlTranspiler();
+            const result = transpiler.transpile(content);
+            if (result.success && result.sql) {
+                edit.replace(cell.document.uri, fullRange, result.sql);
+                await vscode.workspace.applyEdit(edit);
+                await vscode.languages.setTextDocumentLanguage(cell.document, 'sql');
+                if (result.warnings.length > 0) {
+                    const warningMsg = result.warnings.map(w => w.message).join('; ');
+                    vscode.window.showWarningMessage(`Converted with warnings: ${warningMsg}`);
+                }
+                return;
+            } else if (result.error) {
+                vscode.window.showWarningMessage(`FetchXML to SQL failed: ${result.error}. Language toggled without conversion.`);
             }
         }
         const newLang = currentLanguage === 'fetchxml' ? 'sql' : 'fetchxml';
