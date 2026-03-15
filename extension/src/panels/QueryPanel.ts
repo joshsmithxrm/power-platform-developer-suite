@@ -780,6 +780,11 @@ export class QueryPanel extends WebviewPanelBase {
         const td = e.target.closest('td[data-row]');
         if (!td) return;
 
+        // Remove focus from Monaco so Ctrl+C goes to our handler, not Monaco's
+        if (editor.hasTextFocus() && document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+        }
+
         const row = parseInt(td.dataset.row);
         const col = parseInt(td.dataset.col);
 
