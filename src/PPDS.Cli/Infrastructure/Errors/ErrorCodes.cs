@@ -223,4 +223,19 @@ public static class ErrorCodes
         /// <summary>Specified user for impersonation was not found.</summary>
         public const string UserNotFound = "Plugin.UserNotFound";
     }
+
+    /// <summary>
+    /// Update check errors.
+    /// </summary>
+    public static class UpdateCheck
+    {
+        /// <summary>Failed to reach the NuGet API.</summary>
+        public const string NetworkError = "UpdateCheck.NetworkError";
+
+        /// <summary>NuGet API returned unexpected or unparseable data.</summary>
+        public const string ParseError = "UpdateCheck.ParseError";
+
+        /// <summary>Cache file is unreadable or corrupt.</summary>
+        public const string CacheError = "UpdateCheck.CacheError";
+    }
 }
