@@ -21,6 +21,84 @@
     inset: 0;
 }
 
+/* ── Language toggle pill ───────────────────────────────────────────────── */
+
+.lang-toggle {
+    position: absolute;
+    top: 6px;
+    right: 12px;
+    z-index: 5;
+    display: flex;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    overflow: hidden;
+    font-size: 11px;
+}
+
+.lang-seg {
+    background: transparent;
+    border: none;
+    color: var(--vscode-descriptionForeground);
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: var(--vscode-font-family);
+    font-size: 11px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.lang-seg:hover {
+    color: var(--vscode-foreground);
+}
+
+.lang-seg.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+/* ── Dropdown menus (export, overflow) ─────────────────────────────────── */
+
+.dropdown-menu {
+    position: absolute;
+    z-index: 1000;
+    background: var(--vscode-menu-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+    border-radius: 4px;
+    padding: 4px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    min-width: 180px;
+}
+
+.dropdown-item {
+    padding: 4px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+}
+
+.dropdown-item:hover {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+    color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}
+
+.dropdown-item.checked::before {
+    content: '\2713';
+    margin-right: 8px;
+    font-size: 12px;
+}
+
+.dropdown-item.unchecked::before {
+    content: '';
+    margin-right: 20px;
+}
+
+.dropdown-separator {
+    border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
+    margin: 4px 0;
+}
+
 /* ── Results table ──────────────────────────────────────────────────────── */
 
 .results-wrapper {

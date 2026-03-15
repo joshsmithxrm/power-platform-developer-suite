@@ -72,14 +72,11 @@ let manualOverride = false;
 
 const executeBtn = document.getElementById('execute-btn') as HTMLElement;
 const cancelBtn = document.getElementById('cancel-btn') as HTMLElement;
-const fetchxmlBtn = document.getElementById('fetchxml-btn') as HTMLElement;
-const explainBtn = document.getElementById('explain-btn') as HTMLElement;
 const exportBtn = document.getElementById('export-btn') as HTMLElement;
 const historyBtn = document.getElementById('history-btn') as HTMLElement;
-const notebookBtn = document.getElementById('notebook-btn') as HTMLElement;
-const tdsBtn = document.getElementById('tds-btn') as HTMLElement;
-const langBtn = document.getElementById('lang-btn') as HTMLElement;
+const moreBtn = document.getElementById('more-btn') as HTMLElement;
 const filterBtn = document.getElementById('filter-btn') as HTMLElement;
+const langToggle = document.getElementById('lang-toggle') as HTMLElement;
 const filterBar = document.getElementById('filter-bar') as HTMLElement;
 const filterInput = document.getElementById('filter-input') as HTMLInputElement;
 const filterCount = document.getElementById('filter-count') as HTMLElement;
@@ -275,8 +272,11 @@ function updateLanguage(lang: string): void {
     if (lang !== currentLanguage) {
         currentLanguage = lang;
         if (editor) monaco.editor.setModelLanguage(editor.getModel()!, lang);
-        langBtn.textContent = lang === 'xml' ? 'FetchXML' : 'SQL';
     }
+    // Update pill toggle state
+    langToggle.querySelectorAll('.lang-seg').forEach(btn => {
+        btn.classList.toggle('active', (btn as HTMLElement).dataset.lang === lang);
+    });
 }
 
 // Clear table selection when user clicks into the editor
@@ -291,9 +291,12 @@ if (editor) editor.onDidChangeModelContent(() => {
     }
 });
 
-langBtn.addEventListener('click', () => {
+// Language toggle pill
+langToggle.addEventListener('click', (e) => {
+    const seg = (e.target as HTMLElement).closest('.lang-seg') as HTMLElement | null;
+    if (!seg || seg.classList.contains('active')) return;
     manualOverride = true;
-    updateLanguage(currentLanguage === 'sql' ? 'xml' : 'sql');
+    updateLanguage(seg.dataset.lang!);
 });
 
 // ── Monaco clipboard bridge ──
@@ -424,28 +427,106 @@ executeBtn.addEventListener('click', () => {
     const sql = editor ? editor.getValue().trim() : '';
     if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
 });
-fetchxmlBtn.addEventListener('click', () => {
-    const sql = editor ? editor.getValue().trim() : '';
-    if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
-});
-explainBtn.addEventListener('click', () => {
-    const sql = editor ? editor.getValue().trim() : '';
-    if (sql) vscode.postMessage({ command: 'explainQuery', sql });
-});
-exportBtn.addEventListener('click', () => {
-    vscode.postMessage({ command: 'exportResults' });
-});
 historyBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'showHistory' });
 });
-notebookBtn.addEventListener('click', () => {
-    const sql = editor ? editor.getValue().trim() : '';
-    if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
+
+// ── Dropdown menu helper ──
+let activeDropdown: HTMLElement | null = null;
+
+function showDropdown(anchorEl: HTMLElement, items: { label: string; action: string; checked?: boolean }[]): void {
+    closeDropdown();
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu';
+    let html = '';
+    for (const item of items) {
+        if (item.action === 'separator') {
+            html += '<div class="dropdown-separator"></div>';
+        } else {
+            const cls = item.checked === true ? 'checked' : (item.checked === false ? 'unchecked' : '');
+            html += '<div class="dropdown-item ' + cls + '" data-action="' + escapeAttr(item.action) + '">' + escapeHtml(item.label) + '</div>';
+        }
+    }
+    menu.innerHTML = html;
+    const rect = anchorEl.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = rect.bottom + 2 + 'px';
+    document.body.appendChild(menu);
+    activeDropdown = menu;
+    return;
+}
+
+function closeDropdown(): void {
+    if (activeDropdown) { activeDropdown.remove(); activeDropdown = null; }
+}
+
+document.addEventListener('click', (e) => {
+    if (activeDropdown && !activeDropdown.contains(e.target as Node) &&
+        e.target !== exportBtn && e.target !== moreBtn &&
+        !(exportBtn.contains(e.target as Node)) && !(moreBtn.contains(e.target as Node))) {
+        closeDropdown();
+    }
 });
-tdsBtn.addEventListener('click', () => {
-    useTds = !useTds;
-    tdsBtn.textContent = useTds ? 'TDS: On' : 'TDS: Off';
-    tdsBtn.setAttribute('appearance', useTds ? 'primary' : 'secondary');
+
+// ── Export dropdown ──
+exportBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeDropdown) { closeDropdown(); return; }
+    showDropdown(exportBtn, [
+        { label: 'Results as CSV\u2026', action: 'exportCsv' },
+        { label: 'Results as TSV\u2026', action: 'exportTsv' },
+        { label: 'Results as JSON\u2026', action: 'exportJson' },
+        { label: 'Copy to Clipboard', action: 'exportClipboard' },
+        { label: '', action: 'separator' },
+        { label: 'Save Query\u2026', action: 'saveQuery' },
+    ]);
+});
+
+// ── Overflow menu ──
+moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeDropdown) { closeDropdown(); return; }
+    showDropdown(moreBtn, [
+        { label: 'Load Query\u2026', action: 'loadQuery' },
+        { label: 'Open in Notebook', action: 'openInNotebook' },
+        { label: '', action: 'separator' },
+        { label: 'EXPLAIN', action: 'explain' },
+        { label: '', action: 'separator' },
+        { label: 'TDS Read Replica', action: 'toggleTds', checked: useTds },
+    ]);
+});
+
+// ── Dropdown action handler ──
+document.addEventListener('click', (e) => {
+    const item = (e.target as HTMLElement).closest('.dropdown-item') as HTMLElement | null;
+    if (!item || !activeDropdown) return;
+    const action = item.dataset.action;
+    closeDropdown();
+    const sql = editor ? editor.getValue().trim() : '';
+    switch (action) {
+        case 'exportCsv':
+        case 'exportTsv':
+        case 'exportJson':
+        case 'exportClipboard':
+            vscode.postMessage({ command: 'exportResults', format: action.replace('export', '').toLowerCase() });
+            break;
+        case 'saveQuery':
+            vscode.postMessage({ command: 'saveQuery', sql, language: currentLanguage });
+            break;
+        case 'loadQuery':
+            vscode.postMessage({ command: 'loadQueryFromFile' });
+            break;
+        case 'openInNotebook':
+            if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
+            break;
+        case 'explain':
+            if (sql) vscode.postMessage({ command: 'explainQuery', sql });
+            break;
+        case 'toggleTds':
+            useTds = !useTds;
+            break;
+    }
 });
 
 // ── Environment picker ──
