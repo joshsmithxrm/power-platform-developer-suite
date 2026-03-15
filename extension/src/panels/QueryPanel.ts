@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
 import type { DaemonClient } from '../daemonClient.js';
@@ -36,6 +37,7 @@ export class QueryPanel extends WebviewPanelBase {
         return panel;
     }
 
+    private queryCts: CancellationTokenSource | undefined;
     private allRecords: Record<string, unknown>[] = [];
     private lastResult: QueryResultResponse | undefined;
     private lastSql: string | undefined;
@@ -112,6 +114,11 @@ export class QueryPanel extends WebviewPanelBase {
                         case 'copyToClipboard':
                             await vscode.env.clipboard.writeText(message.text as string);
                             break;
+                        case 'openRecordUrl':
+                            if (message.url) {
+                                await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+                            }
+                            break;
                         case 'requestClipboard': {
                             const clipText = await vscode.env.clipboard.readText();
                             this.postMessage({ command: 'clipboardContent', text: clipText });
@@ -138,12 +145,15 @@ export class QueryPanel extends WebviewPanelBase {
                             // Initialize environment from active profile
                             this.initEnvironment();
                             break;
+                        case 'cancelQuery':
+                            this.queryCts?.cancel();
+                            break;
                         case 'requestEnvironmentList': {
                             const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
                             if (env) {
                                 this.environmentUrl = env.url;
                                 this.environmentDisplayName = env.displayName;
-                                this.postMessage({ command: 'updateEnvironment', name: env.displayName });
+                                this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url });
                                 this.updateTitle();
                             }
                             break;
@@ -164,6 +174,8 @@ export class QueryPanel extends WebviewPanelBase {
         // the wrong panel (splice(-1, 1) removes last element).
         const idx = QueryPanel.instances.indexOf(this);
         if (idx >= 0) QueryPanel.instances.splice(idx, 1);
+        this.queryCts?.cancel();
+        this.queryCts?.dispose();
         this.lastSql = undefined;
         this.lastUseTds = false;
         this.lastResult = undefined;
@@ -184,7 +196,7 @@ export class QueryPanel extends WebviewPanelBase {
         } catch {
             // No active profile or environment
         }
-        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
+        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null });
         this.updateTitle();
     }
 
@@ -197,6 +209,12 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string): Promise<void> {
+        // Cancel any in-flight query and create a fresh token
+        this.queryCts?.cancel();
+        this.queryCts?.dispose();
+        this.queryCts = new CancellationTokenSource();
+        const token = this.queryCts.token;
+
         try {
             this.postMessage({ command: 'executionStarted' });
             const defaultTop = vscode.workspace.getConfiguration('ppds').get<number>('queryDefaultTop', 100);
@@ -204,9 +222,9 @@ export class QueryPanel extends WebviewPanelBase {
 
             let result: QueryResultResponse;
             if (language === 'xml') {
-                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl });
+                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl }, token);
             } else {
-                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl });
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl }, token);
             }
             this.lastSql = sql;
             this.lastUseTds = tds;
@@ -218,6 +236,12 @@ export class QueryPanel extends WebviewPanelBase {
                 data: result,
             });
         } catch (error) {
+            // If the token was cancelled, notify the webview and return early
+            if (token.isCancellationRequested) {
+                this.postMessage({ command: 'queryCancelled' });
+                return;
+            }
+
             const msg = error instanceof Error ? error.message : String(error);
 
             // Check for auth errors and offer re-authentication (only on first attempt)
@@ -450,6 +474,7 @@ export class QueryPanel extends WebviewPanelBase {
 
 <div class="toolbar">
     <vscode-button id="execute-btn" appearance="primary">Execute</vscode-button>
+    <vscode-button id="cancel-btn" appearance="secondary" style="display:none;" title="Cancel query (Escape)">Cancel</vscode-button>
     <vscode-button id="fetchxml-btn" appearance="secondary">FetchXML</vscode-button>
     <vscode-button id="explain-btn" appearance="secondary">EXPLAIN</vscode-button>
     <vscode-button id="export-btn" appearance="secondary">Export</vscode-button>
@@ -525,6 +550,7 @@ export class QueryPanel extends WebviewPanelBase {
     let manualOverride = false;
 
     const executeBtn = document.getElementById('execute-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
     const fetchxmlBtn = document.getElementById('fetchxml-btn');
     const explainBtn = document.getElementById('explain-btn');
     const exportBtn = document.getElementById('export-btn');
@@ -552,6 +578,25 @@ export class QueryPanel extends WebviewPanelBase {
     let sortColumn = -1;
     let sortAsc = true;
     let useTds = false;
+    let isExecuting = false;
+
+    // ── Record URL state ──
+    var lastEntityName = null;
+    var lastIsAggregate = false;
+    var currentEnvironmentUrl = null;
+
+    function getRecordId(row) {
+        if (!lastEntityName || !row) return null;
+        var idKey = lastEntityName + 'id';
+        return row[idKey] || null;
+    }
+
+    function buildRecordUrl(entityName, recordId) {
+        if (!currentEnvironmentUrl || !entityName || !recordId) return null;
+        var baseUrl = currentEnvironmentUrl.replace(/\\/+$/, '');
+        return baseUrl + '/main.aspx?pagetype=entityrecord&etn=' +
+            encodeURIComponent(entityName) + '&id=' + encodeURIComponent(recordId);
+    }
 
     // ── Selection state (anchor+focus rectangle) ──
     let anchor = null;   // {row, col} or null
@@ -714,6 +759,18 @@ export class QueryPanel extends WebviewPanelBase {
         run: (ed) => {
             vscode.postMessage({ command: 'requestClipboard' });
         },
+    });
+
+    // ── Monaco keybinding: Escape to cancel query ──
+    editor.addCommand(monaco.KeyCode.Escape, function() {
+        if (isExecuting) {
+            vscode.postMessage({ command: 'cancelQuery' });
+        }
+    });
+
+    // ── Cancel button handler ──
+    cancelBtn.addEventListener('click', function() {
+        vscode.postMessage({ command: 'cancelQuery' });
     });
 
     // ── Monaco keybinding: Ctrl+Enter to execute ──
@@ -983,8 +1040,9 @@ export class QueryPanel extends WebviewPanelBase {
                 showError(msg.error);
                 break;
             case 'executionStarted':
-                executeBtn.setAttribute('disabled', '');
-                executeBtn.textContent = 'Executing...';
+                isExecuting = true;
+                executeBtn.style.display = 'none';
+                cancelBtn.style.display = '';
                 resultsWrapper.innerHTML = '<div class="empty-state"><div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div><div>Executing query...</div></div>';
                 statusText.innerHTML = '<span class="spinner"></span> Executing...';
                 loadMoreBar.style.display = 'none';
@@ -1002,6 +1060,13 @@ export class QueryPanel extends WebviewPanelBase {
                 if (msg.text && editor.hasTextFocus()) {
                     editor.trigger('clipboard', 'type', { text: msg.text });
                 }
+                break;
+            case 'queryCancelled':
+                isExecuting = false;
+                cancelBtn.style.display = 'none';
+                executeBtn.style.display = '';
+                statusText.textContent = 'Query cancelled';
+                resultsWrapper.innerHTML = '<div class="empty-state">Query cancelled</div>';
                 break;
             case 'completionResult': {
                 const pending = pendingCompletions.get(msg.requestId);
@@ -1023,8 +1088,9 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     function resetExecuteBtn() {
-        executeBtn.removeAttribute('disabled');
-        executeBtn.textContent = 'Execute';
+        isExecuting = false;
+        cancelBtn.style.display = 'none';
+        executeBtn.style.display = '';
     }
 
     function handleQueryResult(data) {
@@ -1035,6 +1101,8 @@ export class QueryPanel extends WebviewPanelBase {
         currentPage = 1;
         moreRecords = data.moreRecords || false;
         sortColumn = -1;
+        lastEntityName = data.entityName || null;
+        lastIsAggregate = data.isAggregate || false;
         renderTable(allRows);
         updateStatus(data);
         loadMoreBar.style.display = moreRecords ? '' : 'none';

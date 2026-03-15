@@ -28,6 +28,7 @@ export class SolutionsPanel extends WebviewPanelBase {
     private includeManaged = false;
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
+    private environmentId: string | null = null;
     private profileName: string | undefined;
 
     /**
@@ -104,6 +105,18 @@ export class SolutionsPanel extends WebviewPanelBase {
                         case 'collapseSolution':
                             // No-op on host side; collapse is handled in webview JS
                             break;
+                        case 'openInMaker': {
+                            if (this.environmentId && message.solutionId) {
+                                const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions/${message.solutionId}`;
+                                await vscode.env.openExternal(vscode.Uri.parse(url));
+                            } else if (this.environmentId) {
+                                const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions`;
+                                await vscode.env.openExternal(vscode.Uri.parse(url));
+                            } else {
+                                vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
+                            }
+                            break;
+                        }
                     }
                 }
             )
@@ -129,6 +142,11 @@ export class SolutionsPanel extends WebviewPanelBase {
                 this.environmentUrl = who.environment.url;
                 this.environmentDisplayName = who.environment.displayName || who.environment.url;
             }
+            if (who.environment?.environmentId) {
+                this.environmentId = who.environment.environmentId;
+            } else {
+                this.environmentId = await this.resolveEnvironmentId();
+            }
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
             this.postMessage({ command: 'updateManagedState', includeManaged: this.includeManaged });
@@ -144,9 +162,29 @@ export class SolutionsPanel extends WebviewPanelBase {
         if (result) {
             this.environmentUrl = result.url;
             this.environmentDisplayName = result.displayName;
+            this.environmentId = await this.resolveEnvironmentId();
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: result.displayName });
             await this.loadSolutions();
+        }
+    }
+
+    /**
+     * Resolves the Power Platform environment ID from the current environment URL
+     * by looking it up in the environment list.
+     */
+    private async resolveEnvironmentId(): Promise<string | null> {
+        if (!this.environmentUrl) return null;
+        try {
+            const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+            const targetUrl = normalise(this.environmentUrl);
+            const envResult = await this.daemon.envList();
+            const match = envResult.environments.find(
+                e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
+            );
+            return match?.environmentId ?? null;
+        } catch {
+            return null;
         }
     }
 
@@ -182,6 +220,7 @@ export class SolutionsPanel extends WebviewPanelBase {
             this.postMessage({
                 command: 'solutionsLoaded',
                 solutions: result.solutions.map(s => ({
+                    id: s.id,
                     uniqueName: s.uniqueName,
                     friendlyName: s.friendlyName,
                     version: s.version ?? '',
@@ -304,6 +343,17 @@ export class SolutionsPanel extends WebviewPanelBase {
     .solution-row .version { color: var(--vscode-descriptionForeground); font-size: 12px; }
     .solution-row .publisher { color: var(--vscode-descriptionForeground); font-size: 12px; margin-left: 4px; }
     .solution-row .managed-badge { font-size: 10px; padding: 1px 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+
+    .open-maker-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: 0.5;
+        padding: 2px 4px;
+        font-size: 12px;
+        color: var(--vscode-foreground);
+    }
+    .open-maker-btn:hover { opacity: 1; }
 
     .components-container { display: none; padding-left: 22px; border-bottom: 1px solid var(--vscode-panel-border); }
     .components-container.expanded { display: block; }
@@ -479,6 +529,14 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     // ── Delegated click handler for solution/component rows ──
     content.addEventListener('click', (e) => {
+        var makerBtn = e.target.closest('.open-maker-btn');
+        if (makerBtn) {
+            var solutionId = makerBtn.dataset.solutionId;
+            vscode.postMessage({ command: 'openInMaker', solutionId: solutionId });
+            e.stopPropagation();
+            return;
+        }
+
         const solutionRow = e.target.closest('.solution-row');
         if (solutionRow) {
             const uniqueName = solutionRow.dataset.uniqueName;
@@ -624,6 +682,7 @@ export class SolutionsPanel extends WebviewPanelBase {
             if (sol.isManaged) {
                 html += '<span class="managed-badge">managed</span>';
             }
+            html += '<button class="open-maker-btn" data-solution-id="' + escapeAttr(sol.id || '') + '" title="Open in Maker Portal">\uD83D\uDD17</button>';
             html += '</div>';
             html += '<div class="components-container' + (isExpanded ? ' expanded' : '') + '" id="components-' + escapeAttr(sol.uniqueName) + '">';
             html += '<div class="detail-card">';
