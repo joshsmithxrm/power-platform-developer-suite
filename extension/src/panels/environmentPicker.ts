@@ -1,25 +1,6 @@
 import type { DaemonClient } from '../daemonClient.js';
 
 /**
- * Returns the CSS for the environment picker dropdown.
- */
-export function getEnvironmentPickerCss(): string {
-    return `
-    .env-picker-container { display: flex; align-items: center; gap: 8px; }
-    .env-picker-btn {
-        display: flex; align-items: center; gap: 4px;
-        background: var(--vscode-input-background);
-        color: var(--vscode-input-foreground);
-        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-        padding: 2px 8px; border-radius: 2px; cursor: pointer;
-        font-size: 12px; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;
-    }
-    .env-picker-btn:hover { border-color: var(--vscode-focusBorder); }
-    .env-picker-label { font-size: 11px; color: var(--vscode-descriptionForeground); }
-    `;
-}
-
-/**
  * Returns the HTML for the environment picker button (placed in panel toolbar).
  * The button shows the current environment name and opens a picker on click.
  */
