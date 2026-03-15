@@ -27,6 +27,7 @@ import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './shared/
 import type { QueryResultResponse, QueryColumnInfo } from '../../types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
+import { FilterBar } from './shared/filter-bar.js';
 
 // Monaco is loaded as a global script before this module.
 declare const monaco: typeof import('monaco-editor');
@@ -697,28 +698,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Filter ──
-function hideFilter(): void {
-    filterInput.value = '';
-    renderTable(allRows);
-    filterCount.textContent = '';
-}
-filterInput.addEventListener('input', () => {
-    const term = filterInput.value.toLowerCase();
-    if (!term) { renderTable(allRows); filterCount.textContent = ''; return; }
-    const filtered = allRows.filter(row =>
-        columns.some(col => {
-            const key = col.alias || col.logicalName;
-            const val = row[key];
-            if (val === null || val === undefined) return false;
-            const str = typeof val === 'object' && val !== null && 'formatted' in val
-                ? String((val as Record<string, unknown>).formatted || (val as Record<string, unknown>).value || '')
-                : String(val);
-            return str.toLowerCase().includes(term);
-        })
-    );
-    renderTable(filtered);
-    filterCount.textContent = 'Showing ' + filtered.length + ' of ' + allRows.length + ' rows';
+const resultsFilter = new FilterBar<Record<string, unknown>>({
+    input: filterInput,
+    countEl: filterCount,
+    getSearchableText: (row) => columns.map(col => {
+        const key = col.alias || col.logicalName;
+        const val = row[key];
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'object' && val !== null && 'formatted' in val) {
+            return String((val as Record<string, unknown>).formatted || (val as Record<string, unknown>).value || '');
+        }
+        return String(val);
+    }),
+    onFilter: (filtered) => renderTable(filtered),
+    itemLabel: 'rows',
 });
+
+function hideFilter(): void {
+    resultsFilter.clear();
+}
 
 // ── Message handling ──
 window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>) => {
@@ -815,7 +813,7 @@ function handleQueryResult(data: QueryResultResponse): void {
     sortColumn = -1;
     lastEntityName = data.entityName || null;
     lastIsAggregate = data.isAggregate || false;
-    renderTable(allRows);
+    resultsFilter.setItems(allRows);
     updateStatus(data);
     loadMoreBar.style.display = moreRecords ? '' : 'none';
     filterBar.classList.add('visible');
@@ -828,7 +826,7 @@ function handleAppendResults(data: QueryResultResponse): void {
     pagingCookie = data.pagingCookie || null;
     currentPage++;
     moreRecords = data.moreRecords || false;
-    renderTable(allRows);
+    resultsFilter.setItems(allRows);
     updateStatus(data);
     loadMoreBar.style.display = moreRecords ? '' : 'none';
 }
