@@ -343,7 +343,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         // Configure minimal logging for daemon
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Warning);
+            builder.SetMinimumLevel(LogLevel.Information);
             builder.AddProvider(new LoggerFactoryProvider(_loggerFactory));
         });
 
