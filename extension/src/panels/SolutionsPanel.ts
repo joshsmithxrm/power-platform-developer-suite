@@ -17,7 +17,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
     private static readonly MAX_PANELS = 5;
 
-    private includeManaged = false;
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
     private environmentId: string | null = null;
@@ -49,8 +48,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         private readonly globalState?: vscode.Memento,
     ) {
         super();
-        // Restore managed toggle state
-        this.includeManaged = this.globalState?.get<boolean>('ppds.solutionsPanel.includeManaged') ?? false;
 
         if (initialEnvUrl) {
             this.environmentUrl = initialEnvUrl;
@@ -87,11 +84,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                             await this.handleEnvironmentPicker();
                             break;
                         case 'refresh':
-                            await this.loadSolutions();
-                            break;
-                        case 'toggleManaged':
-                            this.includeManaged = !this.includeManaged;
-                            void this.globalState?.update('ppds.solutionsPanel.includeManaged', this.includeManaged);
                             await this.loadSolutions();
                             break;
                         case 'expandSolution':
@@ -155,7 +147,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             }
             this.updatePanelTitle();
             this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
-            this.postMessage({ command: 'updateManagedState', includeManaged: this.includeManaged });
             await this.loadSolutions();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -205,17 +196,11 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private async loadSolutions(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            // Always fetch all solutions (including managed) in a single call.
-            // Filter client-side to avoid a second API round-trip.
             const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
-            const managedCount = allResult.solutions.filter(s => s.isManaged).length;
-            const solutions = this.includeManaged
-                ? allResult.solutions
-                : allResult.solutions.filter(s => !s.isManaged);
 
             this.postMessage({
                 command: 'solutionsLoaded',
-                solutions: solutions.map(s => ({
+                solutions: allResult.solutions.map(s => ({
                     id: s.id,
                     uniqueName: s.uniqueName,
                     friendlyName: s.friendlyName,
@@ -227,8 +212,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                     modifiedOn: s.modifiedOn ?? null,
                     installedOn: s.installedOn ?? null,
                 })),
-                managedCount,
-                includeManaged: this.includeManaged,
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -328,7 +311,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
-    <vscode-button id="managed-btn" appearance="secondary" title="Toggle managed solutions visibility">Managed: Off</vscode-button>
     <input id="search-input" type="text" placeholder="Filter solutions..." style="flex: 1; min-width: 120px; max-width: 300px; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 12px; outline: none;" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}

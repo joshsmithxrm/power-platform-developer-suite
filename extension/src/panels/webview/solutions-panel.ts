@@ -11,13 +11,11 @@ const vscode = getVsCodeApi<SolutionsPanelWebviewToHost>();
 const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
-const managedBtn = document.getElementById('managed-btn') as HTMLElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
 
 let solutions: SolutionViewDto[] = [];
 const expandedSolutions = new Set<string>();
 const expandedGroups = new Set<string>();
-let managedOn = false;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -32,13 +30,6 @@ function updateEnvironmentDisplay(name: string | null): void {
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'refresh' });
-});
-
-managedBtn.addEventListener('click', () => {
-    managedOn = !managedOn;
-    managedBtn.textContent = managedOn ? 'Managed: On' : 'Managed: Off';
-    managedBtn.setAttribute('appearance', managedOn ? 'primary' : 'secondary');
-    vscode.postMessage({ command: 'toggleManaged' });
 });
 
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
@@ -189,7 +180,7 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             updateEnvironmentDisplay(msg.name);
             break;
         case 'solutionsLoaded':
-            renderSolutions(msg.solutions, msg.managedCount, msg.includeManaged);
+            renderSolutions(msg.solutions);
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
@@ -200,11 +191,6 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             break;
         case 'componentsLoaded':
             renderComponents(msg.uniqueName, msg.groups);
-            break;
-        case 'updateManagedState':
-            managedOn = msg.includeManaged;
-            managedBtn.textContent = managedOn ? 'Managed: On' : 'Managed: Off';
-            managedBtn.setAttribute('appearance', managedOn ? 'primary' : 'secondary');
             break;
         case 'loading':
             content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading solutions...</div></div>';
@@ -222,7 +208,7 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
     }
 });
 
-function renderSolutions(sols: SolutionViewDto[], managedCount: number, includeManaged: boolean): void {
+function renderSolutions(sols: SolutionViewDto[]): void {
     solutions = sols;
     searchInput.value = '';
     filterText = '';
@@ -275,11 +261,9 @@ function renderSolutions(sols: SolutionViewDto[], managedCount: number, includeM
     content.innerHTML = html;
 
     // Update status
-    let statusMsg = sols.length + ' solution' + (sols.length !== 1 ? 's' : '');
-    if (!includeManaged && managedCount > 0) {
-        statusMsg += ' (' + managedCount + ' managed hidden)';
-    }
-    statusText.textContent = statusMsg;
+    const managedCount = sols.filter(s => s.isManaged).length;
+    const unmanagedCount = sols.length - managedCount;
+    statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${unmanagedCount} unmanaged, ${managedCount} managed)`;
 
     // Re-expand solutions that were previously expanded and re-request components
     for (const uniqueName of expandedSolutions) {
