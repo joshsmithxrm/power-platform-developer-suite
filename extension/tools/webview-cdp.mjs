@@ -17,12 +17,6 @@ const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
 // ── Pure functions (exported for testing) ──────────────────────────
 
-export function validatePort(port) {
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-    throw new Error('Invalid port: must be 1024-65535');
-  }
-  return port;
-}
 
 export function parseKeyCombo(combo) {
   if (!combo) throw new Error('Empty key combo');

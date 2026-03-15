@@ -1,6 +1,6 @@
 // extension/tools/webview-cdp.test.mjs
 import { describe, it, expect } from 'vitest';
-import { parseArgs, parseKeyCombo, validatePort } from './webview-cdp.mjs';
+import { parseArgs, parseKeyCombo } from './webview-cdp.mjs';
 
 describe('parseArgs', () => {
   it('parses launch with defaults', () => {
@@ -121,12 +121,6 @@ describe('parseArgs', () => {
   });
 });
 
-describe('validatePort', () => {
-  it('accepts valid port', () => { expect(validatePort(9223)).toBe(9223); });
-  it('rejects port below 1024', () => { expect(() => validatePort(80)).toThrow('Invalid port: must be 1024-65535'); });
-  it('rejects port above 65535', () => { expect(() => validatePort(70000)).toThrow('Invalid port: must be 1024-65535'); });
-  it('rejects non-integer', () => { expect(() => validatePort(NaN)).toThrow('Invalid port: must be 1024-65535'); });
-});
 
 describe('parseKeyCombo', () => {
   it('parses simple key', () => { expect(parseKeyCombo('Escape')).toEqual({ key: 'Escape', modifiers: {} }); });
