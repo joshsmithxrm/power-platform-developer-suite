@@ -271,13 +271,12 @@ async function runDaemon(workspace) {
   async function handleAction(action, params) {
     switch (action) {
       case 'screenshot': {
-        const target = await resolveTarget(params);
-        // Page has .screenshot(), frames don't — use locator for frames
-        if (typeof target.screenshot === 'function') {
-          await target.screenshot({ path: resolve(params.file) });
-        } else {
-          await target.locator('body').screenshot({ path: resolve(params.file) });
-        }
+        // Always use page.screenshot() — it's reliable and fast.
+        // frame.locator('body').screenshot() times out on complex webview content.
+        // --page captures the full window; default captures full window too
+        // (agents can crop mentally — a full window screenshot with the webview
+        // visible is more useful than a timeout).
+        await page.screenshot({ path: resolve(params.file) });
         return { path: resolve(params.file) };
       }
       case 'eval': {
