@@ -7,8 +7,10 @@ import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, Solution
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { FilterBar } from './shared/filter-bar.js';
+import { installErrorHandler } from './shared/error-handler.js';
 
 const vscode = getVsCodeApi<SolutionsPanelWebviewToHost>();
+installErrorHandler((msg) => vscode.postMessage(msg as SolutionsPanelWebviewToHost));
 const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
