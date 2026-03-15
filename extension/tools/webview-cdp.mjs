@@ -436,11 +436,10 @@ async function runDaemon(workspace) {
             return files;
           }
           const logFiles = findLogFiles(logsDir);
+          // VS Code names LogOutputChannel files as N-ChannelName.log (e.g. 1-PPDS.log)
+          const channelRe = new RegExp(`^\\d+-${params.channel}\\.log$`, 'i');
           const matching = logFiles
-            .filter(f => {
-              const name = f.split(/[\\/]/).pop();
-              return name.toLowerCase().includes(params.channel.toLowerCase());
-            });
+            .filter(f => channelRe.test(f.split(/[\\/]/).pop()));
           if (matching.length === 0) return { logs: `No logs found for channel: ${params.channel}` };
           const logContent = matching.map(f => readFileSync(f, 'utf-8')).join('\n');
           return { logs: logContent };
@@ -510,11 +509,18 @@ async function runDaemon(workspace) {
 async function cmdLaunch(parsed) {
   if (parsed.build) {
     const extDir = resolve(__dirname, '..');
+    const repoRoot = resolve(extDir, '..');
     console.log('Building extension...');
     try {
       execSync('npm run compile', { cwd: extDir, stdio: 'inherit' });
     } catch {
       throw new Error('Extension build failed — fix compilation errors above');
+    }
+    console.log('Building daemon...');
+    try {
+      execSync('dotnet build PPDS.sln -v q', { cwd: repoRoot, stdio: 'inherit' });
+    } catch {
+      throw new Error('Daemon build failed — fix compilation errors above');
     }
     console.log('Build complete');
   }
