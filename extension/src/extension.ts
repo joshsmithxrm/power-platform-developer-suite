@@ -50,6 +50,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // eslint-disable-next-line no-console -- startup diagnostic before LogOutputChannel exists
     console.log('Power Platform Developer Suite is now active');
 
+    // ── Gate debug commands — only visible when running in dev mode (F5) ──
+    const isDevelopment = context.extensionMode === vscode.ExtensionMode.Development;
+    void vscode.commands.executeCommand('setContext', 'ppds.isDevelopment', isDevelopment);
+
     // ── Legacy State Migration ────────────────────────────────────────
     migrateLegacyState(context);
 
