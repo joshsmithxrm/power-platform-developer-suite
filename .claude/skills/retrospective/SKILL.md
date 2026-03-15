@@ -69,12 +69,29 @@ Use the prompt template below for EACH session. Do NOT batch sessions — each g
 >    successive diff and explain what changed between attempts and why
 >    the earlier attempts failed.
 >
-> 4. **Search for conversation transcripts** matching this date range:
+> 4. **Search conversation transcripts** for user corrections and
+>    repeated instructions. Transcripts are at:
+>    `~/.claude/projects/<project-path>/*.jsonl`
+>
+>    Find the project path:
 >    ```bash
->    find ~/.claude -name "*.jsonl" -newer {start_date_file} 2>/dev/null | head -10
+>    ls ~/.claude/projects/ | grep {repo-name}
 >    ```
->    If transcripts exist, search for user corrections, frustrations,
->    and repeated instructions. Quote the user directly.
+>
+>    Find recent sessions matching this date range:
+>    ```bash
+>    find ~/.claude/projects/{project-path} -name "*.jsonl" -mtime -{days} -maxdepth 1
+>    ```
+>
+>    Search for correction patterns (user frustration, redirections):
+>    ```bash
+>    grep -il '"role":"user"' ~/.claude/projects/{path}/*.jsonl
+>    ```
+>    Then use Grep to search high-hit files for correction keywords:
+>    pattern: `"role":"user".*(no not|don't|wrong|instead|stop|shouldn't|you missed|why didn't)`
+>
+>    Lines are long (one JSON record per line). Use the Read tool with
+>    offset/limit to read specific user messages. Extract direct quotes.
 >
 > 5. **Return structured output:**
 >    - Session summary (2-3 sentences)
