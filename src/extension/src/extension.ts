@@ -46,6 +46,33 @@ function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void
     };
 }
 
+/**
+ * Registers commands for opening panel-based views (Data Explorer, Solutions, etc.).
+ * Add new panel commands here when adding panels.
+ */
+function registerPanelCommands(
+    context: vscode.ExtensionContext,
+    client: DaemonClient,
+): void {
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.dataExplorer', () => {
+            QueryPanel.show(context.extensionUri, client);
+        }),
+        vscode.commands.registerCommand('ppds.openSolutions', () => {
+            SolutionsPanel.show(context.extensionUri, client, undefined, undefined, context.globalState);
+        }),
+        vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
+            void openQueryInNotebook(sql ?? '');
+        }),
+        vscode.commands.registerCommand('ppds.openNotebooks', () => {
+            void createNewNotebook();
+        }),
+        vscode.commands.registerCommand('ppds.showLogs', () => {
+            logChannel?.show();
+        }),
+    );
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     // eslint-disable-next-line no-console -- startup diagnostic before LogOutputChannel exists
     console.log('Power Platform Developer Suite is now active');
@@ -371,34 +398,8 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.languages.registerCompletionItemProvider({ language: 'fetchxml' }, completionProvider, ' ', '<', '"'),
     );
 
-    // ── Data Explorer ─────────────────────────────────────────────────
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.dataExplorer', () => {
-            QueryPanel.show(context.extensionUri, client);
-        }),
-        vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
-            void openQueryInNotebook(sql ?? '');
-        }),
-    );
-
-    const openNotebooksCmd = vscode.commands.registerCommand('ppds.openNotebooks', () => {
-        void createNewNotebook();
-    });
-    context.subscriptions.push(openNotebooksCmd);
-
-    // ── Solutions Panel ─────────────────────────────────────────────────
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.openSolutions', () => {
-            SolutionsPanel.show(context.extensionUri, client, undefined, undefined, context.globalState);
-        }),
-    );
-
-    // ── Show Logs ───────────────────────────────────────────────────────
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ppds.showLogs', () => {
-            logChannel?.show();
-        }),
-    );
+    // ── Panel Commands ───────────────────────────────────────────────
+    registerPanelCommands(context, client);
 }
 
 export function deactivate(): void {
