@@ -66,8 +66,9 @@ export async function toggleCellLanguage(daemon: DaemonClient): Promise<void> {
         if (currentLanguage !== 'fetchxml' && !content.startsWith('<')) {
             // SQL → FetchXML: use daemon transpiler
             const result = await daemon.queryExplain({ sql: content });
-            if (result.plan) {
-                edit.replace(cell.document.uri, fullRange, result.plan);
+            const fetchXml = result.fetchXml ?? result.plan;
+            if (fetchXml) {
+                edit.replace(cell.document.uri, fullRange, fetchXml);
                 await vscode.workspace.applyEdit(edit);
                 await vscode.languages.setTextDocumentLanguage(cell.document, 'fetchxml');
                 return;

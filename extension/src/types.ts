@@ -235,6 +235,7 @@ export interface QueryExportResponse {
 export interface QueryExplainResponse {
     plan: string;
     format: string;
+    fetchXml?: string;
 }
 
 // ── IntelliSense / Completion types ─────────────────────────────────

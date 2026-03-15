@@ -175,12 +175,12 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                             try {
                                 let converted: string;
                                 if (toLanguage === 'xml') {
-                                    // SQL → FetchXML: use daemon's explain endpoint
+                                    // SQL → FetchXML: use daemon's explain endpoint (fetchXml field has clean XML)
                                     const result = await this.daemon.queryExplain({
                                         sql,
                                         environmentUrl: this.environmentUrl ?? undefined,
                                     });
-                                    converted = result.plan;
+                                    converted = result.fetchXml ?? result.plan;
                                 } else {
                                     // FetchXML → SQL: use client-side transpiler
                                     const { FetchXmlToSqlTranspiler } = await import('../utils/fetchXmlToSql.js');
