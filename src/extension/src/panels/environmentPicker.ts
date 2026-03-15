@@ -23,6 +23,7 @@ interface EnvironmentOption {
     url: string;
     detail?: string;
     isCurrent?: boolean;
+    type?: string | null;
 }
 
 /**
@@ -32,7 +33,7 @@ interface EnvironmentOption {
 export async function showEnvironmentPicker(
     daemon: DaemonClient,
     currentUrl?: string,
-): Promise<{ url: string; displayName: string } | undefined> {
+): Promise<{ url: string; displayName: string; type: string | null } | undefined> {
     const vscode = await import('vscode');
 
     let environments: EnvironmentOption[] = [];
@@ -46,6 +47,7 @@ export async function showEnvironmentPicker(
             url: env.apiUrl,
             detail: env.region ? `${env.apiUrl} (${env.region})` : env.apiUrl,
             isCurrent: env.apiUrl === currentUrl,
+            type: env.type,
         }));
     } catch {
         // Discovery failed — still allow manual entry
@@ -57,6 +59,7 @@ export async function showEnvironmentPicker(
         detail: env.detail,
         url: env.url,
         displayName: env.label,
+        type: env.type ?? null,
     }));
 
     // Add manual entry option
@@ -66,6 +69,7 @@ export async function showEnvironmentPicker(
         detail: 'Connect to an environment not in the list',
         url: '__manual__',
         displayName: '',
+        type: null,
     });
 
     const selected = await vscode.window.showQuickPick(items, {
@@ -92,8 +96,8 @@ export async function showEnvironmentPicker(
         const trimmed = url.trim();
         // Auto-save manual URL to environments.json so it persists
         try { await daemon.envConfigSet({ environmentUrl: trimmed }); } catch { /* best-effort */ }
-        return { url: trimmed, displayName: trimmed };
+        return { url: trimmed, displayName: trimmed, type: null };
     }
 
-    return { url: selected.url, displayName: selected.displayName };
+    return { url: selected.url, displayName: selected.displayName, type: selected.type };
 }
