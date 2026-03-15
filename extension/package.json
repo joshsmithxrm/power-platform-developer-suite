@@ -245,6 +245,12 @@
         "category": "PPDS"
       },
       {
+        "command": "ppds.openDocumentation",
+        "title": "Open Documentation",
+        "category": "PPDS",
+        "icon": "$(book)"
+      },
+      {
         "command": "ppds.debug.daemonStatus",
         "title": "Daemon Status",
         "category": "PPDS Debug",
