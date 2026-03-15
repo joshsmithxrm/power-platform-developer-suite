@@ -33,7 +33,7 @@ public static class Program
     /// </summary>
     private static readonly HashSet<string> SkipVersionHeaderArgs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--help", "-h", "-?", "--version"
+        "--help", "-h", "-?", "--version", "version"
     };
 
     public static async Task<int> Main(string[] args)
@@ -88,6 +88,7 @@ public static class Program
         rootCommand.Subcommands.Add(RolesCommandGroup.Create());
         rootCommand.Subcommands.Add(ServeCommand.Create());
         rootCommand.Subcommands.Add(DocsCommand.Create());
+        rootCommand.Subcommands.Add(VersionCommand.Create());
         rootCommand.Subcommands.Add(InteractiveCommand.Create());
 
         // Internal/debug commands - only visible when PPDS_INTERNAL=1
