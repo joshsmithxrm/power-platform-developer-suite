@@ -1,5 +1,6 @@
 import { ResponseError } from 'vscode-jsonrpc/node';
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 
 /**
