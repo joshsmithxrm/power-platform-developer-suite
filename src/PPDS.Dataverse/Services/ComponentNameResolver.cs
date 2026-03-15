@@ -25,10 +25,14 @@ public class ComponentNameResolver : IComponentNameResolver
     private static readonly Dictionary<int, ComponentTypeMapping> TypeMappings = new()
     {
         // Entity (1) and Option Set (70) handled specially via metadata API — not in this dict
+        [20]  = new("role", "name", null, "name"),
+        [24]  = new("systemform", "name", null, "name"),
         [26]  = new("savedquery", "name", null, null),
         [29]  = new("workflow", "uniquename", null, "name"),
-        [60]  = new("systemform", "name", null, null),
+        [60]  = new("systemform", "name", null, "name"),
         [61]  = new("webresource", "name", null, null),
+        [62]  = new("sitemap", "sitemapname", null, "sitemapname"),
+        [63]  = new("connectionrole", "name", null, "name"),
         [66]  = new("customcontrol", "name", null, null),
         [80]  = new("appmodule", "name", null, null),
         [90]  = new("plugintype", "name", null, null),
