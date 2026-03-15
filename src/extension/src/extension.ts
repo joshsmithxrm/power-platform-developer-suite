@@ -180,46 +180,17 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // ── Profile Move Commands ────────────────────────────────────────────
-    async function moveProfile(
-        item: { profile: { identity: string; authMethod: string; cloud: string; index: number } },
-        direction: 'up' | 'down',
-    ): Promise<void> {
-        if (!item?.profile) return;
-        try {
-            const sortOrder = context.globalState.get<Record<string, number>>('ppds.profiles.sortOrder') ?? {};
-            const profiles = await client.authList();
-            const sorted = profiles.profiles.map(p => ({ id: getProfileId(p), profile: p }));
-
-            sorted.sort((a, b) => {
-                const orderA = sortOrder[a.id] ?? a.profile.index;
-                const orderB = sortOrder[b.id] ?? b.profile.index;
-                return orderA - orderB;
-            });
-
-            const targetId = getProfileId(item.profile as ProfileInfo);
-            const targetIdx = sorted.findIndex(i => i.id === targetId);
-            const swapIdx = direction === 'up' ? targetIdx - 1 : targetIdx + 1;
-
-            if (targetIdx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
-
-            const newOrder: Record<string, number> = {};
-            sorted.forEach((it, idx) => { newOrder[it.id] = idx; });
-            newOrder[sorted[targetIdx].id] = swapIdx;
-            newOrder[sorted[swapIdx].id] = targetIdx;
-
-            await context.globalState.update('ppds.profiles.sortOrder', newOrder);
-            profileTreeProvider.refresh();
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            vscode.window.showErrorMessage(`Failed to move profile: ${msg}`);
-        }
-    }
-
     context.subscriptions.push(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- VS Code command args are untyped
-        vscode.commands.registerCommand('ppds.moveProfileUp', (item) => moveProfile(item, 'up')),
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- VS Code command args are untyped
-        vscode.commands.registerCommand('ppds.moveProfileDown', (item) => moveProfile(item, 'down')),
+        vscode.commands.registerCommand('ppds.moveProfileUp', cmd(async (item: { profile: ProfileInfo }) => {
+            if (!item?.profile) return;
+            const profileId = getProfileId(item.profile);
+            await profileTreeProvider.moveProfile(profileId, 'up');
+        })),
+        vscode.commands.registerCommand('ppds.moveProfileDown', cmd(async (item: { profile: ProfileInfo }) => {
+            if (!item?.profile) return;
+            const profileId = getProfileId(item.profile);
+            await profileTreeProvider.moveProfile(profileId, 'down');
+        })),
     );
 
     // ── Tools Tree View ──────────────────────────────────────────────────
