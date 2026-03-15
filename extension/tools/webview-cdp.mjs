@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SESSION_FILE = resolve(__dirname, '.webview-cdp-session.json');
-const VALID_COMMANDS = ['launch', 'close', 'connect', 'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse'];
+const VALID_COMMANDS = ['launch', 'attach', 'close', 'connect', 'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse'];
 const VALID_MODIFIERS = ['ctrl', 'shift', 'alt', 'meta'];
 const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
@@ -69,6 +69,11 @@ export function parseArgs(argv) {
     return { command, port: launchPort, workspace: args[1], args: [] };
   }
 
+  if (command === 'attach') {
+    const attachPort = args[0] ? validatePort(parseInt(args[0], 10)) : undefined;
+    return { command, port: attachPort, args: [] };
+  }
+
   const result = { command, port, args };
   if (target !== undefined) result.target = target;
   if (command === 'click') result.right = right;
@@ -79,13 +84,13 @@ export function parseArgs(argv) {
 
 function readSession() {
   if (!existsSync(SESSION_FILE)) {
-    throw new Error('No session found. Run `webview-cdp launch` first.');
+    throw new Error('No session found. Run `webview-cdp launch` or `webview-cdp attach` first.');
   }
   return JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
 }
 
-function writeSession(pid, port) {
-  writeFileSync(SESSION_FILE, JSON.stringify({ pid, port }, null, 2));
+function writeSession(pid, port, mode = 'launch') {
+  writeFileSync(SESSION_FILE, JSON.stringify({ pid, port, mode }, null, 2));
 }
 
 function deleteSession() {
@@ -304,10 +309,77 @@ async function cmdLaunch(parsed) {
   }
 }
 
+// ── Command: attach ────────────────────────────────────────────────
+
+async function cmdAttach(parsed) {
+  // If port is provided, try that directly
+  if (parsed.port) {
+    try {
+      await fetchTargets(parsed.port);
+      writeSession(null, parsed.port, 'attach');
+      console.log(`Attached to VS Code on port ${parsed.port}`);
+      return;
+    } catch {
+      throw new Error(`Connection refused on port ${parsed.port}. Is VS Code running with --remote-debugging-port=${parsed.port}?`);
+    }
+  }
+
+  // Auto-discover: scan for VS Code CDP endpoints on common ports and process ports
+  const portsToTry = [];
+
+  // On Windows, find all VS Code/Electron processes and their listening ports
+  if (process.platform === 'win32') {
+    try {
+      const output = execSync(
+        `powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -OwningProcess (Get-Process -Name Code, Electron -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      const discovered = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
+      portsToTry.push(...discovered);
+    } catch {
+      // No VS Code processes found or PowerShell failed
+    }
+  }
+
+  // Also try common debug ports
+  portsToTry.push(9222, 9223, 9224, 9225);
+
+  // Deduplicate
+  const uniquePorts = [...new Set(portsToTry)];
+
+  for (const candidatePort of uniquePorts) {
+    try {
+      const res = await fetch(`http://localhost:${candidatePort}/json/version`);
+      const info = await res.json();
+      // Verify it's actually VS Code / Electron
+      if (info.Browser && /electron/i.test(info.Browser)) {
+        writeSession(null, candidatePort, 'attach');
+        console.log(`Attached to VS Code on port ${candidatePort} (auto-discovered)`);
+        return;
+      }
+    } catch {
+      // Not a CDP endpoint on this port
+    }
+  }
+
+  throw new Error(
+    'Could not find a VS Code instance with CDP enabled.\n' +
+    'Start VS Code with: code --remote-debugging-port=9223\n' +
+    'Or specify the port: webview-cdp attach <port>'
+  );
+}
+
 // ── Command: close ─────────────────────────────────────────────────
 
 async function cmdClose() {
   const session = readSession();
+
+  // Refuse to kill an attached instance — that's the user's editor
+  if (session.mode === 'attach') {
+    deleteSession();
+    console.log('Detached from VS Code (session cleaned up). VS Code was not closed.');
+    return;
+  }
 
   let isVSCode = false;
   try {
@@ -605,6 +677,9 @@ async function main() {
   switch (parsed.command) {
     case 'launch':
       await cmdLaunch(parsed);
+      break;
+    case 'attach':
+      await cmdAttach(parsed);
       break;
     case 'close':
       await cmdClose();
