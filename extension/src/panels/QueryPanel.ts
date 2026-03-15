@@ -148,6 +148,14 @@ export class QueryPanel extends WebviewPanelBase {
                             // Initialize environment from active profile
                             this.initEnvironment();
                             break;
+                        case 'webviewError': {
+                            const errMsg = message.error as string;
+                            const errStack = message.stack as string | undefined;
+                            console.error(`[PPDS Webview] ${errMsg}`);
+                            if (errStack) console.error(`[PPDS Webview Stack] ${errStack}`);
+                            vscode.window.showErrorMessage(`PPDS Data Explorer: ${errMsg}`);
+                            break;
+                        }
                         case 'cancelQuery':
                             this.queryCts?.cancel();
                             break;
@@ -557,34 +565,48 @@ export class QueryPanel extends WebviewPanelBase {
 </div>
 
 <script nonce="${nonce}">
+window.__ppds_errors = [];
+window.onerror = function(msg, src, line, col, err) {
+    window.__ppds_errors.push({msg: String(msg), src: String(src), line: line, col: col, stack: err && err.stack ? err.stack.substring(0, 500) : ''});
+    var el = document.getElementById('sql-editor');
+    if (el) el.setAttribute('data-error', String(msg));
+};
 (function() {
     const vscode = acquireVsCodeApi();
 
     // ── Monaco Editor initialization ──
-    // VS Code adds vscode-dark/vscode-light as body classes in webviews
-    const bodyClasses = document.body.className;
-    const monacoTheme = (bodyClasses.includes('vscode-light') || bodyClasses.includes('vscode-high-contrast-light')) ? 'vs' : 'vs-dark';
-    const editor = monaco.editor.create(document.getElementById('sql-editor'), {
-        language: 'sql',
-        theme: monacoTheme,
-        value: '',
-        minimap: { enabled: false },
-        lineNumbers: 'off',
-        scrollBeyondLastLine: false,
-        wordWrap: 'on',
-        fontSize: 13,
-        automaticLayout: true,
-        suggestOnTriggerCharacters: true,
-        glyphMargin: false,
-        folding: false,
-        lineDecorationsWidth: 0,
-        lineNumbersMinChars: 0,
-        renderLineHighlight: 'none',
-        overviewRulerLanes: 0,
-        hideCursorInOverviewRuler: true,
-        overviewRulerBorder: false,
-        scrollbar: { vertical: 'auto', horizontal: 'auto' },
-    });
+    var editor = null;
+    try {
+        var bodyClasses = document.body.className;
+        var monacoTheme = (bodyClasses.includes('vscode-light') || bodyClasses.includes('vscode-high-contrast-light')) ? 'vs' : 'vs-dark';
+        editor = monaco.editor.create(document.getElementById('sql-editor'), {
+            language: 'sql',
+            theme: monacoTheme,
+            value: '',
+            minimap: { enabled: false },
+            lineNumbers: 'off',
+            scrollBeyondLastLine: false,
+            wordWrap: 'on',
+            fontSize: 13,
+            automaticLayout: true,
+            suggestOnTriggerCharacters: true,
+            glyphMargin: false,
+            folding: false,
+            lineDecorationsWidth: 0,
+            lineNumbersMinChars: 0,
+            renderLineHighlight: 'none',
+            overviewRulerLanes: 0,
+            hideCursorInOverviewRuler: true,
+            overviewRulerBorder: false,
+            scrollbar: { vertical: 'auto', horizontal: 'auto' },
+        });
+    } catch (monacoError) {
+        var errMsg = monacoError instanceof Error ? monacoError.message : String(monacoError);
+        var errStack = monacoError instanceof Error ? monacoError.stack : undefined;
+        console.error('[PPDS] Monaco editor failed to initialize:', errMsg);
+        vscode.postMessage({ command: 'webviewError', error: 'Monaco init failed: ' + errMsg, stack: errStack });
+        document.getElementById('sql-editor').textContent = 'Editor failed to load: ' + errMsg;
+    }
 
     let currentLanguage = 'sql';
     let manualOverride = false;
@@ -805,11 +827,11 @@ export class QueryPanel extends WebviewPanelBase {
     }
 
     // Clear table selection when user clicks into the editor
-    editor.onDidFocusEditorText(() => {
+    if (editor) editor.onDidFocusEditorText(() => {
         if (anchor) clearSelection();
     });
 
-    editor.onDidChangeModelContent(() => {
+    if (editor) editor.onDidChangeModelContent(() => {
         if (!manualOverride) {
             const detected = detectLang(editor.getValue());
             updateLanguage(detected);
@@ -824,7 +846,7 @@ export class QueryPanel extends WebviewPanelBase {
     // ── Monaco clipboard bridge ──
     // VS Code webview sandbox blocks Monaco's native clipboard access.
     // Route copy/paste through postMessage to the host extension.
-    editor.addAction({
+    if (editor) editor.addAction({
         id: 'ppds.editorCopy',
         label: 'Copy',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
@@ -836,7 +858,7 @@ export class QueryPanel extends WebviewPanelBase {
         },
     });
 
-    editor.addAction({
+    if (editor) editor.addAction({
         id: 'ppds.editorCut',
         label: 'Cut',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX],
@@ -850,7 +872,7 @@ export class QueryPanel extends WebviewPanelBase {
         },
     });
 
-    editor.addAction({
+    if (editor) editor.addAction({
         id: 'ppds.editorPaste',
         label: 'Paste',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV],
@@ -860,7 +882,7 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     // ── Monaco keybinding: Escape to cancel query ──
-    editor.addCommand(monaco.KeyCode.Escape, function() {
+    if (editor) editor.addCommand(monaco.KeyCode.Escape, function() {
         if (isExecuting) {
             vscode.postMessage({ command: 'cancelQuery' });
         }
@@ -872,7 +894,7 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     // ── Monaco keybinding: Ctrl+Enter to execute ──
-    editor.addAction({
+    if (editor) editor.addAction({
         id: 'ppds.executeQuery',
         label: 'Execute Query',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
@@ -920,31 +942,33 @@ export class QueryPanel extends WebviewPanelBase {
         }
     }
 
-    monaco.languages.registerCompletionItemProvider('sql', {
-        triggerCharacters: [' ', ',', '.'],
-        provideCompletionItems: async (model, position) => {
-            return await requestCompletions(model, position, 'sql');
-        },
-    });
+    if (typeof monaco !== 'undefined') {
+        monaco.languages.registerCompletionItemProvider('sql', {
+            triggerCharacters: [' ', ',', '.'],
+            provideCompletionItems: async (model, position) => {
+                return await requestCompletions(model, position, 'sql');
+            },
+        });
 
-    monaco.languages.registerCompletionItemProvider('xml', {
-        triggerCharacters: [' ', '<', '"'],
-        provideCompletionItems: async (model, position) => {
-            return await requestCompletions(model, position, 'fetchxml');
-        },
-    });
+        monaco.languages.registerCompletionItemProvider('xml', {
+            triggerCharacters: [' ', '<', '"'],
+            provideCompletionItems: async (model, position) => {
+                return await requestCompletions(model, position, 'fetchxml');
+            },
+        });
+    }
 
     // ── Button handlers ──
     executeBtn.addEventListener('click', () => {
-        const sql = editor.getValue().trim();
+        const sql = editor ? editor.getValue().trim() : '';
         if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
     });
     fetchxmlBtn.addEventListener('click', () => {
-        const sql = editor.getValue().trim();
+        const sql = editor ? editor.getValue().trim() : '';
         if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
     });
     explainBtn.addEventListener('click', () => {
-        const sql = editor.getValue().trim();
+        const sql = editor ? editor.getValue().trim() : '';
         if (sql) vscode.postMessage({ command: 'explainQuery', sql });
     });
     exportBtn.addEventListener('click', () => {
@@ -954,7 +978,7 @@ export class QueryPanel extends WebviewPanelBase {
         vscode.postMessage({ command: 'showHistory' });
     });
     notebookBtn.addEventListener('click', () => {
-        const sql = editor.getValue().trim();
+        const sql = editor ? editor.getValue().trim() : '';
         if (sql) vscode.postMessage({ command: 'openInNotebook', sql });
     });
     tdsBtn.addEventListener('click', () => {
@@ -987,7 +1011,7 @@ export class QueryPanel extends WebviewPanelBase {
         if (!td) return;
 
         // Remove focus from Monaco so Ctrl+C goes to our handler, not Monaco's
-        if (editor.hasTextFocus() && document.activeElement && document.activeElement.blur) {
+        if (editor && editor.hasTextFocus() && document.activeElement && document.activeElement.blur) {
             document.activeElement.blur();
         }
 
@@ -1045,7 +1069,7 @@ export class QueryPanel extends WebviewPanelBase {
     document.addEventListener('keydown', (e) => {
         // Only intercept Ctrl+C for table copy when Monaco does NOT have focus.
         // If Monaco has focus, let it handle copy/paste normally.
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && anchor && !editor.hasTextFocus()) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && anchor && (!editor || !editor.hasTextFocus())) {
             e.preventDefault();
             e.stopPropagation();
             copySelection(e.shiftKey);
@@ -1055,7 +1079,7 @@ export class QueryPanel extends WebviewPanelBase {
 
     document.addEventListener('keydown', (e) => {
         // Filter toggle
-        if (e.key === '/' && !editor.hasTextFocus() && document.activeElement !== filterInput) {
+        if (e.key === '/' && (!editor || !editor.hasTextFocus()) && document.activeElement !== filterInput) {
             e.preventDefault();
             toggleFilter();
             return;
@@ -1073,7 +1097,7 @@ export class QueryPanel extends WebviewPanelBase {
 
         // Ctrl+A: select all (when not in text inputs)
         if ((e.ctrlKey || e.metaKey) && e.key === 'a' &&
-            !editor.hasTextFocus() &&
+            (!editor || !editor.hasTextFocus()) &&
             document.activeElement !== filterInput) {
             if (displayedRows.length > 0 && columns.length > 0) {
                 e.preventDefault();
@@ -1087,7 +1111,7 @@ export class QueryPanel extends WebviewPanelBase {
         // Ctrl+Shift+F: FetchXML preview
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
             e.preventDefault();
-            const sql = editor.getValue().trim();
+            const sql = editor ? editor.getValue().trim() : '';
             if (sql) vscode.postMessage({ command: 'showFetchXml', sql });
             return;
         }
@@ -1162,7 +1186,7 @@ export class QueryPanel extends WebviewPanelBase {
                 executionTimeEl.textContent = '';
                 break;
             case 'loadQuery':
-                editor.setValue(msg.sql);
+                if (editor) editor.setValue(msg.sql);
                 manualOverride = false;
                 break;
             case 'updateEnvironment':
@@ -1170,7 +1194,7 @@ export class QueryPanel extends WebviewPanelBase {
                 currentEnvironmentUrl = msg.url || null;
                 break;
             case 'clipboardContent':
-                if (msg.text && editor.hasTextFocus()) {
+                if (msg.text && editor && editor.hasTextFocus()) {
                     editor.trigger('clipboard', 'type', { text: msg.text });
                 }
                 break;
