@@ -105,6 +105,9 @@ export class SolutionsPanel extends WebviewPanelBase {
                         case 'collapseSolution':
                             // No-op on host side; collapse is handled in webview JS
                             break;
+                        case 'copyToClipboard':
+                            await vscode.env.clipboard.writeText(message.text as string);
+                            break;
                         case 'openInMaker': {
                             if (this.environmentId && message.solutionId) {
                                 const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions/${message.solutionId}`;
@@ -590,10 +593,9 @@ export class SolutionsPanel extends WebviewPanelBase {
         var copyBtn = e.target.closest('.copy-btn');
         if (copyBtn) {
             var text = copyBtn.dataset.copy;
-            navigator.clipboard.writeText(text).then(function() {
-                copyBtn.textContent = '\u2713';
-                setTimeout(function() { copyBtn.textContent = '\u{1F4CB}'; }, 1500);
-            });
+            vscode.postMessage({ command: 'copyToClipboard', text: text });
+            copyBtn.textContent = '\u2713';
+            setTimeout(function() { copyBtn.textContent = '\u{1F4CB}'; }, 1500);
             e.stopPropagation();
             return;
         }
