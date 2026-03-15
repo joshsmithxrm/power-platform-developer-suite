@@ -946,39 +946,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'sql' parameter is required");
         }
 
-        if (request.UseTds)
-        {
-            var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
-            {
-                using var credentialProvider = CredentialProviderFactory.Create(
-                    profile,
-                    DaemonDeviceCodeHandler.CreateCallback(_rpc));
-
-                var tdsExecutor = new TdsQueryExecutor(
-                    env.Url,
-                    async token =>
-                    {
-                        // Create a ServiceClient to trigger MSAL token acquisition,
-                        // then grab the cached access token from the credential provider.
-                        var client = await credentialProvider.CreateServiceClientAsync(env.Url, token)
-                            .ConfigureAwait(false);
-                        client.Dispose();
-                        return credentialProvider.AccessToken
-                            ?? throw new InvalidOperationException("Failed to acquire access token for TDS endpoint");
-                    },
-                    sp.GetService<ILogger<TdsQueryExecutor>>());
-
-                var result = await tdsExecutor.ExecuteSqlAsync(request.Sql, request.Top, ct);
-                return MapToResponse(result, null);
-            }, cancellationToken);
-
-            // Auto-save to history (fire-and-forget)
-            FireAndForgetHistorySave(request.Sql, response);
-
-            return response;
-        }
-
-        // DML safety check: parse SQL and validate before transpilation/execution
+        // DML safety check: parse SQL and validate BEFORE any execution path (TDS or FetchXML)
         if (request.DmlSafety != null)
         {
             var parser = new TSql160Parser(initialQuotedIdentifiers: false);
@@ -1024,6 +992,38 @@ public class RpcMethodHandler : IDisposable
                         });
                 }
             }
+        }
+
+        if (request.UseTds)
+        {
+            var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
+            {
+                using var credentialProvider = CredentialProviderFactory.Create(
+                    profile,
+                    DaemonDeviceCodeHandler.CreateCallback(_rpc));
+
+                var tdsExecutor = new TdsQueryExecutor(
+                    env.Url,
+                    async token =>
+                    {
+                        // Create a ServiceClient to trigger MSAL token acquisition,
+                        // then grab the cached access token from the credential provider.
+                        var client = await credentialProvider.CreateServiceClientAsync(env.Url, token)
+                            .ConfigureAwait(false);
+                        client.Dispose();
+                        return credentialProvider.AccessToken
+                            ?? throw new InvalidOperationException("Failed to acquire access token for TDS endpoint");
+                    },
+                    sp.GetService<ILogger<TdsQueryExecutor>>());
+
+                var result = await tdsExecutor.ExecuteSqlAsync(request.Sql, request.Top, ct);
+                return MapToResponse(result, null);
+            }, cancellationToken);
+
+            // Auto-save to history (fire-and-forget)
+            FireAndForgetHistorySave(request.Sql, response);
+
+            return response;
         }
 
         var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
