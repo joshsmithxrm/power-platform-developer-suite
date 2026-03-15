@@ -247,22 +247,26 @@
       {
         "command": "ppds.debug.daemonStatus",
         "title": "Daemon Status",
-        "category": "PPDS Debug"
+        "category": "PPDS Debug",
+        "enablement": "ppds.isDevelopment"
       },
       {
         "command": "ppds.debug.extensionState",
         "title": "Extension State",
-        "category": "PPDS Debug"
+        "category": "PPDS Debug",
+        "enablement": "ppds.isDevelopment"
       },
       {
         "command": "ppds.debug.treeViewState",
         "title": "Tree View State",
-        "category": "PPDS Debug"
+        "category": "PPDS Debug",
+        "enablement": "ppds.isDevelopment"
       },
       {
         "command": "ppds.debug.panelState",
         "title": "Panel State",
-        "category": "PPDS Debug"
+        "category": "PPDS Debug",
+        "enablement": "ppds.isDevelopment"
       }
     ],
     "menus": {

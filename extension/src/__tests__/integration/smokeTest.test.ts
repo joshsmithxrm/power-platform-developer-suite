@@ -5,6 +5,7 @@ vi.mock('vscode', () => {
     const disposable = { dispose: vi.fn() };
     const _subscriptions: any[] = [];
     return {
+        ExtensionMode: { Development: 1, Production: 2 },
         commands: {
             registerCommand: vi.fn(() => disposable),
             executeCommand: vi.fn(),
@@ -214,6 +215,7 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            extensionMode: 1, // ExtensionMode.Development
             globalState: { get: vi.fn(), update: vi.fn() },
             workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
@@ -239,6 +241,7 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            extensionMode: 1, // ExtensionMode.Development
             globalState: { get: vi.fn(), update: vi.fn() },
             workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
@@ -260,6 +263,7 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            extensionMode: 1, // ExtensionMode.Development
             globalState: { get: vi.fn(), update: vi.fn() },
             workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
