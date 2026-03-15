@@ -1307,7 +1307,8 @@ public class RpcMethodHandler : IDisposable
         }
 
         if (top.HasValue && stmt is SelectStatement selectStmt
-            && selectStmt.QueryExpression is QuerySpecification querySpec)
+            && selectStmt.QueryExpression is QuerySpecification querySpec
+            && querySpec.TopRowFilter == null)
         {
             querySpec.TopRowFilter = new TopRowFilter
             {
