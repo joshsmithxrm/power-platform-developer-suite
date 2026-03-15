@@ -17,7 +17,7 @@ Give Claude an interactive feedback loop for CLI, TUI, Extension, and MCP develo
 Based on recent changes or explicit argument:
 - `src/PPDS.Cli/Commands/` → CLI mode
 - `src/PPDS.Cli/Tui/` → TUI mode
-- `src/extension/` → Extension mode
+- `src/PPDS.Extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
 - No clear match → Ask user
 
@@ -60,12 +60,12 @@ npm test --prefix tests/tui-e2e -- --update-snapshots
 **Build & install for manual testing:**
 
 ```bash
-cd <root>/src/extension && npm run lint && npm run compile && npm run test && npm run local
+cd <root>/src/PPDS.Extension && npm run lint && npm run compile && npm run test && npm run local
 ```
 
 Then reload VS Code (Ctrl+Shift+P -> Reload Window) and test manually.
 
-**Useful npm scripts** (run from repo root with `ext:` prefix, or from src/extension/ directly):
+**Useful npm scripts** (run from repo root with `ext:` prefix, or from src/PPDS.Extension/ directly):
 
 | Request | Command |
 |---------|---------|

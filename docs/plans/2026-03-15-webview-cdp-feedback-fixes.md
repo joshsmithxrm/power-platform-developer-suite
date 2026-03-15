@@ -4,7 +4,7 @@
 
 **Goal:** Fix 4 pain points discovered during a real logging-verification session with the webview-cdp tool, then update the skill documentation.
 
-**Architecture:** All changes are in `extension/tools/webview-cdp.mjs` (tool code) and `.claude/skills/webview-cdp/SKILL.md` (skill docs). Four code changes: (1) Fix `logs --channel` to filter by filename instead of file content. (2) Add `text` command for quick DOM text reads. (3) Add `--build` flag to `launch` for compiling before start. (4) Add `notebook` command with `run` and `run-all` subcommands. Then one skill update covering all new commands plus panel-obscuring documentation.
+**Architecture:** All changes are in `src/PPDS.Extension/tools/webview-cdp.mjs` (tool code) and `.claude/skills/webview-cdp/SKILL.md` (skill docs). Four code changes: (1) Fix `logs --channel` to filter by filename instead of file content. (2) Add `text` command for quick DOM text reads. (3) Add `--build` flag to `launch` for compiling before start. (4) Add `notebook` command with `run` and `run-all` subcommands. Then one skill update covering all new commands plus panel-obscuring documentation.
 
 **Chunk dependencies:** Chunks 1-3 are independent. **Chunk 4 depends on Chunk 2** (the `VALID_COMMANDS` "Old" value includes `'text'` from Chunk 2). Chunk 5 depends on all code chunks being complete.
 
@@ -16,12 +16,12 @@
 
 | Action | File | Responsibility |
 |--------|------|---------------|
-| Modify | `extension/tools/webview-cdp.mjs:13-14` | Add `text`, `notebook` to VALID_COMMANDS |
-| Modify | `extension/tools/webview-cdp.mjs:42-97` | Parse args for `text`, `notebook`, `launch --build` |
-| Modify | `extension/tools/webview-cdp.mjs:290-404` | Daemon handlers: fix `logs` filter, add `text` and `notebook` actions |
-| Modify | `extension/tools/webview-cdp.mjs:464-495` | `cmdLaunch` — `--build` flag runs `npm run compile` |
-| Modify | `extension/tools/webview-cdp.mjs:610-637` | Add `cmdText`, `cmdNotebook`, wire into main dispatch |
-| Modify | `extension/tools/webview-cdp.test.mjs` | Tests for new parsing: `text`, `notebook`, `launch --build` |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.mjs:13-14` | Add `text`, `notebook` to VALID_COMMANDS |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.mjs:42-97` | Parse args for `text`, `notebook`, `launch --build` |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.mjs:290-404` | Daemon handlers: fix `logs` filter, add `text` and `notebook` actions |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.mjs:464-495` | `cmdLaunch` — `--build` flag runs `npm run compile` |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.mjs:610-637` | Add `cmdText`, `cmdNotebook`, wire into main dispatch |
+| Modify | `src/PPDS.Extension/tools/webview-cdp.test.mjs` | Tests for new parsing: `text`, `notebook`, `launch --build` |
 | Modify | `.claude/skills/webview-cdp/SKILL.md` | Document new commands, notebook workflows, panel tip |
 
 ---
@@ -35,8 +35,8 @@ The current implementation at `webview-cdp.mjs:376-400` reads every `.log` file'
 VS Code's LogOutputChannel writes to files named like `N-ChannelName.log` inside `logs/window1/exthost/output_logging_<date>/`. Filtering by filename is both faster and correct.
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs:396-397`
-- Modify: `extension/tools/webview-cdp.test.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:396-397`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 - [ ] **Step 1: Write failing test for new logs parsing (no test change needed — parsing is unchanged)**
 
@@ -63,13 +63,13 @@ This changes the filter from "read entire file, check if content mentions channe
 
 - [ ] **Step 3: Run existing tests**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS — existing parseArgs and parseKeyCombo tests still pass (daemon behavior change, not parsing change)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "fix(tools): filter logs --channel by filename, not file content
 
 The old approach read every .log file and matched on content, returning
@@ -86,15 +86,15 @@ as N-ChannelName.log — matching on filename is faster and correct."
 Currently reading element text requires: `eval 'document.querySelector("#execution-time")?.textContent'`. The `text` command reduces this to: `text "#execution-time"`.
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs:13` (VALID_COMMANDS)
-- Modify: `extension/tools/webview-cdp.mjs:42-97` (parseArgs)
-- Modify: `extension/tools/webview-cdp.mjs:290-404` (daemon handler)
-- Modify: `extension/tools/webview-cdp.mjs:610-637` (cmdText + dispatch)
-- Modify: `extension/tools/webview-cdp.test.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:13` (VALID_COMMANDS)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:42-97` (parseArgs)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:290-404` (daemon handler)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:610-637` (cmdText + dispatch)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 - [ ] **Step 1: Write failing tests for `text` command parsing**
 
-Append to `extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describe block (after the `select` test at line 109):
+Append to `src/PPDS.Extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describe block (after the `select` test at line 109):
 
 ```javascript
   it('parses text with selector', () => {
@@ -110,7 +110,7 @@ Append to `extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describ
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: FAIL — `Unknown command: text`
 
 - [ ] **Step 3: Add `text` to VALID_COMMANDS**
@@ -131,7 +131,7 @@ No changes needed in `parseArgs` — `text` falls through to the interaction com
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS — `text` now recognized, falls through to interaction command parsing
 
 - [ ] **Step 5: Add daemon handler for `text`**
@@ -172,13 +172,13 @@ Then add to the main dispatch switch (after the `eval` case around line 630):
 
 - [ ] **Step 7: Run all tests**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS — all existing + new tests green
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs extension/tools/webview-cdp.test.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs src/PPDS.Extension/tools/webview-cdp.test.mjs
 git commit -m "feat(tools): add text command for quick DOM element reads
 
 text \"#selector\" returns the textContent of the matched element.
@@ -195,9 +195,9 @@ Returns empty string if element not found."
 The first VS Code launch after code changes uses stale compiled output. Adding `--build` runs `npm run compile` before spawning VS Code.
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs:50-51` (parseArgs for launch)
-- Modify: `extension/tools/webview-cdp.mjs:464-495` (cmdLaunch)
-- Modify: `extension/tools/webview-cdp.test.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:50-51` (parseArgs for launch)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:464-495` (cmdLaunch)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 - [ ] **Step 1: Update existing launch tests and add new ones for `--build`**
 
@@ -248,7 +248,7 @@ In `webview-cdp.mjs`, replace the launch parsing (lines 50-51):
 
 - [ ] **Step 3: Run tests to verify they pass**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS
 
 - [ ] **Step 4: Add build step to cmdLaunch**
@@ -270,13 +270,13 @@ async function cmdLaunch(parsed) {
 
 - [ ] **Step 5: Run all tests**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs extension/tools/webview-cdp.test.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs src/PPDS.Extension/tools/webview-cdp.test.mjs
 git commit -m "feat(tools): add --build flag to launch for fresh compiles
 
 launch --build runs npm run compile before spawning VS Code,
@@ -294,15 +294,15 @@ preventing stale binary issues on first launch after code changes."
 `command "Notebook: Execute Cell"` fails because opening the command palette steals focus from the cell. `notebook run` clicks the cell's run button in the DOM instead — focus-independent and reliable.
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs:13` (VALID_COMMANDS — already includes `'text'` from Chunk 2)
-- Modify: `extension/tools/webview-cdp.mjs:42-97` (parseArgs)
-- Modify: `extension/tools/webview-cdp.mjs:290-404` (daemon handler)
-- Modify: `extension/tools/webview-cdp.mjs:610-637` (cmdNotebook + dispatch)
-- Modify: `extension/tools/webview-cdp.test.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:13` (VALID_COMMANDS — already includes `'text'` from Chunk 2)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:42-97` (parseArgs)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:290-404` (daemon handler)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs:610-637` (cmdNotebook + dispatch)
+- Modify: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 - [ ] **Step 1: Write failing tests for `notebook` command parsing**
 
-Append to `extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describe block:
+Append to `src/PPDS.Extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describe block:
 
 ```javascript
   it('parses notebook run', () => {
@@ -326,7 +326,7 @@ Append to `extension/tools/webview-cdp.test.mjs`, inside the `parseArgs` describ
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: FAIL — `Unknown command: notebook`
 
 - [ ] **Step 3: Add `notebook` to VALID_COMMANDS and parseArgs**
@@ -357,7 +357,7 @@ Add notebook parsing in `parseArgs`, after the `logs` block (after line 74):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS
 
 - [ ] **Step 5: Add daemon handler for `notebook`**
@@ -410,13 +410,13 @@ Then add to the main dispatch switch:
 
 - [ ] **Step 7: Run all tests**
 
-Run: `npx vitest run extension/tools/webview-cdp.test.mjs`
+Run: `npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs`
 Expected: PASS
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs extension/tools/webview-cdp.test.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs src/PPDS.Extension/tools/webview-cdp.test.mjs
 git commit -m "feat(tools): add notebook run/run-all commands
 
 notebook run clicks the cell's run button (focus-independent) instead of
@@ -458,12 +458,12 @@ Add after the "Check for errors" section in Common Patterns:
 ### Execute notebook cells
 ```bash
 # Run the focused cell — clicks the run button (reliable, focus-independent)
-node extension/tools/webview-cdp.mjs notebook run
-node extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
+node src/PPDS.Extension/tools/webview-cdp.mjs notebook run
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
 
 # Run all cells
-node extension/tools/webview-cdp.mjs notebook run-all
-node extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
+node src/PPDS.Extension/tools/webview-cdp.mjs notebook run-all
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
 ```
 
 **Avoid** using `command "Notebook: Execute Cell"` — opening the command palette steals focus from the cell, causing the command to silently fail. Similarly, `key "ctrl+enter"` may trigger `executeAndInsertBelow` (creates a duplicate cell) depending on VS Code's keybinding context.
@@ -471,8 +471,8 @@ node extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
 ### Hide panel for notebook screenshots
 ```bash
 # The output panel takes vertical space — hide it to see cell output clearly
-node extension/tools/webview-cdp.mjs command "View: Toggle Panel Visibility"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/notebook-clean.png
+node src/PPDS.Extension/tools/webview-cdp.mjs command "View: Toggle Panel Visibility"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/notebook-clean.png
 ```
 ```
 
@@ -484,11 +484,11 @@ Add after the "Check DOM state" section:
 ### Read element text
 ```bash
 # Quick read of an element's text content
-node extension/tools/webview-cdp.mjs text "#execution-time" --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs text "#execution-time" --ext "power-platform-developer-suite"
 # Returns: "in 298ms via Dataverse"
 
 # Equivalent eval (more verbose, same result):
-node extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-time")?.textContent'
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-time")?.textContent'
 ```
 ```
 
@@ -498,7 +498,7 @@ Change step 1 to use `--build`:
 
 ```markdown
 # 1. Launch VS Code with the extension (--build ensures fresh compilation)
-node extension/tools/webview-cdp.mjs launch --build
+node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
 ```
 
 - [ ] **Step 6: Commit**
@@ -520,7 +520,7 @@ After all tasks are complete:
 - [ ] **Final: Run full test suite**
 
 ```bash
-npx vitest run extension/tools/webview-cdp.test.mjs
+npx vitest run src/PPDS.Extension/tools/webview-cdp.test.mjs
 ```
 
 Expected: All tests pass.

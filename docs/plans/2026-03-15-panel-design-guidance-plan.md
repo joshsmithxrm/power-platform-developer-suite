@@ -13,7 +13,7 @@
 ## Task 1: Add environment theming CSS to shared.css
 
 **Files:**
-- Modify: `src/extension/src/panels/styles/shared.css:19-21` (after `.toolbar` rule)
+- Modify: `src/PPDS.Extension/src/panels/styles/shared.css:19-21` (after `.toolbar` rule)
 
 - [ ] **Step 1: Add `[data-env-type]` CSS selectors to shared.css**
 
@@ -31,13 +31,13 @@ Add after the existing `.toolbar` rule block (after line 21):
 
 - [ ] **Step 2: Run CSS lint to verify**
 
-Run: `cd src/extension && npm run lint:css`
+Run: `cd src/PPDS.Extension && npm run lint:css`
 Expected: PASS, no new violations
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/extension/src/panels/styles/shared.css
+git add src/PPDS.Extension/src/panels/styles/shared.css
 git commit -m "feat(ext): add environment type accent borders to panel toolbar"
 ```
 
@@ -46,7 +46,7 @@ git commit -m "feat(ext): add environment type accent borders to panel toolbar"
 ## Task 2: Extend showEnvironmentPicker to return environment type
 
 **Files:**
-- Modify: `src/extension/src/panels/environmentPicker.ts:35,44-49,54-59,95,98`
+- Modify: `src/PPDS.Extension/src/panels/environmentPicker.ts:35,44-49,54-59,95,98`
 
 - [ ] **Step 1: Update return type and map environment type from envList**
 
@@ -96,13 +96,13 @@ const items = environments.map(env => ({
 
 - [ ] **Step 2: Run typecheck to verify**
 
-Run: `cd src/extension && npm run typecheck:all`
+Run: `cd src/PPDS.Extension && npm run typecheck:all`
 Expected: PASS — existing callers destructure `{ url, displayName }` and will ignore the new `type` field without error.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/extension/src/panels/environmentPicker.ts
+git add src/PPDS.Extension/src/panels/environmentPicker.ts
 git commit -m "feat(ext): return environment type from showEnvironmentPicker"
 ```
 
@@ -111,11 +111,11 @@ git commit -m "feat(ext): return environment type from showEnvironmentPicker"
 ## Task 3: Set data-env-type attribute in panel host code
 
 **Files:**
-- Modify: `src/extension/src/panels/QueryPanel.ts` (env selection + init)
-- Modify: `src/extension/src/panels/SolutionsPanel.ts` (env selection + init)
-- Modify: `src/extension/src/panels/webview/shared/message-types.ts` (add envType to updateEnvironment)
-- Modify: `src/extension/src/panels/webview/query-panel.ts` (set attribute on toolbar)
-- Modify: `src/extension/src/panels/webview/solutions-panel.ts` (set attribute on toolbar)
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts` (env selection + init)
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts` (env selection + init)
+- Modify: `src/PPDS.Extension/src/panels/webview/shared/message-types.ts` (add envType to updateEnvironment)
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts` (set attribute on toolbar)
+- Modify: `src/PPDS.Extension/src/panels/webview/solutions-panel.ts` (set attribute on toolbar)
 
 The flow: host panel gets env type from `showEnvironmentPicker` or `authWho` → sends it to webview via existing `updateEnvironment` message → webview sets `data-env-type` on toolbar element.
 
@@ -196,13 +196,13 @@ In the `updateEnvironment` handler (line 179-181), after `updateEnvironmentDispl
 
 - [ ] **Step 6: Run typecheck and lint**
 
-Run: `cd src/extension && npm run typecheck:all && npm run lint`
+Run: `cd src/PPDS.Extension && npm run typecheck:all && npm run lint`
 Expected: PASS — assertNever will catch any missed cases.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/extension/src/panels/
+git add src/PPDS.Extension/src/panels/
 git commit -m "feat(ext): wire environment type through to toolbar data attribute"
 ```
 
@@ -322,7 +322,7 @@ git commit -m "feat(skill): add design guidance section to webview-panels skill 
 
 - [ ] **Step 1: Run all quality gates**
 
-Run: `cd src/extension && npm run typecheck:all && npm run lint && npm run lint:css && npm run test`
+Run: `cd src/PPDS.Extension && npm run typecheck:all && npm run lint && npm run lint:css && npm run test`
 Expected: All PASS
 
 - [ ] **Step 2: Close GitHub issue #307**

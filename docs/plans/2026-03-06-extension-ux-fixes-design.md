@@ -86,18 +86,18 @@ Register `ppds.showLogs` command that calls `logChannel.show()`. Add to:
 
 | File | Changes |
 |------|---------|
-| `extension/src/extension.ts` | Create LogOutputChannel, pass to consumers |
-| `extension/src/daemonClient.ts` | Accept LogOutputChannel, replace appendLine with leveled logging |
-| `extension/src/commands/profileCommands.ts` | ignoreFocusOut, inline env picker, invalidate command |
-| `extension/src/commands/environmentCommands.ts` | ignoreFocusOut |
-| `extension/src/commands/environmentConfigCommand.ts` | ignoreFocusOut |
-| `extension/src/notebooks/DataverseNotebookController.ts` | ignoreFocusOut |
-| `extension/src/views/profileTreeView.ts` | Accept logger, set context keys, log errors |
-| `extension/src/views/toolsTreeView.ts` | Set context keys |
-| `extension/src/views/solutionsTreeView.ts` | Accept logger, set context keys, log errors |
-| `extension/package.json` | viewsWelcome, invalidateProfile command+menu, showLogs command |
-| `extension/src/__tests__/daemonClient.test.ts` | Update mocks for LogOutputChannel |
-| `extension/src/__tests__/integration/smokeTest.test.ts` | Update mocks |
+| `src/PPDS.Extension/src/extension.ts` | Create LogOutputChannel, pass to consumers |
+| `src/PPDS.Extension/src/daemonClient.ts` | Accept LogOutputChannel, replace appendLine with leveled logging |
+| `src/PPDS.Extension/src/commands/profileCommands.ts` | ignoreFocusOut, inline env picker, invalidate command |
+| `src/PPDS.Extension/src/commands/environmentCommands.ts` | ignoreFocusOut |
+| `src/PPDS.Extension/src/commands/environmentConfigCommand.ts` | ignoreFocusOut |
+| `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts` | ignoreFocusOut |
+| `src/PPDS.Extension/src/views/profileTreeView.ts` | Accept logger, set context keys, log errors |
+| `src/PPDS.Extension/src/views/toolsTreeView.ts` | Set context keys |
+| `src/PPDS.Extension/src/views/solutionsTreeView.ts` | Accept logger, set context keys, log errors |
+| `src/PPDS.Extension/package.json` | viewsWelcome, invalidateProfile command+menu, showLogs command |
+| `src/PPDS.Extension/src/__tests__/daemonClient.test.ts` | Update mocks for LogOutputChannel |
+| `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts` | Update mocks |
 
 ## Out of Scope
 

@@ -55,7 +55,7 @@ updates:
 
   # VS Code Extension (npm)
   - package-ecosystem: "npm"
-    directory: "/src/extension"
+    directory: "/src/PPDS.Extension"
     schedule:
       interval: "weekly"
       day: "monday"

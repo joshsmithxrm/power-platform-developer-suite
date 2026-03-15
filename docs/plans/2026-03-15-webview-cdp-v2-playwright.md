@@ -4,7 +4,7 @@
 
 **Goal:** Rewrite the webview-cdp CLI tool from raw CDP to Playwright Electron, adding daemon lifecycle management, command palette execution, console log capture, and output channel reading.
 
-**Architecture:** Single-file CLI (`extension/tools/webview-cdp.mjs`) with dual mode: caller (short-lived per command) and daemon (long-lived, holds VS Code alive). Daemon uses `_electron.launch()` + console capture. Callers reconnect via `chromium.connectOverCDP(wsEndpoint)`. Webview content accessed via Playwright's `contentFrame()` chain.
+**Architecture:** Single-file CLI (`src/PPDS.Extension/tools/webview-cdp.mjs`) with dual mode: caller (short-lived per command) and daemon (long-lived, holds VS Code alive). Daemon uses `_electron.launch()` + console capture. Callers reconnect via `chromium.connectOverCDP(wsEndpoint)`. Webview content accessed via Playwright's `contentFrame()` chain.
 
 **Tech Stack:** `@playwright/test` (Electron module), `@vscode/test-electron`, Node.js `child_process.fork()`
 
@@ -18,11 +18,11 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `extension/tools/webview-cdp.mjs` | **Rewrite** | Complete rewrite. Dual-mode: caller CLI + daemon. Playwright Electron engine replaces raw CDP. |
-| `extension/tools/webview-cdp.test.mjs` | **Update** | Keep pure function tests (parseArgs, validatePort, parseKeyCombo). Add tests for new parseArgs shapes (no port on launch, --ext flag, `command`/`wait`/`logs` commands). Remove `filterWebviewTargets` tests (function removed). |
+| `src/PPDS.Extension/tools/webview-cdp.mjs` | **Rewrite** | Complete rewrite. Dual-mode: caller CLI + daemon. Playwright Electron engine replaces raw CDP. |
+| `src/PPDS.Extension/tools/webview-cdp.test.mjs` | **Update** | Keep pure function tests (parseArgs, validatePort, parseKeyCombo). Add tests for new parseArgs shapes (no port on launch, --ext flag, `command`/`wait`/`logs` commands). Remove `filterWebviewTargets` tests (function removed). |
 | `.agents/skills/webview-cdp/SKILL.md` | **Rewrite** | Complete rewrite for v2. Remove attach, add command/wait/logs, update workflow, add screenshot temp dir guidance, remove "Known Limitations" that are now fixed. |
-| `extension/package.json` | **Modify** | Remove `ws` dev dependency. |
-| `extension/.gitignore` | **Already done** | Console log file already gitignored. No changes needed. |
+| `src/PPDS.Extension/package.json` | **Modify** | Remove `ws` dev dependency. |
+| `src/PPDS.Extension/.gitignore` | **Already done** | Console log file already gitignored. No changes needed. |
 
 ---
 
@@ -31,16 +31,16 @@
 ### Task 1: Remove `ws` dependency
 
 **Files:**
-- Modify: `extension/package.json`
+- Modify: `src/PPDS.Extension/package.json`
 
 - [ ] **Step 1: Uninstall ws**
 
-Run: `cd extension && npm uninstall ws`
+Run: `cd src/PPDS.Extension && npm uninstall ws`
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add extension/package.json extension/package-lock.json
+git add src/PPDS.Extension/package.json extension/package-lock.json
 git commit -m "chore: remove ws dependency — Playwright handles WebSocket communication"
 ```
 
@@ -49,7 +49,7 @@ git commit -m "chore: remove ws dependency — Playwright handles WebSocket comm
 ### Task 2: Update unit tests for v2 argument parsing
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.test.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 The v2 CLI changes:
 - `launch` takes `[workspace]` not `[port] [workspace]`
@@ -61,7 +61,7 @@ The v2 CLI changes:
 - [ ] **Step 1: Rewrite the test file**
 
 ```js
-// extension/tools/webview-cdp.test.mjs
+// src/PPDS.Extension/tools/webview-cdp.test.mjs
 import { describe, it, expect } from 'vitest';
 import { parseArgs, parseKeyCombo, validatePort } from './webview-cdp.mjs';
 
@@ -193,13 +193,13 @@ describe('parseKeyCombo', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd extension && npx vitest run tools/webview-cdp.test.mjs`
+Run: `cd src/PPDS.Extension && npx vitest run tools/webview-cdp.test.mjs`
 Expected: FAIL — parseArgs returns v1 shapes, import of `filterWebviewTargets` may fail
 
 - [ ] **Step 3: Commit failing tests**
 
 ```bash
-git add extension/tools/webview-cdp.test.mjs
+git add src/PPDS.Extension/tools/webview-cdp.test.mjs
 git commit -m "test: update webview-cdp tests for v2 argument parsing"
 ```
 
@@ -210,7 +210,7 @@ git commit -m "test: update webview-cdp tests for v2 argument parsing"
 ### Task 3: Rewrite webview-cdp.mjs — pure functions, daemon, launch, close
 
 **Files:**
-- Rewrite: `extension/tools/webview-cdp.mjs`
+- Rewrite: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 This is the core rewrite. The file is completely replaced. All v1 CDP code is removed. The new file has two modes:
 - **Caller mode** (default): parses args, sends HTTP request to daemon, prints result
@@ -222,7 +222,7 @@ This is the core rewrite. The file is completely replaced. All v1 CDP code is re
 - Archived `VSCodeLauncher.ts` at `C:\VS\ppdsw\ppds-extension-archived\e2e\helpers\VSCodeLauncher.ts` — launch pattern, console capture, extension log reading
 - Archived `CommandPaletteHelper.ts` at `C:\VS\ppdsw\ppds-extension-archived\e2e\helpers\CommandPaletteHelper.ts` — command palette interaction pattern
 - Archived `WebviewHelper.ts` at `C:\VS\ppdsw\ppds-extension-archived\e2e\helpers\WebviewHelper.ts` — double-nested iframe traversal
-- Current E2E fixtures at `extension/e2e/fixtures.ts` — simplified Electron launch pattern
+- Current E2E fixtures at `src/PPDS.Extension/e2e/fixtures.ts` — simplified Electron launch pattern
 
 The implementer MUST read these reference files and adapt the proven patterns. Do not invent new approaches — use what's already working.
 
@@ -427,13 +427,13 @@ Key implementation notes:
 
 - [ ] **Step 2: Run unit tests**
 
-Run: `cd extension && npx vitest run tools/webview-cdp.test.mjs`
+Run: `cd src/PPDS.Extension && npx vitest run tools/webview-cdp.test.mjs`
 Expected: All tests pass (parseArgs, validatePort, parseKeyCombo)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp v2 — Playwright Electron rewrite with daemon model"
 ```
 
@@ -484,141 +484,141 @@ git commit -m "feat(tools): webview-cdp v2 skill file — command palette, logs,
 
 This verifies the complete v2 tool against a live VS Code instance. Covers all 23 acceptance criteria.
 
-**Prerequisites:** Extension must be compiled: `cd extension && npm run compile`
+**Prerequisites:** Extension must be compiled: `cd src/PPDS.Extension && npm run compile`
 
 Note: On Windows in Git Bash, `/tmp/` maps to a temp directory. All screenshots go there — never to the repo.
 
 - [ ] **Step 1: Launch VS Code (AC-01)**
 
-Run: `node extension/tools/webview-cdp.mjs launch`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs launch`
 Expected: "VS Code launched" message with daemon PID
-Verify: VS Code window appears, session file exists at `extension/tools/.webview-cdp-session.json`
+Verify: VS Code window appears, session file exists at `src/PPDS.Extension/tools/.webview-cdp-session.json`
 Check daemon logs: verify "Dialog hooks installed" or "Dialog hooks not available" appears (AC-23)
 
 - [ ] **Step 2: Execute a command to open Data Explorer (AC-04)**
 
-Run: `node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"`
 Expected: No error, exits cleanly
 
 - [ ] **Step 3: Wait for webview (AC-05)**
 
-Run: `node extension/tools/webview-cdp.mjs wait`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs wait`
 Expected: Returns when webview frame is found
 
 - [ ] **Step 4: List webview frames (AC-03)**
 
-Run: `node extension/tools/webview-cdp.mjs connect`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs connect`
 Expected: Lists webview frames with extension ID identification
 
 - [ ] **Step 5: Take screenshots (AC-06, AC-07)**
 
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-webview.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-webview.png`
 Expected: PNG shows Data Explorer webview content (AC-07)
 
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-page.png --page`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-page.png --page`
 Expected: PNG shows full VS Code window (AC-06)
 
 - [ ] **Step 6: Test eval in both contexts (AC-08, AC-09)**
 
-Run: `node extension/tools/webview-cdp.mjs eval "1 + 1"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "1 + 1"`
 Expected: `2` (AC-08)
 
-Run: `node extension/tools/webview-cdp.mjs eval --page "document.title"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval --page "document.title"`
 Expected: String containing "Visual Studio Code" (AC-09)
 
 - [ ] **Step 7: Test type and click in webview (AC-10, AC-13)**
 
-Run: `node extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT 1"`
-Run: `node extension/tools/webview-cdp.mjs eval "document.querySelector('#sql-editor').value"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT 1"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.querySelector('#sql-editor').value"`
 Expected: `"SELECT 1"` (AC-13)
 
-Run: `node extension/tools/webview-cdp.mjs click "#execute-btn"`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-after-click.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-after-click.png`
 Expected: Screenshot shows button was activated (AC-10)
 
 - [ ] **Step 8: Test click --page on VS Code native UI (AC-11)**
 
 First discover a clickable sidebar element:
-Run: `node extension/tools/webview-cdp.mjs eval --page "document.querySelector('[aria-label=\"Data Explorer\"]')?.tagName || 'not found'"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval --page "document.querySelector('[aria-label=\"Data Explorer\"]')?.tagName || 'not found'"`
 
 Then click it (or another known sidebar element):
-Run: `node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-page-click.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-page-click.png`
 Expected: Screenshot shows the sidebar item was activated (AC-11)
 
 - [ ] **Step 9: Test right-click context menu (AC-12)**
 
-Run: `node extension/tools/webview-cdp.mjs click "#sql-editor" --right`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-rightclick.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click "#sql-editor" --right`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-rightclick.png`
 Expected: Screenshot may show context menu (AC-12)
 
 - [ ] **Step 10: Test keyboard shortcut in VS Code native UI (AC-14)**
 
-Run: `node extension/tools/webview-cdp.mjs key "ctrl+shift+p"`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-palette.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+shift+p"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-palette.png`
 Expected: Screenshot shows command palette open (AC-14)
 
-Run: `node extension/tools/webview-cdp.mjs key "Escape"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs key "Escape"`
 
 - [ ] **Step 11: Test keyboard shortcut inside webview (AC-15)**
 
 Focus the webview first by clicking the SQL editor:
-Run: `node extension/tools/webview-cdp.mjs click "#sql-editor"`
-Run: `node extension/tools/webview-cdp.mjs key "ctrl+a"`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-webview-key.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click "#sql-editor"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+a"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-webview-key.png`
 Expected: Text in SQL editor is selected (AC-15)
 
 - [ ] **Step 12: Test mouse events (AC-16)**
 
 Get coordinates of an element:
-Run: `node extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('#sql-editor').getBoundingClientRect())"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('#sql-editor').getBoundingClientRect())"`
 
 Dispatch a mouse sequence:
-Run: `node extension/tools/webview-cdp.mjs mouse mousedown <x> <y>` (use coordinates from above)
-Run: `node extension/tools/webview-cdp.mjs mouse mouseup <x> <y>`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-mouse.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs mouse mousedown <x> <y>` (use coordinates from above)
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs mouse mouseup <x> <y>`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-mouse.png`
 Expected: No errors, screenshot shows state change (AC-16)
 
 - [ ] **Step 13: Test select dropdown (AC-17)**
 
 If the Data Explorer has a dropdown (e.g., environment picker or TDS toggle), test it:
-Run: `node extension/tools/webview-cdp.mjs eval "document.querySelector('select')?.id || 'no select element'"`
-If a select element exists, run: `node extension/tools/webview-cdp.mjs select "<selector>" "<value>"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.querySelector('select')?.id || 'no select element'"`
+If a select element exists, run: `node src/PPDS.Extension/tools/webview-cdp.mjs select "<selector>" "<value>"`
 If no select element, document: "AC-17 deferred — no native select elements in current Data Explorer UI. Will be tested when plugin traces tool adds dropdown filters."
 
 - [ ] **Step 14: Test logs (AC-18)**
 
-Run: `node extension/tools/webview-cdp.mjs logs`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs logs`
 Expected: Console output from the session (AC-18)
 
 - [ ] **Step 15: Test logs --channel (AC-19)**
 
-Run: `node extension/tools/webview-cdp.mjs logs --channel "PPDS"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"`
 Expected: PPDS extension log output (AC-19). If empty, verify the extension's log channel name is correct.
 
 - [ ] **Step 16: Open second panel and test --target (AC-20)**
 
-Run: `node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"`
-Run: `node extension/tools/webview-cdp.mjs wait`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-target0.png --target 0`
-Run: `node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-target1.png --target 1`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs wait`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-target0.png --target 0`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-target1.png --target 1`
 Expected: Two different screenshots showing different panel instances (AC-20)
 
 - [ ] **Step 17: Verify sequential reconnection (AC-21)**
 
 Run 5 commands in quick succession:
 ```bash
-node extension/tools/webview-cdp.mjs connect
-node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-seq1.png
-node extension/tools/webview-cdp.mjs eval "1+1"
-node extension/tools/webview-cdp.mjs click "#execute-btn"
-node extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-seq2.png
+node src/PPDS.Extension/tools/webview-cdp.mjs connect
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-seq1.png
+node src/PPDS.Extension/tools/webview-cdp.mjs eval "1+1"
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot /tmp/webview-cdp-test-seq2.png
 ```
 Expected: All succeed independently (AC-21)
 
 - [ ] **Step 18: Close and verify no orphans (AC-02, AC-22)**
 
-Run: `node extension/tools/webview-cdp.mjs close`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs close`
 Expected: "VS Code closed" message (AC-02)
 Verify: VS Code window closes, session file deleted
 Run: `tasklist | findstr -i "code electron ppds"` (Windows) to verify no orphaned processes (AC-22)
@@ -631,12 +631,12 @@ rm -f /tmp/webview-cdp-test-*.png
 
 - [ ] **Step 20: Run full test suite**
 
-Run: `cd extension && npm run test`
+Run: `cd src/PPDS.Extension && npm run test`
 Expected: All tests pass
 
 - [ ] **Step 21: Commit if any fixes were needed**
 
 ```bash
-git add extension/tools/webview-cdp.mjs extension/tools/webview-cdp.test.mjs .agents/skills/webview-cdp/SKILL.md
+git add src/PPDS.Extension/tools/webview-cdp.mjs src/PPDS.Extension/tools/webview-cdp.test.mjs .agents/skills/webview-cdp/SKILL.md
 git commit -m "fix(tools): address issues found during v2 integration testing"
 ```

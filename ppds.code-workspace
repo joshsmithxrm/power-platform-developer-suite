@@ -6,7 +6,7 @@
     },
     {
       "name": "Extension",
-      "path": "src/extension"
+      "path": "src/PPDS.Extension"
     }
   ],
   "settings": {
@@ -293,7 +293,7 @@
         "label": "extension: compile",
         "type": "npm",
         "script": "compile",
-        "path": "src/extension",
+        "path": "src/PPDS.Extension",
         "problemMatcher": "$tsc",
         "group": "build",
         "presentation": {
@@ -305,7 +305,7 @@
         "label": "extension: watch",
         "type": "npm",
         "script": "watch",
-        "path": "src/extension",
+        "path": "src/PPDS.Extension",
         "problemMatcher": "$tsc-watch",
         "isBackground": true,
         "presentation": {
@@ -317,7 +317,7 @@
         "label": "extension: lint",
         "type": "npm",
         "script": "lint",
-        "path": "src/extension",
+        "path": "src/PPDS.Extension",
         "problemMatcher": "$eslint-stylish",
         "presentation": {
           "reveal": "always",
@@ -328,7 +328,7 @@
         "label": "extension: package",
         "type": "npm",
         "script": "package",
-        "path": "src/extension",
+        "path": "src/PPDS.Extension",
         "presentation": {
           "reveal": "always",
           "panel": "shared"

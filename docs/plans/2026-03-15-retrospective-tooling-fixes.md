@@ -4,7 +4,7 @@
 
 **Goal:** Fix stale/broken tooling surfaced by the March 13-15 retrospective — move extension into src/, clean up memory, fix broken commands, update skills, and create a retrospective skill.
 
-**Architecture:** Phase 1 moves `extension/` to `src/extension/` and updates all path references (must complete first — every other task references these paths). Phase 2 is 8 independent parallel tasks for instructions, commands, skills, and the new retrospective skill.
+**Architecture:** Phase 1 moves `src/PPDS.Extension/` to `src/PPDS.Extension/` and updates all path references (must complete first — every other task references these paths). Phase 2 is 8 independent parallel tasks for instructions, commands, skills, and the new retrospective skill.
 
 **Tech Stack:** Markdown files + one directory move + package.json update. No application code changes. No tests needed (paths are validated by subsequent `/gates` run).
 
@@ -14,13 +14,13 @@
 
 ```
 Phase 1 (sequential — path foundation):
-  extension/                               → src/extension/ (git mv)
-  package.json                             ← Modify: --prefix extension → --prefix src/extension
+  src/PPDS.Extension/                               → src/PPDS.Extension/ (git mv)
+  package.json                             ← Modify: --prefix extension → --prefix src/PPDS.Extension
   CLAUDE.md                                ← Modify: update Testing section paths
   .claude/commands/gates.md                ← Modify: --prefix paths
   .claude/commands/verify.md               ← Modify: tool paths (also rewritten for webview-cdp)
-  .claude/commands/implement.md            ← Modify: extension/ directory references
-  .claude/commands/debug.md                ← Modify: extension/ directory references
+  .claude/commands/implement.md            ← Modify: src/PPDS.Extension/ directory references
+  .claude/commands/debug.md                ← Modify: src/PPDS.Extension/ directory references
   .claude/commands/spec-audit.md           ← Modify: --prefix path
   .claude/skills/webview-cdp/SKILL.md      ← Modify: tool path references
   .claude/skills/webview-panels/SKILL.md   ← No change (paths are relative within extension)
@@ -39,14 +39,14 @@ Phase 2 (parallel — content changes):
 
 ---
 
-## Phase 1: Move extension/ to src/extension/
+## Phase 1: Move src/PPDS.Extension/ to src/PPDS.Extension/
 
 This phase MUST complete before Phase 2 begins. All path references across the repo change.
 
 ### Task 1: Move Directory and Update All References
 
 **Files:**
-- Move: `extension/` → `src/extension/`
+- Move: `src/PPDS.Extension/` → `src/PPDS.Extension/`
 - Modify: `package.json` (19 `--prefix` lines)
 - Modify: `CLAUDE.md` (testing section)
 - Modify: `.claude/commands/gates.md`
@@ -59,37 +59,37 @@ This phase MUST complete before Phase 2 begins. All path references across the r
 - [ ] **Step 1: Move the directory**
 
 ```bash
-git mv extension/ src/extension/
+git mv src/PPDS.Extension/ src/PPDS.Extension/
 ```
 
 - [ ] **Step 2: Update root package.json**
 
-Replace all 19 instances of `--prefix extension` with `--prefix src/extension`:
+Replace all 19 instances of `--prefix extension` with `--prefix src/PPDS.Extension`:
 
 ```json
 {
   "private": true,
   "description": "PPDS workspace — root proxy scripts for extension and TUI",
   "scripts": {
-    "ext:compile": "npm run compile --prefix src/extension",
-    "ext:watch": "npm run watch --prefix src/extension",
-    "ext:package": "npm run package --prefix src/extension",
-    "ext:lint": "npm run lint --prefix src/extension",
-    "ext:test": "npm run test --prefix src/extension",
-    "ext:test:watch": "npm run test:watch --prefix src/extension",
-    "ext:test:e2e": "npm run test:e2e --prefix src/extension",
-    "ext:vsce:package": "npm run vsce:package --prefix src/extension",
-    "ext:local": "npm run local --prefix src/extension",
-    "ext:local:install": "npm run local:install --prefix src/extension",
-    "ext:local:uninstall": "npm run local:uninstall --prefix src/extension",
-    "ext:local:revert": "npm run local:revert --prefix src/extension",
-    "ext:release:test": "npm run release:test --prefix src/extension",
-    "ext:bundle:cli": "npm run bundle:cli --prefix src/extension",
-    "ext:package:win32-x64": "npm run package:win32-x64 --prefix src/extension",
-    "ext:package:linux-x64": "npm run package:linux-x64 --prefix src/extension",
-    "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix src/extension",
-    "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix src/extension",
-    "ext:dev:webview": "npm run dev:webview --prefix src/extension",
+    "ext:compile": "npm run compile --prefix src/PPDS.Extension",
+    "ext:watch": "npm run watch --prefix src/PPDS.Extension",
+    "ext:package": "npm run package --prefix src/PPDS.Extension",
+    "ext:lint": "npm run lint --prefix src/PPDS.Extension",
+    "ext:test": "npm run test --prefix src/PPDS.Extension",
+    "ext:test:watch": "npm run test:watch --prefix src/PPDS.Extension",
+    "ext:test:e2e": "npm run test:e2e --prefix src/PPDS.Extension",
+    "ext:vsce:package": "npm run vsce:package --prefix src/PPDS.Extension",
+    "ext:local": "npm run local --prefix src/PPDS.Extension",
+    "ext:local:install": "npm run local:install --prefix src/PPDS.Extension",
+    "ext:local:uninstall": "npm run local:uninstall --prefix src/PPDS.Extension",
+    "ext:local:revert": "npm run local:revert --prefix src/PPDS.Extension",
+    "ext:release:test": "npm run release:test --prefix src/PPDS.Extension",
+    "ext:bundle:cli": "npm run bundle:cli --prefix src/PPDS.Extension",
+    "ext:package:win32-x64": "npm run package:win32-x64 --prefix src/PPDS.Extension",
+    "ext:package:linux-x64": "npm run package:linux-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix src/PPDS.Extension",
+    "ext:dev:webview": "npm run dev:webview --prefix src/PPDS.Extension",
     "tui:test": "npm test --prefix tests/tui-e2e",
     "tui:test:update": "npm run test:update --prefix tests/tui-e2e",
     "tui:test:headed": "npm run test:headed --prefix tests/tui-e2e"
@@ -109,52 +109,52 @@ These use the root proxy scripts which are already updated, so no change needed.
 Run: `npm run ext:compile`
 Expected: compiles without errors from the new path
 
-- [ ] **Step 4: Update .claude/commands/gates.md — replace `--prefix extension` with `--prefix src/extension`**
+- [ ] **Step 4: Update .claude/commands/gates.md — replace `--prefix extension` with `--prefix src/PPDS.Extension`**
 
 Three replacements in Gates 3, 4, 5:
-- Line 47: `npm run compile --prefix extension` → `npm run compile --prefix src/extension`
-- Line 56: `npm run lint --prefix extension` → `npm run lint --prefix src/extension`
-- Line 65: `npm test --prefix extension` → `npm test --prefix src/extension`
-- Line 76: `npx vitest run -t "{method}" --prefix extension` → `npx vitest run -t "{method}" --prefix src/extension`
+- Line 47: `npm run compile --prefix extension` → `npm run compile --prefix src/PPDS.Extension`
+- Line 56: `npm run lint --prefix extension` → `npm run lint --prefix src/PPDS.Extension`
+- Line 65: `npm test --prefix extension` → `npm test --prefix src/PPDS.Extension`
+- Line 76: `npx vitest run -t "{method}" --prefix extension` → `npx vitest run -t "{method}" --prefix src/PPDS.Extension`
 
-- [ ] **Step 5: Update .claude/commands/verify.md — replace `--prefix extension` with `--prefix src/extension`**
+- [ ] **Step 5: Update .claude/commands/verify.md — replace `--prefix extension` with `--prefix src/PPDS.Extension`**
 
-- Line 40: `npm run test --prefix extension` → `npm run test --prefix src/extension`
+- Line 40: `npm run test --prefix extension` → `npm run test --prefix src/PPDS.Extension`
 
-(The Phase A/B content with `extension/tools/` paths will be fully rewritten in Task 5, so don't update those here.)
+(The Phase A/B content with `src/PPDS.Extension/tools/` paths will be fully rewritten in Task 5, so don't update those here.)
 
-- [ ] **Step 6: Update .claude/commands/implement.md — replace `extension/` with `src/extension/`**
+- [ ] **Step 6: Update .claude/commands/implement.md — replace `src/PPDS.Extension/` with `src/PPDS.Extension/`**
 
-- Line 104: `` `extension/` directory `` → `` `src/extension/` directory ``
+- Line 104: `` `src/PPDS.Extension/` directory `` → `` `src/PPDS.Extension/` directory ``
 
-- [ ] **Step 7: Update .claude/commands/debug.md — replace `extension/` with `src/extension/`**
+- [ ] **Step 7: Update .claude/commands/debug.md — replace `src/PPDS.Extension/` with `src/PPDS.Extension/`**
 
-- Line 20: `extension/` → `src/extension/`
-- Line 63: `cd <root>/extension &&` → `cd <root>/src/extension &&`
-- Line 68: `or from extension/ directly` → `or from src/extension/ directly`
+- Line 20: `src/PPDS.Extension/` → `src/PPDS.Extension/`
+- Line 63: `cd <root>/extension &&` → `cd <root>/src/PPDS.Extension &&`
+- Line 68: `or from src/PPDS.Extension/ directly` → `or from src/PPDS.Extension/ directly`
 
-- [ ] **Step 8: Update .claude/commands/spec-audit.md — replace `--prefix extension` with `--prefix src/extension`**
+- [ ] **Step 8: Update .claude/commands/spec-audit.md — replace `--prefix extension` with `--prefix src/PPDS.Extension`**
 
-- Line 35: `--prefix extension` → `--prefix src/extension`
+- Line 35: `--prefix extension` → `--prefix src/PPDS.Extension`
 
-- [ ] **Step 9: Update .claude/skills/webview-cdp/SKILL.md — replace `extension/tools/` with `src/extension/tools/`**
+- [ ] **Step 9: Update .claude/skills/webview-cdp/SKILL.md — replace `src/PPDS.Extension/tools/` with `src/PPDS.Extension/tools/`**
 
-Replace ALL instances of `extension/tools/webview-cdp.mjs` with `src/extension/tools/webview-cdp.mjs` throughout the file (approximately 30+ occurrences).
+Replace ALL instances of `src/PPDS.Extension/tools/webview-cdp.mjs` with `src/PPDS.Extension/tools/webview-cdp.mjs` throughout the file (approximately 30+ occurrences).
 
 Also replace:
-- `extension/tools/webview-cdp.mjs` in the Setup section description
-- `--prefix extension` in the allowed-tools frontmatter
+- `src/PPDS.Extension/tools/webview-cdp.mjs` in the Setup section description
+- `--prefix src/PPDS.Extension` in the allowed-tools frontmatter
 
 - [ ] **Step 10: Verify the move didn't break anything**
 
 Run: `npm run ext:compile`
-Expected: compiles successfully from `src/extension/`
+Expected: compiles successfully from `src/PPDS.Extension/`
 
 - [ ] **Step 11: Commit**
 
 ```bash
 git add -A
-git commit -m "refactor: move extension/ to src/extension/
+git commit -m "refactor: move src/PPDS.Extension/ to src/PPDS.Extension/
 
 All product code now lives under src/. Update root package.json
 proxy scripts, all .claude/ commands, and webview-cdp skill to
@@ -167,7 +167,7 @@ use the new path."
 
 ## Phase 2: Content Changes (All Independent — Parallel)
 
-All tasks in Phase 2 use the new `src/extension/` paths from Phase 1.
+All tasks in Phase 2 use the new `src/PPDS.Extension/` paths from Phase 1.
 
 ### Task 2: Add Workflow + Gotchas to Repo CLAUDE.md
 
@@ -306,7 +306,7 @@ Replace the extension row:
 
 Old: `| extension | \`acomagu/vscode-as-mcp-server\` installed in VS Code + Playwright MCP for webview |`
 
-New: `| extension | \`src/extension/tools/webview-cdp.mjs\` (uses @playwright/test + @vscode/test-electron, both dev deps) |`
+New: `| extension | \`src/PPDS.Extension/tools/webview-cdp.mjs\` (uses @playwright/test + @vscode/test-electron, both dev deps) |`
 
 - [ ] **Step 2: Replace Section 5 (Extension Mode) entirely**
 
@@ -321,39 +321,39 @@ Launch VS Code with the extension and verify panels load:
 
 ```bash
 # Build and launch (compiles extension + daemon)
-node src/extension/tools/webview-cdp.mjs launch --build
+node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
 
 # Open Data Explorer and wait for webview
-node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
 
 # Screenshot to verify panel rendered correctly
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
 # LOOK at the screenshot — verify layout, no blank areas, controls visible
 
 # Check for runtime errors
-node src/extension/tools/webview-cdp.mjs logs
-node src/extension/tools/webview-cdp.mjs logs --channel "PPDS"
+node src/PPDS.Extension/tools/webview-cdp.mjs logs
+node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
 **Phase B: Interaction Verification (if testing interactive features)**
 
 ```bash
 # Test query execution
-node src/extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
-node src/extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
 
 # Test Solutions Panel
-node src/extension/tools/webview-cdp.mjs command "PPDS: Solutions"
-node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Solutions"
+node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
 ```
 
 **Phase C: Cleanup**
 
 ```bash
-node src/extension/tools/webview-cdp.mjs close
+node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
 See @webview-cdp skill for full command reference and common patterns.
@@ -385,15 +385,15 @@ dev server with webview-cdp Playwright workflow."
 After the `src/PPDS.Auth/` mapping line, add:
 
 ```markdown
-  - `src/extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
-  - `src/extension/` → check `specs/README.md` for extension-related specs
+  - `src/PPDS.Extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
+  - `src/PPDS.Extension/` → check `specs/README.md` for extension-related specs
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add .claude/commands/implement.md
-git commit -m "fix(tools): add src/extension/ to /implement spec-to-code mapping"
+git commit -m "fix(tools): add src/PPDS.Extension/ to /implement spec-to-code mapping"
 ```
 
 ---
@@ -409,7 +409,7 @@ git commit -m "fix(tools): add src/extension/ to /implement spec-to-code mapping
 **Gate 3.5: TypeScript Type Check** (if TS/JS files changed)
 
 ```bash
-npm run typecheck:all --prefix src/extension
+npm run typecheck:all --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors across both host and webview tsconfigs
@@ -532,15 +532,15 @@ cancellation, and panel-scoped environments."
 
 ```bash
 # Check for stale VS Code processes
-node src/extension/tools/webview-cdp.mjs close   # try graceful shutdown first
+node src/PPDS.Extension/tools/webview-cdp.mjs close   # try graceful shutdown first
 
 # If still stuck, the daemon may hold the port
-node src/extension/tools/webview-cdp.mjs logs
+node src/PPDS.Extension/tools/webview-cdp.mjs logs
 ```
 
 Common causes:
 - **Stale process from prior session** — always `close` before `launch`
-- **Build failure** with `--build` — run `npm run compile --prefix src/extension` separately to see full error output
+- **Build failure** with `--build` — run `npm run compile --prefix src/PPDS.Extension` separately to see full error output
 - **Daemon won't start** — check `logs --channel "PPDS"` for startup errors
 
 ### `wait` times out
@@ -562,11 +562,11 @@ Check in order:
 CSS changes require `--build` because esbuild bundles CSS files:
 
 ```bash
-node src/extension/tools/webview-cdp.mjs close
-node src/extension/tools/webview-cdp.mjs launch --build
-node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/css-verify.png
+node src/PPDS.Extension/tools/webview-cdp.mjs close
+node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/css-verify.png
 ```
 
 You cannot hot-reload CSS in VS Code webviews — a full rebuild + relaunch is required.
@@ -581,7 +581,7 @@ allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*)
 
 With:
 ```
-allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*), Bash(npm run * --prefix src/extension)
+allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*), Bash(npm run * --prefix src/PPDS.Extension)
 ```
 
 - [ ] **Step 3: Narrow description in frontmatter**
@@ -731,7 +731,7 @@ memory cross-reference, and synthesis with recommendations."
 
 | Phase | Task | Dependencies | Description |
 |-------|------|-------------|-------------|
-| 1 | 1 | None | Move extension/ to src/extension/ + update all paths |
+| 1 | 1 | None | Move src/PPDS.Extension/ to src/PPDS.Extension/ + update all paths |
 | 2 | 2 | Task 1 | Add Workflow + Gotchas to repo CLAUDE.md |
 | 2 | 3 | None | Add Worktrees to workspace CLAUDE.md |
 | 2 | 4 | None | Clean up memory files |

@@ -140,7 +140,7 @@ git clone https://github.com/joshsmithxrm/ppds-demo.git {base}/ppds-demo
 
 ```bash
 dotnet restore PPDS.sln
-npm install --prefix src/extension
+npm install --prefix src/PPDS.Extension
 npm install --prefix tests/tui-e2e
 ```
 
@@ -166,7 +166,7 @@ Verify: `ppds --version`
 
 **Extension VSIX (Windows only):**
 ```bash
-npm run ext:local --prefix src/extension
+npm run ext:local --prefix src/PPDS.Extension
 ```
 
 Skip on Linux — not meaningful in dev containers.

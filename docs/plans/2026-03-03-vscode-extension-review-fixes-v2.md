@@ -55,7 +55,7 @@
 ## Task 1: Fix Query History resolve/hide Ordering
 
 **Priority:** CRITICAL
-**Files:** `extension/src/commands/queryHistoryCommand.ts`
+**Files:** `src/PPDS.Extension/src/commands/queryHistoryCommand.ts`
 
 **Problem:** `quickPick.hide()` fires `onDidHide` synchronously, which calls `resolve(undefined)` before `resolve(value)`. Both "Run this query" button and Enter-to-select are completely non-functional — they always return `undefined`.
 
@@ -100,7 +100,7 @@ disposables.push(quickPick.onDidAccept(() => {
 ## Task 2: Remove `shell: true` from Daemon Spawn
 
 **Priority:** CRITICAL
-**Files:** `extension/src/daemonClient.ts`
+**Files:** `src/PPDS.Extension/src/daemonClient.ts`
 
 **Problem:** `shell: true` in `spawn()` passes through the system shell. Unnecessary attack surface — if `ppds.daemonPath` becomes user-configurable, this is command injection. `spawn` resolves PATH without a shell.
 
@@ -126,7 +126,7 @@ this.process = spawn('ppds', ['serve'], {
 ## Task 3: Fix Dispose Lifecycle in QueryPanel + WebviewPanelBase
 
 **Priority:** CRITICAL
-**Files:** `extension/src/panels/QueryPanel.ts`, `extension/src/panels/WebviewPanelBase.ts`
+**Files:** `src/PPDS.Extension/src/panels/QueryPanel.ts`, `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`
 
 **Problem:** `onDidDispose` callback never calls `super.dispose()`, so `this.disposables` (holding the `onDidReceiveMessage` subscription) is never cleaned up. The `onDidDispose` registration itself isn't tracked. Every panel close leaks its message listener.
 
@@ -245,7 +245,7 @@ outputDir: 'test-results',
 ## Task 5: Fix listProfiles authSelect for Unnamed Profiles
 
 **Priority:** CRITICAL
-**Files:** `extension/src/commands/profileCommands.ts`
+**Files:** `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Problem:** When `p.name` is null, the QuickPick label becomes `"Profile ${p.index}"` — a display string. Then `authSelect({ name: "Profile 0" })` is called, which fails because that's not a real profile name.
 
@@ -283,7 +283,7 @@ if (selected) {
 ## Task 6: Fix renameProfile for Unnamed Profiles
 
 **Priority:** CRITICAL
-**Files:** `extension/src/commands/profileCommands.ts`
+**Files:** `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Problem:** `renameProfile` passes `index.toString()` as `currentName` for unnamed profiles — the daemon may not recognize a stringified index as a profile identifier.
 
@@ -306,7 +306,7 @@ await daemonClient.profilesRename(name ?? null, newName.trim(), name ? undefined
 ## Task 7: Restructure Virtual Scroll XSS Architecture
 
 **Priority:** CRITICAL
-**Files:** `extension/src/notebooks/notebookResultRenderer.ts`, `extension/src/notebooks/virtualScrollScript.ts`
+**Files:** `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts`, `src/PPDS.Extension/src/notebooks/virtualScrollScript.ts`
 
 **Problem:** `prepareRowData` mixes escaped plain-text with raw HTML anchor tags in the same `string[][]`. The virtual scroll script injects all values via `innerHTML`. Any future unescaped code path becomes XSS. Additionally, `dataverseUrl` in anchor tags could contain `</script>`.
 
@@ -370,7 +370,7 @@ for (let j = 0; j < cols; j++) {
 ## Task 8: Add Daemon Startup Handshake + Race Condition Fix
 
 **Priority:** CRITICAL
-**Files:** `extension/src/daemonClient.ts`
+**Files:** `src/PPDS.Extension/src/daemonClient.ts`
 
 **Problem:** If the daemon process exits immediately after spawn (binary not found, crash on startup), the `exit` handler fires asynchronously while `start()` continues, creating a connection object on a dead pipe. Requests hang until timeout.
 
@@ -427,7 +427,7 @@ this.process.on('exit', (code) => {
 ## Task 9: Wire Cancellation Tokens in completionProvider
 
 **Priority:** CRITICAL
-**Files:** `extension/src/providers/completionProvider.ts`
+**Files:** `src/PPDS.Extension/src/providers/completionProvider.ts`
 
 **Problem:** `CancellationToken` is received but never used. Every keystroke sends a concurrent RPC request with no cancellation or deduplication.
 
@@ -466,7 +466,7 @@ async provideCompletionItems(
 ## Task 10: Wire Cancellation in Notebook Controller
 
 **Priority:** CRITICAL
-**Files:** `extension/src/notebooks/DataverseNotebookController.ts`
+**Files:** `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 
 **Problem:** `AbortController.signal` is never passed to daemon RPC calls. `execution.token` from VS Code notebook API is ignored. Interrupt only takes effect after the query finishes.
 
@@ -620,7 +620,7 @@ private async Task<T> WithActiveProfileAsync<T>(
 ## Task 14: Add Re-Auth Recursion Guard in QueryPanel
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/panels/QueryPanel.ts`
+**Files:** `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1:** Add an `isRetry` parameter to `executeQuery`:
 
@@ -646,7 +646,7 @@ private async executeQuery(sql: string, useTds?: boolean, isRetry = false): Prom
 ## Task 15: Switch to Event Delegation in QueryPanel Results Table
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/panels/QueryPanel.ts`
+**Files:** `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Problem:** `renderTable` attaches click handlers to every `td` and `th` element. For 10K rows x 15 cols = 150K listener registrations.
 
@@ -691,7 +691,7 @@ resultsWrapper.addEventListener('contextmenu', (e) => {
 ## Task 16: Fix Ctrl+C Override Swallowing Native Copy
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/panels/QueryPanel.ts`
+**Files:** `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1:** Only call `preventDefault()` when cells are actually selected, and exclude the filter input:
 
@@ -713,7 +713,7 @@ if ((e.ctrlKey || e.metaKey) && e.key === 'c' &&
 ## Task 17: Fix Environment Configure Button + Pass URL
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/commands/environmentCommands.ts`
+**Files:** `src/PPDS.Extension/src/commands/environmentCommands.ts`
 
 **Step 1:** Store the environment API URL on the QuickPick item and pass it to the configure command:
 
@@ -737,7 +737,7 @@ disposables.push(quickPick.onDidTriggerItemButton(async (e) => {
 ## Task 18: Fix dispose() Not Awaiting connectingPromise
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/daemonClient.ts`
+**Files:** `src/PPDS.Extension/src/daemonClient.ts`
 
 **Step 1:** Add a `_disposed` flag and make cleanup handle in-flight connections:
 
@@ -788,7 +788,7 @@ private async start(): Promise<void> {
 ## Task 19: Add Error Handling in Query History Delete + selectEnvironment
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/commands/queryHistoryCommand.ts`, `extension/src/notebooks/DataverseNotebookController.ts`
+**Files:** `src/PPDS.Extension/src/commands/queryHistoryCommand.ts`, `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 
 **Step 1:** Wrap query history delete in try/catch:
 
@@ -828,7 +828,7 @@ private async selectEnvironment(): Promise<void> {
 ## Task 20: Fix Concurrent Cell Execution AbortController Overwrite
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/notebooks/DataverseNotebookController.ts`
+**Files:** `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 
 **Step 1:** Abort existing execution before starting a new one for the same cell:
 
@@ -850,7 +850,7 @@ this.activeExecutions.set(cellUri, abortController);
 ## Task 21: Add Structural Validation in Notebook Serializer
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/notebooks/DataverseNotebookSerializer.ts`, `extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`
+**Files:** `src/PPDS.Extension/src/notebooks/DataverseNotebookSerializer.ts`, `src/PPDS.Extension/src/notebooks/__tests__/DataverseNotebookSerializer.test.ts`
 
 **Step 1:** Add structural guard before `parseNotebookData`:
 
@@ -902,7 +902,7 @@ it('handles JSON with null cells', async () => {
 ## Task 22: Fix isAuthError Heuristic False Positives
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/utils/errorUtils.ts`
+**Files:** `src/PPDS.Extension/src/utils/errorUtils.ts`
 
 **Step 1:** Use word-boundary regex instead of `includes()`:
 
@@ -930,7 +930,7 @@ export function isAuthError(error: unknown): boolean {
 ## Task 23: Fix FetchXML Sent as sql Parameter in completionProvider
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/providers/completionProvider.ts`
+**Files:** `src/PPDS.Extension/src/providers/completionProvider.ts`
 
 **Step 1:** Check `document.languageId` and skip completions for FetchXML (or pass language context):
 
@@ -968,7 +968,7 @@ Determine which approach is correct by checking the daemon's `QueryCompleteAsync
 ## Task 24: Add `implements vscode.Disposable` to Tree Providers
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/views/profileTreeView.ts`, `extension/src/views/toolsTreeView.ts`
+**Files:** `src/PPDS.Extension/src/views/profileTreeView.ts`, `src/PPDS.Extension/src/views/toolsTreeView.ts`
 
 **Step 1:** Add the interface to both class declarations:
 
@@ -1025,7 +1025,7 @@ private void FireAndForgetHistorySave(
 ## Task 26: Fix TypeScript Types to Match C# DTOs
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/types.ts`
+**Files:** `src/PPDS.Extension/src/types.ts`
 
 **Step 1:** Add missing fields to `SolutionInfoDto`:
 
@@ -1053,7 +1053,7 @@ export interface SolutionInfoDto {
 ## Task 27: Fix Vitest Module Caching in smokeTest
 
 **Priority:** IMPORTANT
-**Files:** `extension/src/__tests__/integration/smokeTest.test.ts`
+**Files:** `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts`
 
 **Step 1:** Add `vi.resetModules()` in `beforeEach` to force fresh imports:
 
@@ -1091,7 +1091,7 @@ extension/.vscode-test/
 ## Task 29: Cleanup — Rename, Extract Helpers, Type Safety
 
 **Priority:** SUGGESTION
-**Files:** `extension/src/panels/getWebviewContent.ts`, `extension/src/commands/queryHistoryCommand.ts`, `extension/src/panels/QueryPanel.ts`, `extension/src/commands/notebookCommands.ts`
+**Files:** `src/PPDS.Extension/src/panels/getWebviewContent.ts`, `src/PPDS.Extension/src/commands/queryHistoryCommand.ts`, `src/PPDS.Extension/src/panels/QueryPanel.ts`, `src/PPDS.Extension/src/commands/notebookCommands.ts`
 
 **Step 1:** Rename `getWebviewContent.ts` to `webviewUtils.ts` (or move `getNonce()` into `WebviewPanelBase.ts` as a `protected static` method). Update imports.
 
@@ -1136,7 +1136,7 @@ if (e.button === RUN_BUTTON) { ... }
 ## Task 30: Daemon Client Startup Timeout + Reduce Verbose Logging
 
 **Priority:** SUGGESTION
-**Files:** `extension/src/daemonClient.ts`
+**Files:** `src/PPDS.Extension/src/daemonClient.ts`
 
 **Step 1:** Add a configurable startup timeout (default 30 seconds):
 
@@ -1177,7 +1177,7 @@ private async sendRequestQuiet<T>(method: string, params: object): Promise<T> {
 ## Task 31: Fix Test Mock Data to Match TypeScript Interfaces
 
 **Priority:** SUGGESTION
-**Files:** `extension/src/__tests__/daemonClient.test.ts`
+**Files:** `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`
 
 **Step 1:** Update mock data objects to include all required fields from their respective TypeScript interfaces. Use `satisfies` operator where possible:
 
@@ -1204,8 +1204,8 @@ const mockResult = {
 
 **Priority:** SUGGESTION
 **Files:**
-- Create: `extension/src/__tests__/commands/queryHistoryCommand.test.ts`
-- Create: `extension/src/__tests__/views/profileTreeView.test.ts`
+- Create: `src/PPDS.Extension/src/__tests__/commands/queryHistoryCommand.test.ts`
+- Create: `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts`
 - Create: `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerDtoTests.cs`
 
 **Step 1:** Add unit tests for `queryHistoryCommand.ts` covering:

@@ -16,8 +16,8 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `extension/src/panels/QueryPanel.ts` | All webview changes: CSS, selection state, mouse/keyboard handlers, copy logic, context menu, status bar |
-| Create | `extension/src/__tests__/panels/querySelectionUtils.test.ts` | Unit tests for pure-function utilities (getSelectionRect, sanitizeValue, buildTsv) |
+| Modify | `src/PPDS.Extension/src/panels/QueryPanel.ts` | All webview changes: CSS, selection state, mouse/keyboard handlers, copy logic, context menu, status bar |
+| Create | `src/PPDS.Extension/src/__tests__/panels/querySelectionUtils.test.ts` | Unit tests for pure-function utilities (getSelectionRect, sanitizeValue, buildTsv) |
 
 ---
 
@@ -26,7 +26,7 @@
 ### Task 1: Selection CSS + State Variables + getSelectionRect
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts` (CSS block ~lines 356-388, JS state ~line 458)
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts` (CSS block ~lines 356-388, JS state ~line 458)
 
 - [ ] **Step 1: Add selection CSS styles**
 
@@ -168,20 +168,20 @@ In `handleAppendResults`, add `clearSelection();` before `renderTable(allRows);`
 
 - [ ] **Step 7: Verify compilation**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "refactor(extension): replace cell Set with anchor/focus selection state and CSS"
 ```
 
 ### Task 2: Click + Shift+click + updateSelectionVisuals
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 - [ ] **Step 1: Implement updateSelectionVisuals**
 
@@ -309,20 +309,20 @@ Delete the entire `updateCellSelection()` function (lines ~727-731) — it's rep
 
 - [ ] **Step 4: Verify compilation**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): add anchor/focus click, Shift+click, and drag selection"
 ```
 
 ### Task 3: Keyboard Shortcuts (Ctrl+A, Escape, Ctrl+C, Ctrl+Shift+C)
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 - [ ] **Step 1: Rewrite keyboard handler**
 
@@ -451,13 +451,13 @@ Replace the old `copySelectedCells` function (lines ~734-768) with:
 
 - [ ] **Step 3: Verify compilation**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): add Ctrl+A, Escape, smart copy with Ctrl+Shift+C header toggle"
 ```
 
@@ -468,7 +468,7 @@ git commit -m "feat(extension): add Ctrl+A, Escape, smart copy with Ctrl+Shift+C
 ### Task 4: Context Menu Overhaul
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 - [ ] **Step 1: Replace context menu**
 
@@ -582,26 +582,26 @@ Replace the entire context menu block (lines ~771-837) with:
 
 - [ ] **Step 2: Verify compilation**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): replace context menu with smart copy options and shortcuts"
 ```
 
 ### Task 5: Unit Tests for Pure Functions
 
 **Files:**
-- Create: `extension/src/__tests__/panels/querySelectionUtils.test.ts`
+- Create: `src/PPDS.Extension/src/__tests__/panels/querySelectionUtils.test.ts`
 
 Note: Since the pure functions are embedded in the webview IIFE, we can't import them directly. To make them testable, extract them into a separate module.
 
 - [ ] **Step 1: Create selection utilities module**
 
-Create `extension/src/panels/querySelectionUtils.ts`:
+Create `src/PPDS.Extension/src/panels/querySelectionUtils.ts`:
 
 ```typescript
 /**
@@ -669,7 +669,7 @@ export function buildTsv(
 
 - [ ] **Step 2: Write tests**
 
-Create `extension/src/__tests__/panels/querySelectionUtils.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/panels/querySelectionUtils.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -781,13 +781,13 @@ describe('buildTsv', () => {
 
 - [ ] **Step 3: Run tests**
 
-Run: `cd extension && npx vitest run src/__tests__/panels/querySelectionUtils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/panels/querySelectionUtils.test.ts`
 Expected: All PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/src/panels/querySelectionUtils.ts extension/src/__tests__/panels/querySelectionUtils.test.ts
+git add src/PPDS.Extension/src/panels/querySelectionUtils.ts src/PPDS.Extension/src/__tests__/panels/querySelectionUtils.test.ts
 git commit -m "feat(extension): extract and test selection utility functions"
 ```
 
@@ -799,12 +799,12 @@ git commit -m "feat(extension): extract and test selection utility functions"
 
 - [ ] **Step 1: Run all extension tests**
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All new tests PASS, pre-existing failures unchanged
 
 - [ ] **Step 2: Compile extension**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 3: Cleanup any dead code**

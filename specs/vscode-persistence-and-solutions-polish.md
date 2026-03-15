@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-14
-**Code:** [extension/src/](../extension/src/)
+**Code:** [src/PPDS.Extension/src/](../src/PPDS.Extension/src/)
 
 ---
 

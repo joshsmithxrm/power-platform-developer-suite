@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-13
-**Code:** [src/extension/src/](../src/extension/src/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
+**Code:** [src/PPDS.Extension/src/](../src/PPDS.Extension/src/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
 
 ---
 
@@ -366,7 +366,7 @@ All methods: if `environmentUrl` is omitted or null, behavior is identical to cu
 
 ### Adding a New Environment-Scoped Panel
 
-1. **Create panel class** extending `WebviewPanelBase` in `extension/src/panels/`
+1. **Create panel class** extending `WebviewPanelBase` in `src/PPDS.Extension/src/panels/`
 2. **Include environment picker** using the shared helper function in the webview HTML header
 3. **Handle `environmentChanged` message** from webview — update panel's `environmentUrl` instance variable
 4. **Pass `environmentUrl`** on all daemon RPC calls from the panel

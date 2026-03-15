@@ -6,10 +6,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/PPDS.Extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/src/extension/dist/**/*.js"
+        "${workspaceFolder}/src/PPDS.Extension/dist/**/*.js"
       ],
       "preLaunchTask": "Build All"
     },
@@ -18,10 +18,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/PPDS.Extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/src/extension/dist/**/*.js"
+        "${workspaceFolder}/src/PPDS.Extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: watch"
     },
@@ -30,10 +30,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/PPDS.Extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/src/extension/dist/**/*.js"
+        "${workspaceFolder}/src/PPDS.Extension/dist/**/*.js"
       ]
     },
     {
@@ -41,11 +41,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/extension",
-        "--extensionTestsPath=${workspaceFolder}/src/extension/dist/test/suite/index"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/PPDS.Extension",
+        "--extensionTestsPath=${workspaceFolder}/src/PPDS.Extension/dist/test/suite/index"
       ],
       "outFiles": [
-        "${workspaceFolder}/src/extension/dist/**/*.js"
+        "${workspaceFolder}/src/PPDS.Extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
     },
@@ -54,11 +54,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/extension",
+        "--extensionDevelopmentPath=${workspaceFolder}/src/PPDS.Extension",
         "${input:folderToOpen}"
       ],
       "outFiles": [
-        "${workspaceFolder}/src/extension/dist/**/*.js"
+        "${workspaceFolder}/src/PPDS.Extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
     }

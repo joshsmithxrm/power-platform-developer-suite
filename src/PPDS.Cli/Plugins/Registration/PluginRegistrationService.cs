@@ -51,7 +51,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <summary>
     /// Default image property names per SDK message.
     /// This is static knowledge matching Plugin Registration Tool behavior.
-    /// Source: src/extension/src/features/pluginRegistration/domain/services/MessageMetadataService.ts
+    /// Source: src/PPDS.Extension/src/features/pluginRegistration/domain/services/MessageMetadataService.ts
     /// </summary>
     private static readonly Dictionary<string, string> DefaultImagePropertyNames =
         new(StringComparer.OrdinalIgnoreCase)

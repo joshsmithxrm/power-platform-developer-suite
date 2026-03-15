@@ -18,7 +18,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 |------|----------------------|
 | cli | None (uses Bash tool directly) |
 | tui | Not yet available — TUI snapshot tests only (`npm run tui:test`) |
-| extension | `src/extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
+| extension | `src/PPDS.Extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
 | mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
 
 ## Process
@@ -28,7 +28,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 Based on $ARGUMENTS or recent changes:
 - `src/PPDS.Cli/Commands/` → CLI mode
 - `src/PPDS.Cli/Tui/` → TUI mode
-- `src/extension/` → Extension mode
+- `src/PPDS.Extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
 - No clear match → Ask user
 
@@ -37,7 +37,7 @@ Based on $ARGUMENTS or recent changes:
 Always run the relevant unit tests before interactive verification. If tests fail, fix them first — don't waste MCP verification cycles on broken code.
 
 - CLI/TUI: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-- Extension: `npm run test --prefix src/extension`
+- Extension: `npm run test --prefix src/PPDS.Extension`
 - MCP: `dotnet test --filter "FullyQualifiedName~Mcp" -v q`
 
 ### 3. CLI Mode
@@ -75,39 +75,39 @@ Launch VS Code with the extension and verify panels load:
 
 ```bash
 # Build and launch (compiles extension + daemon)
-node src/extension/tools/webview-cdp.mjs launch --build
+node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
 
 # Open Data Explorer and wait for webview
-node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
 
 # Screenshot to verify panel rendered correctly
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
 # LOOK at the screenshot — verify layout, no blank areas, controls visible
 
 # Check for runtime errors
-node src/extension/tools/webview-cdp.mjs logs
-node src/extension/tools/webview-cdp.mjs logs --channel "PPDS"
+node src/PPDS.Extension/tools/webview-cdp.mjs logs
+node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
 **Phase B: Interaction Verification (if testing interactive features)**
 
 ```bash
 # Test query execution
-node src/extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
-node src/extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
 
 # Test Solutions Panel
-node src/extension/tools/webview-cdp.mjs command "PPDS: Solutions"
-node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Solutions"
+node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
 ```
 
 **Phase C: Cleanup**
 
 ```bash
-node src/extension/tools/webview-cdp.mjs close
+node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
 See @webview-cdp skill for full command reference and common patterns.

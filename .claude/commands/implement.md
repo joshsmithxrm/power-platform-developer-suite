@@ -39,8 +39,8 @@ Before dispatching any agents, load the specification context that will be injec
   - `src/PPDS.Mcp/` → `specs/mcp.md`
   - `src/PPDS.Migration/` → `specs/migration.md`
   - `src/PPDS.Auth/` → `specs/authentication.md`
-  - `src/extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
-  - `src/extension/` → check `specs/README.md` for extension-related specs
+  - `src/PPDS.Extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
+  - `src/PPDS.Extension/` → check `specs/README.md` for extension-related specs
 - Always include `specs/architecture.md`
 - Read each relevant spec and extract the `## Acceptance Criteria` section
 
@@ -103,7 +103,7 @@ For EACH phase in the plan, repeat this cycle:
 - If specs with ACs are relevant to this phase, check: do the AC test methods pass?
   Run: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
   for each AC referenced by this phase's tasks
-- If the phase touches extension code (`src/extension/` directory):
+- If the phase touches extension code (`src/PPDS.Extension/` directory):
   Invoke `/verify extension` to check daemon status, tree views, and panel state.
 - If the phase touches TUI code (`src/PPDS.Cli/Tui/`):
   Invoke `/verify tui` to check TUI rendering.

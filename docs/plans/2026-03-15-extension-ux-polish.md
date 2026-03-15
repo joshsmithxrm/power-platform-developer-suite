@@ -19,7 +19,7 @@ These are small, independent, low-risk changes.
 ### Task 1: Data Explorer — Editor/Results Visual Contrast
 
 **Files:**
-- Modify: `extension/src/panels/styles/query-panel.css:5-22`
+- Modify: `src/PPDS.Extension/src/panels/styles/query-panel.css:5-22`
 
 Currently the editor and results are separated by a 1px border only. The editor blends into the results. The resize handle is invisible.
 
@@ -62,7 +62,7 @@ In `query-panel.css`, update the `.editor-container` and `.editor-wrapper` secti
 
 - [ ] **Step 3: Commit**
 ```bash
-git add extension/src/panels/styles/query-panel.css
+git add src/PPDS.Extension/src/panels/styles/query-panel.css
 git commit -m "fix(extension): improve editor/results visual contrast in Data Explorer"
 ```
 
@@ -71,7 +71,7 @@ git commit -m "fix(extension): improve editor/results visual contrast in Data Ex
 ### Task 2: Skip JSON Headers Prompt (Extension + TUI)
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts:427-455` (extension export flow)
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts:427-455` (extension export flow)
 - Modify: `src/PPDS.Cli/Tui/Dialogs/ExportDialog.cs:67-97` (TUI export dialog)
 
 The `includeHeaders` parameter is completely ignored in the JSON serialization path (`RpcMethodHandler.cs:1376-1393`). The prompt is misleading.
@@ -129,7 +129,7 @@ dotnet test PPDS.sln --filter "Category!=Integration" -v q
 
 - [ ] **Step 4: Commit**
 ```bash
-git add extension/src/panels/QueryPanel.ts src/PPDS.Cli/Tui/Dialogs/ExportDialog.cs
+git add src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Cli/Tui/Dialogs/ExportDialog.cs
 git commit -m "fix(export): skip misleading headers prompt for JSON export"
 ```
 
@@ -138,9 +138,9 @@ git commit -m "fix(export): skip misleading headers prompt for JSON export"
 ### Task 3: Wire Up FetchXML Toggle Conversion in Data Explorer
 
 **Files:**
-- Modify: `extension/src/panels/webview/query-panel.ts:294-300` (toggle click handler)
-- Modify: `extension/src/panels/webview/shared/message-types.ts:13-31` (add convertQuery message)
-- Modify: `extension/src/panels/QueryPanel.ts:55-200` (add convertQuery handler in constructor)
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts:294-300` (toggle click handler)
+- Modify: `src/PPDS.Extension/src/panels/webview/shared/message-types.ts:13-31` (add convertQuery message)
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts:55-200` (add convertQuery handler in constructor)
 
 Currently the Data Explorer's SQL/FetchXML toggle only changes the Monaco syntax highlighting mode — no transpilation. Notebooks wire up actual conversion via `daemon.queryExplain()` (SQL→FetchXML) and `FetchXmlToSqlTranspiler` (FetchXML→SQL). Port this logic.
 
@@ -259,7 +259,7 @@ npm run ext:test
 
 - [ ] **Step 6: Commit**
 ```bash
-git add extension/src/panels/QueryPanel.ts extension/src/panels/webview/query-panel.ts extension/src/panels/webview/shared/message-types.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Extension/src/panels/webview/query-panel.ts src/PPDS.Extension/src/panels/webview/shared/message-types.ts
 git commit -m "feat(extension): wire up SQL/FetchXML conversion in Data Explorer toggle"
 ```
 
@@ -268,7 +268,7 @@ git commit -m "feat(extension): wire up SQL/FetchXML conversion in Data Explorer
 ### Task 4: Move Filter Bar Above Results Table
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts:570-595` (HTML template)
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts:570-595` (HTML template)
 
 The filter button is an icon-only button at the far right of the toolbar. It's not discoverable. Move the filter bar to sit between the editor and results, and remove the toolbar filter button.
 
@@ -327,7 +327,7 @@ npm run ext:test
 
 - [ ] **Step 4: Commit**
 ```bash
-git add extension/src/panels/QueryPanel.ts extension/src/panels/webview/query-panel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Extension/src/panels/webview/query-panel.ts
 git commit -m "fix(extension): move filter bar above results table for discoverability"
 ```
 
@@ -336,7 +336,7 @@ git commit -m "fix(extension): move filter bar above results table for discovera
 ### Task 5: Fix EXPLAIN Casing in Overflow Menu
 
 **Files:**
-- Modify: `extension/src/panels/webview/query-panel.ts:494`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts:494`
 
 - [ ] **Step 1: Change label to title case**
 
@@ -351,7 +351,7 @@ to:
 
 - [ ] **Step 2: Commit**
 ```bash
-git add extension/src/panels/webview/query-panel.ts
+git add src/PPDS.Extension/src/panels/webview/query-panel.ts
 git commit -m "fix(extension): use title case for Explain Query menu item"
 ```
 
@@ -495,15 +495,15 @@ git commit -m "feat(solutions): resolve custom component types via entity Object
 ### Task 7: Extract Shared FilterBar Utility
 
 **Files:**
-- Create: `extension/src/panels/webview/shared/filter-bar.ts`
-- Modify: `extension/src/panels/webview/query-panel.ts:686-718` (use shared filter)
-- Modify: `extension/src/panels/webview/solutions-panel.ts:44-85` (use shared filter)
+- Create: `src/PPDS.Extension/src/panels/webview/shared/filter-bar.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts:686-718` (use shared filter)
+- Modify: `src/PPDS.Extension/src/panels/webview/solutions-panel.ts:44-85` (use shared filter)
 
 Both panels implement client-side text filtering independently. Extract to shared utility.
 
 - [ ] **Step 1: Create shared filter-bar utility**
 
-Create `extension/src/panels/webview/shared/filter-bar.ts`:
+Create `src/PPDS.Extension/src/panels/webview/shared/filter-bar.ts`:
 
 ```typescript
 /**
@@ -622,7 +622,7 @@ npm run ext:test
 
 - [ ] **Step 5: Commit**
 ```bash
-git add extension/src/panels/webview/shared/filter-bar.ts extension/src/panels/webview/query-panel.ts extension/src/panels/webview/solutions-panel.ts
+git add src/PPDS.Extension/src/panels/webview/shared/filter-bar.ts src/PPDS.Extension/src/panels/webview/query-panel.ts src/PPDS.Extension/src/panels/webview/solutions-panel.ts
 git commit -m "refactor(extension): extract shared FilterBar utility for webview panels"
 ```
 
@@ -631,8 +631,8 @@ git commit -m "refactor(extension): extract shared FilterBar utility for webview
 ### Task 8: Gate Debug Commands Behind Development Mode
 
 **Files:**
-- Modify: `extension/package.json:248-266` (add enablement clause)
-- Modify: `extension/src/extension.ts:331-335` (set context key)
+- Modify: `src/PPDS.Extension/package.json:248-266` (add enablement clause)
+- Modify: `src/PPDS.Extension/src/extension.ts:331-335` (set context key)
 
 The legacy extension used `context.extensionMode === ExtensionMode.Development` + `enablement` in package.json. Port this pattern.
 
@@ -684,7 +684,7 @@ npm run ext:test
 
 - [ ] **Step 4: Commit**
 ```bash
-git add extension/package.json extension/src/extension.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts
 git commit -m "fix(extension): gate debug commands behind development mode"
 ```
 
@@ -695,8 +695,8 @@ git commit -m "fix(extension): gate debug commands behind development mode"
 ### Task 9: Add "Open Documentation" Command
 
 **Files:**
-- Modify: `extension/package.json` (add command entry)
-- Modify: `extension/src/commands/browserCommands.ts` (add handler)
+- Modify: `src/PPDS.Extension/package.json` (add command entry)
+- Modify: `src/PPDS.Extension/src/commands/browserCommands.ts` (add handler)
 
 - [ ] **Step 1: Register command in package.json**
 
@@ -727,7 +727,7 @@ Note: Replace `https://ppds.dev` with the actual ppds-docs URL if different.
 
 - [ ] **Step 3: Commit**
 ```bash
-git add extension/package.json extension/src/commands/browserCommands.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/commands/browserCommands.ts
 git commit -m "feat(extension): add Open Documentation command"
 ```
 
@@ -736,8 +736,8 @@ git commit -m "feat(extension): add Open Documentation command"
 ### Task 10: Consolidate Maker URL Construction in Solutions Panel
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts:98-112` (use shared helper)
-- Modify: `extension/src/commands/browserCommands.ts:8-13` (export helper)
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts:98-112` (use shared helper)
+- Modify: `src/PPDS.Extension/src/commands/browserCommands.ts:8-13` (export helper)
 
 The Solutions panel reimplements Maker URL building. `browserCommands.ts` already has `buildMakerUrl()`.
 
@@ -778,7 +778,7 @@ npm run ext:test
 
 - [ ] **Step 4: Commit**
 ```bash
-git add extension/src/panels/SolutionsPanel.ts extension/src/commands/browserCommands.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts src/PPDS.Extension/src/commands/browserCommands.ts
 git commit -m "refactor(extension): consolidate Maker URL construction via shared helper"
 ```
 

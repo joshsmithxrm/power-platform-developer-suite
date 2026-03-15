@@ -18,10 +18,10 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `extension/src/views/profileTreeView.ts` | Add `id` to ProfileTreeItem, add sort logic to getProfiles(), export `getProfileId()` helper |
-| Modify | `extension/src/extension.ts` | Register moveProfileUp/moveProfileDown commands, pass `globalState` to provider |
-| Modify | `extension/package.json` | Add command definitions + context menu entries for move up/down |
-| Modify | `extension/src/__tests__/views/profileTreeView.test.ts` | Tests for id stability, sort ordering |
+| Modify | `src/PPDS.Extension/src/views/profileTreeView.ts` | Add `id` to ProfileTreeItem, add sort logic to getProfiles(), export `getProfileId()` helper |
+| Modify | `src/PPDS.Extension/src/extension.ts` | Register moveProfileUp/moveProfileDown commands, pass `globalState` to provider |
+| Modify | `src/PPDS.Extension/package.json` | Add command definitions + context menu entries for move up/down |
+| Modify | `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts` | Tests for id stability, sort ordering |
 
 ### Workstream 2: Component Type Resolution (Daemon)
 
@@ -36,7 +36,7 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `extension/src/panels/SolutionsPanel.ts` | Pass date fields, managed toggle persistence, search filter, detail card HTML/CSS/JS |
+| Modify | `src/PPDS.Extension/src/panels/SolutionsPanel.ts` | Pass date fields, managed toggle persistence, search filter, detail card HTML/CSS/JS |
 
 ---
 
@@ -45,12 +45,12 @@
 ### Task 1: ProfileTreeItem Stable ID
 
 **Files:**
-- Modify: `extension/src/views/profileTreeView.ts:11-33`
-- Test: `extension/src/__tests__/views/profileTreeView.test.ts`
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts:11-33`
+- Test: `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts`
 
 - [ ] **Step 1: Write failing tests for stable id**
 
-Add to `extension/src/__tests__/views/profileTreeView.test.ts` inside the `ProfileTreeItem` describe block:
+Add to `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts` inside the `ProfileTreeItem` describe block:
 
 ```typescript
 it('sets stable id based on identity, authMethod, and cloud', () => {
@@ -79,12 +79,12 @@ it('produces different ids for different auth methods', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: FAIL — `item.id` is `undefined`
 
 - [ ] **Step 3: Add id to ProfileTreeItem**
 
-In `extension/src/views/profileTreeView.ts`, add one line after the `super()` call (line 16):
+In `src/PPDS.Extension/src/views/profileTreeView.ts`, add one line after the `super()` call (line 16):
 
 ```typescript
 export class ProfileTreeItem extends vscode.TreeItem {
@@ -113,26 +113,26 @@ TreeItem: class TreeItem {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/src/views/profileTreeView.ts extension/src/__tests__/views/profileTreeView.test.ts
+git add src/PPDS.Extension/src/views/profileTreeView.ts src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts
 git commit -m "feat(extension): add stable id to ProfileTreeItem for expansion persistence"
 ```
 
 ### Task 2: Profile Custom Ordering — globalState Integration
 
 **Files:**
-- Modify: `extension/src/views/profileTreeView.ts:106-152`
-- Modify: `extension/src/extension.ts:83-89`
-- Test: `extension/src/__tests__/views/profileTreeView.test.ts`
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts:106-152`
+- Modify: `src/PPDS.Extension/src/extension.ts:83-89`
+- Test: `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts`
 
 - [ ] **Step 1: Write failing tests for sort ordering**
 
-Add to `extension/src/__tests__/views/profileTreeView.test.ts` in the `ProfileTreeDataProvider` describe block:
+Add to `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts` in the `ProfileTreeDataProvider` describe block:
 
 ```typescript
 describe('profile ordering', () => {
@@ -180,12 +180,12 @@ describe('profile ordering', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: FAIL — `ProfileTreeDataProvider` constructor doesn't accept `globalState`
 
 - [ ] **Step 3: Add globalState parameter and sort logic to ProfileTreeDataProvider**
 
-In `extension/src/views/profileTreeView.ts`, modify the constructor and `getProfiles()`:
+In `src/PPDS.Extension/src/views/profileTreeView.ts`, modify the constructor and `getProfiles()`:
 
 ```typescript
 // Export helper so commands can compute profile IDs
@@ -229,26 +229,26 @@ In `getProfiles()`, after `result.profiles.map(...)` (line 144), add sorting:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: All PASS (existing tests still pass since globalState is optional)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/src/views/profileTreeView.ts extension/src/__tests__/views/profileTreeView.test.ts
+git add src/PPDS.Extension/src/views/profileTreeView.ts src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts
 git commit -m "feat(extension): add profile sort ordering via globalState"
 ```
 
 ### Task 3: Move Up/Down Commands + Tests + package.json
 
 **Files:**
-- Modify: `extension/src/extension.ts`
-- Modify: `extension/package.json`
-- Test: `extension/src/__tests__/views/profileTreeView.test.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/package.json`
+- Test: `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts`
 
 - [ ] **Step 1: Write failing tests for move boundary conditions**
 
-Add to `extension/src/__tests__/views/profileTreeView.test.ts` in the `profile ordering` describe block:
+Add to `src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts` in the `profile ordering` describe block:
 
 ```typescript
 it('move up on first profile is a no-op (order unchanged)', async () => {
@@ -294,12 +294,12 @@ Note: The actual move up/down swap logic lives in the command handlers in `exten
 
 - [ ] **Step 2: Run tests to verify they pass** (these validate sort ordering, the move boundary guards are in the command handler code)
 
-Run: `cd extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: All PASS
 
 - [ ] **Step 3: Add command definitions to package.json**
 
-In `extension/package.json`, add to the `"commands"` array:
+In `src/PPDS.Extension/package.json`, add to the `"commands"` array:
 
 ```json
 {
@@ -331,7 +331,7 @@ Add to `"menus"."view/item/context"` array, after the existing profile entries (
 
 - [ ] **Step 2: Register commands in extension.ts**
 
-In `extension/src/extension.ts`, update the `ProfileTreeDataProvider` instantiation to pass `globalState`:
+In `src/PPDS.Extension/src/extension.ts`, update the `ProfileTreeDataProvider` instantiation to pass `globalState`:
 
 ```typescript
 const profileTreeProvider = new ProfileTreeDataProvider(client, logChannel, context.globalState);
@@ -405,13 +405,13 @@ Register the move commands (add after the profile tree view setup, around line 8
 
 - [ ] **Step 3: Verify extension compiles**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/src/extension.ts extension/package.json extension/src/views/profileTreeView.ts
+git add src/PPDS.Extension/src/extension.ts src/PPDS.Extension/package.json src/PPDS.Extension/src/views/profileTreeView.ts
 git commit -m "feat(extension): add move profile up/down commands with globalState persistence"
 ```
 
@@ -711,7 +711,7 @@ git commit -m "feat(dataverse): resolve component types via IMetadataService wit
 ### Task 6: Pass Date Fields to Webview + Detail Card
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts:162-174` (loadSolutions message) and `437-486` (renderSolutions)
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts:162-174` (loadSolutions message) and `437-486` (renderSolutions)
 
 - [ ] **Step 1: Add date fields to the solutionsLoaded message**
 
@@ -795,20 +795,20 @@ Add a `formatDate` utility function to the webview JS:
 
 - [ ] **Step 4: Verify extension compiles**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat(extension): add solution detail card with dates and description"
 ```
 
 ### Task 7: Search/Filter in Solutions Panel
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
 
 - [ ] **Step 1: Add search input to toolbar HTML**
 
@@ -889,21 +889,21 @@ Update `renderSolutions()` to clear the filter input on reload:
 
 - [ ] **Step 3: Verify extension compiles**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat(extension): add search/filter to solutions panel toolbar"
 ```
 
 ### Task 8: Managed Toggle Persistence
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts`
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 - [ ] **Step 1: Add globalState to SolutionsPanel**
 
@@ -961,7 +961,7 @@ Add a handler in the webview JS message handler:
 
 - [ ] **Step 4: Update all callers to pass globalState**
 
-In `extension/src/extension.ts`, update all `SolutionsPanel.show()` calls to pass `context.globalState`:
+In `src/PPDS.Extension/src/extension.ts`, update all `SolutionsPanel.show()` calls to pass `context.globalState`:
 
 ```typescript
 // ppds.openSolutions command
@@ -973,13 +973,13 @@ SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayNa
 
 - [ ] **Step 5: Verify extension compiles**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts extension/src/extension.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts src/PPDS.Extension/src/extension.ts
 git commit -m "feat(extension): persist managed toggle state via globalState"
 ```
 
@@ -991,7 +991,7 @@ git commit -m "feat(extension): persist managed toggle state via globalState"
 
 - [ ] **Step 1: Run all extension tests**
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All PASS
 
 - [ ] **Step 2: Run all C# tests**
@@ -1001,7 +1001,7 @@ Expected: All PASS
 
 - [ ] **Step 3: Compile extension**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 4: Build daemon**

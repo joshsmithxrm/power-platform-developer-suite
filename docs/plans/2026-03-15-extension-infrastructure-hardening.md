@@ -15,11 +15,11 @@
 ### Task 0: Remove Dead Code & Unnecessary Exports
 
 **Files:**
-- Modify: `extension/src/types.ts` (delete lines 187-234)
-- Modify: `extension/src/views/toolsTreeView.ts` (remove `export` from `ToolTreeItem`)
-- Modify: `extension/src/views/profileTreeView.ts` (remove `export` from `ProfileTreeItem`, `ManualUrlTreeItem`)
-- Modify: `extension/src/notebooks/notebookResultRenderer.ts` (remove `export` from `CellData`)
-- Modify: `extension/src/panels/environmentPicker.ts` (remove `export` from `EnvironmentOption`)
+- Modify: `src/PPDS.Extension/src/types.ts` (delete lines 187-234)
+- Modify: `src/PPDS.Extension/src/views/toolsTreeView.ts` (remove `export` from `ToolTreeItem`)
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts` (remove `export` from `ProfileTreeItem`, `ManualUrlTreeItem`)
+- Modify: `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts` (remove `export` from `CellData`)
+- Modify: `src/PPDS.Extension/src/panels/environmentPicker.ts` (remove `export` from `EnvironmentOption`)
 
 - [ ] **Step 1: Delete unused plugin interfaces from types.ts**
 
@@ -35,13 +35,13 @@ In each file, change `export class/interface/type` to just `class/interface/type
 
 - [ ] **Step 3: Verify build and tests**
 
-Run: `cd extension && node esbuild.js && npx vitest run`
+Run: `cd src/PPDS.Extension && node esbuild.js && npx vitest run`
 Expected: PASS — these symbols are not imported externally.
 
 - [ ] **Step 4: Commit**
 
 ```
-git add extension/src/types.ts extension/src/views/ extension/src/notebooks/notebookResultRenderer.ts extension/src/panels/environmentPicker.ts
+git add src/PPDS.Extension/src/types.ts src/PPDS.Extension/src/views/ src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts src/PPDS.Extension/src/panels/environmentPicker.ts
 git commit -m "chore(extension): remove dead plugin interfaces and unnecessary exports"
 ```
 
@@ -52,11 +52,11 @@ git commit -m "chore(extension): remove dead plugin interfaces and unnecessary e
 ### Task 1: Infrastructure Setup
 
 **Files:**
-- Create: `extension/tsconfig.webview.json`
-- Create: `extension/src/panels/styles/` (directory)
-- Create: `extension/src/panels/webview/` (directory)
-- Create: `extension/src/panels/webview/shared/` (directory)
-- Create: `extension/src/panels/webview/shared/assert-never.ts`
+- Create: `src/PPDS.Extension/tsconfig.webview.json`
+- Create: `src/PPDS.Extension/src/panels/styles/` (directory)
+- Create: `src/PPDS.Extension/src/panels/webview/` (directory)
+- Create: `src/PPDS.Extension/src/panels/webview/shared/` (directory)
+- Create: `src/PPDS.Extension/src/panels/webview/shared/assert-never.ts`
 
 - [ ] **Step 1: Create tsconfig.webview.json**
 
@@ -86,7 +86,7 @@ This tsconfig targets browser environment for webview scripts. Separate from the
 
 - [ ] **Step 2: Create assertNever utility**
 
-Create `extension/src/panels/webview/shared/assert-never.ts`:
+Create `src/PPDS.Extension/src/panels/webview/shared/assert-never.ts`:
 
 ```typescript
 /**
@@ -107,7 +107,7 @@ mkdir -p src/panels/styles
 
 - [ ] **Step 4: Add type-check script to package.json**
 
-Add these scripts to `extension/package.json`:
+Add these scripts to `src/PPDS.Extension/package.json`:
 
 ```json
 "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -117,13 +117,13 @@ Add these scripts to `extension/package.json`:
 
 - [ ] **Step 5: Verify setup compiles**
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.webview.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.webview.json`
 Expected: Success (no .ts files in webview/ yet, so nothing to check — just validates the config)
 
 - [ ] **Step 6: Commit**
 
 ```
-git add extension/tsconfig.webview.json extension/src/panels/webview/ extension/src/panels/styles/ extension/package.json
+git add src/PPDS.Extension/tsconfig.webview.json src/PPDS.Extension/src/panels/webview/ src/PPDS.Extension/src/panels/styles/ src/PPDS.Extension/package.json
 git commit -m "feat(extension): add webview tsconfig, directory structure, assertNever utility"
 ```
 
@@ -132,7 +132,7 @@ git commit -m "feat(extension): add webview tsconfig, directory structure, asser
 ### Task 2: Message Protocol Types
 
 **Files:**
-- Create: `extension/src/panels/webview/shared/message-types.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/shared/message-types.ts`
 
 Define discriminated union types for ALL webview-to-host and host-to-webview messages. These types are imported by both the host panel classes (via the host tsconfig) and the webview scripts (via tsconfig.webview.json).
 
@@ -140,7 +140,7 @@ Define discriminated union types for ALL webview-to-host and host-to-webview mes
 
 - [ ] **Step 1: Create message-types.ts with Query Panel messages**
 
-Create `extension/src/panels/webview/shared/message-types.ts`. Extract every command string from `QueryPanel.ts:88-177` (the switch statement) and `query-panel-webview.js:619-681` (the message handler).
+Create `src/PPDS.Extension/src/panels/webview/shared/message-types.ts`. Extract every command string from `QueryPanel.ts:88-177` (the switch statement) and `query-panel-webview.js:619-681` (the message handler).
 
 ```typescript
 import type { QueryResultResponse, CompletionItemDto } from '../../../types.js';
@@ -239,18 +239,18 @@ export type SolutionsPanelHostToWebview =
 
 - [ ] **Step 3: Verify the types compile against both tsconfigs**
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.webview.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.webview.json`
 Expected: PASS
 
-The host tsconfig needs access too. Update `extension/tsconfig.json` exclude to NOT exclude the shared message types. Add a path mapping or simply ensure the import path works. The file is under `src/` so it's already included by `"include": ["src"]`.
+The host tsconfig needs access too. Update `src/PPDS.Extension/tsconfig.json` exclude to NOT exclude the shared message types. Add a path mapping or simply ensure the import path works. The file is under `src/` so it's already included by `"include": ["src"]`.
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.json`
 Expected: PASS (the file is under `src/` so the host tsconfig includes it)
 
 - [ ] **Step 4: Commit**
 
 ```
-git add extension/src/panels/webview/shared/message-types.ts
+git add src/PPDS.Extension/src/panels/webview/shared/message-types.ts
 git commit -m "feat(extension): define typed message protocols for Query and Solutions panels"
 ```
 
@@ -259,13 +259,13 @@ git commit -m "feat(extension): define typed message protocols for Query and Sol
 ### Task 3: Enhanced WebviewPanelBase
 
 **Files:**
-- Modify: `extension/src/panels/WebviewPanelBase.ts`
+- Modify: `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`
 
 Add generic type parameters for message types, typed `postMessage`, and AbortSignal for async cancellation on disposal.
 
 - [ ] **Step 1: Write test for typed message posting**
 
-Create `extension/src/__tests__/panels/WebviewPanelBase.test.ts`. If this file already exists, add to it.
+Create `src/PPDS.Extension/src/__tests__/panels/WebviewPanelBase.test.ts`. If this file already exists, add to it.
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -284,12 +284,12 @@ describe('WebviewPanelBase', () => {
 });
 ```
 
-Run: `cd extension && npx vitest run src/__tests__/panels/WebviewPanelBase.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/panels/WebviewPanelBase.test.ts`
 Expected: PASS (basic smoke test)
 
 - [ ] **Step 2: Rewrite WebviewPanelBase with generics**
 
-Modify `extension/src/panels/WebviewPanelBase.ts`:
+Modify `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -363,18 +363,18 @@ export abstract class WebviewPanelBase<
 
 - [ ] **Step 3: Verify host tsconfig compiles**
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.json`
 Expected: PASS (existing panels use the default generic params so no breakage)
 
 - [ ] **Step 4: Run existing tests**
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All existing tests pass (the generics default to `{ command: string }` so no existing code breaks)
 
 - [ ] **Step 5: Commit**
 
 ```
-git add extension/src/panels/WebviewPanelBase.ts
+git add src/PPDS.Extension/src/panels/WebviewPanelBase.ts
 git commit -m "feat(extension): add generic type params and AbortSignal to WebviewPanelBase"
 ```
 
@@ -385,14 +385,14 @@ git commit -m "feat(extension): add generic type params and AbortSignal to Webvi
 ### Task 4: Shared Webview Utilities
 
 **Files:**
-- Create: `extension/src/panels/webview/shared/dom-utils.ts`
-- Create: `extension/src/panels/webview/shared/vscode-api.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/shared/dom-utils.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/shared/vscode-api.ts`
 
 Extract duplicated utilities from both webview scripts: `escapeHtml`, `escapeAttr`, `cssEscape`, `formatDate`. Both `query-panel-webview.js:961-967` and `solutions-panel-webview.js:359-384` have identical copies.
 
 - [ ] **Step 1: Create dom-utils.ts**
 
-Create `extension/src/panels/webview/shared/dom-utils.ts`:
+Create `src/PPDS.Extension/src/panels/webview/shared/dom-utils.ts`:
 
 ```typescript
 /** Escape HTML entities for safe insertion into innerHTML. */
@@ -445,7 +445,7 @@ export function sanitizeValue(val: string): string {
 
 - [ ] **Step 2: Create vscode-api.ts**
 
-Create `extension/src/panels/webview/shared/vscode-api.ts`:
+Create `src/PPDS.Extension/src/panels/webview/shared/vscode-api.ts`:
 
 ```typescript
 /**
@@ -469,7 +469,7 @@ export function getVsCodeApi<TOutgoing extends { command: string }>(): VsCodeApi
 
 - [ ] **Step 3: Write tests for dom-utils**
 
-Create `extension/src/__tests__/panels/webview/dom-utils.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/panels/webview/dom-utils.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -506,13 +506,13 @@ describe('formatDate', () => {
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd extension && npx vitest run src/__tests__/panels/webview/dom-utils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/panels/webview/dom-utils.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```
-git add extension/src/panels/webview/shared/
+git add src/PPDS.Extension/src/panels/webview/shared/
 git commit -m "feat(extension): add shared webview utilities — dom-utils, vscode-api wrapper"
 ```
 
@@ -521,18 +521,18 @@ git commit -m "feat(extension): add shared webview utilities — dom-utils, vsco
 ### Task 5: Extract CSS & Convert Query Panel to TypeScript
 
 **Files:**
-- Create: `extension/src/panels/styles/shared.css`
-- Create: `extension/src/panels/styles/query-panel.css`
-- Create: `extension/src/panels/webview/query-panel.ts`
-- Modify: `extension/src/panels/QueryPanel.ts` (use typed base, CSS link, new script path)
-- Modify: `extension/esbuild.js` (add CSS entry points, change JS→TS entry)
-- Delete: `extension/src/panels/query-panel-webview.js`
+- Create: `src/PPDS.Extension/src/panels/styles/shared.css`
+- Create: `src/PPDS.Extension/src/panels/styles/query-panel.css`
+- Create: `src/PPDS.Extension/src/panels/webview/query-panel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts` (use typed base, CSS link, new script path)
+- Modify: `src/PPDS.Extension/esbuild.js` (add CSS entry points, change JS→TS entry)
+- Delete: `src/PPDS.Extension/src/panels/query-panel-webview.js`
 
 This is the largest task. It converts the Query Panel webview from untyped JS with inline CSS to typed TypeScript with external CSS.
 
 - [ ] **Step 1: Extract shared CSS**
 
-Create `extension/src/panels/styles/shared.css` with styles common to both panels. Extract from `QueryPanel.ts:481-519` and `SolutionsPanel.ts:327-424` — the overlapping rules.
+Create `src/PPDS.Extension/src/panels/styles/shared.css` with styles common to both panels. Extract from `QueryPanel.ts:481-519` and `SolutionsPanel.ts:327-424` — the overlapping rules.
 
 Shared styles include: body reset, toolbar, toolbar-spacer, status-bar, empty-state, error-state, spinner, keyframes, reconnect-banner, environment-picker.
 
@@ -638,7 +638,7 @@ NOTE: The exact environment picker CSS should be extracted from `environmentPick
 
 - [ ] **Step 2: Create query-panel.css**
 
-Create `extension/src/panels/styles/query-panel.css` with Query Panel specific styles:
+Create `src/PPDS.Extension/src/panels/styles/query-panel.css` with Query Panel specific styles:
 
 ```css
 @import './shared.css';
@@ -658,7 +658,7 @@ Full CSS content: extract ALL style rules from `QueryPanel.ts:481-519` that are 
 
 - [ ] **Step 3: Convert query-panel-webview.js to TypeScript**
 
-Create `extension/src/panels/webview/query-panel.ts`. This replaces `src/panels/query-panel-webview.js`.
+Create `src/PPDS.Extension/src/panels/webview/query-panel.ts`. This replaces `src/panels/query-panel-webview.js`.
 
 Key changes from the JS version:
 1. Import types: `import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './shared/message-types.js';`
@@ -685,7 +685,7 @@ The full content is a direct translation of `query-panel-webview.js` (977 lines)
 
 - [ ] **Step 4: Update esbuild.js**
 
-Modify `extension/esbuild.js`:
+Modify `src/PPDS.Extension/esbuild.js`:
 
 1. Change query panel entry point from `.js` to `.ts`:
    ```javascript
@@ -728,7 +728,7 @@ Modify `extension/esbuild.js`:
 
 - [ ] **Step 5: Update QueryPanel.ts to use typed base and CSS link**
 
-Modify `extension/src/panels/QueryPanel.ts`:
+Modify `src/PPDS.Extension/src/panels/QueryPanel.ts`:
 
 1. Change class declaration:
    ```typescript
@@ -771,24 +771,24 @@ Modify `extension/src/panels/QueryPanel.ts`:
 
 - [ ] **Step 6: Delete old JS file**
 
-Delete `extension/src/panels/query-panel-webview.js`.
+Delete `src/PPDS.Extension/src/panels/query-panel-webview.js`.
 
 - [ ] **Step 7: Build and verify**
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: All builds succeed. `dist/query-panel.js` and `dist/query-panel.css` exist.
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.webview.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.webview.json`
 Expected: PASS
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All existing tests pass.
 
 - [ ] **Step 8: Commit**
 
 ```
-git add -A extension/src/panels/
-git add extension/esbuild.js
+git add -A src/PPDS.Extension/src/panels/
+git add src/PPDS.Extension/esbuild.js
 git commit -m "feat(extension): convert Query Panel webview to TypeScript with typed messages and extracted CSS"
 ```
 
@@ -797,17 +797,17 @@ git commit -m "feat(extension): convert Query Panel webview to TypeScript with t
 ### Task 6: Extract CSS & Convert Solutions Panel to TypeScript
 
 **Files:**
-- Create: `extension/src/panels/styles/solutions-panel.css`
-- Create: `extension/src/panels/webview/solutions-panel.ts`
-- Modify: `extension/src/panels/SolutionsPanel.ts`
-- Modify: `extension/esbuild.js` (solutions entry point)
-- Delete: `extension/src/panels/solutions-panel-webview.js`
+- Create: `src/PPDS.Extension/src/panels/styles/solutions-panel.css`
+- Create: `src/PPDS.Extension/src/panels/webview/solutions-panel.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/esbuild.js` (solutions entry point)
+- Delete: `src/PPDS.Extension/src/panels/solutions-panel-webview.js`
 
 Same treatment as Task 5 but for the Solutions Panel. Follow the identical pattern.
 
 - [ ] **Step 1: Create solutions-panel.css**
 
-Create `extension/src/panels/styles/solutions-panel.css`:
+Create `src/PPDS.Extension/src/panels/styles/solutions-panel.css`:
 
 ```css
 @import './shared.css';
@@ -820,7 +820,7 @@ Extract: `.solution-list`, `.solution-row`, `.chevron`, `.components-container`,
 
 - [ ] **Step 2: Convert solutions-panel-webview.js to TypeScript**
 
-Create `extension/src/panels/webview/solutions-panel.ts`. Same conversion pattern as Task 5 Step 3:
+Create `src/PPDS.Extension/src/panels/webview/solutions-panel.ts`. Same conversion pattern as Task 5 Step 3:
 
 1. Import types, dom-utils, vscode-api, assert-never
 2. Type the `getVsCodeApi<SolutionsPanelWebviewToHost>()`
@@ -852,24 +852,24 @@ The CSS entry point was already added in Task 5 Step 4.
 
 - [ ] **Step 5: Delete old JS file**
 
-Delete `extension/src/panels/solutions-panel-webview.js`.
+Delete `src/PPDS.Extension/src/panels/solutions-panel-webview.js`.
 
 - [ ] **Step 6: Build and verify**
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: All builds succeed.
 
-Run: `cd extension && npx tsc --noEmit -p tsconfig.webview.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.webview.json`
 Expected: PASS
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All existing tests pass.
 
 - [ ] **Step 7: Commit**
 
 ```
-git add -A extension/src/panels/
-git add extension/esbuild.js
+git add -A src/PPDS.Extension/src/panels/
+git add src/PPDS.Extension/esbuild.js
 git commit -m "feat(extension): convert Solutions Panel webview to TypeScript with typed messages and extracted CSS"
 ```
 
@@ -878,7 +878,7 @@ git commit -m "feat(extension): convert Solutions Panel webview to TypeScript wi
 ### Task 7: Update environmentPicker.ts
 
 **Files:**
-- Modify: `extension/src/panels/environmentPicker.ts`
+- Modify: `src/PPDS.Extension/src/panels/environmentPicker.ts`
 
 After CSS extraction, the `getEnvironmentPickerCss()` function is no longer needed (its styles are in `shared.css`). Remove it and update any callers.
 
@@ -888,18 +888,18 @@ The function is no longer called from `getHtmlContent()` in either panel (CSS is
 
 - [ ] **Step 2: Verify no remaining callers**
 
-Run: `grep -r "getEnvironmentPickerCss" extension/src/`
+Run: `grep -r "getEnvironmentPickerCss" src/PPDS.Extension/src/`
 Expected: No matches (all callers were in inline `<style>` blocks that are now deleted)
 
 - [ ] **Step 3: Build and test**
 
-Run: `cd extension && node esbuild.js && npx vitest run`
+Run: `cd src/PPDS.Extension && node esbuild.js && npx vitest run`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```
-git add extension/src/panels/environmentPicker.ts
+git add src/PPDS.Extension/src/panels/environmentPicker.ts
 git commit -m "refactor(extension): remove getEnvironmentPickerCss — styles moved to shared.css"
 ```
 
@@ -910,18 +910,18 @@ git commit -m "refactor(extension): remove getEnvironmentPickerCss — styles mo
 ### Task 8: ESLint Overhaul
 
 **Files:**
-- Modify: `extension/eslint.config.mjs`
-- Modify: `extension/package.json` (add eslint-plugin-import dependency + scripts)
+- Modify: `src/PPDS.Extension/eslint.config.mjs`
+- Modify: `src/PPDS.Extension/package.json` (add eslint-plugin-import dependency + scripts)
 
 - [ ] **Step 1: Install additional ESLint dependencies**
 
-Run: `cd extension && npm install --save-dev eslint-plugin-import`
+Run: `cd src/PPDS.Extension && npm install --save-dev eslint-plugin-import`
 
 Note: `typescript-eslint` is already installed. We just need the import ordering plugin.
 
 - [ ] **Step 2: Rewrite eslint.config.mjs**
 
-Replace `extension/eslint.config.mjs` with the comprehensive config. Model it on the legacy config (`ppds-extension-archived/eslint.config.mjs`) but adapted for the MVP's simpler architecture (no Clean Architecture layers, no local-rules plugin).
+Replace `src/PPDS.Extension/eslint.config.mjs` with the comprehensive config. Model it on the legacy config (`ppds-extension-archived/eslint.config.mjs`) but adapted for the MVP's simpler architecture (no Clean Architecture layers, no local-rules plugin).
 
 Key rules to add (all discussed and agreed):
 
@@ -954,7 +954,7 @@ The full config should be ~150-200 lines. Include `parserOptions.project` pointi
 
 - [ ] **Step 3: Add lint:fix and lint:webview scripts**
 
-Add to `extension/package.json` scripts:
+Add to `src/PPDS.Extension/package.json` scripts:
 ```json
 "lint": "eslint src",
 "lint:fix": "eslint src --fix",
@@ -964,32 +964,32 @@ Add to `extension/package.json` scripts:
 - [ ] **Step 4: Commit the config (before fixing violations)**
 
 ```
-git add extension/eslint.config.mjs extension/package.json package-lock.json
+git add src/PPDS.Extension/eslint.config.mjs src/PPDS.Extension/package.json package-lock.json
 git commit -m "feat(extension): comprehensive ESLint config — type safety, async, complexity gates"
 ```
 
 - [ ] **Step 5: Run lint and capture violations**
 
-Run: `cd extension && npx eslint src --format stylish 2>&1 | head -200`
+Run: `cd src/PPDS.Extension && npx eslint src --format stylish 2>&1 | head -200`
 
 Report the violations to the user for discussion. Do NOT auto-fix without review — some violations may be intentional or need discussion (e.g., `no-floating-promises` on fire-and-forget patterns).
 
 - [ ] **Step 6: Fix violations**
 
 Fix violations in batches:
-1. Auto-fixable: `cd extension && npx eslint src --fix`
+1. Auto-fixable: `cd src/PPDS.Extension && npx eslint src --fix`
 2. Manual fixes: address remaining violations one by one
 3. Add `// eslint-disable-next-line` with justification for intentional violations
 
 - [ ] **Step 7: Verify clean lint**
 
-Run: `cd extension && npx eslint src`
+Run: `cd src/PPDS.Extension && npx eslint src`
 Expected: 0 errors, 0 warnings (or only intentional suppressions)
 
 - [ ] **Step 8: Commit fixes**
 
 ```
-git add -A extension/src/
+git add -A src/PPDS.Extension/src/
 git commit -m "fix(extension): resolve ESLint violations — type safety, floating promises, complexity"
 ```
 
@@ -998,16 +998,16 @@ git commit -m "fix(extension): resolve ESLint violations — type safety, floati
 ### Task 9: Stylelint Setup
 
 **Files:**
-- Create: `extension/.stylelintrc.json`
-- Modify: `extension/package.json` (add stylelint dependency + script)
+- Create: `src/PPDS.Extension/.stylelintrc.json`
+- Modify: `src/PPDS.Extension/package.json` (add stylelint dependency + script)
 
 - [ ] **Step 1: Install stylelint**
 
-Run: `cd extension && npm install --save-dev stylelint stylelint-config-standard`
+Run: `cd src/PPDS.Extension && npm install --save-dev stylelint stylelint-config-standard`
 
 - [ ] **Step 2: Create .stylelintrc.json**
 
-Create `extension/.stylelintrc.json`:
+Create `src/PPDS.Extension/.stylelintrc.json`:
 
 ```json
 {
@@ -1027,32 +1027,32 @@ The relaxed rules avoid false positives on VS Code CSS variable patterns (`--vsc
 
 - [ ] **Step 3: Add lint:css script**
 
-Add to `extension/package.json` scripts:
+Add to `src/PPDS.Extension/package.json` scripts:
 ```json
 "lint:css": "stylelint \"src/panels/styles/**/*.css\""
 ```
 
 - [ ] **Step 4: Run stylelint and fix violations**
 
-Run: `cd extension && npx stylelint "src/panels/styles/**/*.css"`
+Run: `cd src/PPDS.Extension && npx stylelint "src/panels/styles/**/*.css"`
 Expected: Fix any violations. These will be formatting issues since the CSS was just extracted from template literals.
 
 - [ ] **Step 5: Install knip for dead code detection**
 
-Run: `cd extension && npm install --save-dev knip`
+Run: `cd src/PPDS.Extension && npm install --save-dev knip`
 
-Add to `extension/package.json` scripts:
+Add to `src/PPDS.Extension/package.json` scripts:
 ```json
 "dead-code": "knip"
 ```
 
-Run: `cd extension && npx knip`
+Run: `cd src/PPDS.Extension && npx knip`
 Expected: Review output. Suppress any false positives (entry points, VS Code API). The goal is to have this available as a maintenance check, not to gate CI.
 
 - [ ] **Step 6: Commit**
 
 ```
-git add extension/.stylelintrc.json extension/package.json package-lock.json extension/src/panels/styles/
+git add src/PPDS.Extension/.stylelintrc.json src/PPDS.Extension/package.json package-lock.json src/PPDS.Extension/src/panels/styles/
 git commit -m "feat(extension): add Stylelint for CSS files and knip for dead code detection"
 ```
 
@@ -1061,7 +1061,7 @@ git commit -m "feat(extension): add Stylelint for CSS files and knip for dead co
 ### Task 10: Update Webview Panels Skill
 
 **Files:**
-- Modify: `extension/../.agents/skills/webview-panels/SKILL.md`
+- Modify: `src/PPDS.Extension/../.agents/skills/webview-panels/SKILL.md`
 
 Update the skill to reflect the new patterns established in this plan.
 
@@ -1102,22 +1102,22 @@ git commit -m "docs(extension): update webview-panels skill for TypeScript, type
 
 - [ ] **Step 1: Full build**
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: All 7+ contexts build without errors. All outputs in `dist/`.
 
 - [ ] **Step 2: Type check both tsconfigs**
 
-Run: `cd extension && npm run typecheck:all`
+Run: `cd src/PPDS.Extension && npm run typecheck:all`
 Expected: PASS for both host and webview tsconfigs.
 
 - [ ] **Step 3: Run all unit tests**
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All tests pass.
 
 - [ ] **Step 4: Lint clean**
 
-Run: `cd extension && npx eslint src && npx stylelint "src/panels/styles/**/*.css"`
+Run: `cd src/PPDS.Extension && npx eslint src && npx stylelint "src/panels/styles/**/*.css"`
 Expected: No errors.
 
 - [ ] **Step 5: Visual verification**
@@ -1132,7 +1132,7 @@ If the webview-cdp tooling has issues, STOP and report to the user.
 
 - [ ] **Step 6: Package test**
 
-Run: `cd extension && npm run release:test`
+Run: `cd src/PPDS.Extension && npm run release:test`
 Expected: `.vsix` packages successfully. No missing files.
 
 - [ ] **Step 7: Final commit if any cleanup needed**

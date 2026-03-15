@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Builds the ppds CLI binary for a specific platform and places it in src/extension/bin/.
+ * Builds the ppds CLI binary for a specific platform and places it in src/PPDS.Extension/bin/.
  *
  * Usage:
  *   node scripts/bundle-cli.js --rid win-x64

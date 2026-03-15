@@ -1,7 +1,7 @@
 {
   "version": "2.0.0",
   "options": {
-    "cwd": "${workspaceFolder}/src/extension"
+    "cwd": "${workspaceFolder}/src/PPDS.Extension"
   },
   "tasks": [
     {
@@ -21,7 +21,7 @@
     {
       "type": "npm",
       "script": "compile",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "problemMatcher": "$tsc",
       "label": "npm: compile",
       "group": {
@@ -44,7 +44,7 @@
     {
       "type": "npm",
       "script": "watch",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "problemMatcher": "$tsc-watch",
       "label": "npm: watch",
       "isBackground": true,
@@ -56,7 +56,7 @@
     {
       "type": "npm",
       "script": "lint",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "problemMatcher": "$eslint-stylish",
       "label": "npm: lint",
       "presentation": {
@@ -67,7 +67,7 @@
     {
       "type": "npm",
       "script": "package",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: package",
       "detail": "Create .vsix package (pre-release)",
       "problemMatcher": [],
@@ -84,7 +84,7 @@
         "command": "if exist dist rmdir /s /q dist"
       },
       "options": {
-        "cwd": "${workspaceFolder}/src/extension"
+        "cwd": "${workspaceFolder}/src/PPDS.Extension"
       },
       "problemMatcher": [],
       "presentation": {
@@ -104,7 +104,7 @@
       "type": "shell",
       "command": "npm ci",
       "options": {
-        "cwd": "${workspaceFolder}/src/extension"
+        "cwd": "${workspaceFolder}/src/PPDS.Extension"
       },
       "problemMatcher": [],
       "presentation": {
@@ -115,7 +115,7 @@
     {
       "type": "npm",
       "script": "local",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: local",
       "detail": "Build and install dev extension to VS Code",
       "problemMatcher": [],
@@ -127,7 +127,7 @@
     {
       "type": "npm",
       "script": "release:test",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: release:test",
       "detail": "Full package + .vsix + install (simulates release)",
       "problemMatcher": [],
@@ -139,7 +139,7 @@
     {
       "type": "npm",
       "script": "local:revert",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: local:revert",
       "detail": "Revert to marketplace version",
       "problemMatcher": [],
@@ -151,7 +151,7 @@
     {
       "type": "npm",
       "script": "test",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: test",
       "detail": "Run vitest unit tests",
       "problemMatcher": [],
@@ -163,7 +163,7 @@
     {
       "type": "npm",
       "script": "test:e2e",
-      "path": "src/extension",
+      "path": "src/PPDS.Extension",
       "label": "npm: test:e2e",
       "detail": "Run Playwright e2e tests",
       "problemMatcher": [],

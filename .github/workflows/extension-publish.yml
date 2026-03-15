@@ -53,26 +53,26 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: src/extension/package-lock.json
+          cache-dependency-path: src/PPDS.Extension/package-lock.json
 
       - name: Install dependencies
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npm ci
 
       - name: Lint
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npm run lint
 
       - name: Test
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npm test
 
       - name: Build
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npm run compile
 
       - name: Bundle CLI for ${{ matrix.target }}
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npm run bundle:cli -- --rid ${{ matrix.rid }}
 
       - name: Determine release channel
@@ -87,26 +87,26 @@ jobs:
 
       - name: Package extension (pre-release)
         if: steps.channel.outputs.is_prerelease == 'true'
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npx vsce package --target ${{ matrix.target }} --pre-release
 
       - name: Package extension (stable)
         if: steps.channel.outputs.is_prerelease != 'true'
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npx vsce package --target ${{ matrix.target }}
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v7
         with:
           name: extension-vsix-${{ matrix.target }}
-          path: src/extension/*.vsix
+          path: src/PPDS.Extension/*.vsix
           retention-days: 30
 
       - name: Publish to VS Code Marketplace (pre-release)
         if: |
           steps.channel.outputs.is_prerelease == 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npx vsce publish --target ${{ matrix.target }} --pre-release -p ${{ secrets.ADO_MARKETPLACE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}
@@ -115,7 +115,7 @@ jobs:
         if: |
           steps.channel.outputs.is_prerelease != 'true' &&
           (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
-        working-directory: src/extension
+        working-directory: src/PPDS.Extension
         run: npx vsce publish --target ${{ matrix.target }} -p ${{ secrets.ADO_MARKETPLACE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.ADO_MARKETPLACE_PAT }}

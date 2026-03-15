@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-14
-**Code:** [extension/src/panels/QueryPanel.ts](../extension/src/panels/QueryPanel.ts)
+**Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts)
 
 ---
 

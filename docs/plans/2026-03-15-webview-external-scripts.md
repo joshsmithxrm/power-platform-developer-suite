@@ -14,25 +14,25 @@
 
 | Action | File | Responsibility |
 |--------|------|---------------|
-| Create | `extension/src/panels/solutions-panel-webview.js` | SolutionsPanel browser-side behavior (extracted from inline IIFE) |
-| Modify | `extension/src/panels/SolutionsPanel.ts` | Remove inline IIFE, load external script via `<script src="...">`, remove `getEnvironmentPickerJs` import |
-| Modify | `extension/esbuild.js` | Add 5th entry point for solutions-panel-webview |
-| Modify | `extension/src/panels/SolutionsPanel.ts:78` | Add `dist/` to `localResourceRoots` |
+| Create | `src/PPDS.Extension/src/panels/solutions-panel-webview.js` | SolutionsPanel browser-side behavior (extracted from inline IIFE) |
+| Modify | `src/PPDS.Extension/src/panels/SolutionsPanel.ts` | Remove inline IIFE, load external script via `<script src="...">`, remove `getEnvironmentPickerJs` import |
+| Modify | `src/PPDS.Extension/esbuild.js` | Add 5th entry point for solutions-panel-webview |
+| Modify | `src/PPDS.Extension/src/panels/SolutionsPanel.ts:78` | Add `dist/` to `localResourceRoots` |
 | Create | `.agents/skills/webview-panels/SKILL.md` | Skill: external script pattern for webview panels |
-| Delete or update | `extension/dev/query-panel.html` | Stale dev HTML (still references textarea, not Monaco) |
+| Delete or update | `src/PPDS.Extension/dev/query-panel.html` | Stale dev HTML (still references textarea, not Monaco) |
 
 ---
 
 ## Task 1: Extract SolutionsPanel IIFE to External Script
 
 **Files:**
-- Create: `extension/src/panels/solutions-panel-webview.js`
-- Modify: `extension/src/panels/SolutionsPanel.ts`
-- Modify: `extension/esbuild.js`
+- Create: `src/PPDS.Extension/src/panels/solutions-panel-webview.js`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/esbuild.js`
 
 **Context:** SolutionsPanel currently has a 16.7KB inline IIFE (lines 458-832). While under 32KB today, it follows the same growth pattern that broke QueryPanel. Extract it following the exact same pattern used for QueryPanel (commit `cd3407461`).
 
-**Reference:** `extension/src/panels/query-panel-webview.js` — the canonical example of this pattern.
+**Reference:** `src/PPDS.Extension/src/panels/query-panel-webview.js` — the canonical example of this pattern.
 
 - [ ] **Step 1: Create `solutions-panel-webview.js`**
 
@@ -46,7 +46,7 @@ The file should start with the `(function() {` IIFE and end with `vscode.postMes
 
 - [ ] **Step 2: Add esbuild entry point**
 
-In `extension/esbuild.js`, add a 5th build context after `queryPanelCtx`:
+In `src/PPDS.Extension/esbuild.js`, add a 5th build context after `queryPanelCtx`:
 
 ```javascript
 // Build 5: Solutions panel webview script (browser, IIFE)
@@ -95,7 +95,7 @@ localResourceRoots: [
 
 Run from repo root:
 ```bash
-cd extension && npx tsc --noEmit && npm run compile && ls -la dist/solutions-panel.js
+cd src/PPDS.Extension && npx tsc --noEmit && npm run compile && ls -la dist/solutions-panel.js
 ```
 
 Expected: clean TypeScript, clean build, `dist/solutions-panel.js` exists.
@@ -111,7 +111,7 @@ Expected: 170 tests pass (SolutionsPanel tests should still pass since behavior 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/src/panels/solutions-panel-webview.js extension/src/panels/SolutionsPanel.ts extension/esbuild.js
+git add src/PPDS.Extension/src/panels/solutions-panel-webview.js src/PPDS.Extension/src/panels/SolutionsPanel.ts src/PPDS.Extension/esbuild.js
 git commit -m "refactor(extension): extract SolutionsPanel IIFE to external script
 
 Same pattern as QueryPanel (cd3407461) — move browser-side behavior to
@@ -247,14 +247,14 @@ in HTML template literals. VS Code silently drops inline scripts over
 ## Task 3: Clean Up Stale Dev HTML
 
 **Files:**
-- Delete: `extension/dev/query-panel.html`
+- Delete: `src/PPDS.Extension/dev/query-panel.html`
 
 **Context:** This file is a standalone dev-mode HTML for testing the Data Explorer panel. It still references a `<textarea>` instead of Monaco, predating the Monaco integration (commit `3946de4c7`). It no longer represents the actual panel and would mislead anyone using it as a reference.
 
 - [ ] **Step 1: Delete the file**
 
 ```bash
-git rm extension/dev/query-panel.html
+git rm src/PPDS.Extension/dev/query-panel.html
 ```
 
 - [ ] **Step 2: Commit**

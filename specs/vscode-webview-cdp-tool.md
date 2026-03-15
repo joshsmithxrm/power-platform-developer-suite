@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 2.0
 **Last Updated:** 2026-03-15
-**Code:** [extension/tools/](../extension/tools/) | None
+**Code:** [src/PPDS.Extension/tools/](../src/PPDS.Extension/tools/) | None
 
 ---
 
@@ -178,7 +178,7 @@ const innerFrame = await innerIframe.contentFrame();
 **Launch flow (daemon process — `--daemon` flag):**
 
 1. **Download VS Code** (if not cached): `@vscode/test-electron` handles this automatically
-2. **Resolve extension path**: Find `extension/` relative to tool location
+2. **Resolve extension path**: Find `src/PPDS.Extension/` relative to tool location
 3. **Launch via Playwright**: `_electron.launch({ executablePath, args: ['--extensionDevelopmentPath=...', '--user-data-dir=...', '--log=trace'] })`
 4. **Get main window**: `electronApp.firstWindow()`
 5. **Wait for workbench**: `page.waitForSelector('[id="workbench.parts.editor"]', { timeout: 60000 })`
@@ -241,12 +241,12 @@ const innerFrame = await innerIframe.contentFrame();
 
 ### Constraints
 
-- Single file implementation (`extension/tools/webview-cdp.mjs`) — handles both caller and daemon modes via `--daemon` flag
+- Single file implementation (`src/PPDS.Extension/tools/webview-cdp.mjs`) — handles both caller and daemon modes via `--daemon` flag
 - Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies)
 - `ws` dependency removed — Playwright handles all communication
-- Session file: `extension/tools/.webview-cdp-session.json` (gitignored)
-- Console log file: `extension/tools/.webview-cdp-console.log` (gitignored)
-- User data dir: `extension/tools/.webview-cdp-profile/` (gitignored)
+- Session file: `src/PPDS.Extension/tools/.webview-cdp-session.json` (gitignored)
+- Console log file: `src/PPDS.Extension/tools/.webview-cdp-console.log` (gitignored)
+- User data dir: `src/PPDS.Extension/tools/.webview-cdp-profile/` (gitignored)
 - All errors to stderr, all results to stdout
 - Exit code 0 on success, 1 on error
 - Single-user tool — not designed for concurrent access
@@ -266,7 +266,7 @@ const innerFrame = await innerIframe.contentFrame();
 
 ## Acceptance Criteria
 
-Note: All acceptance criteria require a running VS Code instance and are verified via integration testing. Pure functions (argument parsing, key combo parsing) retain unit tests in `extension/tools/webview-cdp.test.mjs`.
+Note: All acceptance criteria require a running VS Code instance and are verified via integration testing. Pure functions (argument parsing, key combo parsing) retain unit tests in `src/PPDS.Extension/tools/webview-cdp.test.mjs`.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
@@ -320,8 +320,8 @@ Note: All acceptance criteria require a running VS Code instance and are verifie
 {
   "daemonPort": 52345,
   "daemonPid": 12345,
-  "userDataDir": "/path/to/extension/tools/.webview-cdp-profile",
-  "logFile": "/path/to/extension/tools/.webview-cdp-console.log"
+  "userDataDir": "/path/to/src/PPDS.Extension/tools/.webview-cdp-profile",
+  "logFile": "/path/to/src/PPDS.Extension/tools/.webview-cdp-console.log"
 }
 ```
 
@@ -344,33 +344,33 @@ Captured by `page.on('console')` and `page.on('pageerror')`. Written to `.webvie
 
 ```bash
 # Start VS Code with the extension
-node extension/tools/webview-cdp.mjs launch
+node src/PPDS.Extension/tools/webview-cdp.mjs launch
 
 # Open a Data Explorer panel via command palette
-node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
 
 # Wait for the webview to appear
-node extension/tools/webview-cdp.mjs wait
+node src/PPDS.Extension/tools/webview-cdp.mjs wait
 
 # Take a screenshot to see what's there
-node extension/tools/webview-cdp.mjs screenshot current-state.png
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot current-state.png
 
 # Interact with the webview
-node extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT TOP 10 * FROM account"
-node extension/tools/webview-cdp.mjs click "#execute-btn"
-node extension/tools/webview-cdp.mjs screenshot after-execute.png
+node src/PPDS.Extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT TOP 10 * FROM account"
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot after-execute.png
 
 # Test keyboard shortcut
-node extension/tools/webview-cdp.mjs key "ctrl+shift+p"
-node extension/tools/webview-cdp.mjs screenshot command-palette.png
-node extension/tools/webview-cdp.mjs key "Escape"
+node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+shift+p"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot command-palette.png
+node src/PPDS.Extension/tools/webview-cdp.mjs key "Escape"
 
 # Check for errors
-node extension/tools/webview-cdp.mjs logs
-node extension/tools/webview-cdp.mjs logs --channel "PPDS"
+node src/PPDS.Extension/tools/webview-cdp.mjs logs
+node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 
 # Done
-node extension/tools/webview-cdp.mjs close
+node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
 ---

@@ -13,28 +13,28 @@
 ## File Structure
 
 **Create:**
-- `src/extension/src/panels/webview/shared/error-handler.ts` — shared `window.onerror` + `webviewError` forwarding for all webview scripts
-- `src/extension/src/panels/webview/shared/selection-utils.ts` — pure selection geometry functions shared between host tests and webview
-- `src/extension/src/utils/config.ts` — typed config accessor for extension settings
-- `src/extension/src/__tests__/utils/errorUtils.test.ts` — tests for new `handleAuthError` helper
+- `src/PPDS.Extension/src/panels/webview/shared/error-handler.ts` — shared `window.onerror` + `webviewError` forwarding for all webview scripts
+- `src/PPDS.Extension/src/panels/webview/shared/selection-utils.ts` — pure selection geometry functions shared between host tests and webview
+- `src/PPDS.Extension/src/utils/config.ts` — typed config accessor for extension settings
+- `src/PPDS.Extension/src/__tests__/utils/errorUtils.test.ts` — tests for new `handleAuthError` helper
 
 **Modify:**
-- `src/extension/src/panels/WebviewPanelBase.ts` — add `initPanel()`, make `handleMessage` abstract, remove dead no-op, add `logWebviewError` helper
-- `src/extension/src/panels/QueryPanel.ts` — use `initPanel()`, move switch into `handleMessage`, use `handleAuthError`, fix `convertQuery` raw `postMessage`
-- `src/extension/src/panels/SolutionsPanel.ts` — use `initPanel()`, move switch into `handleMessage`, use `handleAuthError`, set `retainContextWhenHidden: false`
-- `src/extension/src/panels/webview/query-panel.ts` — import selection utils from `shared/selection-utils`, use shared error handler
-- `src/extension/src/panels/webview/solutions-panel.ts` — add shared error handler, add `webviewError` forwarding
-- `src/extension/src/panels/webview/shared/message-types.ts` — add `webviewError` to `SolutionsPanelWebviewToHost`
-- `src/extension/src/panels/querySelectionUtils.ts` — re-export from shared (preserves test imports)
-- `src/extension/src/utils/errorUtils.ts` — add `handleAuthError()` helper
-- `src/extension/src/commands/debugCommands.ts` — change `panelCounts` to `Record<string, () => number>`
-- `src/extension/src/extension.ts` — extract `registerPanelCommands()`, use dynamic panel registry, move `moveProfile` into provider
-- `src/extension/src/views/profileTreeView.ts` — add `moveProfile()` method, add env list cache
-- `src/extension/esbuild.js` — data-driven build config array
+- `src/PPDS.Extension/src/panels/WebviewPanelBase.ts` — add `initPanel()`, make `handleMessage` abstract, remove dead no-op, add `logWebviewError` helper
+- `src/PPDS.Extension/src/panels/QueryPanel.ts` — use `initPanel()`, move switch into `handleMessage`, use `handleAuthError`, fix `convertQuery` raw `postMessage`
+- `src/PPDS.Extension/src/panels/SolutionsPanel.ts` — use `initPanel()`, move switch into `handleMessage`, use `handleAuthError`, set `retainContextWhenHidden: false`
+- `src/PPDS.Extension/src/panels/webview/query-panel.ts` — import selection utils from `shared/selection-utils`, use shared error handler
+- `src/PPDS.Extension/src/panels/webview/solutions-panel.ts` — add shared error handler, add `webviewError` forwarding
+- `src/PPDS.Extension/src/panels/webview/shared/message-types.ts` — add `webviewError` to `SolutionsPanelWebviewToHost`
+- `src/PPDS.Extension/src/panels/querySelectionUtils.ts` — re-export from shared (preserves test imports)
+- `src/PPDS.Extension/src/utils/errorUtils.ts` — add `handleAuthError()` helper
+- `src/PPDS.Extension/src/commands/debugCommands.ts` — change `panelCounts` to `Record<string, () => number>`
+- `src/PPDS.Extension/src/extension.ts` — extract `registerPanelCommands()`, use dynamic panel registry, move `moveProfile` into provider
+- `src/PPDS.Extension/src/views/profileTreeView.ts` — add `moveProfile()` method, add env list cache
+- `src/PPDS.Extension/esbuild.js` — data-driven build config array
 
 **Test files updated:**
-- `src/extension/src/__tests__/commands/debugCommands.test.ts` — update for dynamic `Record<string, () => number>`
-- `src/extension/src/__tests__/panels/querySelectionUtils.test.ts` — no changes needed (re-exports preserve API)
+- `src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts` — update for dynamic `Record<string, () => number>`
+- `src/PPDS.Extension/src/__tests__/panels/querySelectionUtils.test.ts` — no changes needed (re-exports preserve API)
 
 ---
 
@@ -43,7 +43,7 @@
 ### Task 1: Create shared webview error handler
 
 **Files:**
-- Create: `src/extension/src/panels/webview/shared/error-handler.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/shared/error-handler.ts`
 
 **Design note:** The existing `query-panel.ts` has an inline `window.onerror` that records errors to `window.__ppds_errors` but does NOT forward them to the host via `postMessage`. `solutions-panel.ts` has no error handler at all. This shared module improves both: it records errors AND forwards them to the host so `logWebviewError` in the base class receives them.
 
@@ -52,7 +52,7 @@
 - [ ] **Step 1: Create the shared error handler module**
 
 ```ts
-// src/extension/src/panels/webview/shared/error-handler.ts
+// src/PPDS.Extension/src/panels/webview/shared/error-handler.ts
 
 /**
  * Shared error tracking for webview scripts.
@@ -99,13 +99,13 @@ export function installErrorHandler(
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `cd src/extension && npx tsc --noEmit -p tsconfig.webview.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.webview.json`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/src/panels/webview/shared/error-handler.ts
+git add src/PPDS.Extension/src/panels/webview/shared/error-handler.ts
 git commit -m "feat(ext): add shared webview error handler"
 ```
 
@@ -114,16 +114,16 @@ git commit -m "feat(ext): add shared webview error handler"
 ### Task 2: Move selection utils to shared module
 
 **Files:**
-- Create: `src/extension/src/panels/webview/shared/selection-utils.ts`
-- Modify: `src/extension/src/panels/querySelectionUtils.ts`
-- Modify: `src/extension/src/panels/webview/query-panel.ts`
+- Create: `src/PPDS.Extension/src/panels/webview/shared/selection-utils.ts`
+- Modify: `src/PPDS.Extension/src/panels/querySelectionUtils.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts`
 
 **Duplication note:** `sanitizeValue` currently exists in both `shared/dom-utils.ts` (webview) and `querySelectionUtils.ts` (host). After this task, `querySelectionUtils.ts` re-exports `sanitizeValue` from `shared/dom-utils.ts` to eliminate the duplication while preserving the test import path.
 
 - [ ] **Step 1: Create shared selection-utils module**
 
 ```ts
-// src/extension/src/panels/webview/shared/selection-utils.ts
+// src/PPDS.Extension/src/panels/webview/shared/selection-utils.ts
 
 export interface SelectionRect {
     minRow: number;
@@ -155,7 +155,7 @@ export function isSingleCell(anchor: CellCoord | null, focus: CellCoord | null):
 
 - [ ] **Step 2: Update querySelectionUtils.ts to re-export from shared**
 
-Replace the entire file content of `src/extension/src/panels/querySelectionUtils.ts` with:
+Replace the entire file content of `src/PPDS.Extension/src/panels/querySelectionUtils.ts` with:
 
 ```ts
 /**
@@ -200,7 +200,7 @@ export function buildTsv(
 
 - [ ] **Step 3: Update query-panel.ts to import from shared instead of inline duplicates**
 
-In `src/extension/src/panels/webview/query-panel.ts`:
+In `src/PPDS.Extension/src/panels/webview/query-panel.ts`:
 
 Add imports after existing imports:
 ```ts
@@ -255,18 +255,18 @@ Update all 6 call sites to pass `anchor, focus` as arguments:
 
 - [ ] **Step 4: Run typecheck to verify (BEFORE committing)**
 
-Run: `cd src/extension && npm run typecheck:all`
+Run: `cd src/PPDS.Extension && npm run typecheck:all`
 Expected: No errors
 
 - [ ] **Step 5: Run existing tests to verify re-exports work**
 
-Run: `cd src/extension && npx vitest run src/__tests__/panels/querySelectionUtils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/panels/querySelectionUtils.test.ts`
 Expected: All 23 tests pass (5 getSelectionRect + 5 isSingleCell + 6 sanitizeValue + 7 buildTsv)
 
 - [ ] **Step 6: Commit**
 
 ```
-git add src/extension/src/panels/webview/shared/selection-utils.ts src/extension/src/panels/querySelectionUtils.ts src/extension/src/panels/webview/query-panel.ts
+git add src/PPDS.Extension/src/panels/webview/shared/selection-utils.ts src/PPDS.Extension/src/panels/querySelectionUtils.ts src/PPDS.Extension/src/panels/webview/query-panel.ts
 git commit -m "refactor(ext): move selection utils to shared module, eliminate duplication"
 ```
 
@@ -275,14 +275,14 @@ git commit -m "refactor(ext): move selection utils to shared module, eliminate d
 ### Task 3: Extract auth-error retry to shared utility
 
 **Files:**
-- Modify: `src/extension/src/utils/errorUtils.ts`
-- Create: `src/extension/src/__tests__/utils/errorUtils.test.ts` (directory `__tests__/utils/` must be created)
+- Modify: `src/PPDS.Extension/src/utils/errorUtils.ts`
+- Create: `src/PPDS.Extension/src/__tests__/utils/errorUtils.test.ts` (directory `__tests__/utils/` must be created)
 
 **Scope note:** Only `QueryPanel` and `SolutionsPanel` will be migrated to `handleAuthError`. `DataverseNotebookController` has different auth-error semantics (no retry — it shows "Re-authenticated. Please re-execute the cell." and returns). That pattern is intentionally different and stays as-is.
 
 - [ ] **Step 1: Write the failing test**
 
-Create directory `src/extension/src/__tests__/utils/` and file `errorUtils.test.ts`:
+Create directory `src/PPDS.Extension/src/__tests__/utils/` and file `errorUtils.test.ts`:
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -394,12 +394,12 @@ describe('handleAuthError', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd src/extension && npx vitest run src/__tests__/utils/errorUtils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/utils/errorUtils.test.ts`
 Expected: FAIL — `handleAuthError` does not exist
 
 - [ ] **Step 3: Implement handleAuthError**
 
-In `src/extension/src/utils/errorUtils.ts`, add these imports at the top of the file (after the existing `ResponseError` import):
+In `src/PPDS.Extension/src/utils/errorUtils.ts`, add these imports at the top of the file (after the existing `ResponseError` import):
 
 ```ts
 import * as vscode from 'vscode';
@@ -453,13 +453,13 @@ export async function handleAuthError(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd src/extension && npx vitest run src/__tests__/utils/errorUtils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/utils/errorUtils.test.ts`
 Expected: All 6 tests pass
 
 - [ ] **Step 5: Commit**
 
 ```
-git add src/extension/src/utils/errorUtils.ts src/extension/src/__tests__/utils/errorUtils.test.ts
+git add src/PPDS.Extension/src/utils/errorUtils.ts src/PPDS.Extension/src/__tests__/utils/errorUtils.test.ts
 git commit -m "feat(ext): extract handleAuthError to shared utility with tests"
 ```
 
@@ -468,12 +468,12 @@ git commit -m "feat(ext): extract handleAuthError to shared utility with tests"
 ### Task 4: Create centralized config accessor
 
 **Files:**
-- Create: `src/extension/src/utils/config.ts`
+- Create: `src/PPDS.Extension/src/utils/config.ts`
 
 - [ ] **Step 1: Create the config module**
 
 ```ts
-// src/extension/src/utils/config.ts
+// src/PPDS.Extension/src/utils/config.ts
 import * as vscode from 'vscode';
 
 /**
@@ -502,13 +502,13 @@ export function queryDefaultTop(): number {
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `cd src/extension && npx tsc --noEmit -p tsconfig.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.json`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/src/utils/config.ts
+git add src/PPDS.Extension/src/utils/config.ts
 git commit -m "feat(ext): add centralized config accessor"
 ```
 
@@ -519,11 +519,11 @@ git commit -m "feat(ext): add centralized config accessor"
 ### Task 5: Consolidate WebviewPanelBase
 
 **Files:**
-- Modify: `src/extension/src/panels/WebviewPanelBase.ts`
+- Modify: `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`
 
 - [ ] **Step 1: Add `initPanel`, make `handleMessage` abstract, add `logWebviewError`**
 
-Replace the entire content of `src/extension/src/panels/WebviewPanelBase.ts`:
+Replace the entire content of `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`:
 
 ```ts
 import * as vscode from 'vscode';
@@ -642,13 +642,13 @@ export abstract class WebviewPanelBase<
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `cd src/extension && npx tsc --noEmit -p tsconfig.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.json`
 Expected: Compile errors in QueryPanel.ts and SolutionsPanel.ts (handleMessage now abstract) — expected, fixed in next tasks
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/src/panels/WebviewPanelBase.ts
+git add src/PPDS.Extension/src/panels/WebviewPanelBase.ts
 git commit -m "refactor(ext): consolidate WebviewPanelBase — initPanel, abstract handleMessage, logWebviewError"
 ```
 
@@ -657,11 +657,11 @@ git commit -m "refactor(ext): consolidate WebviewPanelBase — initPanel, abstra
 ### Task 6: Update QueryPanel to use new base class
 
 **Files:**
-- Modify: `src/extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 - [ ] **Step 1: Replace constructor wiring with `initPanel` and extract `handleMessage`**
 
-In `src/extension/src/panels/QueryPanel.ts`:
+In `src/PPDS.Extension/src/panels/QueryPanel.ts`:
 
 **Remove** the `isAuthError` import (line 7) — will use `handleAuthError` instead:
 ```ts
@@ -867,13 +867,13 @@ And in the constructor body, before `this.panelId = ...`:
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `cd src/extension && npx tsc --noEmit -p tsconfig.json`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit -p tsconfig.json`
 Expected: Compile errors in SolutionsPanel.ts only (fixed next task)
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "refactor(ext): QueryPanel uses initPanel, handleMessage, handleAuthError, typed postMessage"
 ```
 
@@ -882,13 +882,13 @@ git commit -m "refactor(ext): QueryPanel uses initPanel, handleMessage, handleAu
 ### Task 7: Update SolutionsPanel to use new base class
 
 **Files:**
-- Modify: `src/extension/src/panels/SolutionsPanel.ts`
-- Modify: `src/extension/src/panels/webview/shared/message-types.ts`
-- Modify: `src/extension/src/panels/webview/solutions-panel.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/shared/message-types.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/solutions-panel.ts`
 
 - [ ] **Step 1: Add `webviewError` to SolutionsPanelWebviewToHost**
 
-In `src/extension/src/panels/webview/shared/message-types.ts`, add to the `SolutionsPanelWebviewToHost` union:
+In `src/PPDS.Extension/src/panels/webview/shared/message-types.ts`, add to the `SolutionsPanelWebviewToHost` union:
 
 ```ts
 export type SolutionsPanelWebviewToHost =
@@ -904,7 +904,7 @@ export type SolutionsPanelWebviewToHost =
 
 - [ ] **Step 2: Add error handler to solutions-panel.ts webview script**
 
-At the top of `src/extension/src/panels/webview/solutions-panel.ts`, before all other imports, add:
+At the top of `src/PPDS.Extension/src/panels/webview/solutions-panel.ts`, before all other imports, add:
 
 ```ts
 import { installErrorHandler } from './shared/error-handler.js';
@@ -918,7 +918,7 @@ installErrorHandler((msg) => vscode.postMessage(msg as SolutionsPanelWebviewToHo
 
 - [ ] **Step 3: Update SolutionsPanel.ts to use initPanel, handleMessage, handleAuthError**
 
-In `src/extension/src/panels/SolutionsPanel.ts`:
+In `src/PPDS.Extension/src/panels/SolutionsPanel.ts`:
 
 **Replace** imports:
 ```ts
@@ -1008,18 +1008,18 @@ Note `retainContextWhenHidden: false` — SolutionsPanel is a static list, the `
 
 - [ ] **Step 4: Verify everything compiles**
 
-Run: `cd src/extension && npm run typecheck:all`
+Run: `cd src/PPDS.Extension && npm run typecheck:all`
 Expected: No errors
 
 - [ ] **Step 5: Run all tests**
 
-Run: `cd src/extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All tests pass
 
 - [ ] **Step 6: Commit**
 
 ```
-git add src/extension/src/panels/SolutionsPanel.ts src/extension/src/panels/webview/solutions-panel.ts src/extension/src/panels/webview/shared/message-types.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts src/PPDS.Extension/src/panels/webview/solutions-panel.ts src/PPDS.Extension/src/panels/webview/shared/message-types.ts
 git commit -m "refactor(ext): SolutionsPanel uses initPanel, handleMessage, handleAuthError, onerror, retainContextWhenHidden:false"
 ```
 
@@ -1030,11 +1030,11 @@ git commit -m "refactor(ext): SolutionsPanel uses initPanel, handleMessage, hand
 ### Task 8: Refactor esbuild.js for scalability
 
 **Files:**
-- Modify: `src/extension/esbuild.js`
+- Modify: `src/PPDS.Extension/esbuild.js`
 
 - [ ] **Step 1: Replace individual context variables with data-driven array**
 
-Replace entire content of `src/extension/esbuild.js`:
+Replace entire content of `src/PPDS.Extension/esbuild.js`:
 
 ```js
 const esbuild = require('esbuild');
@@ -1138,13 +1138,13 @@ main().catch(e => { console.error(e); process.exit(1); });
 
 - [ ] **Step 2: Verify build works**
 
-Run: `cd src/extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: Builds successfully, produces same dist/ files
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/esbuild.js
+git add src/PPDS.Extension/esbuild.js
 git commit -m "refactor(ext): data-driven esbuild config — adding panels is now config-only"
 ```
 
@@ -1153,13 +1153,13 @@ git commit -m "refactor(ext): data-driven esbuild config — adding panels is no
 ### Task 9: Make debugCommands panel registry dynamic
 
 **Files:**
-- Modify: `src/extension/src/commands/debugCommands.ts`
-- Modify: `src/extension/src/__tests__/commands/debugCommands.test.ts`
-- Modify: `src/extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/commands/debugCommands.ts`
+- Modify: `src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 - [ ] **Step 1: Update debugCommands to use dynamic Record**
 
-In `src/extension/src/commands/debugCommands.ts`:
+In `src/PPDS.Extension/src/commands/debugCommands.ts`:
 
 Change the `PanelState` interface:
 ```ts
@@ -1201,7 +1201,7 @@ The `panelState` command handler now just passes through:
 
 - [ ] **Step 2: Update extension.ts call site**
 
-In `src/extension/src/extension.ts`, the `registerDebugCommands` call (line 336-339):
+In `src/PPDS.Extension/src/extension.ts`, the `registerDebugCommands` call (line 336-339):
 
 ```ts
     registerDebugCommands(context, client, profileTreeProvider, extensionState, {
@@ -1214,7 +1214,7 @@ No change needed — the object literal `{ queryPanels: ..., solutionsPanels: ..
 
 - [ ] **Step 3: Update tests**
 
-In `src/extension/src/__tests__/commands/debugCommands.test.ts`:
+In `src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts`:
 
 Update `getPanelState` tests to use the new signature:
 
@@ -1280,13 +1280,13 @@ And update the "panelState command handler returns live counts" test:
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd src/extension && npx vitest run src/__tests__/commands/debugCommands.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/commands/debugCommands.test.ts`
 Expected: All tests pass
 
 - [ ] **Step 5: Commit**
 
 ```
-git add src/extension/src/commands/debugCommands.ts src/extension/src/__tests__/commands/debugCommands.test.ts src/extension/src/extension.ts
+git add src/PPDS.Extension/src/commands/debugCommands.ts src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts src/PPDS.Extension/src/extension.ts
 git commit -m "refactor(ext): dynamic panel registry in debugCommands — no manual additions for new panels"
 ```
 
@@ -1295,11 +1295,11 @@ git commit -m "refactor(ext): dynamic panel registry in debugCommands — no man
 ### Task 10: Group activate() panel commands
 
 **Files:**
-- Modify: `src/extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 - [ ] **Step 1: Extract panel commands into registerPanelCommands**
 
-In `src/extension/src/extension.ts`, add a new function before `activate`:
+In `src/PPDS.Extension/src/extension.ts`, add a new function before `activate`:
 
 ```ts
 /**
@@ -1348,13 +1348,13 @@ Note: `logChannel` is module-level, so the extracted function can reference it.
 
 - [ ] **Step 2: Verify build and tests**
 
-Run: `cd src/extension && npm run compile && npx vitest run`
+Run: `cd src/PPDS.Extension && npm run compile && npx vitest run`
 Expected: Build succeeds, all tests pass
 
 - [ ] **Step 3: Commit**
 
 ```
-git add src/extension/src/extension.ts
+git add src/PPDS.Extension/src/extension.ts
 git commit -m "refactor(ext): extract registerPanelCommands from activate()"
 ```
 
@@ -1363,12 +1363,12 @@ git commit -m "refactor(ext): extract registerPanelCommands from activate()"
 ### Task 11: Consolidate moveProfile sort logic
 
 **Files:**
-- Modify: `src/extension/src/views/profileTreeView.ts`
-- Modify: `src/extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 - [ ] **Step 1: Add moveProfile method to ProfileTreeDataProvider**
 
-In `src/extension/src/views/profileTreeView.ts`, add method to `ProfileTreeDataProvider`:
+In `src/PPDS.Extension/src/views/profileTreeView.ts`, add method to `ProfileTreeDataProvider`:
 
 ```ts
     /**
@@ -1403,7 +1403,7 @@ In `src/extension/src/views/profileTreeView.ts`, add method to `ProfileTreeDataP
 
 - [ ] **Step 2: Simplify moveProfile in extension.ts**
 
-Replace the `moveProfile` function in `src/extension/src/extension.ts` (lines 148-181) with:
+Replace the `moveProfile` function in `src/PPDS.Extension/src/extension.ts` (lines 148-181) with:
 
 ```ts
     context.subscriptions.push(
@@ -1426,13 +1426,13 @@ Note: `ProfileInfo` is already imported at the top of `extension.ts` (line 4). N
 
 - [ ] **Step 3: Run tests**
 
-Run: `cd src/extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All tests pass
 
 - [ ] **Step 4: Commit**
 
 ```
-git add src/extension/src/views/profileTreeView.ts src/extension/src/extension.ts
+git add src/PPDS.Extension/src/views/profileTreeView.ts src/PPDS.Extension/src/extension.ts
 git commit -m "refactor(ext): consolidate moveProfile sort logic into ProfileTreeDataProvider"
 ```
 
@@ -1441,11 +1441,11 @@ git commit -m "refactor(ext): consolidate moveProfile sort logic into ProfileTre
 ### Task 12: Add env list caching to ProfileTreeDataProvider
 
 **Files:**
-- Modify: `src/extension/src/views/profileTreeView.ts`
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts`
 
 - [ ] **Step 1: Add a short-lived cache for envList results**
 
-In `src/extension/src/views/profileTreeView.ts`, add cache fields to `ProfileTreeDataProvider`:
+In `src/PPDS.Extension/src/views/profileTreeView.ts`, add cache fields to `ProfileTreeDataProvider`:
 
 ```ts
     /** Cached env list to avoid re-fetching on every tree expand. Cleared on refresh(). */
@@ -1482,18 +1482,18 @@ In `getEnvironments()`, replace `await this.daemonClient.envList()` with `await 
 
 - [ ] **Step 2: Verify build**
 
-Run: `cd src/extension && npm run typecheck`
+Run: `cd src/PPDS.Extension && npm run typecheck`
 Expected: No errors
 
 - [ ] **Step 3: Run tests**
 
-Run: `cd src/extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/views/profileTreeView.test.ts`
 Expected: All tests pass (cache is transparent)
 
 - [ ] **Step 4: Commit**
 
 ```
-git add src/extension/src/views/profileTreeView.ts
+git add src/PPDS.Extension/src/views/profileTreeView.ts
 git commit -m "perf(ext): cache envList in ProfileTreeDataProvider (30s TTL)"
 ```
 
@@ -1503,27 +1503,27 @@ git commit -m "perf(ext): cache envList in ProfileTreeDataProvider (30s TTL)"
 
 - [ ] **Step 1: Typecheck**
 
-Run: `cd src/extension && npm run typecheck:all`
+Run: `cd src/PPDS.Extension && npm run typecheck:all`
 Expected: No errors
 
 - [ ] **Step 2: Lint**
 
-Run: `cd src/extension && npm run lint`
+Run: `cd src/PPDS.Extension && npm run lint`
 Expected: No errors (or only pre-existing warnings)
 
 - [ ] **Step 3: Build**
 
-Run: `cd src/extension && npm run compile`
+Run: `cd src/PPDS.Extension && npm run compile`
 Expected: Build succeeds
 
 - [ ] **Step 4: Run all unit tests**
 
-Run: `cd src/extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All tests pass
 
 - [ ] **Step 5: Check for dead code**
 
-Run: `cd src/extension && npm run dead-code` (runs `knip` — script verified in package.json)
+Run: `cd src/PPDS.Extension && npm run dead-code` (runs `knip` — script verified in package.json)
 Expected: No new dead code introduced
 
 ---

@@ -14,11 +14,11 @@
 
 | Action | File | Responsibility |
 |--------|------|---------------|
-| Modify | `extension/src/daemonClient.ts:154-156` | Parse `[LEVEL]` from stderr, route to correct log method |
-| Create | `extension/src/__tests__/stderrLogParser.test.ts` | Unit tests for stderr log level parsing |
+| Modify | `src/PPDS.Extension/src/daemonClient.ts:154-156` | Parse `[LEVEL]` from stderr, route to correct log method |
+| Create | `src/PPDS.Extension/src/__tests__/stderrLogParser.test.ts` | Unit tests for stderr log level parsing |
 | Modify | `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs:937-1060` | Add Stopwatch timing for parse + transpile stages |
-| Modify | `extension/src/panels/webview/query-panel.ts:827-831` | Append queryMode to status display |
-| Modify | `extension/src/notebooks/notebookResultRenderer.ts:44` | Append queryMode to results summary |
+| Modify | `src/PPDS.Extension/src/panels/webview/query-panel.ts:827-831` | Append queryMode to status display |
+| Modify | `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts:44` | Append queryMode to results summary |
 
 ---
 
@@ -36,12 +36,12 @@ Currently `daemonClient.ts:154-156` dumps everything as `log.warn()`. We need to
 VS Code's LogOutputChannel already handles filtering based on the user's "Developer: Set Log Level" setting — no custom filtering needed.
 
 **Files:**
-- Modify: `extension/src/daemonClient.ts:154-156`
-- Create: `extension/src/__tests__/stderrLogParser.test.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts:154-156`
+- Create: `src/PPDS.Extension/src/__tests__/stderrLogParser.test.ts`
 
 - [ ] **Step 1: Write failing tests for stderr log level parsing**
 
-Create `extension/src/__tests__/stderrLogParser.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/stderrLogParser.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -84,12 +84,12 @@ describe('parseDaemonLogLevel', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npm run test --prefix extension -- --run src/__tests__/stderrLogParser.test.ts`
+Run: `npm run test --prefix src/PPDS.Extension -- --run src/__tests__/stderrLogParser.test.ts`
 Expected: FAIL — `parseDaemonLogLevel` is not exported from `daemonClient.ts`
 
 - [ ] **Step 3: Implement parseDaemonLogLevel and update stderr handler**
 
-In `extension/src/daemonClient.ts`, add this exported function (place it after the imports, before the class):
+In `src/PPDS.Extension/src/daemonClient.ts`, add this exported function (place it after the imports, before the class):
 
 ```typescript
 /** Maps daemon stderr log-level tags to LogOutputChannel method names. */
@@ -135,7 +135,7 @@ Note: split on `\n` handles multi-line buffer chunks. Prefix changes from `[daem
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npm run test --prefix extension -- --run src/__tests__/stderrLogParser.test.ts`
+Run: `npm run test --prefix src/PPDS.Extension -- --run src/__tests__/stderrLogParser.test.ts`
 Expected: PASS — all 8 tests green
 
 - [ ] **Step 5: Run full extension test suite**
@@ -146,7 +146,7 @@ Expected: All tests pass (existing tests don't exercise the stderr handler direc
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/src/daemonClient.ts extension/src/__tests__/stderrLogParser.test.ts
+git add src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/src/__tests__/stderrLogParser.test.ts
 git commit -m "feat(extension): parse daemon stderr log levels instead of flattening to WARN
 
 Route [TRC]→trace, [DBG]→debug, [INF]→info, [WRN]→warn, [ERR/CRT]→error.
@@ -235,7 +235,7 @@ visible when user sets VS Code log level to Debug."
 The `updateStatus` function in `query-panel.ts:827-831` currently shows `"X rows (more available)"` and `"in Yms"`. Append the query mode after the timing.
 
 **Files:**
-- Modify: `extension/src/panels/webview/query-panel.ts:827-831`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts:827-831`
 
 - [ ] **Step 1: Update updateStatus to show queryMode**
 
@@ -265,12 +265,12 @@ Hold — commit together with Task 4.
 The `renderResultsHtml` function in `notebookResultRenderer.ts:44` shows `"X rows returned in Yms"`. Append the query mode.
 
 **Files:**
-- Modify: `extension/src/notebooks/notebookResultRenderer.ts:44`
-- Create: `extension/src/notebooks/__tests__/notebookResultRenderer.test.ts`
+- Modify: `src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts:44`
+- Create: `src/PPDS.Extension/src/notebooks/__tests__/notebookResultRenderer.test.ts`
 
 - [ ] **Step 1: Write failing test for queryMode in renderResultsHtml**
 
-Create `extension/src/notebooks/__tests__/notebookResultRenderer.test.ts`:
+Create `src/PPDS.Extension/src/notebooks/__tests__/notebookResultRenderer.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -318,7 +318,7 @@ describe('renderResultsHtml queryMode display', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npm run test --prefix extension -- --run src/notebooks/__tests__/notebookResultRenderer.test.ts`
+Run: `npm run test --prefix src/PPDS.Extension -- --run src/notebooks/__tests__/notebookResultRenderer.test.ts`
 Expected: FAIL — queryMode not used in summary yet
 
 - [ ] **Step 3: Update summary line to show queryMode**
@@ -336,7 +336,7 @@ const summary = `<div class="results-summary">${result.count} row${result.count 
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npm run test --prefix extension -- --run src/notebooks/__tests__/notebookResultRenderer.test.ts`
+Run: `npm run test --prefix src/PPDS.Extension -- --run src/notebooks/__tests__/notebookResultRenderer.test.ts`
 Expected: PASS — all 3 tests green
 
 - [ ] **Step 5: Run full extension test suite**
@@ -347,7 +347,7 @@ Expected: All tests pass
 - [ ] **Step 6: Commit both queryMode display changes**
 
 ```bash
-git add extension/src/panels/webview/query-panel.ts extension/src/notebooks/notebookResultRenderer.ts extension/src/notebooks/__tests__/notebookResultRenderer.test.ts
+git add src/PPDS.Extension/src/panels/webview/query-panel.ts src/PPDS.Extension/src/notebooks/notebookResultRenderer.ts src/PPDS.Extension/src/notebooks/__tests__/notebookResultRenderer.test.ts
 git commit -m "feat(extension): display query execution mode in results summary
 
 Shows 'via TDS' or 'via Dataverse' after execution timing in both the

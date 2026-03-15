@@ -68,7 +68,7 @@ feat(daemon): expose environmentId in auth/list EnvironmentSummary
 ### Task 2: Update TypeScript `EnvironmentSummary` interface
 
 **Files:**
-- Modify: `extension/src/types.ts:26-29`
+- Modify: `src/PPDS.Extension/src/types.ts:26-29`
 
 **Step 1: Add `environmentId` to the interface**
 
@@ -82,7 +82,7 @@ export interface EnvironmentSummary {
 
 **Step 2: Verify no type errors**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors (the new field is nullable so existing code doesn't break)
 
 **Step 3: Commit**
@@ -98,11 +98,11 @@ feat(extension): add environmentId to EnvironmentSummary type
 Create a new command file for the browser commands. These are separate from profile commands because they're a different concern (navigation, not profile management).
 
 **Files:**
-- Create: `extension/src/commands/browserCommands.ts`
+- Create: `src/PPDS.Extension/src/commands/browserCommands.ts`
 
 **Step 1: Write the test**
 
-Create `extension/src/__tests__/commands/browserCommands.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/commands/browserCommands.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -163,12 +163,12 @@ describe('browserCommands', () => {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd extension && npx vitest run src/__tests__/commands/browserCommands.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/commands/browserCommands.test.ts`
 Expected: FAIL — module not found
 
 **Step 3: Implement browserCommands.ts**
 
-Create `extension/src/commands/browserCommands.ts`:
+Create `src/PPDS.Extension/src/commands/browserCommands.ts`:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -310,7 +310,7 @@ export function registerBrowserCommands(
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd extension && npx vitest run src/__tests__/commands/browserCommands.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/commands/browserCommands.test.ts`
 Expected: PASS
 
 **Step 5: Commit**
@@ -324,8 +324,8 @@ feat(extension): add Open in Maker Portal and Open in Dynamics commands
 ### Task 4: Register commands in package.json and extension.ts
 
 **Files:**
-- Modify: `extension/package.json` (commands array, menus)
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/package.json` (commands array, menus)
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Add command definitions to package.json `contributes.commands` array**
 
@@ -378,7 +378,7 @@ registerBrowserCommands(context, client);
 
 **Step 4: Build and lint**
 
-Run: `cd extension && npm run compile && npm run lint`
+Run: `cd src/PPDS.Extension && npm run compile && npm run lint`
 Expected: No errors
 
 **Step 5: Commit**
@@ -395,12 +395,12 @@ feat(extension): register Open in Maker/Dynamics in package.json and activation
 
 **Step 1: Run unit tests**
 
-Run: `cd extension && npm run test`
+Run: `cd src/PPDS.Extension && npm run test`
 Expected: All tests pass including new browserCommands tests
 
 **Step 2: Run lint**
 
-Run: `cd extension && npm run lint`
+Run: `cd src/PPDS.Extension && npm run lint`
 Expected: No errors
 
 **Step 3: Build daemon**
