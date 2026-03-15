@@ -14,9 +14,15 @@ export class ExplainDocumentProvider implements vscode.TextDocumentContentProvid
 
     private readonly contents = new Map<string, string>();
     private counter = 0;
+    private readonly _closeListener: vscode.Disposable;
 
     constructor() {
         ExplainDocumentProvider.instance = this;
+        this._closeListener = vscode.workspace.onDidCloseTextDocument((doc) => {
+            if (doc.uri.scheme === ExplainDocumentProvider.scheme) {
+                this.contents.delete(doc.uri.toString());
+            }
+        });
     }
 
     provideTextDocumentContent(uri: vscode.Uri): string {
@@ -38,6 +44,7 @@ export class ExplainDocumentProvider implements vscode.TextDocumentContentProvid
     }
 
     dispose(): void {
+        this._closeListener.dispose();
         this._onDidChange.dispose();
     }
 }

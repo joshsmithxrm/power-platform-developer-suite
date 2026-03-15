@@ -106,6 +106,10 @@ vsc-extension-quickstart.md
 # Development Scripts
 # -----------------------------------------------------------------------------
 scripts/**
+dev/**
+tools/**
+knip.json
+.stylelintrc.json
 
 # -----------------------------------------------------------------------------
 # Build Artifacts and Temp Files

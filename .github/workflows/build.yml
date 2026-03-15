@@ -104,10 +104,6 @@ jobs:
   # Extension build (TypeScript)
   extension:
     runs-on: ubuntu-latest
-    # Only run if extension files changed
-    if: |
-      github.event_name == 'push' && contains(github.event.head_commit.modified, 'src/PPDS.Extension/') ||
-      github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v6
@@ -130,6 +126,10 @@ jobs:
       - name: Build
         working-directory: src/PPDS.Extension
         run: npm run compile
+
+      - name: Test
+        working-directory: src/PPDS.Extension
+        run: npm test
 
   # Gate job for branch protection
   build-status:

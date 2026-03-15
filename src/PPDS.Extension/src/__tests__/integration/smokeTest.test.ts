@@ -68,6 +68,7 @@ vi.mock('vscode', () => {
             openTextDocument: vi.fn(() => Promise.resolve({})),
             onDidOpenNotebookDocument: vi.fn(() => disposable),
             onDidCloseNotebookDocument: vi.fn(() => disposable),
+            onDidCloseTextDocument: vi.fn(() => disposable),
             onDidChangeTextDocument: vi.fn(() => disposable),
             getConfiguration: vi.fn(() => ({
                 get: vi.fn((key: string, defaultVal: any) => defaultVal),

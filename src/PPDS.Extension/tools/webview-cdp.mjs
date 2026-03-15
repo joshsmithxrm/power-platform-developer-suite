@@ -509,7 +509,7 @@ async function runDaemon(workspace) {
 async function cmdLaunch(parsed) {
   if (parsed.build) {
     const extDir = resolve(__dirname, '..');
-    const repoRoot = resolve(extDir, '..');
+    const repoRoot = resolve(extDir, '..', '..');
     console.log('Building extension...');
     try {
       execSync('npm run compile', { cwd: extDir, stdio: 'inherit' });
