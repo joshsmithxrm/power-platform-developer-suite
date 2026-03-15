@@ -183,31 +183,36 @@ async function runDaemon(workspace) {
   });
 
   // Webview frame resolver
+  // Use page.frames() instead of DOM traversal — avoids stale ElementHandle issues
+  // when VS Code re-renders webview containers between commands
   async function resolveWebviewFrame(targetIndex, extFilter) {
-    const iframes = await page.$$('iframe[class*="webview"]');
-    let filtered = iframes;
-    if (extFilter) {
-      filtered = [];
-      for (const iframe of iframes) {
-        const src = await iframe.getAttribute('src') || '';
-        if (src.includes(extFilter)) filtered.push(iframe);
+    const allFrames = page.frames();
+
+    // Webview frames have URLs starting with vscode-webview://
+    // The inner (active-frame) is the one we want — it's nested inside the wrapper
+    // We identify it by checking that it has real DOM content (body.children.length > 0)
+    const candidates = [];
+    for (const frame of allFrames) {
+      const url = frame.url();
+      if (!url.startsWith('vscode-webview://')) continue;
+      if (extFilter && !url.includes(extFilter)) continue;
+
+      // Check if this frame has real content (inner active-frame, not wrapper)
+      try {
+        const hasContent = await frame.evaluate(() => document.body && document.body.children.length > 0);
+        if (hasContent) candidates.push(frame);
+      } catch {
+        // Frame may be detached or navigating — skip
       }
     }
+
+    if (candidates.length === 0) throw new Error('No webview found. Open a panel first.');
+
     const idx = targetIndex ?? 0;
-    if (filtered.length === 0) throw new Error('No webview found. Open a panel first.');
-    if (idx < 0 || idx >= filtered.length)
-      throw new Error(`Target index ${idx} out of range (found ${filtered.length} webviews)`);
+    if (idx < 0 || idx >= candidates.length)
+      throw new Error(`Target index ${idx} out of range (found ${candidates.length} webviews)`);
 
-    const outerFrame = await filtered[idx].contentFrame();
-    if (!outerFrame) throw new Error('Could not access webview frame');
-
-    // VS Code nests another iframe inside
-    try {
-      const innerIframe = await outerFrame.waitForSelector('iframe', { timeout: 5000 });
-      const innerFrame = await innerIframe.contentFrame();
-      if (innerFrame) return innerFrame;
-    } catch {}
-    return outerFrame;
+    return candidates[idx];
   }
 
   async function resolveTarget(params) {
@@ -249,6 +254,20 @@ async function runDaemon(workspace) {
   }
 
   // Action handler
+  // Retry wrapper for commands that may fail due to transient frame detachment
+  async function withRetry(fn, maxRetries = 2) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        const isTransient = err.message?.includes('detached') || err.message?.includes('navigating')
+          || err.message?.includes('closed') || err.message?.includes('Target page, context or browser has been closed');
+        if (!isTransient || attempt === maxRetries) throw err;
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  }
+
   async function handleAction(action, params) {
     switch (action) {
       case 'screenshot': {
@@ -309,12 +328,18 @@ async function runDaemon(workspace) {
         return {};
       }
       case 'connect': {
-        const iframes = await page.$$('iframe[class*="webview"]');
+        // Use page.frames() for consistency with resolveWebviewFrame
+        const allFrames = page.frames();
         const targets = [];
-        for (const iframe of iframes) {
-          const src = await iframe.getAttribute('src') || '';
-          const extMatch = src.match(/extensionId=([^&]*)/);
-          targets.push({ ext: extMatch?.[1] || 'unknown', src });
+        for (const frame of allFrames) {
+          const url = frame.url();
+          if (!url.startsWith('vscode-webview://')) continue;
+          try {
+            const hasContent = await frame.evaluate(() => document.body && document.body.children.length > 0);
+            if (!hasContent) continue;
+          } catch { continue; }
+          const extMatch = url.match(/extensionId=([^&]*)/);
+          targets.push({ ext: extMatch?.[1] || 'unknown', src: url });
         }
         return { targets };
       }
@@ -387,7 +412,7 @@ async function runDaemon(workspace) {
       if (req.url === '/execute' && req.method === 'POST') {
         const body = await readBody(req);
         const { action, ...params } = JSON.parse(body);
-        const result = await handleAction(action, params);
+        const result = await withRetry(() => handleAction(action, params));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, ...result }));
         return;
