@@ -208,27 +208,17 @@ export class SolutionsPanel extends WebviewPanelBase {
     private async loadSolutions(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const result = await this.daemon.solutionsList(undefined, this.includeManaged, this.environmentUrl);
-
-            // Count managed solutions that are hidden (when includeManaged is false)
-            let managedCount = 0;
-            if (!this.includeManaged) {
-                // We need to query again with includeManaged=true to get the count,
-                // but that's expensive. Instead, just report what we know.
-                // The managed count is the difference between total and unmanaged.
-                // Since the API already filters, we can make a separate count call.
-                try {
-                    const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
-                    managedCount = allResult.solutions.filter(s => s.isManaged).length;
-                } catch {
-                    // If the count call fails, just use 0
-                    managedCount = 0;
-                }
-            }
+            // Always fetch all solutions (including managed) in a single call.
+            // Filter client-side to avoid a second API round-trip.
+            const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
+            const managedCount = allResult.solutions.filter(s => s.isManaged).length;
+            const solutions = this.includeManaged
+                ? allResult.solutions
+                : allResult.solutions.filter(s => !s.isManaged);
 
             this.postMessage({
                 command: 'solutionsLoaded',
-                solutions: result.solutions.map(s => ({
+                solutions: solutions.map(s => ({
                     id: s.id,
                     uniqueName: s.uniqueName,
                     friendlyName: s.friendlyName,
