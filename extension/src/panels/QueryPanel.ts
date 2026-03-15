@@ -381,6 +381,9 @@ export class QueryPanel extends WebviewPanelBase {
         const monacoUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'monaco-editor.js')
         );
+        const monacoCssUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'monaco-editor.css')
+        );
         const workerUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'editor.worker.js')
         );
@@ -394,6 +397,7 @@ export class QueryPanel extends WebviewPanelBase {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; worker-src blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="module" nonce="${nonce}" src="${toolkitUri}"></script>
+    <link rel="stylesheet" href="${monacoCssUri}">
     <script nonce="${nonce}">self.__MONACO_WORKER_URL__ = '${workerUri}';</script>
     <script nonce="${nonce}" src="${monacoUri}"></script>
 </head>
