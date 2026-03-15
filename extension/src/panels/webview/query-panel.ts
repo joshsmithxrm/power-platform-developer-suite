@@ -491,7 +491,7 @@ moreBtn.addEventListener('click', (e) => {
         { label: 'Load Query\u2026', action: 'loadQuery' },
         { label: 'Open in Notebook', action: 'openInNotebook' },
         { label: '', action: 'separator' },
-        { label: 'EXPLAIN', action: 'explain' },
+        { label: 'Explain Query', action: 'explain' },
         { label: '', action: 'separator' },
         { label: 'TDS Read Replica', action: 'toggleTds', checked: useTds },
     ]);
