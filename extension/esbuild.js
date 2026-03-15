@@ -59,11 +59,24 @@ async function main() {
         logLevel: 'warning',
     });
 
+    // Build 5: Solutions panel webview script (browser, IIFE)
+    const solutionsPanelCtx = await esbuild.context({
+        entryPoints: ['src/panels/solutions-panel-webview.js'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/solutions-panel.js',
+        logLevel: 'warning',
+    });
+
     if (process.argv.includes('--watch')) {
-        await Promise.all([extCtx.watch(), monacoCtx.watch(), workerCtx.watch(), queryPanelCtx.watch()]);
+        await Promise.all([extCtx.watch(), monacoCtx.watch(), workerCtx.watch(), queryPanelCtx.watch(), solutionsPanelCtx.watch()]);
     } else {
-        await Promise.all([extCtx.rebuild(), monacoCtx.rebuild(), workerCtx.rebuild(), queryPanelCtx.rebuild()]);
-        await Promise.all([extCtx.dispose(), monacoCtx.dispose(), workerCtx.dispose(), queryPanelCtx.dispose()]);
+        await Promise.all([extCtx.rebuild(), monacoCtx.rebuild(), workerCtx.rebuild(), queryPanelCtx.rebuild(), solutionsPanelCtx.rebuild()]);
+        await Promise.all([extCtx.dispose(), monacoCtx.dispose(), workerCtx.dispose(), queryPanelCtx.dispose(), solutionsPanelCtx.dispose()]);
     }
 }
 main().catch(e => { console.error(e); process.exit(1); });
