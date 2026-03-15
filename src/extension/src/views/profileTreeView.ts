@@ -158,8 +158,15 @@ export class ProfileTreeDataProvider
             if (result.profiles.length === 0) {
                 return [];
             }
-            const expandedIds = new Set(this.globalState?.get<string[]>('ppds.profiles.expandedIds') ?? []);
-            const items = result.profiles.map(p => new ProfileTreeItem(p, expandedIds));
+            const rawExpandedIds = this.globalState?.get<string[]>('ppds.profiles.expandedIds') ?? [];
+            const expandedIds = new Set(rawExpandedIds);
+            this.log.info(`[expand-debug] getProfiles: globalState expandedIds=[${rawExpandedIds.join(', ')}]`);
+            const items = result.profiles.map(p => {
+                const stableId = `profile://${p.identity}//${p.authMethod}//${p.cloud}`;
+                const isExpanded = expandedIds.has(stableId);
+                this.log.info(`[expand-debug] getProfiles: profile="${p.name ?? p.index}" stableId="${stableId}" isExpanded=${isExpanded} collapsibleState=${isExpanded ? 'Expanded' : 'Collapsed'}`);
+                return new ProfileTreeItem(p, expandedIds);
+            });
 
             // Apply user-defined sort order from globalState
             const sortOrder = this.globalState?.get<Record<string, number>>('ppds.profiles.sortOrder');
@@ -261,6 +268,35 @@ export class ProfileTreeDataProvider
         });
 
         return [...envItems, ...otherItems];
+    }
+
+    /**
+     * Swaps the sort position of a profile with its neighbor.
+     * Consolidates the sort logic that was duplicated in extension.ts.
+     */
+    async moveProfile(profileId: string, direction: 'up' | 'down'): Promise<void> {
+        const sortOrder = this.globalState?.get<Record<string, number>>('ppds.profiles.sortOrder') ?? {};
+        const profiles = await this.daemonClient.authList();
+        const sorted = profiles.profiles.map(p => ({ id: getProfileId(p), profile: p }));
+
+        sorted.sort((a, b) => {
+            const orderA = sortOrder[a.id] ?? a.profile.index;
+            const orderB = sortOrder[b.id] ?? b.profile.index;
+            return orderA - orderB;
+        });
+
+        const targetIdx = sorted.findIndex(i => i.id === profileId);
+        const swapIdx = direction === 'up' ? targetIdx - 1 : targetIdx + 1;
+
+        if (targetIdx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+
+        const newOrder: Record<string, number> = {};
+        sorted.forEach((it, idx) => { newOrder[it.id] = idx; });
+        newOrder[sorted[targetIdx].id] = swapIdx;
+        newOrder[sorted[swapIdx].id] = targetIdx;
+
+        await this.globalState?.update('ppds.profiles.sortOrder', newOrder);
+        this.refresh();
     }
 
     dispose(): void {
