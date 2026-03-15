@@ -416,6 +416,7 @@ export class DaemonClient implements vscode.Disposable {
         count?: boolean;
         showFetchXml?: boolean;
         useTds?: boolean;
+        dmlSafety?: { isConfirmed?: boolean; isDryRun?: boolean; noLimit?: boolean; rowCap?: number };
     }, token?: CancellationToken): Promise<QueryResultResponse> {
         await this.ensureConnected();
 
