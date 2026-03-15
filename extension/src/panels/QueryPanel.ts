@@ -487,18 +487,29 @@ export class QueryPanel extends WebviewPanelBase {
     const vscode = acquireVsCodeApi();
 
     // ── Monaco Editor initialization ──
-    const monacoTheme = document.body.classList.contains('vscode-light') || document.body.classList.contains('vscode-high-contrast-light') ? 'vs' : 'vs-dark';
+    // VS Code adds vscode-dark/vscode-light as body classes in webviews
+    const bodyClasses = document.body.className;
+    const monacoTheme = (bodyClasses.includes('vscode-light') || bodyClasses.includes('vscode-high-contrast-light')) ? 'vs' : 'vs-dark';
     const editor = monaco.editor.create(document.getElementById('sql-editor'), {
         language: 'sql',
         theme: monacoTheme,
         value: '',
         minimap: { enabled: false },
-        lineNumbers: 'on',
+        lineNumbers: 'off',
         scrollBeyondLastLine: false,
         wordWrap: 'on',
         fontSize: 13,
         automaticLayout: true,
         suggestOnTriggerCharacters: true,
+        glyphMargin: false,
+        folding: false,
+        lineDecorationsWidth: 0,
+        lineNumbersMinChars: 0,
+        renderLineHighlight: 'none',
+        overviewRulerLanes: 0,
+        hideCursorInOverviewRuler: true,
+        overviewRulerBorder: false,
+        scrollbar: { vertical: 'auto', horizontal: 'auto' },
     });
 
     let currentLanguage = 'sql';
@@ -669,15 +680,25 @@ export class QueryPanel extends WebviewPanelBase {
     const pendingCompletions = new Map();
 
     function requestCompletions(model, position, language) {
+        // Compute the word range for replacement
+        const wordInfo = model.getWordUntilPosition(position);
+        const range = {
+            startLineNumber: position.lineNumber,
+            startColumn: wordInfo.startColumn,
+            endLineNumber: position.lineNumber,
+            endColumn: wordInfo.endColumn,
+        };
+
         return new Promise((resolve) => {
             const id = ++completionRequestId;
             const cursorOffset = model.getOffsetAt(position);
-            pendingCompletions.set(id, resolve);
+            pendingCompletions.set(id, { resolve, range });
             vscode.postMessage({ command: 'requestCompletions', requestId: id, sql: model.getValue(), cursorOffset, language });
             setTimeout(() => {
-                if (pendingCompletions.has(id)) {
+                const p = pendingCompletions.get(id);
+                if (p) {
                     pendingCompletions.delete(id);
-                    resolve({ suggestions: [] });
+                    p.resolve({ suggestions: [] });
                 }
             }, 3000);
         });
@@ -916,8 +937,8 @@ export class QueryPanel extends WebviewPanelBase {
                 updateEnvironmentDisplay(msg.name);
                 break;
             case 'completionResult': {
-                const resolver = pendingCompletions.get(msg.requestId);
-                if (resolver) {
+                const pending = pendingCompletions.get(msg.requestId);
+                if (pending) {
                     pendingCompletions.delete(msg.requestId);
                     const suggestions = (msg.items || []).map(item => ({
                         label: item.label,
@@ -925,9 +946,9 @@ export class QueryPanel extends WebviewPanelBase {
                         kind: mapKind(item.kind),
                         detail: item.detail || '',
                         sortText: String(item.sortOrder || 0).padStart(5, '0'),
-                        range: undefined,
+                        range: pending.range,
                     }));
-                    resolver({ suggestions });
+                    pending.resolve({ suggestions });
                 }
                 break;
             }
