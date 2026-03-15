@@ -511,7 +511,11 @@ async function cmdLaunch(parsed) {
   if (parsed.build) {
     const extDir = resolve(__dirname, '..');
     console.log('Building extension...');
-    execSync('npm run compile', { cwd: extDir, stdio: 'inherit' });
+    try {
+      execSync('npm run compile', { cwd: extDir, stdio: 'inherit' });
+    } catch {
+      throw new Error('Extension build failed — fix compilation errors above');
+    }
     console.log('Build complete');
   }
 
