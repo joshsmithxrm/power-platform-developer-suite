@@ -18,11 +18,13 @@ public class ComponentNameResolver : IComponentNameResolver
     private const int MaxBatchSize = 100;
 
     private readonly ICachedMetadataProvider _metadataProvider;
+    private readonly IMetadataService _metadataService;
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<ComponentNameResolver> _logger;
 
     private static readonly Dictionary<int, ComponentTypeMapping> TypeMappings = new()
     {
+        // Entity (1) and Option Set (70) handled specially via metadata API — not in this dict
         [26]  = new("savedquery", "name", null, null),
         [29]  = new("workflow", "uniquename", null, "name"),
         [60]  = new("systemform", "name", null, null),
@@ -31,6 +33,7 @@ public class ComponentNameResolver : IComponentNameResolver
         [90]  = new("plugintype", "name", null, null),
         [91]  = new("pluginassembly", "name", null, null),
         [92]  = new("sdkmessageprocessingstep", "name", null, null),
+        [95]  = new("serviceendpoint", "name", null, null),
         [300] = new("canvasapp", "name", null, "displayname"),
         [371] = new("connector", "name", null, "displayname"),
         [372] = new("connector", "name", null, "displayname"),
@@ -43,10 +46,12 @@ public class ComponentNameResolver : IComponentNameResolver
     /// </summary>
     public ComponentNameResolver(
         ICachedMetadataProvider metadataProvider,
+        IMetadataService metadataService,
         IDataverseConnectionPool pool,
         ILogger<ComponentNameResolver> logger)
     {
         _metadataProvider = metadataProvider ?? throw new ArgumentNullException(nameof(metadataProvider));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -67,13 +72,22 @@ public class ComponentNameResolver : IComponentNameResolver
         {
             IReadOnlyDictionary<Guid, ComponentNames> result;
 
+            string typeName;
+
             if (componentType == 1)
             {
                 result = await ResolveEntitiesAsync(objectIds, cancellationToken);
+                typeName = "Entity";
+            }
+            else if (componentType == 70)
+            {
+                result = await ResolveOptionSetsAsync(objectIds, cancellationToken);
+                typeName = "OptionSet";
             }
             else if (TypeMappings.TryGetValue(componentType, out mapping))
             {
                 result = await ResolveFromTableAsync(mapping, objectIds, cancellationToken);
+                typeName = mapping.TableName;
             }
             else
             {
@@ -83,9 +97,7 @@ public class ComponentNameResolver : IComponentNameResolver
             stopwatch.Stop();
             _logger.LogInformation(
                 "Resolved {Count} {TypeName} names in {ElapsedMs}ms",
-                result.Count,
-                componentType == 1 ? "Entity" : mapping!.TableName,
-                stopwatch.ElapsedMilliseconds);
+                result.Count, typeName, stopwatch.ElapsedMilliseconds);
 
             return result;
         }
@@ -116,6 +128,28 @@ public class ComponentNameResolver : IComponentNameResolver
                     entity.LogicalName,
                     entity.SchemaName,
                     entity.DisplayName);
+            }
+        }
+
+        return lookup;
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, ComponentNames>> ResolveOptionSetsAsync(
+        IReadOnlyList<Guid> objectIds,
+        CancellationToken cancellationToken)
+    {
+        var optionSets = await _metadataService.GetGlobalOptionSetsAsync(cancellationToken: cancellationToken);
+        var byMetadataId = optionSets.ToDictionary(os => os.MetadataId);
+        var lookup = new Dictionary<Guid, ComponentNames>();
+
+        foreach (var objectId in objectIds)
+        {
+            if (byMetadataId.TryGetValue(objectId, out var optionSet))
+            {
+                lookup[objectId] = new ComponentNames(
+                    optionSet.Name,
+                    null,
+                    optionSet.DisplayName);
             }
         }
 
