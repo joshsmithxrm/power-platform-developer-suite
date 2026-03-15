@@ -329,6 +329,31 @@ export class SolutionsPanel extends WebviewPanelBase {
     .component-item:hover { background: var(--vscode-list-hoverBackground); }
     .component-item .metadata-badge { font-size: 10px; color: var(--vscode-descriptionForeground); }
 
+    .component-detail-card {
+        display: none;
+        padding: 4px 8px 4px 28px;
+        margin: 0 0 2px 0;
+        background: var(--vscode-editor-background);
+        border-left: 2px solid var(--vscode-focusBorder);
+        font-size: 12px;
+    }
+    .component-detail-card.expanded {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 8px;
+    }
+    .component-item { cursor: pointer; }
+    .component-item:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0 4px;
+        color: var(--vscode-foreground);
+        font-size: 12px;
+    }
+    .copy-btn:hover { color: var(--vscode-textLink-foreground); }
+
     .status-bar { display: flex; gap: 16px; padding: 4px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
 
     .empty-state { padding: 40px; text-align: center; color: var(--vscode-descriptionForeground); font-style: italic; }
@@ -481,6 +506,45 @@ export class SolutionsPanel extends WebviewPanelBase {
                 if (chevron) chevron.classList.add('expanded');
             }
         }
+    });
+
+    // Component item click → toggle detail card
+    content.addEventListener('click', function(e) {
+        var copyBtn = e.target.closest('.copy-btn');
+        if (copyBtn) {
+            var text = copyBtn.dataset.copy;
+            navigator.clipboard.writeText(text).then(function() {
+                var original = copyBtn.innerHTML;
+                copyBtn.textContent = '\\u2713';
+                setTimeout(function() { copyBtn.innerHTML = original; }, 1500);
+            });
+            e.stopPropagation();
+            return;
+        }
+
+        var item = e.target.closest('.component-item');
+        if (!item) return;
+
+        var objectId = item.dataset.objectId;
+        var detailCard = content.querySelector('.component-detail-card[data-detail-for="' + cssEscape(objectId) + '"]');
+        if (!detailCard) return;
+
+        // Collapse any other expanded card
+        var expanded = content.querySelector('.component-detail-card.expanded');
+        if (expanded && expanded !== detailCard) {
+            expanded.classList.remove('expanded');
+        }
+
+        detailCard.classList.toggle('expanded');
+    });
+
+    // Keyboard: Enter/Space on component item
+    content.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var item = e.target.closest('.component-item');
+        if (!item) return;
+        e.preventDefault();
+        item.click();
     });
 
     function updateSolutionExpansion(uniqueName, expanded) {
@@ -637,6 +701,22 @@ export class SolutionsPanel extends WebviewPanelBase {
                 if (comp.isMetadata) {
                     html += ' <span class="metadata-badge">metadata</span>';
                 }
+                html += '</div>';
+
+                // Detail card (hidden by default)
+                html += '<div class="component-detail-card" data-detail-for="' + escapeAttr(comp.objectId) + '">';
+                if (comp.logicalName) {
+                    html += '<span class="detail-label">Logical Name</span><span class="detail-value">' + escapeHtml(comp.logicalName) + '</span>';
+                }
+                if (comp.schemaName) {
+                    html += '<span class="detail-label">Schema Name</span><span class="detail-value">' + escapeHtml(comp.schemaName) + '</span>';
+                }
+                if (comp.displayName) {
+                    html += '<span class="detail-label">Display Name</span><span class="detail-value">' + escapeHtml(comp.displayName) + '</span>';
+                }
+                html += '<span class="detail-label">Object ID</span><span class="detail-value">' + escapeHtml(comp.objectId) + ' <button class="copy-btn" data-copy="' + escapeAttr(comp.objectId) + '">&#128203;</button></span>';
+                html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + comp.rootComponentBehavior + '</span>';
+                html += '<span class="detail-label">Metadata</span><span class="detail-value">' + (comp.isMetadata ? 'Yes' : 'No') + '</span>';
                 html += '</div>';
             }
             html += '</div>';
