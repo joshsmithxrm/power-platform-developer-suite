@@ -517,9 +517,8 @@ export class SolutionsPanel extends WebviewPanelBase {
         if (copyBtn) {
             var text = copyBtn.dataset.copy;
             navigator.clipboard.writeText(text).then(function() {
-                var original = copyBtn.innerHTML;
-                copyBtn.textContent = '\\u2713';
-                setTimeout(function() { copyBtn.innerHTML = original; }, 1500);
+                copyBtn.textContent = '\u2713';
+                setTimeout(function() { copyBtn.textContent = '\u{1F4CB}'; }, 1500);
             });
             e.stopPropagation();
             return;
