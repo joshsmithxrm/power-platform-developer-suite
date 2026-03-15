@@ -6,10 +6,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/extension/dist/**/*.js"
+        "${workspaceFolder}/src/extension/dist/**/*.js"
       ],
       "preLaunchTask": "Build All"
     },
@@ -18,10 +18,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/extension/dist/**/*.js"
+        "${workspaceFolder}/src/extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: watch"
     },
@@ -30,10 +30,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/extension/dist/**/*.js"
+        "${workspaceFolder}/src/extension/dist/**/*.js"
       ]
     },
     {
@@ -41,11 +41,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/extension",
-        "--extensionTestsPath=${workspaceFolder}/extension/dist/test/suite/index"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/extension",
+        "--extensionTestsPath=${workspaceFolder}/src/extension/dist/test/suite/index"
       ],
       "outFiles": [
-        "${workspaceFolder}/extension/dist/**/*.js"
+        "${workspaceFolder}/src/extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
     },
@@ -54,11 +54,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/extension",
+        "--extensionDevelopmentPath=${workspaceFolder}/src/extension",
         "${input:folderToOpen}"
       ],
       "outFiles": [
-        "${workspaceFolder}/extension/dist/**/*.js"
+        "${workspaceFolder}/src/extension/dist/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
     }

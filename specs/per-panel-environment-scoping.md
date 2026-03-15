@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-13
-**Code:** [extension/src/](../extension/src/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
+**Code:** [src/extension/src/](../src/extension/src/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
 
 ---
 

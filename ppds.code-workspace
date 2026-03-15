@@ -6,7 +6,7 @@
     },
     {
       "name": "Extension",
-      "path": "extension"
+      "path": "src/extension"
     }
   ],
   "settings": {
@@ -293,7 +293,7 @@
         "label": "extension: compile",
         "type": "npm",
         "script": "compile",
-        "path": "extension",
+        "path": "src/extension",
         "problemMatcher": "$tsc",
         "group": "build",
         "presentation": {
@@ -305,7 +305,7 @@
         "label": "extension: watch",
         "type": "npm",
         "script": "watch",
-        "path": "extension",
+        "path": "src/extension",
         "problemMatcher": "$tsc-watch",
         "isBackground": true,
         "presentation": {
@@ -317,7 +317,7 @@
         "label": "extension: lint",
         "type": "npm",
         "script": "lint",
-        "path": "extension",
+        "path": "src/extension",
         "problemMatcher": "$eslint-stylish",
         "presentation": {
           "reveal": "always",
@@ -328,7 +328,7 @@
         "label": "extension: package",
         "type": "npm",
         "script": "package",
-        "path": "extension",
+        "path": "src/extension",
         "presentation": {
           "reveal": "always",
           "panel": "shared"
