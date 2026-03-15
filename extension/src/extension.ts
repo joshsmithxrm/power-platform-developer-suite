@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 import { DaemonClient } from './daemonClient.js';
 import type { ProfileInfo } from './types.js';
-import { ProfileTreeDataProvider, getProfileId } from './views/profileTreeView.js';
+import { ProfileTreeDataProvider, ProfileTreeItem, getProfileId } from './views/profileTreeView.js';
 import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
@@ -113,6 +113,24 @@ export function activate(context: vscode.ExtensionContext): void {
         showCollapseAll: false,
     });
     context.subscriptions.push(profileTreeView, profileTreeProvider);
+
+    // ── Profile expansion persistence ────────────────────────────────────
+    context.subscriptions.push(
+        profileTreeView.onDidExpandElement(e => {
+            if (e.element instanceof ProfileTreeItem && e.element.id) {
+                const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
+                ids.add(e.element.id);
+                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
+            }
+        }),
+        profileTreeView.onDidCollapseElement(e => {
+            if (e.element instanceof ProfileTreeItem && e.element.id) {
+                const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
+                ids.delete(e.element.id);
+                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
+            }
+        }),
+    );
 
     // ── Profile Move Commands ────────────────────────────────────────────
     async function moveProfile(

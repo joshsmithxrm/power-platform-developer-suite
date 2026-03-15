@@ -288,7 +288,10 @@ describe('ProfileTreeDataProvider', () => {
                 'profile://a@x.com//DeviceCode//Public': 1,
                 'profile://b@x.com//DeviceCode//Public': 2,
             };
-            const globalState = { get: vi.fn().mockReturnValue(sortOrder), update: vi.fn() };
+            const globalState = {
+                get: vi.fn().mockImplementation((key: string) => key === 'ppds.profiles.sortOrder' ? sortOrder : undefined),
+                update: vi.fn(),
+            };
             const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any, globalState as any);
 
             const children = await provider.getChildren();

@@ -10,7 +10,12 @@ vi.mock('vscode', () => {
             executeCommand: vi.fn(),
         },
         window: {
-            createTreeView: vi.fn(() => ({ ...disposable, onDidChangeVisibility: vi.fn() })),
+            createTreeView: vi.fn(() => ({
+                ...disposable,
+                onDidChangeVisibility: vi.fn(),
+                onDidExpandElement: vi.fn(() => disposable),
+                onDidCollapseElement: vi.fn(() => disposable),
+            })),
             createOutputChannel: vi.fn(() => ({
                 appendLine: vi.fn(),
                 trace: vi.fn(),
