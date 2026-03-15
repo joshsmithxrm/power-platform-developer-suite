@@ -174,6 +174,9 @@ public static class ErrorCodes
 
         /// <summary>SQL validation failed.</summary>
         public const string ValidationFailed = "Query.ValidationFailed";
+
+        /// <summary>DML operation requires user confirmation before execution.</summary>
+        public const string DmlConfirmationRequired = "Query.DmlConfirmationRequired";
     }
 
     /// <summary>

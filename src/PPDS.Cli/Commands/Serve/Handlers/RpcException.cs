@@ -34,6 +34,19 @@ public class RpcException : LocalRpcException
     }
 
     /// <summary>
+    /// Creates a new RPC exception with custom error data.
+    /// </summary>
+    /// <param name="errorCode">Hierarchical error code from <see cref="Infrastructure.Errors.ErrorCodes"/>.</param>
+    /// <param name="message">Human-readable error message.</param>
+    /// <param name="errorData">Custom error data to include in the JSON-RPC error response.</param>
+    public RpcException(string errorCode, string message, RpcErrorData errorData)
+        : base(message)
+    {
+        StructuredErrorCode = errorCode;
+        ErrorData = errorData;
+    }
+
+    /// <summary>
     /// Creates a new RPC exception from an existing exception.
     /// </summary>
     /// <param name="errorCode">Hierarchical error code.</param>
@@ -82,4 +95,20 @@ public class RpcErrorData
     /// </summary>
     [JsonPropertyName("target")]
     public string? Target { get; set; }
+}
+
+/// <summary>
+/// Extended error data for DML safety violations.
+/// Includes flags that the TypeScript client can use for programmatic flow control
+/// (e.g., showing a confirmation dialog or blocking execution outright).
+/// </summary>
+public sealed class DmlSafetyErrorData : RpcErrorData
+{
+    /// <summary>Whether the DML operation is blocked outright (e.g., DELETE without WHERE).</summary>
+    [JsonPropertyName("dmlBlocked")]
+    public bool DmlBlocked { get; init; }
+
+    /// <summary>Whether the DML operation requires user confirmation before execution.</summary>
+    [JsonPropertyName("dmlConfirmationRequired")]
+    public bool DmlConfirmationRequired { get; init; }
 }

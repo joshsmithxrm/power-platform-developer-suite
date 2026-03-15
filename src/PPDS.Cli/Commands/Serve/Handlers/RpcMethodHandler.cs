@@ -18,6 +18,7 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Security;
 using PPDS.Dataverse.Services;
+using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Query.Intellisense;
@@ -975,6 +976,54 @@ public class RpcMethodHandler : IDisposable
             FireAndForgetHistorySave(request.Sql, response);
 
             return response;
+        }
+
+        // DML safety check: parse SQL and validate before transpilation/execution
+        if (request.DmlSafety != null)
+        {
+            var parser = new TSql160Parser(initialQuotedIdentifiers: false);
+            using var reader = new StringReader(request.Sql);
+            var fragment = parser.Parse(reader, out _);
+
+            if (fragment is TSqlScript script && script.Batches.Count > 0
+                && script.Batches[0].Statements.Count > 0)
+            {
+                var guard = new DmlSafetyGuard();
+                var opts = new DmlSafetyOptions
+                {
+                    IsConfirmed = request.DmlSafety.IsConfirmed,
+                    IsDryRun = request.DmlSafety.IsDryRun,
+                    NoLimit = request.DmlSafety.NoLimit,
+                    RowCap = request.DmlSafety.RowCap,
+                };
+                var result = guard.Check(script.Batches[0].Statements[0], opts);
+
+                if (result.IsBlocked)
+                {
+                    throw new RpcException(
+                        ErrorCodes.Query.DmlBlocked,
+                        result.BlockReason ?? "DML operation blocked",
+                        new DmlSafetyErrorData
+                        {
+                            Code = ErrorCodes.Query.DmlBlocked,
+                            Message = result.BlockReason ?? "DML operation blocked",
+                            DmlBlocked = true,
+                        });
+                }
+
+                if (result.RequiresConfirmation && !request.DmlSafety.IsConfirmed)
+                {
+                    throw new RpcException(
+                        ErrorCodes.Query.DmlConfirmationRequired,
+                        result.ConfirmationMessage ?? "DML operation requires confirmation",
+                        new DmlSafetyErrorData
+                        {
+                            Code = ErrorCodes.Query.DmlConfirmationRequired,
+                            Message = result.ConfirmationMessage ?? "DML operation requires confirmation",
+                            DmlConfirmationRequired = true,
+                        });
+                }
+            }
         }
 
         var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
@@ -2727,6 +2776,20 @@ public class QuerySqlRequest
     [JsonPropertyName("showFetchXml")] public bool ShowFetchXml { get; set; }
     [JsonPropertyName("useTds")] public bool UseTds { get; set; }
     [JsonPropertyName("environmentUrl")] public string? EnvironmentUrl { get; set; }
+    [JsonPropertyName("dmlSafety")] public DmlSafetyRpcOptions? DmlSafety { get; set; }
+}
+
+/// <summary>
+/// Options for DML safety checking passed from the TypeScript client.
+/// When present, the SQL statement is parsed and checked via <see cref="Services.Query.DmlSafetyGuard"/>
+/// before transpilation/execution.
+/// </summary>
+public sealed class DmlSafetyRpcOptions
+{
+    [JsonPropertyName("isConfirmed")] public bool IsConfirmed { get; set; }
+    [JsonPropertyName("isDryRun")] public bool IsDryRun { get; set; }
+    [JsonPropertyName("noLimit")] public bool NoLimit { get; set; }
+    [JsonPropertyName("rowCap")] public int? RowCap { get; set; }
 }
 
 /// <summary>
