@@ -17,7 +17,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 | Mode | Required MCPs / Tools |
 |------|----------------------|
 | cli | None (uses Bash tool directly) |
-| tui | `mcp-tui-test` configured in Claude Code |
+| tui | Not yet available — TUI snapshot tests only (`npm run tui:test`) |
 | extension | `src/extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
 | mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
 
@@ -28,7 +28,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 Based on $ARGUMENTS or recent changes:
 - `src/PPDS.Cli/Commands/` → CLI mode
 - `src/PPDS.Cli/Tui/` → TUI mode
-- `extension/` → Extension mode
+- `src/extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
 - No clear match → Ask user
 
@@ -57,26 +57,15 @@ Verify:
 
 ### 4. TUI Mode
 
-Use `mcp-tui-test` MCP tools:
+TUI interactive verification via MCP is not yet available. Use snapshot tests:
 
-1. **Launch:** Start the TUI app with configured dimensions
-2. **Wait:** Wait for initial render (look for expected text)
-3. **Interact:** Send keyboard input to navigate menus, trigger actions
-4. **Capture:** Read screen output after each interaction
-5. **Verify:** Check captured output contains expected elements
-
-```
--> launch_tui_app("ppds tui", rows=40, cols=120)
--> wait_for_text("PPDS", timeout=10000)
--> capture_screen() -> verify menu items visible
--> send_keys("Enter") -> navigate into menu
--> capture_screen() -> verify expected view loaded
-```
-
-Also run TUI snapshot tests for visual regression:
 ```bash
-npm test --prefix tests/tui-e2e
+npm run tui:test
 ```
+
+Verify:
+- All snapshot tests pass
+- No visual regressions in terminal output
 
 ### 5. Extension Mode
 
@@ -158,7 +147,7 @@ Present structured results:
 ## Rules
 
 1. **Unit tests first** -- always. Don't waste interactive cycles on broken code.
-2. **Structured data over screenshots** -- prefer ppds.debug.* JSON over visual inspection.
+2. **Structured data over screenshots** -- when both are available, prefer ppds.debug.* JSON over visual inspection. For webview panels, use @webview-cdp screenshots (see Extension Mode above).
 3. **Report exact state** -- include actual values, not just pass/fail.
 4. **Prerequisites are hard gates** -- if MCP not configured, stop and say so.
 5. **Don't fix during verify** -- report problems, don't fix them. That's for /debug or /converge.
