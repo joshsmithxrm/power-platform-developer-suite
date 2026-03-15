@@ -59,7 +59,7 @@ function registerPanelCommands(
             QueryPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openSolutions', () => {
-            SolutionsPanel.show(context.extensionUri, client, undefined, undefined, context.globalState);
+            SolutionsPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -231,7 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // Open Solutions targeting this environment
         vscode.commands.registerCommand('ppds.openSolutionsForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
-            SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName, context.globalState);
+            SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
         })),
 
         // Copy environment URL to clipboard

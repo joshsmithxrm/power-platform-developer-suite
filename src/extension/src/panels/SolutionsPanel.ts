@@ -32,13 +32,13 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         return SolutionsPanel.instances.length;
     }
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string, globalState?: vscode.Memento): SolutionsPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string): SolutionsPanel {
         if (SolutionsPanel.instances.length >= SolutionsPanel.MAX_PANELS) {
             const oldest = SolutionsPanel.instances[0];
             oldest.panel?.reveal();
             return oldest;
         }
-        const panel = new SolutionsPanel(extensionUri, daemon, envUrl, envDisplayName, globalState);
+        const panel = new SolutionsPanel(extensionUri, daemon, envUrl, envDisplayName);
         return panel;
     }
 
@@ -47,7 +47,6 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         private readonly daemon: DaemonClient,
         initialEnvUrl?: string,
         initialEnvDisplayName?: string,
-        private readonly globalState?: vscode.Memento,
     ) {
         super();
 

@@ -893,51 +893,6 @@ export class FetchXmlToSqlTranspiler {
 	}
 
 	/**
-	 * Builds the column list for SELECT.
-	 * Handles regular columns and aggregate functions.
-	 */
-	private buildColumnList(params: {
-		hasAllAttributes: boolean;
-		attributes: ParsedAttribute[];
-		linkEntities: ParsedLinkEntity[];
-	}): string {
-		if (params.hasAllAttributes && params.linkEntities.length === 0) {
-			return '*';
-		}
-
-		const columns: string[] = [];
-
-		// Main entity columns
-		if (params.hasAllAttributes) {
-			columns.push('*');
-		} else {
-			for (const attr of params.attributes) {
-				const columnExpr = this.buildColumnExpression(attr);
-				columns.push(columnExpr);
-			}
-		}
-
-		// Link entity columns
-		for (const link of params.linkEntities) {
-			const prefix = link.alias ?? link.name;
-			if (link.attributes.length === 0) {
-				columns.push(`${prefix}.*`);
-			} else {
-				for (const attr of link.attributes) {
-					const col = `${prefix}.${attr.name}`;
-					if (attr.alias) {
-						columns.push(`${col} AS ${attr.alias}`);
-					} else {
-						columns.push(col);
-					}
-				}
-			}
-		}
-
-		return columns.length > 0 ? columns.join(', ') : '*';
-	}
-
-	/**
 	 * Builds a single column expression, wrapping in aggregate function if needed.
 	 */
 	private buildColumnExpression(attr: ParsedAttribute): string {
@@ -993,24 +948,6 @@ export class FetchXmlToSqlTranspiler {
 				// Unknown aggregate, just use the column name
 				return attr.name;
 		}
-	}
-
-	/**
-	 * Builds WHERE clause from filter.
-	 */
-	private buildWhereClause(filter: ParsedFilter): string {
-		const parts: string[] = [];
-
-		// Build conditions
-		for (const condition of filter.conditions) {
-			const conditionSql = this.buildConditionSql(condition);
-			if (conditionSql) {
-				parts.push(conditionSql);
-			}
-		}
-
-		const connector = filter.type === 'or' ? ' OR ' : ' AND ';
-		return parts.join(connector);
 	}
 
 	/**
