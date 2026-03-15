@@ -1404,7 +1404,7 @@ window.onerror = function(msg, src, line, col, err) {
         var contextRecordLabel = 'Open Record in Dynamics';
         if (cellRich.url && cellRich.entityType) {
             contextRecordUrl = cellRich.url;
-            contextRecordLabel = 'Open ' + cellRich.entityType + ' Record';
+            contextRecordLabel = 'Open ' + escapeHtml(cellRich.entityType) + ' Record';
         } else {
             var rowPkId = getRecordId(displayedRows[clickRow]);
             if (lastEntityName && rowPkId && !lastIsAggregate) {
