@@ -12,6 +12,7 @@ using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
 
+/// <inheritdoc />
 public class ComponentNameResolver : IComponentNameResolver
 {
     private const int MaxBatchSize = 100;
@@ -37,6 +38,9 @@ public class ComponentNameResolver : IComponentNameResolver
         [381] = new("environmentvariablevalue", null, "schemaname", null),
     };
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ComponentNameResolver"/> class.
+    /// </summary>
     public ComponentNameResolver(
         ICachedMetadataProvider metadataProvider,
         IDataverseConnectionPool pool,
@@ -47,6 +51,7 @@ public class ComponentNameResolver : IComponentNameResolver
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<Guid, ComponentNames>> ResolveAsync(
         int componentType,
         IReadOnlyList<Guid> objectIds,
