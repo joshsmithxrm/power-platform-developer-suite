@@ -477,7 +477,7 @@ export class QueryPanel extends WebviewPanelBase {
     .results-table th { padding: 6px 12px; text-align: left; font-weight: 600; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-bottom: 2px solid var(--vscode-panel-border); border-right: 1px solid rgba(255,255,255,0.1); white-space: nowrap; cursor: pointer; user-select: none; }
     .results-table th:last-child { border-right: none; }
     .results-table th .sort-indicator { margin-left: 4px; opacity: 0.7; }
-    .results-table td { padding: 6px 12px; white-space: nowrap; border-bottom: 1px solid var(--vscode-panel-border); }
+    .results-table td { padding: 6px 12px; white-space: nowrap; border-bottom: 1px solid var(--vscode-panel-border); user-select: none; }
     .results-table tr:nth-child(even) { background: var(--vscode-list-inactiveSelectionBackground); }
     .results-table tr:hover { background: var(--vscode-list-hoverBackground); }
     .results-table td.cell-selected { background: var(--vscode-editor-selectionBackground) !important; }
@@ -669,6 +669,20 @@ export class QueryPanel extends WebviewPanelBase {
         if (copyHintEl) copyHintEl.textContent = '';
     }
 
+    function isGuid(val) {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+    }
+
+    function isUrl(val) {
+        return /^https?:\/\/.+/i.test(val);
+    }
+
+    function escapeAttr(str) {
+        if (str === null || str === undefined) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function getCellDisplayValue(row, colIdx) {
         const key = columns[colIdx].alias || columns[colIdx].logicalName;
         const rawVal = row ? row[key] : undefined;
@@ -676,6 +690,55 @@ export class QueryPanel extends WebviewPanelBase {
         if (typeof rawVal === 'object' && 'formatted' in rawVal) return String(rawVal.formatted || rawVal.value || '');
         if (typeof rawVal === 'object' && 'entityId' in rawVal) return String(rawVal.formatted || rawVal.value || '');
         return String(rawVal);
+    }
+
+    /** Returns { text, url?, entityType?, entityId? } for rendering and context menu */
+    function getCellRichValue(row, colIdx) {
+        const col = columns[colIdx];
+        const key = col.alias || col.logicalName;
+        const rawVal = row ? row[key] : undefined;
+        if (rawVal === null || rawVal === undefined) return { text: '' };
+
+        // Structured lookup value — clickable link to target record
+        if (typeof rawVal === 'object' && rawVal !== null && 'entityId' in rawVal) {
+            const text = String(rawVal.formatted || rawVal.value || '');
+            if (currentEnvironmentUrl && rawVal.entityType && rawVal.entityId) {
+                return {
+                    text,
+                    url: buildRecordUrl(rawVal.entityType, rawVal.entityId),
+                    entityType: rawVal.entityType,
+                    entityId: rawVal.entityId,
+                };
+            }
+            return { text };
+        }
+
+        // Structured formatted value (optionsets, booleans)
+        if (typeof rawVal === 'object' && rawVal !== null && 'formatted' in rawVal) {
+            return { text: String(rawVal.formatted || rawVal.value || '') };
+        }
+
+        const stringValue = String(rawVal);
+
+        // Primary key column — clickable link to own record
+        if (lastEntityName && currentEnvironmentUrl && !lastIsAggregate) {
+            const pkCol = lastEntityName + 'id';
+            if (col.logicalName && col.logicalName.toLowerCase() === pkCol.toLowerCase() && isGuid(stringValue)) {
+                return {
+                    text: stringValue,
+                    url: buildRecordUrl(lastEntityName, stringValue),
+                    entityType: lastEntityName,
+                    entityId: stringValue,
+                };
+            }
+        }
+
+        // Plain URL string — clickable external link
+        if (isUrl(stringValue)) {
+            return { text: stringValue, url: stringValue };
+        }
+
+        return { text: stringValue };
     }
 
     function sanitizeValue(val) {
@@ -961,6 +1024,18 @@ export class QueryPanel extends WebviewPanelBase {
         updateSelectionVisuals();
     });
 
+    // ── Link click handler ──
+    // VS Code webviews block external navigations by default.
+    // Intercept <a> clicks in the results table and open via the extension host.
+    resultsWrapper.addEventListener('click', (e) => {
+        const link = e.target.closest('a[href]');
+        if (link) {
+            e.preventDefault();
+            e.stopPropagation();
+            vscode.postMessage({ command: 'openRecordUrl', url: link.getAttribute('href') });
+        }
+    });
+
     // ── Keyboard shortcuts ──
     // Ctrl+C with table selection: use CAPTURE phase to intercept before Monaco.
     // When the user has selected cells in the results grid, Ctrl+C should copy
@@ -1198,7 +1273,12 @@ export class QueryPanel extends WebviewPanelBase {
         rows.forEach((row, rowIdx) => {
             html += '<tr>';
             columns.forEach((col, colIdx) => {
-                html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '">' + escapeHtml(getCellDisplayValue(row, colIdx)) + '</td>';
+                const rich = getCellRichValue(row, colIdx);
+                if (rich.url) {
+                    html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '"><a href="' + escapeAttr(rich.url) + '" target="_blank">' + escapeHtml(rich.text) + '</a></td>';
+                } else {
+                    html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '">' + escapeHtml(rich.text) + '</td>';
+                }
             });
             html += '</tr>';
         });
@@ -1291,7 +1371,21 @@ export class QueryPanel extends WebviewPanelBase {
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
 
-        var recordId = anchor ? getRecordId(displayedRows[anchor.row]) : null;
+        // Determine the best record link for the clicked cell:
+        // 1. If the cell itself is a lookup/primary key, use that (cell-aware)
+        // 2. Otherwise fall back to the row's primary key
+        var cellRich = getCellRichValue(displayedRows[clickRow], clickCol);
+        var contextRecordUrl = null;
+        var contextRecordLabel = 'Open Record in Dynamics';
+        if (cellRich.url && cellRich.entityType) {
+            contextRecordUrl = cellRich.url;
+            contextRecordLabel = 'Open ' + cellRich.entityType + ' Record';
+        } else {
+            var rowPkId = getRecordId(displayedRows[clickRow]);
+            if (lastEntityName && rowPkId && !lastIsAggregate) {
+                contextRecordUrl = buildRecordUrl(lastEntityName, rowPkId);
+            }
+        }
 
         const items = [
             { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
@@ -1302,9 +1396,9 @@ export class QueryPanel extends WebviewPanelBase {
             { label: 'Copy All Results', shortcut: '', action: 'all' },
         ];
 
-        if (lastEntityName && recordId && !lastIsAggregate) {
+        if (contextRecordUrl) {
             items.push({ label: 'separator', shortcut: '', action: 'separator' });
-            items.push({ label: 'Open Record in Dynamics', shortcut: '', action: 'openRecord' });
+            items.push({ label: contextRecordLabel, shortcut: '', action: 'openRecord' });
             items.push({ label: 'Copy Record URL', shortcut: '', action: 'copyRecordUrl' });
         }
 
@@ -1366,14 +1460,10 @@ export class QueryPanel extends WebviewPanelBase {
                     setTimeout(() => { updateCopyHint(); }, 2000);
                 }
             } else if (action === 'openRecord') {
-                var rid = getRecordId(displayedRows[clickRow]);
-                var url = buildRecordUrl(lastEntityName, rid);
-                if (url) vscode.postMessage({ command: 'openRecordUrl', url: url });
+                if (contextRecordUrl) vscode.postMessage({ command: 'openRecordUrl', url: contextRecordUrl });
             } else if (action === 'copyRecordUrl') {
-                var rid = getRecordId(displayedRows[clickRow]);
-                var url = buildRecordUrl(lastEntityName, rid);
-                if (url) {
-                    vscode.postMessage({ command: 'copyToClipboard', text: url });
+                if (contextRecordUrl) {
+                    vscode.postMessage({ command: 'copyToClipboard', text: contextRecordUrl });
                     if (copyHintEl) {
                         copyHintEl.textContent = 'Copied record URL';
                         setTimeout(() => { updateCopyHint(); }, 2000);
