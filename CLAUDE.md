@@ -66,7 +66,7 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 
 ## Git Hooks
 
-Pre-commit hook in `scripts/hooks/` runs `typecheck:all` on extension TS changes. Auto-configured by `npm install` via `prepare` script. Manual setup: `git config core.hooksPath scripts/hooks`.
+Pre-commit hook in `scripts/hooks/` runs `typecheck:all` and `eslint --quiet` (errors only) on extension TS changes. Auto-configured by `npm install` via `prepare` script. Manual setup: `git config core.hooksPath scripts/hooks`.
 
 ## Gotchas
 
