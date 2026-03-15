@@ -85,6 +85,7 @@ public class SolutionService : ISolutionService
         { 68, "CustomControlDefaultConfig" },
         { 70, "FieldSecurityProfile" },
         { 71, "FieldPermission" },
+        { 80, "Model-Driven App" },
         { 90, "PluginType" },
         { 91, "PluginAssembly" },
         { 92, "SDKMessageProcessingStep" },

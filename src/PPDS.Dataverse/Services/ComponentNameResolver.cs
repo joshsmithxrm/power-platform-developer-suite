@@ -30,6 +30,7 @@ public class ComponentNameResolver : IComponentNameResolver
         [60]  = new("systemform", "name", null, null),
         [61]  = new("webresource", "name", null, null),
         [66]  = new("customcontrol", "name", null, null),
+        [80]  = new("appmodule", "name", null, null),
         [90]  = new("plugintype", "name", null, null),
         [91]  = new("pluginassembly", "name", null, null),
         [92]  = new("sdkmessageprocessingstep", "name", null, null),
