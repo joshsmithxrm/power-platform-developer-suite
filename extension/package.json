@@ -200,6 +200,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "ppds.testConnection",
+        "title": "Test Connection",
+        "icon": "$(plug)"
+      },
+      {
         "command": "ppds.setDefaultEnvironment",
         "title": "Set as Default",
         "icon": "$(star)"
@@ -313,6 +318,11 @@
           "command": "ppds.setDefaultEnvironment",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env@1"
+        },
+        {
+          "command": "ppds.testConnection",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env@2"
         },
         {
           "command": "ppds.openDataExplorerForEnv",

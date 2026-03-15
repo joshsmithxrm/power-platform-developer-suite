@@ -332,11 +332,13 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         try {
             const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
             if (result.plan) {
-                const doc = await vscode.workspace.openTextDocument({
-                    content: result.plan,
-                    language: 'xml',
-                });
-                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+                const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
+                if (ExplainDocumentProvider.instance) {
+                    await ExplainDocumentProvider.instance.show(result.plan, 'xml');
+                } else {
+                    const doc = await vscode.workspace.openTextDocument({ content: result.plan, language: 'xml' });
+                    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+                }
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -347,12 +349,15 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private async explainQuery(sql: string): Promise<void> {
         try {
             const result = await this.daemon.queryExplain({ sql, environmentUrl: this.environmentUrl });
-            const language = result.format === 'fetchxml' ? 'xml' : 'text';
-            const doc = await vscode.workspace.openTextDocument({
-                content: result.plan,
-                language,
-            });
-            await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+            const language = result.format === 'fetchxml' ? 'xml' : 'plaintext';
+            const { ExplainDocumentProvider } = await import('../providers/explainDocumentProvider.js');
+            if (ExplainDocumentProvider.instance) {
+                await ExplainDocumentProvider.instance.show(result.plan, language);
+            } else {
+                // Fallback if provider not registered
+                const doc = await vscode.workspace.openTextDocument({ content: result.plan, language });
+                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+            }
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`EXPLAIN failed: ${msg}`);
@@ -399,23 +404,45 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         }
     }
 
-    private async exportResults(): Promise<void> {
+    private async exportResults(preselectedFormat?: string): Promise<void> {
         if (!this.lastResult || this.allRecords.length === 0 || !this.lastSql) {
             vscode.window.showWarningMessage('No results to export. Run a query first.');
             return;
         }
 
-        const formatPick = await vscode.window.showQuickPick([
-            { label: 'CSV', description: 'Comma-separated values', format: 'csv', isClipboard: false },
-            { label: 'TSV', description: 'Tab-separated values', format: 'tsv', isClipboard: false },
-            { label: 'JSON', description: 'JSON array', format: 'json', isClipboard: false },
-            { label: 'Clipboard', description: 'Copy as TSV to clipboard', format: 'tsv', isClipboard: true },
-        ], {
-            title: `Export ${this.allRecords.length} rows`,
-            placeHolder: 'Select export format',
-        });
+        // If clipboard was selected from dropdown, copy immediately
+        if (preselectedFormat === 'clipboard') {
+            try {
+                const exportParams = this.buildExportParams('tsv', true);
+                const result = await this.daemon.queryExport(exportParams);
+                await vscode.env.clipboard.writeText(result.content);
+                vscode.window.showInformationMessage(`Copied ${result.rowCount} rows to clipboard`);
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Export failed: ${msg}`);
+            }
+            return;
+        }
 
-        if (!formatPick) return;
+        // Resolve format: use preselected from dropdown or show QuickPick
+        let format: string;
+        let isClipboard = false;
+        if (preselectedFormat && ['csv', 'tsv', 'json'].includes(preselectedFormat)) {
+            format = preselectedFormat;
+        } else {
+            const formatPick = await vscode.window.showQuickPick([
+                { label: 'CSV', description: 'Comma-separated values', format: 'csv', isClipboard: false },
+                { label: 'TSV', description: 'Tab-separated values', format: 'tsv', isClipboard: false },
+                { label: 'JSON', description: 'JSON array', format: 'json', isClipboard: false },
+                { label: 'Clipboard', description: 'Copy as TSV to clipboard', format: 'tsv', isClipboard: true },
+            ], {
+                title: `Export ${this.allRecords.length} rows`,
+                placeHolder: 'Select export format',
+            });
+            if (!formatPick) return;
+            format = formatPick.format;
+            isClipboard = formatPick.isClipboard;
+        }
 
         // Headers toggle
         const headersPick = await vscode.window.showQuickPick([
@@ -425,31 +452,20 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             title: 'Column Headers',
             placeHolder: 'Include headers in export?',
         });
-
         if (!headersPick) return;
 
         try {
-            const exportParams: Parameters<typeof this.daemon.queryExport>[0] = {
-                sql: this.lastSql,
-                format: formatPick.format,
-                includeHeaders: headersPick.includeHeaders,
-                environmentUrl: this.environmentUrl,
-            };
-            // When language is FetchXML, send as fetchXml instead of sql
-            if (this.lastLanguage === 'xml') {
-                exportParams.fetchXml = this.lastSql;
-                exportParams.sql = '';
-            }
+            const exportParams = this.buildExportParams(format, headersPick.includeHeaders);
             const result = await this.daemon.queryExport(exportParams);
 
-            if (formatPick.isClipboard) {
+            if (isClipboard) {
                 await vscode.env.clipboard.writeText(result.content);
                 vscode.window.showInformationMessage(`Copied ${result.rowCount} rows to clipboard`);
                 return;
             }
 
-            const fileExt = formatPick.format === 'tsv' ? 'tsv' : formatPick.format === 'json' ? 'json' : 'csv';
-            const filterName = formatPick.format === 'tsv' ? 'TSV Files' : formatPick.format === 'json' ? 'JSON Files' : 'CSV Files';
+            const fileExt = format === 'tsv' ? 'tsv' : format === 'json' ? 'json' : 'csv';
+            const filterName = format === 'tsv' ? 'TSV Files' : format === 'json' ? 'JSON Files' : 'CSV Files';
 
             const uri = await vscode.window.showSaveDialog({
                 defaultUri: vscode.Uri.file(`query_results.${fileExt}`),
@@ -463,6 +479,20 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             const msg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Export failed: ${msg}`);
         }
+    }
+
+    private buildExportParams(format: string, includeHeaders: boolean): Parameters<typeof this.daemon.queryExport>[0] {
+        const params: Parameters<typeof this.daemon.queryExport>[0] = {
+            sql: this.lastSql!,
+            format,
+            includeHeaders,
+            environmentUrl: this.environmentUrl,
+        };
+        if (this.lastLanguage === 'xml') {
+            params.fetchXml = this.lastSql!;
+            params.sql = '';
+        }
+        return params;
     }
 
     private async saveQuery(sql: string, language: string): Promise<void> {
