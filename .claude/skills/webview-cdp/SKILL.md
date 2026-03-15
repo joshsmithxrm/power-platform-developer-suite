@@ -28,14 +28,14 @@ node extension/tools/webview-cdp.mjs launch
 
 # 2. Open a panel via command palette
 node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node extension/tools/webview-cdp.mjs wait --ext "power-platform"
+node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
 
 # 3. Take a screenshot to see what you built
 node extension/tools/webview-cdp.mjs screenshot $TEMP/current-state.png
 # IMPORTANT: Actually look at the screenshot to verify the UI
 
 # 4. Interact with webview content (use --ext to target the PPDS webview)
-node extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform"
+node extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
 node extension/tools/webview-cdp.mjs screenshot $TEMP/after-click.png
 
 # 5. Check for errors
@@ -45,7 +45,7 @@ node extension/tools/webview-cdp.mjs logs
 node extension/tools/webview-cdp.mjs close
 ```
 
-**Always use `--ext "power-platform"`** on `eval`, `click`, `type`, `select`, and `wait` commands. VS Code may have other webviews open (walkthrough, settings, etc.) — without `--ext`, you might interact with the wrong panel.
+**Always use `--ext "power-platform-developer-suite"`** on `eval`, `click`, `type`, `select`, and `wait` commands. VS Code may have other webviews open (walkthrough, settings, etc.) — without `--ext`, you might interact with the wrong panel.
 
 ## Commands
 
@@ -84,7 +84,7 @@ node extension/tools/webview-cdp.mjs close
 ### Open a panel and verify it loaded
 ```bash
 node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node extension/tools/webview-cdp.mjs wait --ext "power-platform"
+node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
 node extension/tools/webview-cdp.mjs screenshot $TEMP/panel.png
 ```
 
