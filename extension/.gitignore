@@ -6,3 +6,4 @@ bin/
 .dev-version
 package.json.backup
 tools/.webview-cdp-session.json
+tools/.webview-cdp-profile/

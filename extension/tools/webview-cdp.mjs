@@ -200,10 +200,67 @@ async function withWebview(port, targetIndex, fn) {
 
 // ── Command: launch ────────────────────────────────────────────────
 
+function findVSCodeExecutable() {
+  if (process.platform === 'win32') {
+    // Try common install locations for Code.exe (not the code.cmd wrapper)
+    const candidates = [
+      resolve(process.env.LOCALAPPDATA || '', 'Programs/Microsoft VS Code/Code.exe'),
+      resolve(process.env.PROGRAMFILES || '', 'Microsoft VS Code/Code.exe'),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+    // Fall back to 'code' wrapper (may not honor --remote-debugging-port)
+    return 'code';
+  }
+  // macOS/Linux: use 'code' binary directly
+  return 'code';
+}
+
+async function discoverCDPPort(pid, requestedPort, timeoutMs = 20000) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    // First try the requested port
+    try {
+      const res = await fetch(`http://localhost:${requestedPort}/json/version`);
+      await res.json();
+      return requestedPort;
+    } catch {
+      // Not on requested port yet
+    }
+
+    // On Windows, scan ports opened by the VS Code process tree
+    if (process.platform === 'win32') {
+      try {
+        const output = execSync(
+          `powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -OwningProcess (Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} -or $_.ProcessId -eq ${pid} } | Select-Object -ExpandProperty ProcessId) -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"`,
+          { encoding: 'utf-8', timeout: 5000 }
+        );
+        const ports = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
+        for (const candidatePort of ports) {
+          try {
+            const res = await fetch(`http://localhost:${candidatePort}/json/version`);
+            await res.json();
+            return candidatePort;
+          } catch {
+            // Not a CDP endpoint
+          }
+        }
+      } catch {
+        // PowerShell command failed, continue polling
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error(`Timeout: Could not find VS Code CDP port within ${timeoutMs / 1000} seconds.`);
+}
+
 async function cmdLaunch(parsed) {
   const port = parsed.port;
 
-  // Check if port is in use
+  // Check if requested port is in use
   try {
     await fetch(`http://localhost:${port}/json/version`);
     throw new Error(`Port ${port} already in use.`);
@@ -212,41 +269,39 @@ async function cmdLaunch(parsed) {
     // Connection refused = port is free, continue
   }
 
-  // Resolve extension path (relative to tool location, not cwd)
+  // Resolve paths
   const workspace = parsed.workspace || process.cwd();
   const extensionPath = resolve(__dirname, '..');  // extension/ directory
+  const userDataDir = resolve(__dirname, '.webview-cdp-profile');
 
-  // Spawn VS Code
-  const codeProcess = spawn('code', [
+  // Find the actual VS Code executable (not the wrapper)
+  const vscodeExe = findVSCodeExecutable();
+  const useShell = vscodeExe === 'code'; // only shell for the wrapper
+
+  // Spawn VS Code with isolated profile
+  const codeProcess = spawn(vscodeExe, [
     '--extensionDevelopmentPath', extensionPath,
     '--remote-debugging-port', String(port),
-    '--wait',  // keeps the wrapper process alive, so its PID stays valid
+    '--user-data-dir', userDataDir,
+    '--skip-release-notes',
+    '--disable-workspace-trust',
     workspace,
   ], {
-    shell: true, // Required: 'code' is a .cmd batch file on Windows
+    shell: useShell,
     detached: true,
     stdio: 'ignore',
   });
   codeProcess.unref();
 
-  // Poll for CDP readiness
-  const startTime = Date.now();
-  const timeout = 15000;
-  while (Date.now() - startTime < timeout) {
-    try {
-      const verRes = await fetch(`http://localhost:${port}/json/version`);
-      await verRes.json();
-      const pidRes = await fetch(`http://localhost:${port}/json/list`);
-      await pidRes.json();
+  // Discover the actual CDP port (VS Code may use a different port than requested)
+  const actualPort = await discoverCDPPort(codeProcess.pid, port);
 
-      writeSession(codeProcess.pid, port);
-      console.log(`VS Code launched on port ${port} (PID ${codeProcess.pid})`);
-      return;
-    } catch {
-      await new Promise(r => setTimeout(r, 500));
-    }
+  writeSession(codeProcess.pid, actualPort);
+  if (actualPort !== port) {
+    console.log(`VS Code launched on port ${actualPort} (requested ${port}, PID ${codeProcess.pid})`);
+  } else {
+    console.log(`VS Code launched on port ${actualPort} (PID ${codeProcess.pid})`);
   }
-  throw new Error(`Timeout: VS Code did not start within ${timeout / 1000} seconds.`);
 }
 
 // ── Command: close ─────────────────────────────────────────────────
