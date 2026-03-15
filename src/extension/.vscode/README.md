@@ -15,11 +15,11 @@ Open the workspace file at the repo root: `ppds.code-workspace`
 
 ### 2. Standalone Extension Development
 
-Open the `extension/` folder directly in VS Code
+Open the `src/extension/` folder directly in VS Code
 
 - Uses these local `.vscode/` configurations
 - Focused TypeScript-only environment
-- F5 debugging works as expected (uses `${workspaceFolder}` = extension/)
+- F5 debugging works as expected (uses `${workspaceFolder}` = src/extension/)
 
 ## Configuration Files
 
@@ -34,7 +34,7 @@ Open the `extension/` folder directly in VS Code
 
 | Scenario | Recommended Approach |
 |----------|---------------------|
-| Working on extension only | Open `extension/` folder directly |
+| Working on extension only | Open `src/extension/` folder directly |
 | Working on CLI + Extension | Open `ppds.code-workspace` |
 | Debugging RPC integration | Open `ppds.code-workspace` (use compound config) |
 | Testing extension with local CLI | Open `ppds.code-workspace` |
