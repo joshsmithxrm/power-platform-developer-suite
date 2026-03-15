@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { ProfileTreeDataProvider } from '../views/profileTreeView.js';
 

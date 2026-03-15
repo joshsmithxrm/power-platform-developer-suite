@@ -49,6 +49,8 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'error',
       '@typescript-eslint/no-unsafe-call': 'error',
       '@typescript-eslint/no-unsafe-argument': 'error',
+      // Disabled: too many false positives with Record<string, unknown> patterns from Dataverse records
+      '@typescript-eslint/no-base-to-string': 'off',
       'no-console': 'error',
 
       // MEDIUM PRIORITY — code quality
@@ -93,6 +95,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-base-to-string': 'off',
       'max-nested-callbacks': 'off',
       'max-lines-per-function': 'off',
       'max-lines': 'off',
@@ -131,6 +136,7 @@ export default tseslint.config(
     rules: {
       'no-console': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/no-base-to-string': 'off',
       'no-restricted-imports': ['error', {
         patterns: [{
           group: ['vscode', 'child_process', 'fs', 'path', 'os'],

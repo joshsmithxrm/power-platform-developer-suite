@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import { WebviewPanelBase } from './WebviewPanelBase.js';
-import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { SolutionComponentInfoDto } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
+
+import { WebviewPanelBase } from './WebviewPanelBase.js';
+import { getNonce } from './webviewUtils.js';
+import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, ComponentGroupDto } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -180,7 +182,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private async resolveEnvironmentId(): Promise<string | null> {
         if (!this.environmentUrl) return null;
         try {
-            const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+            const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
             const targetUrl = normalise(this.environmentUrl);
             const envResult = await this.daemon.envList();
             const match = envResult.environments.find(
@@ -299,13 +301,13 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     getHtmlContent(webview: vscode.Webview): string {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
-        );
+        ).toString();
         const solutionsPanelJsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'solutions-panel.js')
-        );
+        ).toString();
         const solutionsPanelCssUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'solutions-panel.css')
-        );
+        ).toString();
         const nonce = getNonce();
 
         return `<!DOCTYPE html>

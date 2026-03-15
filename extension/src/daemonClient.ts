@@ -1,7 +1,8 @@
-import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
+
+import * as vscode from 'vscode';
 import {
     createMessageConnection,
     MessageConnection,
@@ -11,6 +12,7 @@ import {
     RequestType,
     ParameterStructures,
 } from 'vscode-jsonrpc/node';
+
 import type {
     AuthListResponse,
     AuthWhoResponse,
@@ -191,7 +193,7 @@ export class DaemonClient implements vscode.Disposable {
         // between handshake success and startupExitReject being nulled.
         exitPromise.catch(() => {});
 
-        const onStartupExit = (code: number | null) => {
+        const onStartupExit = (code: number | null): void => {
             this.log.error(`Daemon exited during startup with code ${code}`);
             this.connection = null;
             this.process = null;
@@ -716,7 +718,7 @@ export class DaemonClient implements vscode.Disposable {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private async sendRequestQuiet<T>(method: string | RequestType<any, T, any>, params?: unknown): Promise<T> {
         await this.ensureConnected();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument -- JSON-RPC accepts string | RequestType
         return this.connection!.sendRequest(method as any, params);
     }
 
@@ -744,16 +746,14 @@ export class DaemonClient implements vscode.Disposable {
 
     private startHeartbeat(): void {
         this.stopHeartbeat();
-        this._heartbeatTimer = setInterval(async () => {
+        this._heartbeatTimer = setInterval(() => {
             if (!this.connection || this._disposed) {
                 this.stopHeartbeat();
                 return;
             }
-            try {
-                // Use auth/list as heartbeat ping
-                // TODO: Consider a lightweight health/ping endpoint
-                await this.connection.sendRequest('auth/list');
-            } catch {
+            // Use auth/list as heartbeat ping
+            // TODO: Consider a lightweight health/ping endpoint
+            this.connection.sendRequest('auth/list').catch(() => {
                 this.log.warn('Heartbeat failed — daemon may be unresponsive');
                 this.connection?.dispose();
                 this.connection = null;
@@ -761,7 +761,7 @@ export class DaemonClient implements vscode.Disposable {
                 this.process = null;
                 this.stopHeartbeat();
                 this.setState('error');
-            }
+            });
         }, DaemonClient.HEARTBEAT_INTERVAL_MS);
     }
 

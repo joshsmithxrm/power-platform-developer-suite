@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { CancellationTokenSource } from 'vscode-jsonrpc/node';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
-import { renderResultsHtml } from './notebookResultRenderer.js';
 import { isAuthError } from '../utils/errorUtils.js';
+
+import { renderResultsHtml } from './notebookResultRenderer.js';
 
 const AUTO_SWITCH_THRESHOLD = 30;
 

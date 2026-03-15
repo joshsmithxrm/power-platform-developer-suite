@@ -286,7 +286,7 @@ if (editor) editor.onDidFocusEditorText(() => {
 
 if (editor) editor.onDidChangeModelContent(() => {
     if (!manualOverride) {
-        const detected = detectLang(editor!.getValue());
+        const detected = detectLang(editor.getValue());
         updateLanguage(detected);
     }
 });
@@ -352,7 +352,7 @@ if (editor) editor.addAction({
     label: 'Execute Query',
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
     run: () => {
-        const sql = editor!.getValue().trim();
+        const sql = editor.getValue().trim();
         if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
     },
 });

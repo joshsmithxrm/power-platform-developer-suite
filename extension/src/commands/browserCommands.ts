@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
 
@@ -28,7 +29,7 @@ async function resolveEnvironmentId(
 
     try {
         const envResult = await daemonClient.envList();
-        const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+        const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
         const targetUrl = normalise(envUrl);
         const match = envResult.environments.find(
             e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)

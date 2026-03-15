@@ -19,36 +19,36 @@ interface NotebookCellFileData {
 
 export class DataverseNotebookSerializer implements vscode.NotebookSerializer {
 
-    async deserializeNotebook(content: Uint8Array, _token: vscode.CancellationToken): Promise<vscode.NotebookData> {
+    deserializeNotebook(content: Uint8Array, _token: vscode.CancellationToken): Promise<vscode.NotebookData> {
         const text = new TextDecoder().decode(content);
 
         if (!text.trim()) {
-            return this.createEmptyNotebook();
+            return Promise.resolve(this.createEmptyNotebook());
         }
 
         try {
-            const data = JSON.parse(text);
-            if (!data || !Array.isArray(data.cells)) {
+            const data: unknown = JSON.parse(text);
+            if (!data || typeof data !== 'object' || !('cells' in data) || !Array.isArray((data as NotebookFileData).cells)) {
                 vscode.window.showWarningMessage(
                     'Could not parse notebook file. Starting with empty notebook.'
                 );
-                return this.createEmptyNotebook();
+                return Promise.resolve(this.createEmptyNotebook());
             }
-            return this.parseNotebookData(data as NotebookFileData);
+            return Promise.resolve(this.parseNotebookData(data as NotebookFileData));
         } catch {
             vscode.window.showWarningMessage(
                 'Could not parse notebook file. Starting with empty notebook.'
             );
-            return this.createEmptyNotebook();
+            return Promise.resolve(this.createEmptyNotebook());
         }
     }
 
-    async serializeNotebook(data: vscode.NotebookData, _token: vscode.CancellationToken): Promise<Uint8Array> {
+    serializeNotebook(data: vscode.NotebookData, _token: vscode.CancellationToken): Promise<Uint8Array> {
         const notebookData: NotebookFileData = {
             metadata: this.extractMetadata(data),
             cells: data.cells.map(cell => this.serializeCell(cell)),
         };
-        return new TextEncoder().encode(JSON.stringify(notebookData, null, 2));
+        return Promise.resolve(new TextEncoder().encode(JSON.stringify(notebookData, null, 2)));
     }
 
     private createEmptyNotebook(): vscode.NotebookData {
@@ -67,10 +67,6 @@ export class DataverseNotebookSerializer implements vscode.NotebookSerializer {
             const kind = cellData.kind === 'markdown'
                 ? vscode.NotebookCellKind.Markup
                 : vscode.NotebookCellKind.Code;
-
-            if (cellData.kind !== 'markdown' && cellData.kind !== 'fetchxml' && cellData.kind !== 'sql') {
-                console.warn(`[DataverseNotebookSerializer] Unrecognized cell kind '${cellData.kind}' — defaulting to SQL.`);
-            }
 
             const language = cellData.kind === 'markdown' ? 'markdown'
                 : cellData.kind === 'fetchxml' ? 'fetchxml'

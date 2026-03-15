@@ -1,5 +1,6 @@
-import { generateVirtualScrollScript } from './virtualScrollScript.js';
 import type { QueryResultResponse } from '../types.js';
+
+import { generateVirtualScrollScript } from './virtualScrollScript.js';
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 5;
