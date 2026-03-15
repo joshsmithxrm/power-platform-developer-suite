@@ -51,6 +51,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private lastLanguage = 'sql';
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
+    private environmentType: string | null = null;
     private profileName: string | undefined;
     private readonly initialSql: string | undefined;
 
@@ -214,7 +215,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 if (env) {
                     this.environmentUrl = env.url;
                     this.environmentDisplayName = env.displayName;
-                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url });
+                    this.environmentType = env.type;
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: env.type });
                     this.updateTitle();
                 }
                 break;
@@ -249,10 +251,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 this.environmentUrl = who.environment.url;
                 this.environmentDisplayName = who.environment.displayName;
             }
+            this.environmentType = who.environment?.type ?? null;
         } catch {
             // No active profile or environment
         }
-        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null });
+        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, envType: this.environmentType });
         this.updateTitle();
     }
 

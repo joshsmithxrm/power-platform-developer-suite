@@ -34,7 +34,7 @@ export type QueryPanelWebviewToHost =
 /** Messages the extension host sends to the Query Panel webview. */
 export type QueryPanelHostToWebview =
     | { command: 'loadQuery'; sql: string }
-    | { command: 'updateEnvironment'; name: string; url: string | null }
+    | { command: 'updateEnvironment'; name: string; url: string | null; envType: string | null }
     | { command: 'executionStarted' }
     | { command: 'queryResult'; data: QueryResultResponse }
     | { command: 'queryCancelled' }
@@ -88,7 +88,7 @@ export type SolutionsPanelWebviewToHost =
 
 /** Messages the extension host sends to the Solutions Panel webview. */
 export type SolutionsPanelHostToWebview =
-    | { command: 'updateEnvironment'; name: string }
+    | { command: 'updateEnvironment'; name: string; envType: string | null }
     | { command: 'solutionsLoaded'; solutions: SolutionViewDto[] }
     | { command: 'componentsLoading'; uniqueName: string }
     | { command: 'componentsLoaded'; uniqueName: string; groups: ComponentGroupDto[] }

@@ -747,6 +747,16 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
         case 'updateEnvironment':
             updateEnvironmentDisplay(msg.name);
             currentEnvironmentUrl = msg.url || null;
+            {
+                const toolbar = document.querySelector('.toolbar');
+                if (toolbar) {
+                    if (msg.envType) {
+                        toolbar.setAttribute('data-env-type', msg.envType.toLowerCase());
+                    } else {
+                        toolbar.removeAttribute('data-env-type');
+                    }
+                }
+            }
             break;
         case 'clipboardContent':
             if (msg.text && editor && editor.hasTextFocus()) {
