@@ -821,7 +821,7 @@ window.onerror = function(msg, src, line, col, err) {
     function updateLanguage(lang) {
         if (lang !== currentLanguage) {
             currentLanguage = lang;
-            monaco.editor.setModelLanguage(editor.getModel(), lang);
+            if (editor) monaco.editor.setModelLanguage(editor.getModel(), lang);
             langBtn.textContent = lang === 'xml' ? 'FetchXML' : 'SQL';
         }
     }
@@ -1521,6 +1521,30 @@ window.onerror = function(msg, src, line, col, err) {
 
     // Signal ready
     vscode.postMessage({ command: 'ready' });
+})();
+</script>
+<script nonce="${nonce}">
+(function() {
+    var diag = [];
+    if (typeof window.__ppds_errors === 'undefined') {
+        diag.push('IIFE script tag was SILENTLY DROPPED (never parsed)');
+    } else {
+        diag.push('IIFE script tag parsed OK (__ppds_errors exists)');
+    }
+    if (!document.querySelector('.monaco-editor')) {
+        diag.push('Monaco editor NOT created');
+    } else {
+        diag.push('Monaco editor created OK');
+    }
+    var el = document.getElementById('sql-editor');
+    if (el) {
+        var errAttr = el.getAttribute('data-error');
+        if (errAttr) diag.push('Editor error: ' + errAttr);
+    }
+    var banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#c00;color:#fff;padding:8px 12px;font:13px monospace;white-space:pre-wrap;';
+    banner.textContent = '[PPDS DIAGNOSTIC]\\n' + diag.join('\\n');
+    document.body.prepend(banner);
 })();
 </script>
 </body>
