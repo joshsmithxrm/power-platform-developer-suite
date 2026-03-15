@@ -647,6 +647,8 @@ export class SolutionsPanel extends WebviewPanelBase {
                 break;
             case 'solutionsLoaded':
                 renderSolutions(msg.solutions, msg.managedCount, msg.includeManaged);
+                var reconnectBanner = document.getElementById('reconnect-banner');
+                if (reconnectBanner) reconnectBanner.style.display = 'none';
                 break;
             case 'componentsLoading':
                 showComponentsLoading(msg.uniqueName);

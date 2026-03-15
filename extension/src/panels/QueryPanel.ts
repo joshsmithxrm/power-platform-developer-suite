@@ -1291,7 +1291,7 @@ export class QueryPanel extends WebviewPanelBase {
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
 
-        var recordId = anchor ? getRecordId(allRows[anchor.row]) : null;
+        var recordId = anchor ? getRecordId(displayedRows[anchor.row]) : null;
 
         const items = [
             { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
@@ -1366,11 +1366,11 @@ export class QueryPanel extends WebviewPanelBase {
                     setTimeout(() => { updateCopyHint(); }, 2000);
                 }
             } else if (action === 'openRecord') {
-                var rid = getRecordId(allRows[clickRow]);
+                var rid = getRecordId(displayedRows[clickRow]);
                 var url = buildRecordUrl(lastEntityName, rid);
                 if (url) vscode.postMessage({ command: 'openRecordUrl', url: url });
             } else if (action === 'copyRecordUrl') {
-                var rid = getRecordId(allRows[clickRow]);
+                var rid = getRecordId(displayedRows[clickRow]);
                 var url = buildRecordUrl(lastEntityName, rid);
                 if (url) {
                     vscode.postMessage({ command: 'copyToClipboard', text: url });
