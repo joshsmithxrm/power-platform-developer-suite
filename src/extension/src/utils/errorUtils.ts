@@ -1,4 +1,6 @@
 import { ResponseError } from 'vscode-jsonrpc/node';
+import * as vscode from 'vscode';
+import type { DaemonClient } from '../daemonClient.js';
 
 /**
  * Structured error codes from the daemon RPC layer.
@@ -63,4 +65,45 @@ export function isAuthError(error: unknown): boolean {
         lower.includes('invalid_grant') ||
         lower.includes('aadsts')
     );
+}
+
+/**
+ * Shared auth-error retry handler for panels.
+ * Shows a re-authentication prompt when an auth error is detected,
+ * invalidates cached tokens, and retries the operation once.
+ *
+ * Note: DataverseNotebookController has different auth-error semantics
+ * (no retry, shows "re-execute" message) and does NOT use this helper.
+ *
+ * @returns true if the retry succeeded (caller should return early),
+ *          false otherwise (caller should show error to user)
+ */
+export async function handleAuthError(
+    daemon: DaemonClient,
+    error: unknown,
+    isRetry: boolean,
+    retry: () => Promise<void>,
+): Promise<boolean> {
+    if (!isAuthError(error) || isRetry) return false;
+
+    const action = await vscode.window.showErrorMessage(
+        'Session expired. Re-authenticate?',
+        'Re-authenticate', 'Cancel',
+    );
+    if (action !== 'Re-authenticate') return false;
+
+    try {
+        const who = await daemon.authWho();
+        const profileId = who.name ?? String(who.index);
+        await daemon.profilesInvalidate(profileId);
+    } catch {
+        // If authWho fails, proceed with retry anyway
+    }
+
+    try {
+        await retry();
+        return true;
+    } catch {
+        return false;
+    }
 }
