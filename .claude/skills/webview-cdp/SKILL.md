@@ -54,7 +54,7 @@ node extension/tools/webview-cdp.mjs close
 | `connect` | `connect` | List available webview frames |
 | `command "<cmd>"` | `command "PPDS: Data Explorer"` | Execute VS Code command via command palette |
 | `wait [timeout] [--ext id]` | `wait 10000` | Wait until webview appears |
-| `screenshot <file> [--page]` | `screenshot $TEMP/shot.png` | Capture webview (default) or full window (--page) |
+| `screenshot <file>` | `screenshot $TEMP/shot.png` | Capture full VS Code window (always full window; `--page` accepted but ignored) |
 | `eval "<js>" [--page]` | `eval "document.title"` | Run JS in webview or page context |
 | `click "<selector>" [--right] [--page]` | `click "#btn"` | Click element |
 | `type "<selector>" "<text>" [--page]` | `type "#input" "hello"` | Type text into element |
@@ -69,6 +69,8 @@ node extension/tools/webview-cdp.mjs close
 - `--ext "<id>"` — select webview by extension ID (more stable than index)
 
 ## Two Targets: `--page` vs default
+
+**Note:** For `screenshot`, both modes produce a full window capture — `--page` is accepted but ignored. The distinction below applies to `eval`, `click`, `type`, `select`, `key`, and `mouse`.
 
 | Flag | Target | Use for |
 |------|--------|---------|
