@@ -116,6 +116,58 @@ export function generateVirtualScrollScript(rowDataJson: string, config: Virtual
     }
 
     render();
+
+    // ── Cell selection and copy ──
+    var selectedCell = null;
+    var toast = document.createElement('div');
+    toast.className = 'copy-toast';
+    document.body.appendChild(toast);
+    var toastTimer = null;
+
+    function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('visible');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function() { toast.classList.remove('visible'); }, 1500);
+    }
+
+    function clearCellSelection() {
+        if (selectedCell) {
+            selectedCell.classList.remove('cell-selected');
+            selectedCell = null;
+        }
+    }
+
+    function getCellText(td) {
+        var link = td.querySelector('a');
+        return link ? link.textContent : td.textContent;
+    }
+
+    container.addEventListener('click', function(e) {
+        // Don't interfere with link clicks
+        if (e.target.closest('a')) return;
+        var td = e.target.closest('.data-cell');
+        if (!td) { clearCellSelection(); return; }
+        clearCellSelection();
+        td.classList.add('cell-selected');
+        selectedCell = td;
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (!selectedCell) return;
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            e.preventDefault();
+            var text = getCellText(selectedCell);
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function() {
+                    showToast('Copied: ' + (text.length > 30 ? text.substring(0, 30) + '...' : text));
+                });
+            }
+        }
+        if (e.key === 'Escape') {
+            clearCellSelection();
+        }
+    });
 })();
 </script>`;
 }

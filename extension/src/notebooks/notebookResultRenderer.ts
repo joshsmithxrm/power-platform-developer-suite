@@ -179,8 +179,12 @@ function getNotebookStyles(): string {
             padding: 8px 12px; white-space: nowrap;
             vertical-align: middle; text-align: left;
         }
+        .data-cell { cursor: default; user-select: none; }
         .data-cell a { color: var(--vscode-textLink-foreground); text-decoration: none; }
         .data-cell a:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+        .data-cell.cell-selected { background: var(--vscode-editor-selectionBackground) !important; outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
+        .copy-toast { position: fixed; bottom: 8px; right: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 4px 10px; border-radius: 4px; font-size: 12px; z-index: 100; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+        .copy-toast.visible { opacity: 1; }
         .virtual-spacer td { padding: 0 !important; border: none !important; }
     `;
 }
