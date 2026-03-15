@@ -13,19 +13,27 @@ describe('parseArgs', () => {
   });
   it('parses click with selector', () => {
     const result = parseArgs(['click', '#btn']);
-    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: false });
+    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: false, page: false });
   });
   it('parses click with --right flag', () => {
     const result = parseArgs(['click', '#btn', '--right']);
-    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: true });
+    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: true, page: false });
   });
   it('parses --target flag', () => {
     const result = parseArgs(['eval', '1+1', '--target', '2']);
-    expect(result).toEqual({ command: 'eval', port: 9223, args: ['1+1'], target: 2 });
+    expect(result).toEqual({ command: 'eval', port: 9223, args: ['1+1'], target: 2, page: false });
+  });
+  it('parses --page flag', () => {
+    const result = parseArgs(['click', '#sidebar-item', '--page']);
+    expect(result).toEqual({ command: 'click', port: 9223, args: ['#sidebar-item'], target: undefined, right: false, page: true });
+  });
+  it('parses --page with eval', () => {
+    const result = parseArgs(['eval', 'document.title', '--page']);
+    expect(result).toEqual({ command: 'eval', port: 9223, args: ['document.title'], page: true });
   });
   it('parses mouse with event and coordinates', () => {
     const result = parseArgs(['mouse', 'mousedown', '150', '200']);
-    expect(result).toEqual({ command: 'mouse', port: 9223, args: ['mousedown', '150', '200'], target: undefined });
+    expect(result).toEqual({ command: 'mouse', port: 9223, args: ['mousedown', '150', '200'], target: undefined, page: false });
   });
   it('errors on empty args', () => {
     expect(() => parseArgs([])).toThrow('No command provided');

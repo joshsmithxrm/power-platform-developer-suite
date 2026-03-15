@@ -19,83 +19,106 @@ Interact with extension webview panels running inside VS Code. Take screenshots 
 
 The tool is at `extension/tools/webview-cdp.mjs`. No additional installation needed.
 
-## Two Modes: `attach` vs `launch`
-
-### `attach` — Use with VS Code MCP (preferred for code review / testing sessions)
-
-Connects CDP to the user's running VS Code instance. Use this when VS Code MCP tools (`mcp__vscode__*`) are available in your session — both tools operate on the same VS Code instance, so you can:
-- Use VS Code MCP to execute commands (open panels, run tasks, read diagnostics)
-- Use CDP to see and interact with webview content (screenshots, clicks, DOM inspection)
+## Core Workflow
 
 ```bash
-# Attach to the user's VS Code (auto-discovers the CDP port)
-node extension/tools/webview-cdp.mjs attach
-
-# Or specify the port if auto-discovery fails
-node extension/tools/webview-cdp.mjs attach 9223
-
-# Now use VS Code MCP to open a panel, then CDP to inspect it
-# mcp__vscode__execute_command("ppds.openDataExplorer")
-node extension/tools/webview-cdp.mjs screenshot data-explorer.png
-
-# When done — detaches without closing VS Code
-node extension/tools/webview-cdp.mjs close
-```
-
-**The user must start VS Code with CDP enabled:**
-```
-code --remote-debugging-port=9223
-```
-
-**NEVER use `close` to kill an attached instance** — `close` on an attached session only cleans up the session file, it does NOT kill VS Code. This is intentional — the attached instance is the user's editor.
-
-### `launch` — Standalone testing (when VS Code MCP is not available)
-
-Launches an isolated VS Code instance with the extension loaded. Use this for standalone CDP-only testing when VS Code MCP tools are not in your session.
-
-```bash
-# Launch an isolated VS Code instance
+# 1. Launch an isolated VS Code instance with the extension loaded
 node extension/tools/webview-cdp.mjs launch 9223
 
-# Test and verify
+# 2. Open a panel by clicking VS Code's native UI (--page targets VS Code itself, not webviews)
+node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
+# Wait for the webview to load
+sleep 3
+
+# 3. Take a screenshot to see what you built
 node extension/tools/webview-cdp.mjs screenshot current-state.png
-node extension/tools/webview-cdp.mjs click "#my-button"
+# IMPORTANT: Actually look at the screenshot to verify the UI
+
+# 4. Interact with webview content (no --page = targets the webview)
+node extension/tools/webview-cdp.mjs click "#execute-btn"
 node extension/tools/webview-cdp.mjs screenshot after-click.png
 
-# When done — kills the launched instance
+# 5. When done
 node extension/tools/webview-cdp.mjs close
 ```
 
-**Note:** The launched instance uses an isolated profile (`--user-data-dir`) and does NOT have the user's extensions installed. VS Code MCP tools will NOT work against it. If you need both CDP and VS Code MCP, use `attach` instead.
+## Two Targets: `--page` vs default (webview)
 
-### How to Choose
+Every interaction command (`click`, `eval`, `type`, `key`, `screenshot`, `mouse`, `select`) works on **two targets**:
 
-| Scenario | Use | Why |
-|----------|-----|-----|
-| Code review / testing session with VS Code MCP available | `attach` | Both tools work on the same instance |
-| Quick visual check during implementation | `attach` | Faster, no launch overhead |
-| Standalone testing without VS Code MCP | `launch` | Self-contained, no user setup needed |
-| CI or automated testing | `launch` | Reproducible isolated environment |
+| Flag | Target | Use for |
+|------|--------|---------|
+| *(none)* | Webview iframe content | Buttons, inputs, tables inside your extension's webview panels |
+| `--page` | VS Code's main UI | Sidebar items, tabs, menus, command palette, native VS Code elements |
+
+**You need `--page` to navigate VS Code's UI** (open panels, click sidebar items, switch tabs). Once a webview panel is open, drop `--page` to interact with its content.
+
+```bash
+# Click something in VS Code's sidebar (--page)
+node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
+
+# Click a button inside the webview panel (no --page)
+node extension/tools/webview-cdp.mjs click "#execute-btn"
+
+# Screenshot VS Code's full window (--page)
+node extension/tools/webview-cdp.mjs screenshot --page full-window.png
+
+# Screenshot just the webview content (no --page)
+node extension/tools/webview-cdp.mjs screenshot webview-only.png
+```
+
+## Connection Modes
+
+### `launch` — Self-contained (primary mode)
+
+Launches an isolated VS Code instance with the extension loaded. Fully automated, no user involvement.
+
+```bash
+node extension/tools/webview-cdp.mjs launch 9223
+# ... work ...
+node extension/tools/webview-cdp.mjs close
+```
+
+### `attach` — Connect to user's VS Code (when CDP is already enabled)
+
+Connects to the user's running VS Code. Use when the user has started VS Code with `--remote-debugging-port`. Useful for debugging issues in the user's actual environment.
+
+```bash
+node extension/tools/webview-cdp.mjs attach        # auto-discovers port
+node extension/tools/webview-cdp.mjs attach 9223   # specific port
+# ... work ...
+node extension/tools/webview-cdp.mjs close         # detaches only, does NOT kill VS Code
+```
 
 ## Commands
 
 | Command | Example | Purpose |
 |---------|---------|---------|
-| `attach [port]` | `attach` or `attach 9223` | Connect to running VS Code (auto-discovers port) |
 | `launch [port] [workspace]` | `launch 9223` | Start isolated VS Code with extension |
-| `close` | `close` | Detach (if attached) or kill (if launched) |
+| `attach [port]` | `attach` | Connect to running VS Code |
+| `close` | `close` | Kill (launched) or detach (attached) |
 | `connect [port]` | `connect` | Test connectivity, list webview targets |
-| `screenshot <file>` | `screenshot result.png` | Capture webview as PNG |
-| `eval "<js>"` | `eval "document.title"` | Run JS in webview, print result |
-| `click "<selector>" [--right]` | `click "#btn"` | Left or right click element |
+| `screenshot <file>` | `screenshot result.png` | Capture as PNG |
+| `eval "<js>"` | `eval "document.title"` | Run JS, print result |
+| `click "<selector>" [--right]` | `click "#btn"` | Left or right click |
 | `type "<selector>" "<text>"` | `type "#input" "hello"` | Type text into element |
 | `select "<selector>" "<value>"` | `select "#dropdown" "opt1"` | Select dropdown option |
 | `key "<combo>"` | `key "ctrl+enter"` | Send keyboard shortcut |
-| `mouse <event> <x> <y>` | `mouse mousedown 150 200` | Raw mouse event at coordinates |
+| `mouse <event> <x> <y>` | `mouse mousedown 150 200` | Raw mouse event |
 
-All commands except `launch`, `attach`, and `close` accept `--target N` to select a specific webview when multiple panels are open.
+**Flags available on all interaction commands:**
+- `--page` — target VS Code's main UI instead of webview content
+- `--target N` — select specific webview when multiple are open
 
 ## Common Patterns
+
+### Open a webview panel
+```bash
+# Use --page to interact with VS Code's sidebar/UI
+node extension/tools/webview-cdp.mjs click --page "[aria-label='Data Explorer']"
+sleep 2
+node extension/tools/webview-cdp.mjs screenshot panel-opened.png
+```
 
 ### Verify a button click
 ```bash
@@ -103,7 +126,7 @@ node extension/tools/webview-cdp.mjs click "#execute-btn"
 node extension/tools/webview-cdp.mjs screenshot after-execute.png
 ```
 
-### Test a keyboard shortcut
+### Test a keyboard shortcut (inside webview)
 ```bash
 node extension/tools/webview-cdp.mjs key "ctrl+enter"
 node extension/tools/webview-cdp.mjs screenshot after-shortcut.png
@@ -131,6 +154,12 @@ node extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selecte
 node extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
 ```
 
+### Discover available elements on the page
+```bash
+# Find clickable elements in VS Code's sidebar
+node extension/tools/webview-cdp.mjs eval --page "Array.from(document.querySelectorAll('[aria-label]')).map(e => e.getAttribute('aria-label')).slice(0, 20).join('\\n')"
+```
+
 ## Gap Protocol
 
 If you encounter a webview interaction that this tool cannot handle:
@@ -145,8 +174,8 @@ This ensures the tool evolves based on real needs.
 ## Important
 
 - **Always screenshot after changes** — don't assume your code works, verify visually
-- **Use `attach` when VS Code MCP is available** — both tools work on the same instance
-- **Use `launch` only for standalone testing** — it creates an isolated instance without the user's extensions
+- **Use `--page` to navigate VS Code UI** — open panels, click sidebar items, switch tabs
+- **Drop `--page` for webview content** — buttons, inputs, tables inside extension panels
 - **NEVER close an attached instance** — `close` on attached sessions only cleans up the session file
 - **Do NOT use agent-browser for VS Code webviews** — it cannot reach webview iframe targets
 - **Do NOT use Playwright MCP for webview testing** — same limitation
