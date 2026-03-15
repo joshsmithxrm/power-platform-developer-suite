@@ -50,8 +50,11 @@ public static class VersionCommand
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Latest stable:      {result.LatestStableVersion ?? "unknown"}");
-                    Console.Error.WriteLine($"Latest pre-release: {result.LatestPreReleaseVersion ?? "unknown"}");
+                    if (result.LatestStableVersion is not null)
+                        Console.Error.WriteLine($"Latest stable:      {result.LatestStableVersion}");
+
+                    if (result.LatestPreReleaseVersion is not null)
+                        Console.Error.WriteLine($"Latest pre-release: {result.LatestPreReleaseVersion}");
 
                     if (result.UpdateAvailable && result.UpdateCommand is not null)
                     {
