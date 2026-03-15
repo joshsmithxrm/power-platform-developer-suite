@@ -35,25 +35,6 @@ export function getEnvironmentPickerHtml(): string {
 }
 
 /**
- * Returns the JavaScript for the environment picker (runs inside webview).
- * Handles click on the env picker button to request environment list from host.
- */
-export function getEnvironmentPickerJs(): string {
-    return `
-    const envPickerBtn = document.getElementById('env-picker-btn');
-    const envPickerName = document.getElementById('env-picker-name');
-
-    envPickerBtn.addEventListener('click', () => {
-        vscode.postMessage({ command: 'requestEnvironmentList' });
-    });
-
-    function updateEnvironmentDisplay(name) {
-        envPickerName.textContent = name || 'No environment';
-    }
-    `;
-}
-
-/**
  * Represents an environment option for the picker.
  */
 export interface EnvironmentOption {
