@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CancellationTokenSource } from 'vscode-jsonrpc/node';
+import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
 import type { DaemonClient } from '../daemonClient.js';
@@ -208,7 +208,7 @@ export class QueryPanel extends WebviewPanelBase {
         this.panel.title = parts.join(' — ');
     }
 
-    private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string): Promise<void> {
+    private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string, isConfirmed = false): Promise<void> {
         // Cancel any in-flight query and create a fresh token
         this.queryCts?.cancel();
         this.queryCts?.dispose();
@@ -224,7 +224,7 @@ export class QueryPanel extends WebviewPanelBase {
             if (language === 'xml') {
                 result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, environmentUrl: this.environmentUrl }, token);
             } else {
-                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl }, token);
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, environmentUrl: this.environmentUrl, dmlSafety: { isConfirmed } }, token);
             }
             this.lastSql = sql;
             this.lastUseTds = tds;
@@ -240,6 +240,32 @@ export class QueryPanel extends WebviewPanelBase {
             if (token.isCancellationRequested) {
                 this.postMessage({ command: 'queryCancelled' });
                 return;
+            }
+
+            // Check for DML safety errors from the daemon
+            if (error instanceof ResponseError) {
+                const data = error.data as { dmlBlocked?: boolean; dmlConfirmationRequired?: boolean; message?: string; code?: string } | undefined;
+
+                // DML confirmation required — prompt the user
+                if (data?.dmlConfirmationRequired || data?.code === 'Query.DmlConfirmationRequired') {
+                    const choice = await vscode.window.showWarningMessage(
+                        data?.message || 'This DML operation requires confirmation.',
+                        { modal: true },
+                        'Execute Anyway'
+                    );
+                    if (choice === 'Execute Anyway') {
+                        await this.executeQuery(sql, isRetry, useTds, language, true);
+                    } else {
+                        this.postMessage({ command: 'queryCancelled' });
+                    }
+                    return;
+                }
+
+                // DML blocked outright — show error
+                if (data?.dmlBlocked || data?.code === 'Query.DmlBlocked') {
+                    this.postMessage({ command: 'queryError', error: data?.message || 'DML operation blocked.' });
+                    return;
+                }
             }
 
             const msg = error instanceof Error ? error.message : String(error);
