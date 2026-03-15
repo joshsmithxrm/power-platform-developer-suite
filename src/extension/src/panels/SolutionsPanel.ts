@@ -3,8 +3,8 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { SolutionComponentInfoDto } from '../types.js';
 import { handleAuthError } from '../utils/errorUtils.js';
-
 import { buildMakerUrl } from '../commands/browserCommands.js';
+
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
 import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
