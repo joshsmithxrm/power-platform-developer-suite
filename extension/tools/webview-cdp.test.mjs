@@ -139,6 +139,24 @@ describe('parseArgs', () => {
   it('errors on removed attach command', () => {
     expect(() => parseArgs(['attach'])).toThrow('Unknown command: attach');
   });
+
+  it('parses notebook run', () => {
+    const result = parseArgs(['notebook', 'run']);
+    expect(result).toEqual({ command: 'notebook', subcommand: 'run' });
+  });
+
+  it('parses notebook run-all', () => {
+    const result = parseArgs(['notebook', 'run-all']);
+    expect(result).toEqual({ command: 'notebook', subcommand: 'run-all' });
+  });
+
+  it('errors on notebook with no subcommand', () => {
+    expect(() => parseArgs(['notebook'])).toThrow('notebook requires a subcommand');
+  });
+
+  it('errors on notebook with unknown subcommand', () => {
+    expect(() => parseArgs(['notebook', 'foo'])).toThrow('Unknown notebook subcommand: foo');
+  });
 });
 
 
