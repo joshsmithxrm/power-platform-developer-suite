@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-commit hook: run typecheck on staged extension TS/JS files
+# pre-commit hook: run typecheck and lint on staged extension TS/JS files
 # Install: git config core.hooksPath scripts/hooks
 
 set -euo pipefail
@@ -36,3 +36,13 @@ if ! npm run typecheck:all --prefix "$EXT_DIR"; then
 fi
 
 echo "[pre-commit] typecheck passed."
+
+# Run lint (--quiet shows only errors, not warnings)
+echo "[pre-commit] Running lint..."
+if ! (cd "$EXT_DIR" && npx eslint src --quiet); then
+    echo ""
+    echo "[pre-commit] BLOCKED: lint errors found. Fix errors before committing."
+    exit 1
+fi
+
+echo "[pre-commit] lint passed."
