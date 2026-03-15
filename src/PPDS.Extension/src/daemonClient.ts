@@ -287,10 +287,11 @@ export class DaemonClient implements vscode.Disposable {
         const result = await this.connection!.sendRequest<AuthListResponse>('auth/list');
 
         // Defensive: older daemon versions (pre-SystemTextJsonFormatter) return PascalCase keys
-        if (!result.profiles && (result as any).Profiles) {
-            result.profiles = (result as any).Profiles;
-            result.activeProfile = (result as any).ActiveProfile ?? result.activeProfile;
-            result.activeProfileIndex = (result as any).ActiveProfileIndex ?? result.activeProfileIndex;
+        const raw = result as unknown as Record<string, unknown>;
+        if (!result.profiles && raw['Profiles']) {
+            result.profiles = raw['Profiles'] as AuthListResponse['profiles'];
+            result.activeProfile = (raw['ActiveProfile'] as string | undefined) ?? result.activeProfile;
+            result.activeProfileIndex = (raw['ActiveProfileIndex'] as number | undefined) ?? result.activeProfileIndex;
         }
 
         this.log.debug(`Got ${result.profiles?.length ?? 0} profiles`);

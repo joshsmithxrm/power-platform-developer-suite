@@ -292,9 +292,11 @@ if (editor) editor.onDidChangeModelContent(() => {
 
 // Language toggle pill — triggers conversion
 langToggle.addEventListener('click', (e) => {
-    const seg = (e.target as HTMLElement).closest('.lang-seg') as HTMLElement | null;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const seg = target.closest<HTMLElement>('.lang-seg');
     if (!seg || seg.classList.contains('active')) return;
-    const targetLang = seg.dataset.lang!;
+    const targetLang = seg.dataset['lang']!;
     const content = editor ? editor.getValue().trim() : '';
     if (!content) {
         // Empty editor — just switch mode
@@ -511,9 +513,11 @@ moreBtn.addEventListener('click', (e) => {
 
 // ── Dropdown action handler ──
 document.addEventListener('click', (e) => {
-    const item = (e.target as HTMLElement).closest('.dropdown-item') as HTMLElement | null;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const item = target.closest<HTMLElement>('.dropdown-item');
     if (!item || !activeDropdown) return;
-    const action = item.dataset.action;
+    const action = item.dataset['action'];
     closeDropdown();
     const sql = editor ? editor.getValue().trim() : '';
     switch (action) {
