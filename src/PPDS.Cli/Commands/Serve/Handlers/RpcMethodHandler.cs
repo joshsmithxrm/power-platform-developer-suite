@@ -1149,11 +1149,11 @@ public class RpcMethodHandler : IDisposable
         QueryExportRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Sql))
+        if (string.IsNullOrWhiteSpace(request.Sql) && string.IsNullOrWhiteSpace(request.FetchXml))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
-                "The 'sql' parameter is required");
+                "Either 'sql' or 'fetchXml' parameter is required");
         }
 
         var format = request.Format.ToLowerInvariant();
@@ -1164,7 +1164,10 @@ public class RpcMethodHandler : IDisposable
                 $"Invalid format '{format}'. Valid values: csv, tsv, json");
         }
 
-        var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
+        // Use FetchXML directly if provided, otherwise transpile SQL
+        var fetchXml = !string.IsNullOrWhiteSpace(request.FetchXml)
+            ? request.FetchXml
+            : TranspileSqlToFetchXml(request.Sql, request.Top);
 
         // Execute the query
         const int MaxExportRecords = 100_000;
@@ -2822,6 +2825,7 @@ public class QueryCompleteRequest
 public class QueryExportRequest
 {
     [JsonPropertyName("sql")] public string Sql { get; set; } = "";
+    [JsonPropertyName("fetchXml")] public string? FetchXml { get; set; }
     [JsonPropertyName("format")] public string Format { get; set; } = "csv";
     [JsonPropertyName("includeHeaders")] public bool IncludeHeaders { get; set; } = true;
     [JsonPropertyName("top")] public int? Top { get; set; }

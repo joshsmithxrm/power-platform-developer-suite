@@ -154,12 +154,6 @@ content.addEventListener('click', (e) => {
     const detailCard = content.querySelector<HTMLElement>('.component-detail-card[data-detail-for="' + cssEscape(objectId) + '"]');
     if (!detailCard) return;
 
-    // Collapse any other expanded card
-    const expanded = content.querySelector('.component-detail-card.expanded');
-    if (expanded && expanded !== detailCard) {
-        expanded.classList.remove('expanded');
-    }
-
     detailCard.classList.toggle('expanded');
 });
 
@@ -246,7 +240,7 @@ function renderSolutions(sols: SolutionViewDto[], managedCount: number, includeM
         html += '<div class="solution-row" data-unique-name="' + escapeAttr(sol.uniqueName) + '">';
         html += '<span class="chevron' + (isExpanded ? ' expanded' : '') + '">&#9654;</span>';
         html += '<span class="icon">' + (sol.isManaged ? '&#128274;' : '&#128230;') + '</span>';
-        html += '<span class="name">' + escapeHtml(sol.friendlyName) + '</span>';
+        html += '<span class="name">' + escapeHtml(sol.uniqueName) + (sol.friendlyName !== sol.uniqueName ? ' (' + escapeHtml(sol.friendlyName) + ')' : '') + '</span>';
         if (sol.version) {
             html += '<span class="version">(' + escapeHtml(sol.version) + ')</span>';
         }
@@ -332,6 +326,7 @@ function renderComponents(uniqueName: string, groups: ComponentGroupDto[]): void
             }
 
             html += '<div class="component-item" tabindex="0" data-object-id="' + escapeAttr(comp.objectId) + '">';
+            html += '<span class="item-chevron">&#8250;</span>';
             html += '<span class="component-name">' + escapeHtml(name) + subtitle + '</span>';
             if (comp.isMetadata) {
                 html += ' <span class="metadata-badge">metadata</span>';

@@ -133,6 +133,15 @@
     outline-offset: -1px;
 }
 
+.component-item .item-chevron {
+    flex-shrink: 0;
+    font-size: 12px;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+
+.component-item:hover .item-chevron { opacity: 1; }
+
 .component-item .metadata-badge {
     font-size: 10px;
     color: var(--vscode-descriptionForeground);
