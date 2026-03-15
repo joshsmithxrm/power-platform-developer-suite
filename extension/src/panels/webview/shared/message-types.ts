@@ -27,6 +27,7 @@ export type QueryPanelWebviewToHost =
     | { command: 'requestCompletions'; requestId: number; sql: string; cursorOffset: number; language: string }
     | { command: 'webviewError'; error: string; stack?: string }
     | { command: 'cancelQuery' }
+    | { command: 'convertQuery'; sql: string; fromLanguage: string; toLanguage: string }
     | { command: 'refresh' }
     | { command: 'requestEnvironmentList' };
 
@@ -41,7 +42,9 @@ export type QueryPanelHostToWebview =
     | { command: 'appendResults'; data: QueryResultResponse }
     | { command: 'clipboardContent'; text: string }
     | { command: 'completionResult'; requestId: number; items: CompletionItemDto[] }
-    | { command: 'daemonReconnected' };
+    | { command: 'daemonReconnected' }
+    | { command: 'queryConverted'; content: string; language: string }
+    | { command: 'conversionFailed'; error: string; language: string };
 
 // ── Solutions Panel ─────────────────────────────────────────────────────────
 

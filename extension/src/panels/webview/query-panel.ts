@@ -291,12 +291,25 @@ if (editor) editor.onDidChangeModelContent(() => {
     }
 });
 
-// Language toggle pill
+// Language toggle pill — triggers conversion
 langToggle.addEventListener('click', (e) => {
     const seg = (e.target as HTMLElement).closest('.lang-seg') as HTMLElement | null;
     if (!seg || seg.classList.contains('active')) return;
-    manualOverride = true;
-    updateLanguage(seg.dataset.lang!);
+    const targetLang = seg.dataset.lang!;
+    const content = editor ? editor.getValue().trim() : '';
+    if (!content) {
+        // Empty editor — just switch mode
+        manualOverride = true;
+        updateLanguage(targetLang);
+        return;
+    }
+    // Request conversion from host
+    vscode.postMessage({
+        command: 'convertQuery',
+        sql: content,
+        fromLanguage: currentLanguage,
+        toLanguage: targetLang,
+    });
 });
 
 // ── Monaco clipboard bridge ──
@@ -778,6 +791,18 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
         }
         case 'daemonReconnected':
             document.getElementById('reconnect-banner')!.style.display = '';
+            break;
+        case 'queryConverted':
+            manualOverride = true;
+            if (editor) {
+                editor.setValue(msg.content);
+                updateLanguage(msg.language);
+            }
+            break;
+        case 'conversionFailed':
+            // Conversion failed — just toggle the syntax mode anyway
+            manualOverride = true;
+            updateLanguage(msg.language);
             break;
         default:
             assertNever(msg);
