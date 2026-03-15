@@ -334,7 +334,9 @@ public class SolutionService : ISolutionService
                 ? name
                 : ComponentTypeNames.TryGetValue(type, out var fallback)
                     ? fallback
-                    : $"Unknown ({type})";
+                    : type >= 10000
+                        ? $"Custom Component ({type})"
+                        : $"Component Type {type}";
 
             return new SolutionComponentInfo(
                 e.Id,
@@ -344,6 +346,22 @@ public class SolutionService : ISolutionService
                 e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.RootComponentBehavior)?.Value ?? 0,
                 e.GetAttributeValue<bool?>(SolutionComponent.Fields.IsMetadata) ?? false);
         }).ToList();
+
+        // Log any component types that couldn't be resolved from either the option set or hardcoded dictionary
+        var unresolvedTypes = components
+            .Where(c => c.ComponentTypeName.StartsWith("Component Type ") || c.ComponentTypeName.StartsWith("Custom Component ("))
+            .Select(c => c.ComponentType)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+
+        if (unresolvedTypes.Count > 0)
+        {
+            _logger.LogWarning(
+                "Component type resolution: {Count} type(s) unresolved [{Types}]. " +
+                "These are missing from both the componenttype option set metadata and the hardcoded fallback dictionary",
+                unresolvedTypes.Count, string.Join(", ", unresolvedTypes));
+        }
 
         // Resolve component names by type
         var resolveStopwatch = System.Diagnostics.Stopwatch.StartNew();
