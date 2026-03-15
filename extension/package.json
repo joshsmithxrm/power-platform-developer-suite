@@ -63,12 +63,12 @@
     "views": {
       "ppds": [
         {
-          "id": "ppds.profiles",
-          "name": "Profiles"
-        },
-        {
           "id": "ppds.tools",
           "name": "Tools"
+        },
+        {
+          "id": "ppds.profiles",
+          "name": "Profiles"
         }
       ]
     },
