@@ -7,6 +7,7 @@ import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 import { registerBrowserCommands } from './commands/browserCommands.js';
+import { ExplainDocumentProvider } from './providers/explainDocumentProvider.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
 import {
@@ -81,6 +82,13 @@ export function activate(context: vscode.ExtensionContext): void {
     // ── Daemon Status Bar ────────────────────────────────────────────
     const statusBar = new DaemonStatusBar(client);
     context.subscriptions.push(statusBar);
+
+    // ── Virtual Document Provider (EXPLAIN output) ────────────────────
+    const explainProvider = new ExplainDocumentProvider();
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider(ExplainDocumentProvider.scheme, explainProvider),
+        explainProvider,
+    );
 
     // ── Restart Daemon Command ───────────────────────────────────────
     context.subscriptions.push(
@@ -229,6 +237,30 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!item?.envUrl) return;
             await vscode.env.clipboard.writeText(item.envUrl);
             vscode.window.showInformationMessage('Environment URL copied to clipboard');
+        }),
+
+        // Test connection to environment (uses a lightweight query against the target env)
+        vscode.commands.registerCommand('ppds.testConnection', async (item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: `Testing connection to ${item.envDisplayName}\u2026` },
+                async () => {
+                    try {
+                        const result = await client.querySql({
+                            sql: 'SELECT TOP 1 name FROM organization',
+                            top: 1,
+                            environmentUrl: item.envUrl,
+                        });
+                        const orgName = result.records[0]?.['name'] ?? 'unknown';
+                        vscode.window.showInformationMessage(
+                            `Connection successful \u2014 ${orgName} (${result.executionTimeMs}ms)`,
+                        );
+                    } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        vscode.window.showErrorMessage(`Connection failed: ${msg}`);
+                    }
+                },
+            );
         }),
 
         // Remove configured environment from environments.json

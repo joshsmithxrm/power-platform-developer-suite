@@ -61,6 +61,7 @@ vi.mock('vscode', () => {
             onDidChangeActiveNotebookEditor: vi.fn(() => disposable),
         },
         workspace: {
+            registerTextDocumentContentProvider: vi.fn(() => disposable),
             registerNotebookSerializer: vi.fn(() => disposable),
             openNotebookDocument: vi.fn(() => Promise.resolve({ notebookType: 'ppdsnb', metadata: {} })),
             openTextDocument: vi.fn(() => Promise.resolve({})),
