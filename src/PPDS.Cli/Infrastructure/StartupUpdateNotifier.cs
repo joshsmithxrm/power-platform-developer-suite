@@ -14,8 +14,6 @@ namespace PPDS.Cli.Infrastructure;
 /// </remarks>
 public static class StartupUpdateNotifier
 {
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -58,7 +56,7 @@ public static class StartupUpdateNotifier
                 return null;
 
             // Honour the same 24-hour TTL as UpdateCheckService
-            if (DateTimeOffset.UtcNow - result.CheckedAt > CacheTtl)
+            if (DateTimeOffset.UtcNow - result.CheckedAt > UpdateCheckService.CacheTtl)
                 return null;
 
             if (!result.UpdateAvailable)
@@ -156,7 +154,7 @@ public static class StartupUpdateNotifier
             if (result is null)
                 return false;
 
-            return DateTimeOffset.UtcNow - result.CheckedAt <= CacheTtl;
+            return DateTimeOffset.UtcNow - result.CheckedAt <= UpdateCheckService.CacheTtl;
         }
         catch
         {

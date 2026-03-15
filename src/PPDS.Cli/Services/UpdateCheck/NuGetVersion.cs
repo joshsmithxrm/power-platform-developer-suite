@@ -218,6 +218,14 @@ public sealed class NuGetVersion : IComparable<NuGetVersion>, IEquatable<NuGetVe
     public override string ToString() =>
         IsPreRelease ? $"{Major}.{Minor}.{Patch}-{PreReleaseLabel}" : $"{Major}.{Minor}.{Patch}";
 
+    /// <summary>Returns <see langword="true"/> if <paramref name="left"/> equals <paramref name="right"/> by value.</summary>
+    public static bool operator ==(NuGetVersion? left, NuGetVersion? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    /// <summary>Returns <see langword="true"/> if <paramref name="left"/> does not equal <paramref name="right"/> by value.</summary>
+    public static bool operator !=(NuGetVersion? left, NuGetVersion? right) =>
+        !(left == right);
+
     /// <summary>Returns <see langword="true"/> if <paramref name="left"/> is greater than <paramref name="right"/>.</summary>
     public static bool operator >(NuGetVersion? left, NuGetVersion? right) =>
         left is not null && left.CompareTo(right) > 0;

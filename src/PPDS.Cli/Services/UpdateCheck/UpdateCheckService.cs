@@ -21,7 +21,8 @@ public sealed class UpdateCheckService : IUpdateCheckService
     private const string UpdateCommand = "dotnet tool update PPDS.Cli -g";
     private const string UpdateCommandPreRelease = "dotnet tool update PPDS.Cli -g --prerelease";
 
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
+    /// <summary>How long a cached result is considered fresh. Shared with <see cref="Infrastructure.StartupUpdateNotifier"/>.</summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
