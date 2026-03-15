@@ -75,7 +75,8 @@
     "commands": [
       {
         "command": "ppds.listProfiles",
-        "title": "PPDS: List Profiles"
+        "title": "List Profiles",
+        "category": "PPDS"
       },
       {
         "command": "ppds.refreshProfiles",
@@ -84,90 +85,108 @@
       },
       {
         "command": "ppds.selectProfile",
-        "title": "PPDS: Select Profile"
+        "title": "Select Profile",
+        "category": "PPDS"
       },
       {
         "command": "ppds.profileDetails",
-        "title": "PPDS: Profile Details"
+        "title": "Profile Details",
+        "category": "PPDS"
       },
       {
         "command": "ppds.createProfile",
-        "title": "PPDS: Create Profile",
+        "title": "Create Profile",
+        "category": "PPDS",
         "icon": "$(add)"
       },
       {
         "command": "ppds.deleteProfile",
-        "title": "PPDS: Delete Profile",
+        "title": "Delete Profile",
+        "category": "PPDS",
         "icon": "$(trash)"
       },
       {
         "command": "ppds.renameProfile",
-        "title": "PPDS: Rename Profile",
+        "title": "Rename Profile",
+        "category": "PPDS",
         "icon": "$(edit)"
       },
       {
         "command": "ppds.configureEnvironment",
-        "title": "PPDS: Configure Environment",
+        "title": "Configure Environment",
+        "category": "PPDS",
         "icon": "$(gear)"
       },
       {
         "command": "ppds.newNotebook",
-        "title": "PPDS: New Notebook",
+        "title": "New Notebook",
+        "category": "PPDS",
         "icon": "$(notebook)"
       },
       {
         "command": "ppds.toggleNotebookCellLanguage",
-        "title": "PPDS: Toggle SQL/FetchXML",
+        "title": "Toggle SQL/FetchXML",
+        "category": "PPDS",
         "icon": "$(arrow-swap)"
       },
       {
         "command": "ppds.openCellInDataExplorer",
-        "title": "PPDS: Open in Data Explorer",
+        "title": "Open in Data Explorer",
+        "category": "PPDS",
         "icon": "$(table)"
       },
       {
         "command": "ppds.exportCellResultsCsv",
-        "title": "PPDS: Export Cell Results to CSV",
+        "title": "Export Cell Results to CSV",
+        "category": "PPDS",
         "icon": "$(file)"
       },
       {
         "command": "ppds.exportCellResultsJson",
-        "title": "PPDS: Export Cell Results to JSON",
+        "title": "Export Cell Results to JSON",
+        "category": "PPDS",
         "icon": "$(json)"
       },
       {
         "command": "ppds.selectNotebookEnvironment",
-        "title": "PPDS: Select Notebook Environment",
+        "title": "Select Notebook Environment",
+        "category": "PPDS",
         "icon": "$(database)"
       },
       {
         "command": "ppds.dataExplorer",
-        "title": "PPDS: Data Explorer",
+        "title": "Data Explorer",
+        "category": "PPDS",
         "icon": "$(database)"
       },
       {
         "command": "ppds.openQueryInNotebook",
-        "title": "PPDS: Open Query in Notebook",
+        "title": "Open Query in Notebook",
+        "category": "PPDS",
         "icon": "$(notebook)"
       },
       {
         "command": "ppds.openNotebooks",
-        "title": "PPDS: Open Notebooks",
+        "title": "Open Notebooks",
+        "category": "PPDS",
         "icon": "$(notebook)"
       },
       {
         "command": "ppds.openSolutions",
-        "title": "PPDS: Open Solutions",
+        "title": "Open Solutions",
+        "category": "PPDS",
         "icon": "$(package)"
       },
       {
         "command": "ppds.invalidateProfile",
-        "title": "PPDS: Invalidate Tokens",
+        "title": "Invalidate Tokens",
+        "category": "PPDS",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "ppds.showLogs",
-        "title": "PPDS: Show Logs",
+        "title": "Show Logs",
+        "category": "PPDS",
         "icon": "$(output)"
       },
       {
@@ -217,23 +236,28 @@
       },
       {
         "command": "ppds.restartDaemon",
-        "title": "PPDS: Restart Daemon"
+        "title": "Restart Daemon",
+        "category": "PPDS"
       },
       {
         "command": "ppds.debug.daemonStatus",
-        "title": "PPDS Debug: Daemon Status"
+        "title": "Daemon Status",
+        "category": "PPDS Debug"
       },
       {
         "command": "ppds.debug.extensionState",
-        "title": "PPDS Debug: Extension State"
+        "title": "Extension State",
+        "category": "PPDS Debug"
       },
       {
         "command": "ppds.debug.treeViewState",
-        "title": "PPDS Debug: Tree View State"
+        "title": "Tree View State",
+        "category": "PPDS Debug"
       },
       {
         "command": "ppds.debug.panelState",
-        "title": "PPDS Debug: Panel State"
+        "title": "Panel State",
+        "category": "PPDS Debug"
       }
     ],
     "menus": {
