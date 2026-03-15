@@ -37,7 +37,7 @@ Based on $ARGUMENTS or recent changes:
 Always run the relevant unit tests before interactive verification. If tests fail, fix them first — don't waste MCP verification cycles on broken code.
 
 - CLI/TUI: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-- Extension: `npm run test --prefix extension`
+- Extension: `npm run test --prefix src/extension`
 - MCP: `dotnet test --filter "FullyQualifiedName~Mcp" -v q`
 
 ### 3. CLI Mode
