@@ -198,6 +198,93 @@ async function withWebview(port, targetIndex, fn) {
   }
 }
 
+// ── Command: launch ────────────────────────────────────────────────
+
+async function cmdLaunch(parsed) {
+  const port = parsed.port;
+
+  // Check if port is in use
+  try {
+    await fetch(`http://localhost:${port}/json/version`);
+    throw new Error(`Port ${port} already in use.`);
+  } catch (err) {
+    if (err.message.includes('already in use')) throw err;
+    // Connection refused = port is free, continue
+  }
+
+  // Resolve extension path (relative to tool location, not cwd)
+  const workspace = parsed.workspace || process.cwd();
+  const extensionPath = resolve(__dirname, '..');  // extension/ directory
+
+  // Spawn VS Code
+  const codeProcess = spawn('code', [
+    '--extensionDevelopmentPath', extensionPath,
+    '--remote-debugging-port', String(port),
+    '--wait',  // keeps the wrapper process alive, so its PID stays valid
+    workspace,
+  ], {
+    shell: true, // Required: 'code' is a .cmd batch file on Windows
+    detached: true,
+    stdio: 'ignore',
+  });
+  codeProcess.unref();
+
+  // Poll for CDP readiness
+  const startTime = Date.now();
+  const timeout = 15000;
+  while (Date.now() - startTime < timeout) {
+    try {
+      const verRes = await fetch(`http://localhost:${port}/json/version`);
+      await verRes.json();
+      const pidRes = await fetch(`http://localhost:${port}/json/list`);
+      await pidRes.json();
+
+      writeSession(codeProcess.pid, port);
+      console.log(`VS Code launched on port ${port} (PID ${codeProcess.pid})`);
+      return;
+    } catch {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  throw new Error(`Timeout: VS Code did not start within ${timeout / 1000} seconds.`);
+}
+
+// ── Command: close ─────────────────────────────────────────────────
+
+async function cmdClose() {
+  const session = readSession();
+
+  let isVSCode = false;
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync(`tasklist /FI "PID eq ${session.pid}" /FO CSV /NH`, { encoding: 'utf-8' });
+      isVSCode = /code|electron/i.test(output);
+    } else {
+      const output = execSync(`ps -p ${session.pid} -o comm=`, { encoding: 'utf-8' });
+      isVSCode = /code|electron/i.test(output);
+    }
+  } catch {
+    // Process may already be dead
+  }
+
+  if (isVSCode) {
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /PID ${session.pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        process.kill(-session.pid, 'SIGTERM');
+      }
+    } catch {
+      // Process already dead, that's fine
+    }
+    console.log(`VS Code closed (PID ${session.pid})`);
+  } else {
+    console.log(`Warning: PID ${session.pid} is not a VS Code process. Session file cleaned up.`);
+  }
+
+  deleteSession();
+}
+
 // ── Command: connect ───────────────────────────────────────────────
 
 async function cmdConnect(parsed) {
@@ -227,17 +314,270 @@ async function cmdConnect(parsed) {
   });
 }
 
+// ── Command: screenshot ────────────────────────────────────────────
+
+async function cmdScreenshot(parsed) {
+  const filePath = parsed.args[0];
+  if (!filePath) throw new Error('Usage: screenshot <file>');
+
+  const dir = dirname(resolve(filePath));
+  if (!existsSync(dir)) throw new Error(`Cannot write to: ${filePath}`);
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    try {
+      await sendCDP(ws, 'Page.enable');
+      const result = await sendCDP(ws, 'Page.captureScreenshot', { format: 'png' });
+      const buffer = Buffer.from(result.data, 'base64');
+      writeFileSync(resolve(filePath), buffer);
+      console.log(resolve(filePath));
+      return;
+    } catch {
+      // Page domain may not be available on iframe targets — fall back
+    }
+
+    const allTargets = await fetchTargets(session.port);
+    const pageTargets = allTargets.filter(t => t.type === 'page' && t.title?.includes('Visual Studio Code'));
+    if (pageTargets.length === 0) throw new Error('Cannot capture screenshot: no page target found');
+
+    const pageWs = await connectWebSocket(pageTargets[0].webSocketDebuggerUrl);
+    try {
+      await sendCDP(pageWs, 'Page.enable');
+      const result = await sendCDP(pageWs, 'Page.captureScreenshot', { format: 'png' });
+      const buffer = Buffer.from(result.data, 'base64');
+      writeFileSync(resolve(filePath), buffer);
+      console.log(resolve(filePath));
+    } finally {
+      pageWs.close();
+    }
+  });
+}
+
+// ── Command: eval ──────────────────────────────────────────────────
+
+async function cmdEval(parsed) {
+  const expression = parsed.args[0];
+  if (!expression) throw new Error('Empty expression');
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    const result = await sendCDP(ws, 'Runtime.evaluate', {
+      expression,
+      contextId,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+
+    if (result.exceptionDetails) {
+      const msg = result.exceptionDetails.exception?.description
+        || result.exceptionDetails.text
+        || 'Unknown eval error';
+      throw new Error(`Eval error: ${msg}`);
+    }
+
+    const value = result.result.value;
+    console.log(JSON.stringify(value));
+  });
+}
+
+// ── Command: click ─────────────────────────────────────────────────
+
+async function cmdClick(parsed) {
+  const selector = parsed.args[0];
+  if (!selector) throw new Error('Empty selector');
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    const check = await sendCDP(ws, 'Runtime.evaluate', {
+      expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
+      contextId,
+      returnByValue: true,
+    });
+    if (!check.result.value) {
+      throw new Error(`Element not found: ${selector}`);
+    }
+
+    if (parsed.right) {
+      await sendCDP(ws, 'Runtime.evaluate', {
+        expression: `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          const rect = el.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          el.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2
+          }));
+        })()`,
+        contextId,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+    } else {
+      await sendCDP(ws, 'Runtime.evaluate', {
+        expression: `document.querySelector(${JSON.stringify(selector)}).click()`,
+        contextId,
+        returnByValue: true,
+      });
+    }
+  });
+}
+
+// ── Command: type ──────────────────────────────────────────────────
+
+async function cmdType(parsed) {
+  const selector = parsed.args[0];
+  const text = parsed.args[1];
+  if (!selector || text === undefined) throw new Error('Usage: type <selector> <text>');
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    const check = await sendCDP(ws, 'Runtime.evaluate', {
+      expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
+      contextId,
+      returnByValue: true,
+    });
+    if (!check.result.value) throw new Error(`Element not found: ${selector}`);
+
+    await sendCDP(ws, 'Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        el.focus();
+        el.value = ${JSON.stringify(text)};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`,
+      contextId,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+  });
+}
+
+// ── Command: select ────────────────────────────────────────────────
+
+async function cmdSelect(parsed) {
+  const selector = parsed.args[0];
+  const value = parsed.args[1];
+  if (!selector || value === undefined) throw new Error('Usage: select <selector> <value>');
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    const result = await sendCDP(ws, 'Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return { error: 'not_found' };
+        const options = Array.from(el.options || el.querySelectorAll('option'));
+        let option = options.find(o => o.value === ${JSON.stringify(value)});
+        if (!option) option = options.find(o => o.textContent.trim() === ${JSON.stringify(value)});
+        if (!option) return { error: 'option_not_found' };
+        el.value = option.value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { success: true, selected: option.value };
+      })()`,
+      contextId,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+
+    const val = result.result.value;
+    if (val?.error === 'not_found') throw new Error(`Element not found: ${selector}`);
+    if (val?.error === 'option_not_found') throw new Error(`Option not found: ${value}`);
+  });
+}
+
+// ── Command: key ───────────────────────────────────────────────────
+
+async function cmdKey(parsed) {
+  const combo = parsed.args[0];
+  if (!combo) throw new Error('Empty key combo');
+  const { key, modifiers } = parseKeyCombo(combo);
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    const dispatchParams = {
+      type: 'keyDown',
+      key,
+      modifiers: (modifiers.alt ? 1 : 0) | (modifiers.ctrl ? 2 : 0)
+        | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0),
+    };
+
+    if (key.length === 1) {
+      dispatchParams.text = key;
+    }
+
+    await sendCDP(ws, 'Input.dispatchKeyEvent', dispatchParams);
+    const { text, ...keyUpParams } = dispatchParams;
+    await sendCDP(ws, 'Input.dispatchKeyEvent', { ...keyUpParams, type: 'keyUp' });
+  });
+}
+
+// ── Command: mouse ─────────────────────────────────────────────────
+
+async function cmdMouse(parsed) {
+  const event = parsed.args[0];
+  const x = parseFloat(parsed.args[1]);
+  const y = parseFloat(parsed.args[2]);
+
+  if (!VALID_MOUSE_EVENTS.includes(event)) {
+    throw new Error('Invalid mouse event. Must be: mousedown, mousemove, mouseup');
+  }
+  if (isNaN(x) || isNaN(y) || x < 0 || y < 0) {
+    throw new Error('Invalid coordinates');
+  }
+
+  const cdpTypeMap = {
+    mousedown: 'mousePressed',
+    mousemove: 'mouseMoved',
+    mouseup: 'mouseReleased',
+  };
+
+  const session = readSession();
+  await withWebview(session.port, parsed.target, async (ws, contextId) => {
+    await sendCDP(ws, 'Input.dispatchMouseEvent', {
+      type: cdpTypeMap[event],
+      x, y,
+      button: event === 'mousemove' ? 'none' : 'left',
+      clickCount: event === 'mousedown' ? 1 : 0,
+    });
+  });
+}
+
 // ── Command dispatch ───────────────────────────────────────────────
 
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
 
   switch (parsed.command) {
+    case 'launch':
+      await cmdLaunch(parsed);
+      break;
+    case 'close':
+      await cmdClose();
+      break;
     case 'connect':
       await cmdConnect(parsed);
       break;
-    default:
-      throw new Error(`Command '${parsed.command}' not yet implemented`);
+    case 'screenshot':
+      await cmdScreenshot(parsed);
+      break;
+    case 'eval':
+      await cmdEval(parsed);
+      break;
+    case 'click':
+      await cmdClick(parsed);
+      break;
+    case 'type':
+      await cmdType(parsed);
+      break;
+    case 'select':
+      await cmdSelect(parsed);
+      break;
+    case 'key':
+      await cmdKey(parsed);
+      break;
+    case 'mouse':
+      await cmdMouse(parsed);
+      break;
   }
 }
 
