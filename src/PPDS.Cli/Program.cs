@@ -48,6 +48,19 @@ public static class Program
         if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
         {
             ErrorOutput.WriteVersionHeader();
+
+            // Show cached update notification (guarded by --quiet)
+            if (StartupUpdateNotifier.ShouldShow(args))
+            {
+                var updateMessage = StartupUpdateNotifier.GetNotificationMessage();
+                if (updateMessage != null)
+                {
+                    Console.Error.WriteLine(updateMessage);
+                }
+            }
+
+            // Fire-and-forget background cache refresh for next startup
+            StartupUpdateNotifier.RefreshCacheInBackground(ErrorOutput.Version);
         }
 
         var rootCommand = new RootCommand(
