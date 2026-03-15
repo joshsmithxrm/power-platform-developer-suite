@@ -341,17 +341,27 @@ async function runDaemon(workspace) {
         if (params.channel) {
           const logsDir = resolve(PROFILE_DIR, 'logs');
           if (!existsSync(logsDir)) return { logs: 'No log directory found' };
-          try {
-            const output = execSync(
-              `grep -r "${params.channel}" "${logsDir}" --include="*.log" -l`,
-              { encoding: 'utf-8', timeout: 5000 }
-            ).trim();
-            if (!output) return { logs: `No logs found for channel: ${params.channel}` };
-            const logContent = output.split('\n').map(f => readFileSync(f, 'utf-8')).join('\n');
-            return { logs: logContent };
-          } catch {
-            return { logs: `No logs found for channel: ${params.channel}` };
+          // Search log files using pure Node.js (no shell — CONSTITUTION S2)
+          const { readdirSync, statSync } = await import('node:fs');
+          function findLogFiles(dir) {
+            let files = [];
+            try {
+              for (const entry of readdirSync(dir)) {
+                const full = resolve(dir, entry);
+                try {
+                  if (statSync(full).isDirectory()) files.push(...findLogFiles(full));
+                  else if (entry.endsWith('.log')) files.push(full);
+                } catch { /* skip inaccessible */ }
+              }
+            } catch { /* skip inaccessible */ }
+            return files;
           }
+          const logFiles = findLogFiles(logsDir);
+          const matching = logFiles
+            .filter(f => { try { return readFileSync(f, 'utf-8').includes(params.channel); } catch { return false; } });
+          if (matching.length === 0) return { logs: `No logs found for channel: ${params.channel}` };
+          const logContent = matching.map(f => readFileSync(f, 'utf-8')).join('\n');
+          return { logs: logContent };
         }
         if (!existsSync(LOG_FILE)) return { logs: '' };
         return { logs: readFileSync(LOG_FILE, 'utf-8') };
@@ -395,7 +405,7 @@ async function runDaemon(workspace) {
     }
   });
 
-  server.listen(0); // random port
+  server.listen(0, '127.0.0.1'); // localhost only, random port
   const daemonPort = server.address().port;
 
   writeSession({ daemonPort, daemonPid: process.pid, userDataDir: PROFILE_DIR, logFile: LOG_FILE });
