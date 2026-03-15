@@ -5,3 +5,4 @@ bin/
 .vscode-test/
 .dev-version
 package.json.backup
+tools/.webview-cdp-session.json

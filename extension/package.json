@@ -446,7 +446,8 @@
     "eslint": "^10.0.3",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.56.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "ws": "^8.19.0"
   },
   "repository": {
     "type": "git",
