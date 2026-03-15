@@ -118,13 +118,22 @@ describe('debugCommands', () => {
 
     describe('getPanelState', () => {
         it('returns panel instance counts', () => {
-            const result = getPanelState({ queryPanels: 2, solutionsPanels: 1 });
+            const result = getPanelState({ queryPanels: () => 2, solutionsPanels: () => 1 });
             expect(result).toEqual({ queryPanels: 2, solutionsPanels: 1 });
         });
 
         it('returns zero counts when no panels are open', () => {
-            const result = getPanelState({ queryPanels: 0, solutionsPanels: 0 });
+            const result = getPanelState({ queryPanels: () => 0, solutionsPanels: () => 0 });
             expect(result).toEqual({ queryPanels: 0, solutionsPanels: 0 });
+        });
+
+        it('handles dynamic panel types', () => {
+            const result = getPanelState({
+                queryPanels: () => 1,
+                solutionsPanels: () => 2,
+                metadataPanels: () => 3,
+            });
+            expect(result).toEqual({ queryPanels: 1, solutionsPanels: 2, metadataPanels: 3 });
         });
     });
 
@@ -148,7 +157,7 @@ describe('debugCommands', () => {
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'ready', profileCount: 1 },
-                { queryPanelCount: () => 0, solutionsPanelCount: () => 0 },
+                { queryPanels: () => 0, solutionsPanels: () => 0 },
             );
 
             expect(mockRegisterCommand).toHaveBeenCalledTimes(4);
@@ -182,7 +191,7 @@ describe('debugCommands', () => {
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'starting', profileCount: 0 },
-                { queryPanelCount: () => 0, solutionsPanelCount: () => 0 },
+                { queryPanels: () => 0, solutionsPanels: () => 0 },
             );
 
             // Should push all 4 disposables
@@ -206,7 +215,7 @@ describe('debugCommands', () => {
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'ready', profileCount: 2 },
-                { queryPanelCount: () => 1, solutionsPanelCount: () => 0 },
+                { queryPanels: () => 1, solutionsPanels: () => 0 },
             );
 
             // Find the daemonStatus handler and invoke it
@@ -239,7 +248,7 @@ describe('debugCommands', () => {
                 mockDaemon as any,
                 mockProvider as any,
                 { daemonState: 'error', profileCount: 0 },
-                { queryPanelCount: () => qCount, solutionsPanelCount: () => sCount },
+                { queryPanels: () => qCount, solutionsPanels: () => sCount },
             );
 
             const panelStateCall = mockRegisterCommand.mock.calls.find(

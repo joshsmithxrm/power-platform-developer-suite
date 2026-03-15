@@ -25,8 +25,7 @@ interface TreeViewState {
 }
 
 interface PanelState {
-    queryPanels: number;
-    solutionsPanels: number;
+    [panelName: string]: number;
 }
 
 // ── Pure diagnostic functions ───────────────────────────────────────────────
@@ -69,13 +68,14 @@ export async function getTreeViewState(provider: ProfileTreeDataProvider): Promi
 }
 
 /**
- * Returns the number of open Query and Solutions panels.
+ * Returns the number of open panels for each registered panel type.
  */
-export function getPanelState(counts: { queryPanels: number; solutionsPanels: number }): PanelState {
-    return {
-        queryPanels: counts.queryPanels,
-        solutionsPanels: counts.solutionsPanels,
-    };
+export function getPanelState(counts: Record<string, () => number>): PanelState {
+    const state: PanelState = {};
+    for (const [name, countFn] of Object.entries(counts)) {
+        state[name] = countFn();
+    }
+    return state;
 }
 
 // ── Command registration ────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ export function registerDebugCommands(
     daemon: DaemonClient,
     profileTreeProvider: ProfileTreeDataProvider,
     extensionState: { daemonState: string; profileCount: number },
-    panelCounts: { queryPanelCount: () => number; solutionsPanelCount: () => number },
+    panelCounts: Record<string, () => number>,
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.debug.daemonStatus', () => {
@@ -114,10 +114,7 @@ export function registerDebugCommands(
 
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.debug.panelState', () => {
-            return getPanelState({
-                queryPanels: panelCounts.queryPanelCount(),
-                solutionsPanels: panelCounts.solutionsPanelCount(),
-            });
+            return getPanelState(panelCounts);
         }),
     );
 }

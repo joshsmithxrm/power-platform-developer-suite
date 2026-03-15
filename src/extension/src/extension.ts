@@ -127,19 +127,27 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(profileTreeView, profileTreeProvider);
 
     // ── Profile expansion persistence ────────────────────────────────────
+    // DEBUG: Log what's in globalState at startup
+    const startupExpandedIds = context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? [];
+    logChannel.info(`[expand-debug] Startup expandedIds in globalState: [${startupExpandedIds.join(', ')}]`);
+
     context.subscriptions.push(
         profileTreeView.onDidExpandElement(e => {
             if (e.element instanceof ProfileTreeItem && e.element.id) {
                 const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
                 ids.add(e.element.id);
-                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
+                const updated = [...ids];
+                logChannel.info(`[expand-debug] onDidExpandElement: id="${e.element.id}", saving expandedIds=[${updated.join(', ')}]`);
+                void context.globalState.update('ppds.profiles.expandedIds', updated);
             }
         }),
         profileTreeView.onDidCollapseElement(e => {
             if (e.element instanceof ProfileTreeItem && e.element.id) {
                 const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
                 ids.delete(e.element.id);
-                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
+                const updated = [...ids];
+                logChannel.info(`[expand-debug] onDidCollapseElement: id="${e.element.id}", saving expandedIds=[${updated.join(', ')}]`);
+                void context.globalState.update('ppds.profiles.expandedIds', updated);
             }
         }),
     );
@@ -334,8 +342,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // ── Debug / Diagnostic Commands ──────────────────────────────────
     registerDebugCommands(context, client, profileTreeProvider, extensionState, {
-        queryPanelCount: () => QueryPanel.instanceCount,
-        solutionsPanelCount: () => SolutionsPanel.instanceCount,
+        queryPanels: () => QueryPanel.instanceCount,
+        solutionsPanels: () => SolutionsPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks
