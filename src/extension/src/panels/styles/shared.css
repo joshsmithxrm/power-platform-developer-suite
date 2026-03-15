@@ -20,6 +20,14 @@ body {
     align-items: center;
 }
 
+/* ── Environment type accent ──────────────────────────────────────────────── */
+
+.toolbar[data-env-type="production"]  { border-top: 3px solid var(--vscode-testing-iconFailed, #f14c4c); }
+.toolbar[data-env-type="sandbox"]     { border-top: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
+.toolbar[data-env-type="development"] { border-top: 3px solid var(--vscode-testing-iconPassed, #73c991); }
+.toolbar[data-env-type="test"]        { border-top: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
+.toolbar[data-env-type="trial"]       { border-top: 3px solid var(--vscode-editorInfo-foreground, #3794ff); }
+
 .toolbar-spacer {
     flex: 1;
 }
