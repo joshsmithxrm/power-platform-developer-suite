@@ -6,6 +6,7 @@ import { escapeHtml, escapeAttr, cssEscape, formatDate } from './shared/dom-util
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, SolutionViewDto, ComponentGroupDto } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
+import { FilterBar } from './shared/filter-bar.js';
 
 const vscode = getVsCodeApi<SolutionsPanelWebviewToHost>();
 const content = document.getElementById('content') as HTMLElement;
@@ -38,51 +39,48 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     vscode.postMessage({ command: 'refresh' });
 });
 
-let filterText = '';
-let filterTimeout: ReturnType<typeof setTimeout> | null = null;
+// Dummy element — FilterBar needs a countEl but solutions panel manages status text itself
+const _filterCountSink = document.createElement('span');
 
-searchInput.addEventListener('input', () => {
-    if (filterTimeout !== null) clearTimeout(filterTimeout);
-    filterTimeout = setTimeout(() => {
-        filterText = searchInput.value.trim().toLowerCase();
-        applyFilter();
-    }, 150);
-});
+const solutionsFilter = new FilterBar<SolutionViewDto>({
+    input: searchInput,
+    countEl: _filterCountSink,
+    getSearchableText: (sol) => [
+        sol.friendlyName,
+        sol.uniqueName,
+        sol.publisherName || '',
+    ],
+    onFilter: (filtered, total) => {
+        const rows = content.querySelectorAll<HTMLElement>('.solution-list > li');
+        const isFiltered = searchInput.value.trim().length > 0;
 
-function applyFilter(): void {
-    if (!solutions.length) return;
-    const rows = content.querySelectorAll<HTMLElement>('.solution-list > li');
-    let visibleCount = 0;
-    rows.forEach((li, idx) => {
-        const sol = solutions[idx];
-        if (!sol) return;
-        const matches = !filterText ||
-            sol.friendlyName.toLowerCase().includes(filterText) ||
-            sol.uniqueName.toLowerCase().includes(filterText) ||
-            (sol.publisherName && sol.publisherName.toLowerCase().includes(filterText));
-        li.style.display = matches ? '' : 'none';
-        if (matches) visibleCount++;
-    });
+        rows.forEach((li, idx) => {
+            const sol = solutions[idx];
+            if (!sol) return;
+            li.style.display = filtered.includes(sol) ? '' : 'none';
+        });
 
-    if (filterText) {
-        statusText.textContent = visibleCount + ' of ' + solutions.length + ' solution' + (solutions.length !== 1 ? 's' : '');
-    } else {
-        statusText.textContent = solutions.length + ' solution' + (solutions.length !== 1 ? 's' : '');
-    }
-
-    if (filterText && visibleCount === 0) {
-        let emptyEl = content.querySelector('.filter-empty');
-        if (!emptyEl) {
-            emptyEl = document.createElement('div');
-            emptyEl.className = 'empty-state filter-empty';
-            emptyEl.textContent = 'No solutions match filter';
-            content.appendChild(emptyEl);
+        if (isFiltered) {
+            statusText.textContent = filtered.length + ' of ' + total + ' solution' + (total !== 1 ? 's' : '');
+        } else {
+            statusText.textContent = total + ' solution' + (total !== 1 ? 's' : '');
         }
-    } else {
-        const emptyEl = content.querySelector('.filter-empty');
-        if (emptyEl) emptyEl.remove();
-    }
-}
+
+        if (isFiltered && filtered.length === 0) {
+            let emptyEl = content.querySelector('.filter-empty');
+            if (!emptyEl) {
+                emptyEl = document.createElement('div');
+                emptyEl.className = 'empty-state filter-empty';
+                emptyEl.textContent = 'No solutions match filter';
+                content.appendChild(emptyEl);
+            }
+        } else {
+            const emptyEl = content.querySelector('.filter-empty');
+            if (emptyEl) emptyEl.remove();
+        }
+    },
+    itemLabel: 'solutions',
+});
 
 // ── Delegated click handler for solution/component rows ──
 content.addEventListener('click', (e) => {
@@ -211,7 +209,6 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
 function renderSolutions(sols: SolutionViewDto[]): void {
     solutions = sols;
     searchInput.value = '';
-    filterText = '';
 
     if (sols.length === 0) {
         content.innerHTML = '<div class="empty-state">No solutions found</div>';
@@ -260,7 +257,10 @@ function renderSolutions(sols: SolutionViewDto[]): void {
     html += '</ul>';
     content.innerHTML = html;
 
-    // Update status
+    // Initialize filter with the new data set (resets filter input and DOM visibility)
+    solutionsFilter.setItems(sols);
+
+    // Override status with the more detailed managed/unmanaged breakdown
     const managedCount = sols.filter(s => s.isManaged).length;
     const unmanagedCount = sols.length - managedCount;
     statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${unmanagedCount} unmanaged, ${managedCount} managed)`;
