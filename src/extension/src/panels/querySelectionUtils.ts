@@ -1,44 +1,21 @@
 /**
- * Pure utility functions for query results selection and copy.
- * Extracted from QueryPanel webview JS for testability.
- * The webview IIFE has inline copies of these — keep in sync.
+ * Re-exports selection and DOM utilities from shared webview modules.
+ * Kept as a stable import path for host-side tests.
  */
+export { getSelectionRect, isSingleCell } from './webview/shared/selection-utils.js';
+export type { SelectionRect, CellCoord } from './webview/shared/selection-utils.js';
 
-interface SelectionRect {
-    minRow: number;
-    maxRow: number;
-    minCol: number;
-    maxCol: number;
-}
-
-interface CellCoord {
-    row: number;
-    col: number;
-}
-
-export function getSelectionRect(anchor: CellCoord | null, focus: CellCoord | null): SelectionRect | null {
-    if (!anchor || !focus) return null;
-    return {
-        minRow: Math.min(anchor.row, focus.row),
-        maxRow: Math.max(anchor.row, focus.row),
-        minCol: Math.min(anchor.col, focus.col),
-        maxCol: Math.max(anchor.col, focus.col),
-    };
-}
-
-export function isSingleCell(anchor: CellCoord | null, focus: CellCoord | null): boolean {
-    if (!anchor || !focus) return false;
-    return anchor.row === focus.row && anchor.col === focus.col;
-}
-
+// sanitizeValue is also defined in dom-utils.ts (webview) — kept inline here to
+// avoid pulling a browser-only dependency (CSS.escape) into the host tsconfig.
 export function sanitizeValue(val: string): string {
     return val.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
 }
 
+// buildTsv is host-only (used for copy/paste in test utilities)
 export function buildTsv(
     rows: Record<string, unknown>[],
     columns: { alias: string | null; logicalName: string }[],
-    rect: SelectionRect,
+    rect: { minRow: number; maxRow: number; minCol: number; maxCol: number },
     withHeaders: boolean,
     getDisplayValue: (row: Record<string, unknown>, colIdx: number) => string,
 ): string {
