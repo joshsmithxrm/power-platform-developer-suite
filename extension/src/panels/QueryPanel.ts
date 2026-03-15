@@ -170,6 +170,43 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         case 'cancelQuery':
                             this.queryCts?.cancel();
                             break;
+                        case 'convertQuery': {
+                            const { sql, toLanguage } = message;
+                            try {
+                                let converted: string;
+                                if (toLanguage === 'xml') {
+                                    // SQL → FetchXML: use daemon's explain endpoint
+                                    const result = await this.daemon.queryExplain({
+                                        sql,
+                                        environmentUrl: this.environmentUrl ?? undefined,
+                                    });
+                                    converted = result.plan;
+                                } else {
+                                    // FetchXML → SQL: use client-side transpiler
+                                    const { FetchXmlToSqlTranspiler } = await import('../utils/fetchXmlToSql.js');
+                                    const transpiler = new FetchXmlToSqlTranspiler();
+                                    const result = transpiler.transpile(sql);
+                                    if (!result.success) {
+                                        throw new Error(result.error || 'Transpilation failed');
+                                    }
+                                    converted = result.sql;
+                                }
+                                this.panel?.webview.postMessage({
+                                    command: 'queryConverted',
+                                    content: converted,
+                                    language: toLanguage,
+                                });
+                            } catch (error) {
+                                const msg = error instanceof Error ? error.message : String(error);
+                                vscode.window.showWarningMessage(`Conversion failed: ${msg}`);
+                                this.panel?.webview.postMessage({
+                                    command: 'conversionFailed',
+                                    error: msg,
+                                    language: toLanguage,
+                                });
+                            }
+                            break;
+                        }
                         case 'refresh':
                             if (this.lastSql) {
                                 await this.executeQuery(this.lastSql, false, this.lastUseTds, this.lastLanguage);
