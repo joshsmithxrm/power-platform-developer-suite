@@ -1834,7 +1834,10 @@ public class RpcMethodHandler : IDisposable
                     ComponentType = c.ComponentType,
                     ComponentTypeName = c.ComponentTypeName,
                     RootComponentBehavior = c.RootComponentBehavior,
-                    IsMetadata = c.IsMetadata
+                    IsMetadata = c.IsMetadata,
+                    DisplayName = c.DisplayName,
+                    LogicalName = c.LogicalName,
+                    SchemaName = c.SchemaName
                 }).ToList()
             };
         }, cancellationToken);
@@ -2580,6 +2583,24 @@ public class SolutionComponentInfoDto
     /// </summary>
     [JsonPropertyName("isMetadata")]
     public bool IsMetadata { get; set; }
+
+    /// <summary>
+    /// Gets or sets the component display name.
+    /// </summary>
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+
+    /// <summary>
+    /// Gets or sets the component logical name.
+    /// </summary>
+    [JsonPropertyName("logicalName")]
+    public string? LogicalName { get; set; }
+
+    /// <summary>
+    /// Gets or sets the component schema name.
+    /// </summary>
+    [JsonPropertyName("schemaName")]
+    public string? SchemaName { get; set; }
 }
 
 /// <summary>

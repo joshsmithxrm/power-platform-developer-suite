@@ -179,6 +179,9 @@ export interface SolutionComponentInfoDto {
     componentTypeName: string;
     rootComponentBehavior: number;
     isMetadata: boolean;
+    displayName?: string;
+    logicalName?: string;
+    schemaName?: string;
 }
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
