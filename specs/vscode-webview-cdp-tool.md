@@ -46,30 +46,30 @@ Claude Code
 │   (caller)                │  Reads .webview-cdp-session.json
 └───────┬──────────────────┘
         │
-        ├── launch:  forks daemon → daemon starts VS Code
-        │            daemon writes session file with wsEndpoint + daemon PID
-        │            daemon captures console logs continuously
+        ├── launch:  forks daemon → daemon starts VS Code + HTTP server
+        │            daemon writes session file with daemonPort + PID
         │
-        ├── other commands:  chromium.connectOverCDP(wsEndpoint)
-        │   → gets Page → Playwright APIs for interaction
-        │   → webview access via contentFrame() chain
+        ├── other commands:  POST http://localhost:<daemonPort>/execute
+        │   daemon receives request → executes via Electron Page
+        │   → uses Playwright Electron APIs (keyboard, frames, etc.)
+        │   → returns result as JSON
         │
-        └── close:  sends SIGTERM to daemon PID
-                    daemon calls browser.close() → VS Code shuts down
+        └── close:  POST /shutdown to daemon
+                    daemon calls electronApp.close() → VS Code shuts down
                     daemon deletes session file and exits
 
 ┌─────────────────────────┐     ┌──────────────────────────┐
 │  webview-cdp daemon      │────▶│  VS Code (Electron)       │
 │  (long-lived background) │     │                           │
 │                          │     │  ┌─────────────────────┐  │
-│  Holds ElectronApp alive │     │  │ Main Page            │  │
-│  Captures console logs   │     │  │  ├─ Sidebar          │  │
-│  Writes to .console.log  │     │  │  ├─ Command Palette  │  │
-│  Handles SIGTERM cleanup │     │  │  ├─ Notifications    │  │
-└─────────────────────────┘     │  │  └─ Webview Panel    │  │
-                                │  │     └─ outer iframe  │  │
-                                │  │        └─ inner frame│  │
-                                │  └─────────────────────┘  │
+│  HTTP server on random   │     │  │ Main Page            │  │
+│    port for CLI commands │     │  │  ├─ Sidebar          │  │
+│  Holds ElectronApp alive │     │  │  ├─ Command Palette  │  │
+│  Captures console logs   │     │  │  ├─ Notifications    │  │
+│  Executes ALL Playwright │     │  │  └─ Webview Panel    │  │
+│    commands via Electron │     │  │     └─ outer iframe  │  │
+│    Page (not CDP)        │     │  │        └─ inner frame│  │
+└─────────────────────────┘     │  └─────────────────────┘  │
                                 └──────────────────────────┘
 ```
 
@@ -82,16 +82,16 @@ Claude Code
 2. Waits for workbench ready
 3. Installs dialog interception hooks
 4. Starts console capture (`page.on('console')`, `page.on('pageerror')`) writing to `.webview-cdp-console.log`
-5. Passes `--remote-debugging-port` to VS Code so CDP is exposed
-6. Writes session file with `{ wsEndpoint, daemonPid, userDataDir, logFile }`
+5. Starts HTTP server on a random available port for CLI commands
+6. Writes session file with `{ daemonPort, daemonPid, userDataDir, logFile }`
 7. Listens for `SIGTERM` / `SIGINT` to trigger clean shutdown
 8. The foreground `launch` process polls until the session file appears, prints confirmation, and exits
 
-**Subsequent commands** use `chromium.connectOverCDP(wsEndpoint)` to reconnect to the VS Code instance. This returns a `Browser` → `BrowserContext` → `Page`, giving full Playwright API access. Each command connects, executes, disconnects. The daemon stays alive throughout.
+**Subsequent commands** send HTTP requests to the daemon's local server. The daemon executes them using the Electron-mode Playwright `Page` (which has full keyboard, frame traversal, and input capabilities). This avoids CDP reconnection entirely — all Playwright interaction happens in the daemon process where the Electron APIs work correctly. The daemon returns results as JSON over HTTP.
 
 **Close** reads the daemon PID from the session file and sends `SIGTERM`. The daemon catches this, calls `electronApp.close()` (which cleanly shuts down VS Code and its process tree), deletes the session file and console log, then exits.
 
-**Orphan detection:** If `launch` finds an existing session file, it attempts to connect to the wsEndpoint. If the connection succeeds, the previous instance is still running — the tool warns and exits. If the connection fails, the session is stale — the tool kills the daemon PID (if still alive), deletes the stale session file, and proceeds with a fresh launch.
+**Orphan detection:** If `launch` finds an existing session file, it pings the daemon's HTTP server (`GET http://localhost:<daemonPort>/health`). If the ping succeeds, the previous instance is still running — the tool warns and exits. If the ping fails, the session is stale — the tool kills the daemon PID (if still alive), deletes the stale session file, and proceeds with a fresh launch.
 
 ### Webview Frame Traversal
 
@@ -170,7 +170,7 @@ const innerFrame = await innerIframe.contentFrame();
 
 **Launch flow (caller process):**
 
-1. **Check for stale session**: If session file exists, try connecting to wsEndpoint. If connection succeeds, warn "VS Code already running" and exit. If fails, kill stale daemon PID, delete session file.
+1. **Check for stale session**: If session file exists, try pinging daemon HTTP server. If ping succeeds, warn "VS Code already running" and exit. If fails, kill stale daemon PID, delete session file.
 2. **Fork daemon**: Spawn `node webview-cdp.mjs --daemon [workspace]` as a detached background process with stdio piped to `/dev/null`.
 3. **Wait for session**: Poll for session file to appear (daemon writes it when VS Code is ready), up to 60 seconds.
 4. **Print confirmation**: Read session file, output "VS Code launched on port X (daemon PID Y)" to stdout, exit.
@@ -179,23 +179,22 @@ const innerFrame = await innerIframe.contentFrame();
 
 1. **Download VS Code** (if not cached): `@vscode/test-electron` handles this automatically
 2. **Resolve extension path**: Find `extension/` relative to tool location
-3. **Launch via Playwright**: `_electron.launch({ executablePath, args: ['--extensionDevelopmentPath=...', '--user-data-dir=...', '--remote-debugging-port=0', '--log=trace'] })`
+3. **Launch via Playwright**: `_electron.launch({ executablePath, args: ['--extensionDevelopmentPath=...', '--user-data-dir=...', '--log=trace'] })`
 4. **Get main window**: `electronApp.firstWindow()`
 5. **Wait for workbench**: `page.waitForSelector('[id="workbench.parts.editor"]', { timeout: 60000 })`
-6. **Discover wsEndpoint**: Get the CDP WebSocket URL from the launched instance (via `--remote-debugging-port` and `/json/version` endpoint)
-7. **Intercept native dialogs**: `electronApp.evaluate()` to hook `dialog.showMessageBox`, `dialog.showOpenDialog`, `dialog.showSaveDialog` — auto-dismiss to prevent blocking. If hooks fail, log a warning and continue.
-8. **Start console capture**: `page.on('console', ...)` and `page.on('pageerror', ...)` — write JSONL to `.webview-cdp-console.log` continuously
-9. **Write session file**: `{ wsEndpoint, daemonPid: process.pid, userDataDir, logFile }`
-10. **Wait for shutdown signal**: Listen for `SIGTERM` / `SIGINT`. On signal, call `electronApp.close()`, delete session file, delete console log, exit.
+6. **Intercept native dialogs**: `electronApp.evaluate()` to hook `dialog.showMessageBox`, `dialog.showOpenDialog`, `dialog.showSaveDialog` — auto-dismiss to prevent blocking. If hooks fail, log a warning and continue.
+7. **Start console capture**: `page.on('console', ...)` and `page.on('pageerror', ...)` — write JSONL to `.webview-cdp-console.log` continuously
+8. **Start HTTP server**: Listen on a random available port. Expose `/execute` (command dispatch), `/shutdown` (clean exit), `/health` (liveness check).
+9. **Write session file**: `{ daemonPort, daemonPid: process.pid, userDataDir, logFile }`
+10. **Wait for shutdown**: Listen for `SIGTERM` / `SIGINT` / `/shutdown` HTTP request. On any, call `electronApp.close()`, delete session file, delete console log, stop HTTP server, exit.
 
 **Command execution flow (all commands except launch/close):**
 
-1. **Read session**: Load `wsEndpoint` from `.webview-cdp-session.json`
-2. **Connect**: `chromium.connectOverCDP(wsEndpoint)` → get `Browser` → first context → first page
-3. **Resolve target**: If `--page`, use the page directly. Otherwise, traverse the `contentFrame()` chain to find the webview frame. If `--target N`, select the Nth webview.
-4. **Execute**: Use Playwright's native APIs (`frame.click()`, `page.keyboard.press()`, `frame.evaluate()`, etc.)
-5. **Output result**: Print to stdout
-6. **Disconnect**: Close the browser connection (NOT the VS Code process)
+1. **Read session**: Load `daemonPort` from `.webview-cdp-session.json`
+2. **Send request**: POST to `http://localhost:<daemonPort>/execute` with the command, args, and flags as JSON
+3. **Daemon executes**: The daemon resolves the target (page or webview frame via `contentFrame()` chain), executes using Playwright's Electron-mode APIs, and returns the result as JSON
+4. **Output result**: CLI prints the result to stdout
+5. **No CDP reconnection**: All Playwright interaction happens in the daemon process where the Electron `Page` has full input capabilities (keyboard shortcuts, frame traversal, etc.)
 
 **Command palette flow (`command` action):**
 
@@ -210,9 +209,9 @@ const innerFrame = await innerIframe.contentFrame();
 
 **Close flow:**
 
-1. **Read session**: Load `daemonPid` from session file
-2. **Signal daemon**: Send `SIGTERM` to the daemon PID (on Windows: `process.kill(daemonPid)`)
-3. **Wait for cleanup**: The daemon catches the signal, calls `electronApp.close()`, deletes session file and console log, then exits. The caller polls until the session file disappears (up to 10 seconds).
+1. **Read session**: Load `daemonPort` and `daemonPid` from session file
+2. **Request shutdown**: POST to `http://localhost:<daemonPort>/shutdown`. The daemon receives this, calls `electronApp.close()`, deletes session file and console log, then exits.
+3. **Wait for cleanup**: Poll until the session file disappears (up to 10 seconds).
 4. **Force kill if needed**: If session file still exists after timeout, force-kill the daemon PID and clean up manually.
 5. **Print confirmation**: Output to stdout
 
@@ -319,14 +318,14 @@ Note: All acceptance criteria require a running VS Code instance and are verifie
 
 ```json
 {
-  "wsEndpoint": "ws://127.0.0.1:52345/devtools/browser/abc123",
+  "daemonPort": 52345,
   "daemonPid": 12345,
   "userDataDir": "/path/to/extension/tools/.webview-cdp-profile",
   "logFile": "/path/to/extension/tools/.webview-cdp-console.log"
 }
 ```
 
-Written by the daemon during launch, read by all other commands, deleted by the daemon during close.
+Written by the daemon during launch, read by all other commands (to know which port to POST to), deleted by the daemon during close.
 
 ### Console Log Entry
 
@@ -437,10 +436,10 @@ node extension/tools/webview-cdp.mjs close
 - Keeps VS Code running across multiple CLI invocations
 - Captures console logs continuously (not just during individual commands)
 - Handles clean shutdown when `close` sends `SIGTERM`
-- Writes session file with wsEndpoint for CLI commands to reconnect via `connectOverCDP`
+- Exposes HTTP server for CLI commands to send requests, executes them using the Electron Page
 
 **Alternatives considered:**
-- Stateless reconnect (Option B): Save wsEndpoint, reconnect per command. Rejected because the wsEndpoint dies when the launch process exits.
+- Stateless CDP reconnect (Option B): Save wsEndpoint, reconnect via `chromium.connectOverCDP()` per command. Rejected for two reasons: (1) the wsEndpoint dies when the launch process exits, and (2) even if kept alive, `connectOverCDP` creates a CDP-mode Page where `page.keyboard.press()` uses `Input.dispatchKeyEvent` — the same mechanism proven not to trigger VS Code keybindings. Only the Electron-mode Page from `_electron.launch()` has working keyboard shortcuts.
 - Script-per-session: Accept a script file with multiple commands. Rejected because it breaks the CLI-per-command model agents use.
 
 **Consequences:**
