@@ -266,9 +266,9 @@ export class DataverseNotebookController implements vscode.Disposable {
 
             let result: QueryResultResponse;
             if (isFetchXml) {
-                result = await this.daemon.queryFetch({ fetchXml: content }, cts.token);
+                result = await this.daemon.queryFetch({ fetchXml: content, environmentUrl: this.selectedEnvironmentUrl }, cts.token);
             } else {
-                result = await this.daemon.querySql({ sql: content }, cts.token);
+                result = await this.daemon.querySql({ sql: content, environmentUrl: this.selectedEnvironmentUrl }, cts.token);
             }
 
             if (abortController.signal.aborted) {
