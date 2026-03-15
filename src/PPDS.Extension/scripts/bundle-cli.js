@@ -14,7 +14,7 @@ const { existsSync, mkdirSync } = require('fs');
 const { join } = require('path');
 
 const EXTENSION_DIR = join(__dirname, '..');
-const CLI_PROJECT = join(EXTENSION_DIR, '..', 'src', 'PPDS.Cli', 'PPDS.Cli.csproj');
+const CLI_PROJECT = join(EXTENSION_DIR, '..', 'PPDS.Cli', 'PPDS.Cli.csproj');
 const BIN_DIR = join(EXTENSION_DIR, 'bin');
 
 function parseArgs() {

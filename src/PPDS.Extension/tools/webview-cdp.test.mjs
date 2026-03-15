@@ -1,4 +1,4 @@
-// extension/tools/webview-cdp.test.mjs
+// src/PPDS.Extension/tools/webview-cdp.test.mjs
 import { describe, it, expect } from 'vitest';
 import { parseArgs, parseKeyCombo } from './webview-cdp.mjs';
 

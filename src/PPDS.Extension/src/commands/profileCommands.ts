@@ -395,7 +395,7 @@ async function runCreateProfileWizard(
     }
 
     // Step 2: Profile name
-    const isSPN = ['clientSecret', 'certificateFile', 'certificateStore'].includes(
+    const isSPN = ['ClientSecret', 'CertificateFile', 'CertificateStore'].includes(
         selectedMethod.authMethodId,
     );
 
