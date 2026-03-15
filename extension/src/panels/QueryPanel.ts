@@ -403,7 +403,8 @@ export class QueryPanel extends WebviewPanelBase {
     .toolbar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; align-items: center; }
     .toolbar-spacer { flex: 1; }
     .editor-container { flex-shrink: 0; border-bottom: 1px solid var(--vscode-panel-border); }
-    .editor-wrapper { height: 150px; min-height: 120px; max-height: 300px; overflow: hidden; resize: vertical; }
+    .editor-wrapper { height: 150px; min-height: 120px; max-height: 300px; overflow: hidden; resize: vertical; position: relative; }
+    #sql-editor { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
     .results-wrapper { flex: 1; overflow: auto; position: relative; min-height: 0; }
     .results-table { width: max-content; min-width: 100%; border-collapse: collapse; }
     .results-table thead { position: sticky; top: 0; z-index: 1; }
@@ -456,7 +457,7 @@ export class QueryPanel extends WebviewPanelBase {
 
 <div class="editor-container">
     <div class="editor-wrapper">
-        <div id="sql-editor" style="width:100%;height:100%;"></div>
+        <div id="sql-editor"></div>
     </div>
 </div>
 
