@@ -39,6 +39,8 @@ Before dispatching any agents, load the specification context that will be injec
   - `src/PPDS.Mcp/` → `specs/mcp.md`
   - `src/PPDS.Migration/` → `specs/migration.md`
   - `src/PPDS.Auth/` → `specs/authentication.md`
+  - `src/extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
+  - `src/extension/` → check `specs/README.md` for extension-related specs
 - Always include `specs/architecture.md`
 - Read each relevant spec and extract the `## Acceptance Criteria` section
 
