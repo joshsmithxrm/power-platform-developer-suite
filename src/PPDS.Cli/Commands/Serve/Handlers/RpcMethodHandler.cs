@@ -1273,7 +1273,8 @@ public class RpcMethodHandler : IDisposable
             return Task.FromResult(new QueryExplainResponse
             {
                 Plan = formatted + "\n\n--- FetchXML ---\n" + fetchXml,
-                Format = "text"
+                Format = "text",
+                FetchXml = fetchXml
             });
         }
         catch
@@ -1283,7 +1284,8 @@ public class RpcMethodHandler : IDisposable
             return Task.FromResult(new QueryExplainResponse
             {
                 Plan = fetchXml,
-                Format = "fetchxml"
+                Format = "fetchxml",
+                FetchXml = fetchXml
             });
         }
     }
@@ -2803,6 +2805,7 @@ public class QueryExplainResponse
 {
     [JsonPropertyName("plan")] public string Plan { get; set; } = "";
     [JsonPropertyName("format")] public string Format { get; set; } = "fetchxml";
+    [JsonPropertyName("fetchXml")] public string? FetchXml { get; set; }
 }
 
 // ── Query Request DTOs ──────────────────────────────────────────────────────
