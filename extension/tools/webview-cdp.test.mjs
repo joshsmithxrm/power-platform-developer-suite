@@ -1,45 +1,123 @@
 // extension/tools/webview-cdp.test.mjs
 import { describe, it, expect } from 'vitest';
-import { parseArgs, parseKeyCombo, validatePort, filterWebviewTargets } from './webview-cdp.mjs';
+import { parseArgs, parseKeyCombo, validatePort } from './webview-cdp.mjs';
 
 describe('parseArgs', () => {
   it('parses launch with defaults', () => {
     const result = parseArgs(['launch']);
-    expect(result).toEqual({ command: 'launch', port: 9223, workspace: undefined, args: [] });
+    expect(result).toEqual({ command: 'launch', workspace: undefined });
   });
-  it('parses launch with port and workspace', () => {
-    const result = parseArgs(['launch', '9224', '/my/workspace']);
-    expect(result).toEqual({ command: 'launch', port: 9224, workspace: '/my/workspace', args: [] });
+
+  it('parses launch with workspace', () => {
+    const result = parseArgs(['launch', '/my/workspace']);
+    expect(result).toEqual({ command: 'launch', workspace: '/my/workspace' });
   });
+
+  it('parses close', () => {
+    const result = parseArgs(['close']);
+    expect(result).toEqual({ command: 'close' });
+  });
+
+  it('parses connect', () => {
+    const result = parseArgs(['connect']);
+    expect(result).toEqual({ command: 'connect' });
+  });
+
+  it('parses command', () => {
+    const result = parseArgs(['command', 'ppds.dataExplorer']);
+    expect(result).toEqual({ command: 'command', args: ['ppds.dataExplorer'] });
+  });
+
+  it('parses wait with default timeout', () => {
+    const result = parseArgs(['wait']);
+    expect(result).toEqual({ command: 'wait', timeout: 30000, ext: undefined });
+  });
+
+  it('parses wait with timeout', () => {
+    const result = parseArgs(['wait', '5000']);
+    expect(result).toEqual({ command: 'wait', timeout: 5000, ext: undefined });
+  });
+
+  it('parses wait with --ext', () => {
+    const result = parseArgs(['wait', '--ext', 'ppds']);
+    expect(result).toEqual({ command: 'wait', timeout: 30000, ext: 'ppds' });
+  });
+
+  it('parses logs with no flags', () => {
+    const result = parseArgs(['logs']);
+    expect(result).toEqual({ command: 'logs', channel: undefined, level: undefined });
+  });
+
+  it('parses logs with --channel', () => {
+    const result = parseArgs(['logs', '--channel', 'PPDS']);
+    expect(result).toEqual({ command: 'logs', channel: 'PPDS', level: undefined });
+  });
+
   it('parses click with selector', () => {
     const result = parseArgs(['click', '#btn']);
-    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: false, page: false });
+    expect(result).toEqual({ command: 'click', args: ['#btn'], page: false, right: false, target: undefined, ext: undefined });
   });
-  it('parses click with --right flag', () => {
-    const result = parseArgs(['click', '#btn', '--right']);
-    expect(result).toEqual({ command: 'click', port: 9223, args: ['#btn'], target: undefined, right: true, page: false });
+
+  it('parses click with --right and --page', () => {
+    const result = parseArgs(['click', '#btn', '--right', '--page']);
+    expect(result).toEqual({ command: 'click', args: ['#btn'], page: true, right: true, target: undefined, ext: undefined });
   });
+
+  it('parses eval with --page', () => {
+    const result = parseArgs(['eval', 'document.title', '--page']);
+    expect(result).toEqual({ command: 'eval', args: ['document.title'], page: true, target: undefined, ext: undefined });
+  });
+
   it('parses --target flag', () => {
     const result = parseArgs(['eval', '1+1', '--target', '2']);
-    expect(result).toEqual({ command: 'eval', port: 9223, args: ['1+1'], target: 2, page: false });
+    expect(result).toEqual({ command: 'eval', args: ['1+1'], page: false, target: 2, ext: undefined });
   });
-  it('parses --page flag', () => {
-    const result = parseArgs(['click', '#sidebar-item', '--page']);
-    expect(result).toEqual({ command: 'click', port: 9223, args: ['#sidebar-item'], target: undefined, right: false, page: true });
+
+  it('parses --ext flag on interaction commands', () => {
+    const result = parseArgs(['eval', '1+1', '--ext', 'ppds']);
+    expect(result).toEqual({ command: 'eval', args: ['1+1'], page: false, target: undefined, ext: 'ppds' });
   });
-  it('parses --page with eval', () => {
-    const result = parseArgs(['eval', 'document.title', '--page']);
-    expect(result).toEqual({ command: 'eval', port: 9223, args: ['document.title'], page: true });
+
+  it('parses screenshot with --page', () => {
+    const result = parseArgs(['screenshot', '/tmp/shot.png', '--page']);
+    expect(result).toEqual({ command: 'screenshot', args: ['/tmp/shot.png'], page: true, target: undefined, ext: undefined });
   });
+
   it('parses mouse with event and coordinates', () => {
     const result = parseArgs(['mouse', 'mousedown', '150', '200']);
-    expect(result).toEqual({ command: 'mouse', port: 9223, args: ['mousedown', '150', '200'], target: undefined, page: false });
+    expect(result).toEqual({ command: 'mouse', args: ['mousedown', '150', '200'], page: false, target: undefined, ext: undefined });
   });
+
+  it('parses key', () => {
+    const result = parseArgs(['key', 'ctrl+shift+p']);
+    expect(result).toEqual({ command: 'key', args: ['ctrl+shift+p'], page: false });
+  });
+
+  it('parses key with --page', () => {
+    const result = parseArgs(['key', 'ctrl+shift+p', '--page']);
+    expect(result).toEqual({ command: 'key', args: ['ctrl+shift+p'], page: true });
+  });
+
+  it('parses type with selector and text', () => {
+    const result = parseArgs(['type', '#input', 'hello world']);
+    expect(result).toEqual({ command: 'type', args: ['#input', 'hello world'], page: false, target: undefined, ext: undefined });
+  });
+
+  it('parses select with selector and value', () => {
+    const result = parseArgs(['select', '#dropdown', 'option1']);
+    expect(result).toEqual({ command: 'select', args: ['#dropdown', 'option1'], page: false, target: undefined, ext: undefined });
+  });
+
   it('errors on empty args', () => {
     expect(() => parseArgs([])).toThrow('No command provided');
   });
+
   it('errors on unknown command', () => {
     expect(() => parseArgs(['foobar'])).toThrow('Unknown command: foobar');
+  });
+
+  it('errors on removed attach command', () => {
+    expect(() => parseArgs(['attach'])).toThrow('Unknown command: attach');
   });
 });
 
@@ -57,23 +135,4 @@ describe('parseKeyCombo', () => {
   it('parses ctrl+enter', () => { expect(parseKeyCombo('ctrl+enter')).toEqual({ key: 'Enter', modifiers: { ctrl: true } }); });
   it('rejects unknown modifier', () => { expect(() => parseKeyCombo('foo+a')).toThrow("Invalid key combo: unknown modifier 'foo'"); });
   it('rejects empty string', () => { expect(() => parseKeyCombo('')).toThrow('Empty key combo'); });
-});
-
-describe('filterWebviewTargets', () => {
-  const targets = [
-    { id: '1', type: 'page', url: 'file:///vscode/workbench.html', title: 'VS Code' },
-    { id: '2', type: 'iframe', url: 'vscode-webview://abc123/index.html?extensionId=test', title: 'webview' },
-    { id: '3', type: 'worker', url: 'worker.js', title: 'TextMateWorker' },
-    { id: '4', type: 'iframe', url: 'vscode-webview://def456/index.html?extensionId=other', title: 'webview2' },
-  ];
-  it('filters to iframe targets with vscode-webview:// URLs', () => {
-    const result = filterWebviewTargets(targets);
-    expect(result).toHaveLength(2);
-    expect(result[0].id).toBe('2');
-    expect(result[1].id).toBe('4');
-  });
-  it('returns empty array when no webview targets', () => {
-    const result = filterWebviewTargets([targets[0], targets[2]]);
-    expect(result).toEqual([]);
-  });
 });
