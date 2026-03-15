@@ -318,17 +318,14 @@ function renderComponents(uniqueName: string, groups: ComponentGroupDto[]): void
             html += '</div>';
 
             // Detail card (hidden by default)
+            const hasAnyName = comp.logicalName || comp.schemaName || comp.displayName;
             html += '<div class="component-detail-card" data-detail-for="' + escapeAttr(comp.objectId) + '">';
-            if (comp.logicalName) {
-                html += '<span class="detail-label">Logical Name</span><span class="detail-value">' + escapeHtml(comp.logicalName) + '</span>';
-            }
-            if (comp.schemaName) {
-                html += '<span class="detail-label">Schema Name</span><span class="detail-value">' + escapeHtml(comp.schemaName) + '</span>';
-            }
-            if (comp.displayName) {
-                html += '<span class="detail-label">Display Name</span><span class="detail-value">' + escapeHtml(comp.displayName) + '</span>';
-            }
             html += '<span class="detail-label">Object ID</span><span class="detail-value">' + escapeHtml(comp.objectId) + ' <button class="copy-btn" data-copy="' + escapeAttr(comp.objectId) + '">&#128203;</button></span>';
+            if (hasAnyName) {
+                html += '<span class="detail-label">Logical Name</span><span class="detail-value">' + (comp.logicalName ? escapeHtml(comp.logicalName) : '\u2014') + '</span>';
+                html += '<span class="detail-label">Schema Name</span><span class="detail-value">' + (comp.schemaName ? escapeHtml(comp.schemaName) : '\u2014') + '</span>';
+                html += '<span class="detail-label">Display Name</span><span class="detail-value">' + (comp.displayName ? escapeHtml(comp.displayName) : '\u2014') + '</span>';
+            }
             html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + comp.rootComponentBehavior + '</span>';
             html += '<span class="detail-label">Metadata</span><span class="detail-value">' + (comp.isMetadata ? 'Yes' : 'No') + '</span>';
             html += '</div>';
