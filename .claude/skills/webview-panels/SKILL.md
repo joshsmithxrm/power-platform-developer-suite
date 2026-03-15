@@ -208,6 +208,73 @@ Add both to the `watch()`, `rebuild()`, and `dispose()` arrays.
 | Shared DOM utilities | `webview/shared/dom-utils.ts` | DRY across all panels |
 | Shared HTML generators | `environmentPicker.ts` | Reused across panels |
 
+## Daemon Communication
+
+Host-side panels call the daemon via `this.daemon` (a `DaemonClient` instance passed at construction).
+
+### Calling RPC methods
+
+```typescript
+// All daemon methods accept an optional CancellationToken as last arg
+const result = await this.daemon.querySql({
+    sql, top: 100, environmentUrl: this.environmentUrl
+}, token);
+```
+
+Available methods are defined in `DaemonClient.ts`. Common ones: `querySql`, `queryFetch`, `queryExplain`, `queryExport`, `queryComplete`, `solutionsList`, `solutionsComponents`, `authWho`, `envList`.
+
+### Handling daemon disconnection
+
+WebviewPanelBase provides a reconnection hook. Subscribe in your constructor and override to auto-refresh:
+
+```typescript
+// In constructor:
+this.subscribeToDaemonReconnect(daemon);
+
+// Override to handle reconnection:
+protected override onDaemonReconnected(): void {
+    void this.loadData(); // re-fetch stale data
+}
+```
+
+The base class sends `{ command: 'daemonReconnected' }` to the webview automatically — add it to your HostToWebview union type and handle it (e.g., show a refresh banner).
+
+### Query cancellation
+
+For long-running operations, use `CancellationTokenSource` from vscode-jsonrpc:
+
+```typescript
+private queryCts: CancellationTokenSource | undefined;
+
+async executeQuery(): Promise<void> {
+    this.queryCts?.cancel();
+    this.queryCts = new CancellationTokenSource();
+    const token = this.queryCts.token;
+
+    const result = await this.daemon.querySql(params, token);
+    if (token.isCancellationRequested) return;
+    // ... use result
+}
+
+// Cancel from webview message:
+case 'cancelQuery': this.queryCts?.cancel(); break;
+
+// Cleanup in dispose:
+this.queryCts?.cancel();
+this.queryCts?.dispose();
+```
+
+### Panel-scoped environment
+
+Panels can target a specific environment (not the global active one). Store `environmentUrl` as an instance property, pass it to every daemon call, and update it from the environment picker:
+
+```typescript
+case 'selectEnvironment':
+    this.environmentUrl = message.url;
+    await this.loadData(); // re-fetch with new env
+    break;
+```
+
 ## Adding/Removing a Command
 
 When you add a new message command:
