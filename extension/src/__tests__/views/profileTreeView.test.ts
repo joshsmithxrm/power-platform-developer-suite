@@ -39,6 +39,8 @@ vi.mock('vscode', () => ({
 import {
     ProfileTreeItem,
     ProfileTreeDataProvider,
+    EnvironmentTreeItem,
+    ManualUrlTreeItem,
     getProfileId,
 } from '../../views/profileTreeView.js';
 
@@ -99,10 +101,16 @@ describe('ProfileTreeItem', () => {
         expect(item.label).toBe('Profile 3');
     });
 
-    it('sets description to identity', () => {
-        const profile = makeProfile({ identity: 'admin@contoso.com' });
+    it('sets description to environment displayName', () => {
+        const profile = makeProfile({ environment: { url: 'https://dev.crm.dynamics.com', displayName: 'Dev Org' } });
         const item = new ProfileTreeItem(profile);
-        expect(item.description).toBe('admin@contoso.com');
+        expect(item.description).toBe('Dev Org');
+    });
+
+    it('sets description to "(no environment)" when environment is null', () => {
+        const profile = makeProfile({ environment: null });
+        const item = new ProfileTreeItem(profile);
+        expect(item.description).toBe('(no environment)');
     });
 
     it('sets contextValue to "profile"', () => {
@@ -194,12 +202,24 @@ describe('ProfileTreeDataProvider', () => {
         expect(provider.getTreeItem(item)).toBe(item);
     });
 
-    it('getChildren returns empty array for a child element (flat list)', async () => {
+    it('getChildren returns environment children for a profile node', async () => {
         const daemon = makeDaemonClient();
         const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
-        const profile = makeProfile();
+        const profile = makeProfile(); // non-active, has environment
         const item = new ProfileTreeItem(profile);
         const children = await provider.getChildren(item);
+
+        // Non-active profile with an environment: EnvironmentTreeItem + ManualUrlTreeItem
+        expect(children).toHaveLength(2);
+        expect(children[0]).toBeInstanceOf(EnvironmentTreeItem);
+        expect(children[1]).toBeInstanceOf(ManualUrlTreeItem);
+    });
+
+    it('getChildren returns empty array for a leaf element', async () => {
+        const daemon = makeDaemonClient();
+        const provider = new ProfileTreeDataProvider(daemon as any, makeLogChannel() as any);
+        const leaf = new EnvironmentTreeItem('https://dev.crm.dynamics.com', 'Dev Org', null, false, 'saved');
+        const children = await provider.getChildren(leaf);
         expect(children).toEqual([]);
     });
 

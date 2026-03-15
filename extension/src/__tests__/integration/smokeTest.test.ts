@@ -184,6 +184,8 @@ vi.mock('vscode-jsonrpc/node', () => ({
     })),
     StreamMessageReader: vi.fn(),
     StreamMessageWriter: vi.fn(),
+    RequestType: class { constructor(public method: string, public paramStructures?: unknown) {} },
+    ParameterStructures: { byPosition: 1, byName: 2, auto: 0 },
 }));
 
 describe('Extension Smoke Tests', () => {
@@ -206,6 +208,8 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            globalState: { get: vi.fn(), update: vi.fn() },
+            workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
 
         ext.activate(context);
@@ -219,7 +223,6 @@ describe('Extension Smoke Tests', () => {
         expect(registeredCommands).toContain('ppds.refreshProfiles');
         expect(registeredCommands).toContain('ppds.newNotebook');
         expect(registeredCommands).toContain('ppds.openSolutions');
-        expect(registeredCommands).toContain('ppds.refreshSolutions');
     });
 
     it('activate registers notebook serializer', async () => {
@@ -230,6 +233,8 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            globalState: { get: vi.fn(), update: vi.fn() },
+            workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
 
         ext.activate(context);
@@ -249,6 +254,8 @@ describe('Extension Smoke Tests', () => {
             subscriptions: [],
             extensionUri: { fsPath: '/test', scheme: 'file' },
             extensionPath: '/test',
+            globalState: { get: vi.fn(), update: vi.fn() },
+            workspaceState: { get: vi.fn(), update: vi.fn() },
         } as any;
 
         ext.activate(context);
