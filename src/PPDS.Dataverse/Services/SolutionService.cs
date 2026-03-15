@@ -308,7 +308,7 @@ public class SolutionService : ISolutionService
 
         var results = await client.RetrieveMultipleAsync(query, cancellationToken);
 
-        var envUrl = client.ConnectedOrgUniqueName ?? "default";
+        var envUrl = client.ConnectedOrgUniqueName ?? client.ConnectedOrgId?.ToString() ?? "default";
 
         // Resolve component type names (uses cache after first call per env)
         Dictionary<int, string> resolvedTypeNames;
@@ -316,8 +316,9 @@ public class SolutionService : ISolutionService
         {
             resolvedTypeNames = await GetComponentTypeNamesAsync(envUrl, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Failed to resolve component type names for {EnvUrl}, falling back to hardcoded dictionary", envUrl);
             resolvedTypeNames = ComponentTypeNames;
         }
 
