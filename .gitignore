@@ -85,7 +85,7 @@ node_modules/
 # VS Code Extension test artifacts
 extension/test-results/
 extension/playwright-report/
-extension/.vscode-test/
+.vscode-test/
 
 # Git worktrees
 .worktrees/
