@@ -112,6 +112,11 @@ export class QueryPanel extends WebviewPanelBase {
                         case 'copyToClipboard':
                             await vscode.env.clipboard.writeText(message.text as string);
                             break;
+                        case 'requestClipboard': {
+                            const clipText = await vscode.env.clipboard.readText();
+                            this.postMessage({ command: 'clipboardContent', text: clipText });
+                            break;
+                        }
                         case 'requestCompletions': {
                             const requestId = message.requestId as number;
                             try {
@@ -673,6 +678,44 @@ export class QueryPanel extends WebviewPanelBase {
         updateLanguage(currentLanguage === 'sql' ? 'xml' : 'sql');
     });
 
+    // ── Monaco clipboard bridge ──
+    // VS Code webview sandbox blocks Monaco's native clipboard access.
+    // Route copy/paste through postMessage to the host extension.
+    editor.addAction({
+        id: 'ppds.editorCopy',
+        label: 'Copy',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
+        run: (ed) => {
+            const selection = ed.getModel().getValueInRange(ed.getSelection());
+            if (selection) {
+                vscode.postMessage({ command: 'copyToClipboard', text: selection });
+            }
+        },
+    });
+
+    editor.addAction({
+        id: 'ppds.editorCut',
+        label: 'Cut',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX],
+        run: (ed) => {
+            const sel = ed.getSelection();
+            const text = ed.getModel().getValueInRange(sel);
+            if (text) {
+                vscode.postMessage({ command: 'copyToClipboard', text });
+                ed.executeEdits('cut', [{ range: sel, text: '' }]);
+            }
+        },
+    });
+
+    editor.addAction({
+        id: 'ppds.editorPaste',
+        label: 'Paste',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV],
+        run: (ed) => {
+            vscode.postMessage({ command: 'requestClipboard' });
+        },
+    });
+
     // ── Monaco keybinding: Ctrl+Enter to execute ──
     editor.addAction({
         id: 'ppds.executeQuery',
@@ -954,6 +997,11 @@ export class QueryPanel extends WebviewPanelBase {
                 break;
             case 'updateEnvironment':
                 updateEnvironmentDisplay(msg.name);
+                break;
+            case 'clipboardContent':
+                if (msg.text && editor.hasTextFocus()) {
+                    editor.trigger('clipboard', 'type', { text: msg.text });
+                }
                 break;
             case 'completionResult': {
                 const pending = pendingCompletions.get(msg.requestId);
