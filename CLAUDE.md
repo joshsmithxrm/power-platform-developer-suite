@@ -55,3 +55,16 @@ Odd/even minor convention: odd minor = pre-release, even minor = stable. See `do
 ## Architecture
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
+
+## Workflow
+
+- Spec: /spec → /spec-audit
+- Implement: /implement → dispatches subagents, runs /gates and /verify at phase gates
+- Review: /review → /converge
+- Skills: @webview-panels (panel dev), @webview-cdp (visual verification)
+- Execution: commit after every task, verify with /gates before proceeding — don't ask, just do it
+
+## Gotchas
+
+- VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
+- Agent research summaries may be wrong — read code yourself before stating codebase behavior as fact
