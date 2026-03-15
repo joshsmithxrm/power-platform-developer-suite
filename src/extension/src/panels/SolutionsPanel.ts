@@ -20,6 +20,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
+    private environmentType: string | null = null;
     private environmentId: string | null = null;
     private profileName: string | undefined;
 
@@ -136,13 +137,14 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                 this.environmentUrl = who.environment.url;
                 this.environmentDisplayName = who.environment.displayName || who.environment.url;
             }
+            this.environmentType = who.environment?.type ?? null;
             if (who.environment?.environmentId) {
                 this.environmentId = who.environment.environmentId;
             } else {
                 this.environmentId = await this.resolveEnvironmentId();
             }
             this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment' });
+            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType });
             await this.loadSolutions();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -155,9 +157,10 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         if (result) {
             this.environmentUrl = result.url;
             this.environmentDisplayName = result.displayName;
+            this.environmentType = result.type;
             this.environmentId = await this.resolveEnvironmentId();
             this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: result.displayName });
+            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type });
             await this.loadSolutions();
         }
     }

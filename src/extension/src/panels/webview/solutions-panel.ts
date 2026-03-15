@@ -178,6 +178,16 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
     switch (msg.command) {
         case 'updateEnvironment':
             updateEnvironmentDisplay(msg.name);
+            {
+                const toolbar = document.querySelector('.toolbar');
+                if (toolbar) {
+                    if (msg.envType) {
+                        toolbar.setAttribute('data-env-type', msg.envType.toLowerCase());
+                    } else {
+                        toolbar.removeAttribute('data-env-type');
+                    }
+                }
+            }
             break;
         case 'solutionsLoaded':
             renderSolutions(msg.solutions);
