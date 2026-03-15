@@ -21,9 +21,10 @@ public class SolutionServiceTests
         // Arrange
         var logger = new NullLogger<SolutionService>();
         var metadataService = new Mock<IMetadataService>().Object;
+        var nameResolver = new Mock<IComponentNameResolver>().Object;
 
         // Act
-        var act = () => new SolutionService(null!, logger, metadataService);
+        var act = () => new SolutionService(null!, logger, metadataService, nameResolver);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -36,9 +37,10 @@ public class SolutionServiceTests
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var metadataService = new Mock<IMetadataService>().Object;
+        var nameResolver = new Mock<IComponentNameResolver>().Object;
 
         // Act
-        var act = () => new SolutionService(pool, null!, metadataService);
+        var act = () => new SolutionService(pool, null!, metadataService, nameResolver);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -51,9 +53,10 @@ public class SolutionServiceTests
         // Arrange
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
+        var nameResolver = new Mock<IComponentNameResolver>().Object;
 
         // Act
-        var act = () => new SolutionService(pool, logger, null!);
+        var act = () => new SolutionService(pool, logger, null!, nameResolver);
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -67,9 +70,10 @@ public class SolutionServiceTests
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<SolutionService>();
         var metadataService = new Mock<IMetadataService>().Object;
+        var nameResolver = new Mock<IComponentNameResolver>().Object;
 
         // Act
-        var service = new SolutionService(pool, logger, metadataService);
+        var service = new SolutionService(pool, logger, metadataService, nameResolver);
 
         // Assert
         service.Should().NotBeNull();

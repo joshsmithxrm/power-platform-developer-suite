@@ -23,6 +23,7 @@ public class SolutionService : ISolutionService
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<SolutionService> _logger;
     private readonly IMetadataService _metadataService;
+    private readonly IComponentNameResolver _nameResolver;
 
     /// <summary>
     /// Component type names for common component types.
@@ -132,14 +133,17 @@ public class SolutionService : ISolutionService
     /// <param name="pool">The connection pool.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="metadataService">The metadata service for runtime option set resolution.</param>
+    /// <param name="nameResolver">The component name resolver.</param>
     public SolutionService(
         IDataverseConnectionPool pool,
         ILogger<SolutionService> logger,
-        IMetadataService metadataService)
+        IMetadataService metadataService,
+        IComponentNameResolver nameResolver)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
+        _nameResolver = nameResolver ?? throw new ArgumentNullException(nameof(nameResolver));
     }
 
     /// <inheritdoc />
@@ -322,7 +326,7 @@ public class SolutionService : ISolutionService
             resolvedTypeNames = ComponentTypeNames;
         }
 
-        return results.Entities.Select(e =>
+        var components = results.Entities.Select(e =>
         {
             var type = e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.ComponentType)?.Value ?? 0;
             var typeName = resolvedTypeNames.TryGetValue(type, out var name)
@@ -339,6 +343,49 @@ public class SolutionService : ISolutionService
                 e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.RootComponentBehavior)?.Value ?? 0,
                 e.GetAttributeValue<bool?>(SolutionComponent.Fields.IsMetadata) ?? false);
         }).ToList();
+
+        // Resolve component names by type
+        var resolveStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var grouped = components.GroupBy(c => c.ComponentType).ToList();
+
+        foreach (var group in grouped)
+        {
+            try
+            {
+                var names = await _nameResolver.ResolveAsync(
+                    group.Key,
+                    group.Select(c => c.ObjectId).ToList(),
+                    cancellationToken);
+
+                for (var i = 0; i < components.Count; i++)
+                {
+                    var comp = components[i];
+                    if (comp.ComponentType == group.Key &&
+                        names.TryGetValue(comp.ObjectId, out var resolved))
+                    {
+                        components[i] = comp with
+                        {
+                            LogicalName = resolved.LogicalName,
+                            SchemaName = resolved.SchemaName,
+                            DisplayName = resolved.DisplayName
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Name resolution failed for component type {Type}, components will show GUIDs",
+                    group.Key);
+            }
+        }
+
+        resolveStopwatch.Stop();
+        _logger.LogInformation(
+            "Total component name resolution: {TypeCount} types, {TotalMs}ms",
+            grouped.Count, resolveStopwatch.ElapsedMilliseconds);
+
+        return components;
     }
 
     /// <inheritdoc />
