@@ -227,10 +227,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private updateTitle(): void {
         if (!this.panel) return;
-        const parts = [`Data Explorer #${this.panelId}`];
-        if (this.profileName) parts.push(this.profileName);
-        if (this.environmentDisplayName) parts.push(this.environmentDisplayName);
-        this.panel.title = parts.join(' — ');
+        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
+        const suffix = QueryPanel.instances.length > 1 ? ` ${this.panelId}` : '';
+        this.panel.title = context ? `${context} \u2014 Data Explorer${suffix}` : `Data Explorer${suffix}`;
     }
 
     private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string, isConfirmed = false): Promise<void> {

@@ -885,6 +885,7 @@ document.addEventListener('contextmenu', (e) => {
         const rowPkId = getRecordId(displayedRows[clickRow]);
         if (lastEntityName && rowPkId && !lastIsAggregate) {
             contextRecordUrl = buildRecordUrl(lastEntityName, rowPkId);
+            contextRecordLabel = 'Open ' + escapeHtml(lastEntityName) + ' Record';
         }
     }
 
@@ -895,6 +896,8 @@ document.addEventListener('contextmenu', (e) => {
         { label: 'Copy Cell Value', shortcut: '', action: 'cell' },
         { label: 'Copy Row', shortcut: '', action: 'row' },
         { label: 'Copy All Results', shortcut: '', action: 'all' },
+        { label: 'separator', shortcut: '', action: 'separator' },
+        { label: 'Filter to This Value', shortcut: '/', action: 'filterToValue' },
     ];
 
     if (contextRecordUrl) {
@@ -970,6 +973,11 @@ document.addEventListener('contextmenu', (e) => {
                     setTimeout(() => { updateCopyHint(); }, 2000);
                 }
             }
+        } else if (action === 'filterToValue') {
+            const cellText = getCellDisplayValue(displayedRows[clickRow], clickCol);
+            filterBar.classList.add('visible');
+            filterInput.value = cellText;
+            filterInput.dispatchEvent(new Event('input'));
         }
         removeContextMenu();
     });
