@@ -2,37 +2,21 @@
 // External webview script for the Data Explorer panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-// Error tracking — must be set up before any imports execute.
-// Declared on window for diagnostic access from the host.
-declare global {
-    interface Window {
-        __ppds_errors: { msg: string; src: string; line: number | null; col: number | null; stack: string }[];
-    }
-}
-window.__ppds_errors = [];
-window.onerror = function (msg, src, line, col, err) {
-    window.__ppds_errors.push({
-        msg: String(msg),
-        src: String(src ?? ''),
-        line: line ?? null,
-        col: col ?? null,
-        stack: err && err.stack ? err.stack.substring(0, 500) : '',
-    });
-    const el = document.getElementById('sql-editor');
-    if (el) el.setAttribute('data-error', String(msg));
-};
-
 import { escapeHtml, escapeAttr, sanitizeValue } from './shared/dom-utils.js';
 import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './shared/message-types.js';
 import type { QueryResultResponse, QueryColumnInfo } from '../../types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { FilterBar } from './shared/filter-bar.js';
+import { installErrorHandler } from './shared/error-handler.js';
+import { getSelectionRect as computeSelectionRect, isSingleCell as checkSingleCell } from './shared/selection-utils.js';
+import type { CellCoord, SelectionRect } from './shared/selection-utils.js';
 
 // Monaco is loaded as a global script before this module.
 declare const monaco: typeof import('monaco-editor');
 
 const vscode = getVsCodeApi<QueryPanelWebviewToHost>();
+installErrorHandler((msg) => vscode.postMessage(msg as QueryPanelWebviewToHost));
 
 // ── Monaco Editor initialization ──
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null;
@@ -149,30 +133,12 @@ function buildRecordUrl(entityName: string, recordId: unknown): string | null {
 }
 
 // ── Selection state (anchor+focus rectangle) ──
-interface CellPosition { row: number; col: number }
-interface SelectionRect { minRow: number; maxRow: number; minCol: number; maxCol: number }
 interface CellRichValue { text: string; url?: string | null; entityType?: string; entityId?: string }
 
-let anchor: CellPosition | null = null;
-let focus: CellPosition | null = null;
+let anchor: CellCoord | null = null;
+let focus: CellCoord | null = null;
 let displayedRows: Record<string, unknown>[] = [];
 const copyHintEl = document.getElementById('copy-hint');
-
-// ── Selection utilities ──
-function getSelectionRect(): SelectionRect | null {
-    if (!anchor || !focus) return null;
-    return {
-        minRow: Math.min(anchor.row, focus.row),
-        maxRow: Math.max(anchor.row, focus.row),
-        minCol: Math.min(anchor.col, focus.col),
-        maxCol: Math.max(anchor.col, focus.col),
-    };
-}
-
-function isSingleCell(): boolean {
-    if (!anchor || !focus) return false;
-    return anchor.row === focus.row && anchor.col === focus.col;
-}
 
 function clearSelection(): void {
     anchor = null;
@@ -251,7 +217,7 @@ function getCellRichValue(row: Record<string, unknown>, colIdx: number): CellRic
 function updateCopyHint(): void {
     if (!copyHintEl) return;
     if (!anchor) { copyHintEl.textContent = ''; return; }
-    if (isSingleCell()) {
+    if (checkSingleCell(anchor, focus)) {
         copyHintEl.textContent = 'Ctrl+C: copy value | Right-click: with header';
     } else {
         copyHintEl.textContent = 'Ctrl+C: copy with headers | Right-click: values only';
@@ -259,7 +225,7 @@ function updateCopyHint(): void {
 }
 
 function updateSelectionVisuals(): void {
-    const rect = getSelectionRect();
+    const rect = computeSelectionRect(anchor, focus);
     const tbody = resultsWrapper.querySelector('tbody');
     if (!tbody) return;
 
@@ -934,10 +900,10 @@ function sortAndRender(): void {
 
 function copySelection(invertHeaders: boolean): void {
     if (!anchor) return;
-    const rect = getSelectionRect();
+    const rect = computeSelectionRect(anchor, focus);
     if (!rect) return;
 
-    const single = isSingleCell();
+    const single = checkSingleCell(anchor, focus);
     const withHeaders = single ? invertHeaders : !invertHeaders;
 
     let text = '';
@@ -988,7 +954,7 @@ document.addEventListener('contextmenu', (e) => {
     const clickCol = parseInt(td.dataset.col!);
 
     // If right-clicked cell is outside current selection, move selection there
-    const rect = getSelectionRect();
+    const rect = computeSelectionRect(anchor, focus);
     if (!rect || clickRow < rect.minRow || clickRow > rect.maxRow ||
         clickCol < rect.minCol || clickCol > rect.maxCol) {
         anchor = { row: clickRow, col: clickCol };
@@ -996,7 +962,7 @@ document.addEventListener('contextmenu', (e) => {
         updateSelectionVisuals();
     }
 
-    const single = isSingleCell();
+    const single = checkSingleCell(anchor, focus);
     const inverseLabel = single ? 'Copy (with header)' : 'Copy (no headers)';
 
     contextMenu = document.createElement('div');
