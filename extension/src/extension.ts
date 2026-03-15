@@ -16,6 +16,7 @@ import { QueryPanel } from './panels/QueryPanel.js';
 import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
+import { DaemonStatusBar } from './daemonStatusBar.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
@@ -72,6 +73,23 @@ export function activate(context: vscode.ExtensionContext) {
     daemonClient = new DaemonClient(context.extensionPath, logChannel);
     const client = daemonClient; // Local const for type narrowing in closures
     context.subscriptions.push(client);
+
+    // ── Daemon Status Bar ────────────────────────────────────────────
+    const statusBar = new DaemonStatusBar(client);
+    context.subscriptions.push(statusBar);
+
+    // ── Restart Daemon Command ───────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.restartDaemon', async () => {
+            try {
+                await client.restart();
+                vscode.window.showInformationMessage('PPDS daemon restarted.');
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to restart daemon: ${msg}`);
+            }
+        })
+    );
 
     // Auto-start daemon if configured (default: true)
     if (config.get<boolean>('autoStartDaemon', true)) {
