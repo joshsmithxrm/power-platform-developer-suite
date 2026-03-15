@@ -98,4 +98,7 @@ public record SolutionComponentInfo(
     int ComponentType,
     string ComponentTypeName,
     int RootComponentBehavior,
-    bool IsMetadata);
+    bool IsMetadata,
+    string? DisplayName = null,
+    string? LogicalName = null,
+    string? SchemaName = null);
