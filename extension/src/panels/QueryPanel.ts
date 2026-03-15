@@ -148,6 +148,11 @@ export class QueryPanel extends WebviewPanelBase {
                         case 'cancelQuery':
                             this.queryCts?.cancel();
                             break;
+                        case 'refresh':
+                            if (this.lastSql) {
+                                await this.executeQuery(this.lastSql, false, this.lastUseTds, this.lastLanguage);
+                            }
+                            break;
                         case 'requestEnvironmentList': {
                             const env = await showEnvironmentPicker(this.daemon, this.environmentUrl);
                             if (env) {
@@ -166,6 +171,8 @@ export class QueryPanel extends WebviewPanelBase {
         this.disposables.push(
             this.panel.onDidDispose(() => this.dispose())
         );
+
+        this.subscribeToDaemonReconnect(this.daemon);
     }
 
     override dispose(): void {
@@ -513,6 +520,10 @@ export class QueryPanel extends WebviewPanelBase {
     <vscode-button id="filter-btn" appearance="icon" title="Filter results (/)">
         <span class="codicon codicon-filter"></span>
     </vscode-button>
+</div>
+
+<div id="reconnect-banner" style="display:none; background: var(--vscode-inputValidation-infoBackground, #063b49); color: var(--vscode-foreground); padding: 6px 12px; text-align: center; font-size: 12px;">
+    Connection restored. Data may be stale. <a href="#" id="reconnect-refresh" style="color: var(--vscode-textLink-foreground);">Refresh</a>
 </div>
 
 <div class="editor-container">
@@ -1110,6 +1121,9 @@ export class QueryPanel extends WebviewPanelBase {
                 }
                 break;
             }
+            case 'daemonReconnected':
+                document.getElementById('reconnect-banner').style.display = '';
+                break;
         }
     });
 
@@ -1383,6 +1397,12 @@ export class QueryPanel extends WebviewPanelBase {
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
+
+    document.getElementById('reconnect-refresh').addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('reconnect-banner').style.display = 'none';
+        vscode.postMessage({ command: 'refresh' });
+    });
 
     // Signal ready
     vscode.postMessage({ command: 'ready' });
