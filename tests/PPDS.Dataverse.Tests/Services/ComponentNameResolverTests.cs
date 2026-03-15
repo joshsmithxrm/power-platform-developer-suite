@@ -21,11 +21,12 @@ namespace PPDS.Dataverse.Tests.Services;
 public class ComponentNameResolverTests
 {
     private readonly Mock<ICachedMetadataProvider> _metadataProvider = new();
+    private readonly Mock<IMetadataService> _metadataService = new();
     private readonly Mock<IDataverseConnectionPool> _pool = new();
     private readonly ILogger<ComponentNameResolver> _logger = NullLogger<ComponentNameResolver>.Instance;
 
     private ComponentNameResolver CreateResolver() =>
-        new(_metadataProvider.Object, _pool.Object, _logger);
+        new(_metadataProvider.Object, _metadataService.Object, _pool.Object, _logger);
 
     [Fact]
     public async Task ResolveAsync_EntityType_UsesMetadataProvider()
@@ -95,7 +96,7 @@ public class ComponentNameResolverTests
             });
 
         var mockLogger = new Mock<ILogger<ComponentNameResolver>>();
-        var resolver = new ComponentNameResolver(_metadataProvider.Object, _pool.Object, mockLogger.Object);
+        var resolver = new ComponentNameResolver(_metadataProvider.Object, _metadataService.Object, _pool.Object, mockLogger.Object);
 
         await resolver.ResolveAsync(1, new[] { entityId });
 
@@ -117,7 +118,7 @@ public class ComponentNameResolverTests
             .ThrowsAsync(new InvalidOperationException("Metadata unavailable"));
 
         var mockLogger = new Mock<ILogger<ComponentNameResolver>>();
-        var resolver = new ComponentNameResolver(_metadataProvider.Object, _pool.Object, mockLogger.Object);
+        var resolver = new ComponentNameResolver(_metadataProvider.Object, _metadataService.Object, _pool.Object, mockLogger.Object);
 
         var result = await resolver.ResolveAsync(1, new[] { Guid.NewGuid() });
 

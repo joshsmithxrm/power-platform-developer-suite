@@ -331,26 +331,29 @@ export class SolutionsPanel extends WebviewPanelBase {
 
     .component-detail-card {
         display: none;
-        padding: 4px 8px 4px 28px;
-        margin: 0 0 2px 0;
-        background: var(--vscode-editor-background);
-        border-left: 2px solid var(--vscode-focusBorder);
+        margin: 0 12px 4px 28px;
+        padding: 6px 10px;
+        background: var(--vscode-textBlockQuote-background);
+        border-left: 3px solid var(--vscode-textBlockQuote-border);
+        border-radius: 2px;
         font-size: 12px;
     }
     .component-detail-card.expanded {
         display: grid;
         grid-template-columns: auto 1fr;
-        gap: 2px 8px;
+        gap: 2px 12px;
     }
+    .component-detail-card .detail-label { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+    .component-detail-card .detail-value { overflow: hidden; text-overflow: ellipsis; }
     .component-item { cursor: pointer; }
     .component-item:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
     .copy-btn {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 0 4px;
-        color: var(--vscode-foreground);
-        font-size: 12px;
+        padding: 0 2px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 11px;
     }
     .copy-btn:hover { color: var(--vscode-textLink-foreground); }
 
