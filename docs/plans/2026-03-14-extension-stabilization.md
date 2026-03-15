@@ -4,7 +4,7 @@
 
 **Goal:** Fix security issues, optimize bundle size, add query cancellation + DML safety guard, add "Open in Maker" links, and implement full daemon lifecycle resilience — bringing the VS Code extension to release-ready stability.
 
-**Architecture:** All work is in `extension/src/` (TypeScript) except DML safety which requires changes to `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`. The RPC handler currently does its own SQL→FetchXML transpilation and calls `IQueryExecutor` directly — it does NOT route through `SqlQueryService`. DML safety requires adding `DmlSafetyGuard` invocation directly in the RPC handler. Daemon lifecycle uses VS Code EventEmitter pattern already established in tree views.
+**Architecture:** All work is in `src/PPDS.Extension/src/` (TypeScript) except DML safety which requires changes to `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`. The RPC handler currently does its own SQL→FetchXML transpilation and calls `IQueryExecutor` directly — it does NOT route through `SqlQueryService`. DML safety requires adding `DmlSafetyGuard` invocation directly in the RPC handler. Daemon lifecycle uses VS Code EventEmitter pattern already established in tree views.
 
 **Tech Stack:** TypeScript, VS Code Extension API, esbuild, JSON-RPC (vscode-jsonrpc), Monaco Editor
 
@@ -13,24 +13,24 @@
 ## File Structure
 
 ### New Files
-- `extension/src/daemonStatusBar.ts` — Daemon connection status bar indicator
-- `extension/src/__tests__/daemonStatusBar.test.ts` — Unit tests for status bar
-- `extension/src/__tests__/panels/queryCancellation.test.ts` — Unit tests for cancellation wiring
-- `extension/src/__tests__/panels/dmlSafety.test.ts` — Unit tests for DML safety UX
+- `src/PPDS.Extension/src/daemonStatusBar.ts` — Daemon connection status bar indicator
+- `src/PPDS.Extension/src/__tests__/daemonStatusBar.test.ts` — Unit tests for status bar
+- `src/PPDS.Extension/src/__tests__/panels/queryCancellation.test.ts` — Unit tests for cancellation wiring
+- `src/PPDS.Extension/src/__tests__/panels/dmlSafety.test.ts` — Unit tests for DML safety UX
 
 ### Modified Files
-- `extension/src/panels/SolutionsPanel.ts` — Fix innerHTML copy button, add Open in Maker
-- `extension/src/notebooks/virtualScrollScript.ts` — Fix href attribute escaping
-- `extension/src/panels/monaco-entry.ts` — Selective language imports
-- `extension/src/panels/monaco-worker.ts` — Match selective imports
-- `extension/esbuild.js` — Add Monaco ESM plugin if needed
-- `extension/src/daemonClient.ts` — Add heartbeat, onReconnected event, cancellation support
-- `extension/src/extension.ts` — Wire status bar, register cancellation commands
-- `extension/src/panels/WebviewPanelBase.ts` — Add daemon reconnect subscription
-- `extension/src/panels/QueryPanel.ts` — Wire cancellation, DML safety, record links
-- `extension/src/commands/browserCommands.ts` — Add solution-level Open in Maker
-- `extension/src/types.ts` — Add DML safety types if needed
-- `extension/package.json` — Register new commands (cancel query, restart daemon)
+- `src/PPDS.Extension/src/panels/SolutionsPanel.ts` — Fix innerHTML copy button, add Open in Maker
+- `src/PPDS.Extension/src/notebooks/virtualScrollScript.ts` — Fix href attribute escaping
+- `src/PPDS.Extension/src/panels/monaco-entry.ts` — Selective language imports
+- `src/PPDS.Extension/src/panels/monaco-worker.ts` — Match selective imports
+- `src/PPDS.Extension/esbuild.js` — Add Monaco ESM plugin if needed
+- `src/PPDS.Extension/src/daemonClient.ts` — Add heartbeat, onReconnected event, cancellation support
+- `src/PPDS.Extension/src/extension.ts` — Wire status bar, register cancellation commands
+- `src/PPDS.Extension/src/panels/WebviewPanelBase.ts` — Add daemon reconnect subscription
+- `src/PPDS.Extension/src/panels/QueryPanel.ts` — Wire cancellation, DML safety, record links
+- `src/PPDS.Extension/src/commands/browserCommands.ts` — Add solution-level Open in Maker
+- `src/PPDS.Extension/src/types.ts` — Add DML safety types if needed
+- `src/PPDS.Extension/package.json` — Register new commands (cancel query, restart daemon)
 - `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` — Wire DmlSafetyOptions through query/sql RPC
 
 ---
@@ -42,7 +42,7 @@
 The copy button at `SolutionsPanel.ts:520-522` saves `copyBtn.innerHTML` and restores it via `innerHTML` after showing a checkmark. This violates Constitution S1. The fix is trivial — use `textContent` consistently since the button content is a single emoji character.
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts:516-524`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts:516-524`
 
 **Acceptance Criteria:**
 - AC-01: Copy button never uses innerHTML for restoration
@@ -69,7 +69,7 @@ The clipboard emoji `📋` is Unicode `U+1F4CB`. Use the ES2015+ `\u{...}` escap
 
 - [ ] **Step 2: Verify the fix**
 
-Run: `npm run compile` from `extension/`
+Run: `npm run compile` from `src/PPDS.Extension/`
 Expected: No compilation errors. The copy button should show ✓ on click and revert to 📋 after 1.5s.
 
 - [ ] **Step 3: Commit**
@@ -85,7 +85,7 @@ fix: replace innerHTML restoration with textContent in SolutionsPanel copy butto
 The virtual scroll script at `virtualScrollScript.ts:76` uses `escapeHtml()` for href attributes. While safe today (URLs are pre-encoded with `encodeURIComponent`), the correct function for attribute values is `escapeAttr()`. Add it for correctness.
 
 **Files:**
-- Modify: `extension/src/notebooks/virtualScrollScript.ts:39-44,76`
+- Modify: `src/PPDS.Extension/src/notebooks/virtualScrollScript.ts:39-44,76`
 
 - [ ] **Step 1: Add escapeAttr function to the generated script**
 
@@ -120,7 +120,7 @@ Note: `escapeHtml` is still correct for the link text content. Only the attribut
 
 - [ ] **Step 3: Verify the fix**
 
-Run: `npm run compile` from `extension/`
+Run: `npm run compile` from `src/PPDS.Extension/`
 Expected: No errors. Notebook results with clickable links should still work.
 
 - [ ] **Step 4: Commit**
@@ -136,9 +136,9 @@ fix: use escapeAttr for href attribute values in notebook virtual scroll (S1)
 The current `monaco-entry.ts` does `import * as monaco from 'monaco-editor'` which bundles all 30+ languages into a 9.5 MB file. We only need SQL and XML. Switch to selective ESM imports.
 
 **Files:**
-- Modify: `extension/src/panels/monaco-entry.ts`
-- Modify: `extension/src/panels/monaco-worker.ts` (may need update)
-- Modify: `extension/esbuild.js` (may need ESM alias)
+- Modify: `src/PPDS.Extension/src/panels/monaco-entry.ts`
+- Modify: `src/PPDS.Extension/src/panels/monaco-worker.ts` (may need update)
+- Modify: `src/PPDS.Extension/esbuild.js` (may need ESM alias)
 
 **Acceptance Criteria:**
 - AC-01: Monaco bundle size drops below 4 MB (production build)
@@ -149,7 +149,7 @@ The current `monaco-entry.ts` does `import * as monaco from 'monaco-editor'` whi
 
 - [ ] **Step 1: Switch to selective Monaco imports**
 
-Replace the entire content of `extension/src/panels/monaco-entry.ts` with:
+Replace the entire content of `src/PPDS.Extension/src/panels/monaco-entry.ts` with:
 
 ```typescript
 /**
@@ -186,7 +186,7 @@ import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js';
 
 - [ ] **Step 2: Build and measure**
 
-Run from `extension/`:
+Run from `src/PPDS.Extension/`:
 ```bash
 node esbuild.js --production
 ```
@@ -237,9 +237,9 @@ the languages we actually use instead of the full monaco-editor package.
 The TUI supports Escape to cancel in-flight queries via `CancellationTokenSource`. The extension's `daemonClient.querySql()` already accepts an optional `CancellationToken` parameter but `QueryPanel` never passes one. We need to wire cancellation end-to-end.
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
-- Modify: `extension/package.json` (register ppds.cancelQuery command)
-- Test: `extension/src/__tests__/unit/queryCancellation.test.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/package.json` (register ppds.cancelQuery command)
+- Test: `src/PPDS.Extension/src/__tests__/unit/queryCancellation.test.ts`
 
 **Acceptance Criteria:**
 - AC-01: User can press Escape in the editor while a query is running to cancel it
@@ -250,7 +250,7 @@ The TUI supports Escape to cancel in-flight queries via `CancellationTokenSource
 
 - [ ] **Step 1: Write unit test for cancellation token wiring**
 
-Create `extension/src/__tests__/unit/queryCancellation.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/unit/queryCancellation.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -558,9 +558,9 @@ Does not affect existing callers (dmlSafety is optional).
 Wire the extension to send `dmlSafety` params with every query and handle confirmation dialogs.
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
-- Modify: `extension/src/daemonClient.ts` (add dmlSafety to querySql params type)
-- Test: `extension/src/__tests__/unit/dmlSafety.test.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts` (add dmlSafety to querySql params type)
+- Test: `src/PPDS.Extension/src/__tests__/unit/dmlSafety.test.ts`
 
 **Acceptance Criteria:**
 - AC-05: Extension sends `dmlSafety: { isConfirmed: false }` with every query by default
@@ -679,7 +679,7 @@ AC-05 through AC-10 satisfied.
 The `browserCommands.ts` already has `buildMakerUrl()` and environment ID resolution. We need to add a click action on solutions that opens the solution in the Maker Portal.
 
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
 
 **Acceptance Criteria:**
 - AC-01: Each solution in the list has an "Open in Maker" button/link
@@ -770,7 +770,7 @@ Power Apps Maker Portal. Uses environment ID from profile for URL.
 Query results should let users open records in Dynamics 365. The entity name comes from `QueryResultResponse.entityName` and the record ID follows the `{entityName}id` convention.
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Acceptance Criteria:**
 - AC-04: Right-click context menu on a result row includes "Open Record in Dynamics"
@@ -883,8 +883,8 @@ AC-04 through AC-07 satisfied.
 Add a reconnection event, heartbeat ping, and structured state management.
 
 **Files:**
-- Modify: `extension/src/daemonClient.ts`
-- Test: `extension/src/__tests__/unit/daemonStatusBar.test.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts`
+- Test: `src/PPDS.Extension/src/__tests__/unit/daemonStatusBar.test.ts`
 
 **Acceptance Criteria:**
 - AC-01: DaemonClient emits `onDidChangeState` event with states: `starting`, `ready`, `error`, `reconnecting`
@@ -1046,8 +1046,8 @@ AC-01 through AC-05 satisfied.
 Wire the DaemonClient state events to a visible StatusBarItem.
 
 **Files:**
-- Create: `extension/src/daemonStatusBar.ts`
-- Modify: `extension/src/extension.ts`
+- Create: `src/PPDS.Extension/src/daemonStatusBar.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Acceptance Criteria:**
 - AC-06: Status bar shows daemon connection state with icon and text
@@ -1195,9 +1195,9 @@ AC-06 through AC-09 satisfied.
 When the daemon reconnects, panels should notify the user and optionally auto-refresh.
 
 **Files:**
-- Modify: `extension/src/panels/WebviewPanelBase.ts`
-- Modify: `extension/src/panels/QueryPanel.ts`
-- Modify: `extension/src/panels/SolutionsPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/WebviewPanelBase.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts`
 
 **Acceptance Criteria:**
 - AC-10: After daemon reconnect, panels show a non-intrusive banner: "Connection restored. Data may be stale."
@@ -1321,10 +1321,10 @@ After all tasks are complete, run the full test suite:
 
 ```bash
 # Extension unit tests
-cd extension && npm run ext:test
+cd src/PPDS.Extension && npm run ext:test
 
 # Extension compilation check
-cd extension && npm run compile
+cd src/PPDS.Extension && npm run compile
 
 # .NET build (for RPC changes)
 cd .. && dotnet build PPDS.sln --no-restore

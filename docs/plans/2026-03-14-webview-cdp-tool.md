@@ -4,7 +4,7 @@
 
 **Goal:** Build a CLI tool that connects to VS Code via CDP and gives AI agents visual access to extension webview panels — screenshots, clicks, typing, keyboard shortcuts, and DOM inspection.
 
-**Architecture:** Single-file Node.js CLI (`extension/tools/webview-cdp.mjs`) communicating over raw WebSocket with VS Code's CDP endpoint. Each invocation connects, executes one command, and disconnects. A session file tracks the launched VS Code process between invocations.
+**Architecture:** Single-file Node.js CLI (`src/PPDS.Extension/tools/webview-cdp.mjs`) communicating over raw WebSocket with VS Code's CDP endpoint. Each invocation connects, executes one command, and disconnects. A session file tracks the launched VS Code process between invocations.
 
 **Tech Stack:** Node.js, `ws` (WebSocket), Chrome DevTools Protocol (CDP)
 
@@ -16,12 +16,12 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `extension/tools/webview-cdp.mjs` | Create | CLI tool — argument parsing, CDP connection, all 10 commands |
-| `extension/tools/webview-cdp.test.mjs` | Create | Unit tests for pure functions (arg parsing, key combo parsing, session I/O, target filtering) |
+| `src/PPDS.Extension/tools/webview-cdp.mjs` | Create | CLI tool — argument parsing, CDP connection, all 10 commands |
+| `src/PPDS.Extension/tools/webview-cdp.test.mjs` | Create | Unit tests for pure functions (arg parsing, key combo parsing, session I/O, target filtering) |
 | `.agents/skills/webview-cdp/SKILL.md` | Create | Skill file teaching AI agents when/how to use the tool and the gap protocol |
-| `extension/.gitignore` | Modify | Add `tools/.webview-cdp-session.json` entry |
-| `extension/package.json` | Modify | Add `ws` dev dependency |
-| `extension/vitest.config.ts` | Modify | Add `tools/**/*.test.mjs` to include pattern |
+| `src/PPDS.Extension/.gitignore` | Modify | Add `tools/.webview-cdp-session.json` entry |
+| `src/PPDS.Extension/package.json` | Modify | Add `ws` dev dependency |
+| `src/PPDS.Extension/vitest.config.ts` | Modify | Add `tools/**/*.test.mjs` to include pattern |
 
 ---
 
@@ -30,16 +30,16 @@
 ### Task 1: Project setup
 
 **Files:**
-- Modify: `extension/package.json`
-- Modify: `extension/.gitignore`
+- Modify: `src/PPDS.Extension/package.json`
+- Modify: `src/PPDS.Extension/.gitignore`
 
 - [ ] **Step 1: Install `ws` dependency**
 
-Run: `cd extension && npm install --save-dev ws`
+Run: `cd src/PPDS.Extension && npm install --save-dev ws`
 
 - [ ] **Step 2: Add session file to gitignore**
 
-In `extension/.gitignore`, add at the end:
+In `src/PPDS.Extension/.gitignore`, add at the end:
 
 ```
 tools/.webview-cdp-session.json
@@ -47,7 +47,7 @@ tools/.webview-cdp-session.json
 
 - [ ] **Step 3: Update vitest config to include tools tests**
 
-In `extension/vitest.config.ts`, update the `include` array to also match tool test files:
+In `src/PPDS.Extension/vitest.config.ts`, update the `include` array to also match tool test files:
 
 ```ts
 include: ['src/**/*.test.ts', 'tools/**/*.test.mjs'],
@@ -55,12 +55,12 @@ include: ['src/**/*.test.ts', 'tools/**/*.test.mjs'],
 
 - [ ] **Step 4: Create tools directory**
 
-Run: `mkdir -p extension/tools`
+Run: `mkdir -p src/PPDS.Extension/tools`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/package.json extension/package-lock.json extension/.gitignore extension/vitest.config.ts
+git add src/PPDS.Extension/package.json extension/package-lock.json src/PPDS.Extension/.gitignore src/PPDS.Extension/vitest.config.ts
 git commit -m "chore: add ws dependency, gitignore, and vitest config for webview-cdp tool"
 ```
 
@@ -69,14 +69,14 @@ git commit -m "chore: add ws dependency, gitignore, and vitest config for webvie
 ### Task 2: Unit tests for pure functions
 
 **Files:**
-- Create: `extension/tools/webview-cdp.test.mjs`
+- Create: `src/PPDS.Extension/tools/webview-cdp.test.mjs`
 
 These tests drive the pure utility functions we'll extract. Write them first — they'll fail until Task 3.
 
 - [ ] **Step 1: Write tests for argument parsing**
 
 ```js
-// extension/tools/webview-cdp.test.mjs
+// src/PPDS.Extension/tools/webview-cdp.test.mjs
 import { describe, it, expect } from 'vitest';
 import { parseArgs, parseKeyCombo, validatePort, filterWebviewTargets } from './webview-cdp.mjs';
 
@@ -188,13 +188,13 @@ describe('filterWebviewTargets', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd extension && npx vitest run tools/webview-cdp.test.mjs`
+Run: `cd src/PPDS.Extension && npx vitest run tools/webview-cdp.test.mjs`
 Expected: FAIL — module `./webview-cdp.mjs` does not exist
 
 - [ ] **Step 3: Commit failing tests**
 
 ```bash
-git add extension/tools/webview-cdp.test.mjs
+git add src/PPDS.Extension/tools/webview-cdp.test.mjs
 git commit -m "test: add failing unit tests for webview-cdp pure functions"
 ```
 
@@ -203,14 +203,14 @@ git commit -m "test: add failing unit tests for webview-cdp pure functions"
 ### Task 3: Core implementation — argument parsing, session I/O, CDP connection, `connect` command
 
 **Files:**
-- Create: `extension/tools/webview-cdp.mjs`
+- Create: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 This is the main implementation. Build the foundation that all commands share, plus the `connect` command as the first working command.
 
 - [ ] **Step 1: Implement the CLI tool with pure functions and connect command**
 
 ```js
-// extension/tools/webview-cdp.mjs
+// src/PPDS.Extension/tools/webview-cdp.mjs
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { spawn, execSync } from 'node:child_process';
@@ -474,13 +474,13 @@ if (process.argv[1] && resolve(process.argv[1]) === __filename) {
 
 - [ ] **Step 2: Run unit tests to verify pure functions pass**
 
-Run: `cd extension && npx vitest run tools/webview-cdp.test.mjs`
+Run: `cd src/PPDS.Extension && npx vitest run tools/webview-cdp.test.mjs`
 Expected: All tests PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp core — arg parsing, CDP connection, connect command"
 ```
 
@@ -491,7 +491,7 @@ git commit -m "feat(tools): webview-cdp core — arg parsing, CDP connection, co
 ### Task 4: Implement `launch` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add launch command implementation**
 
@@ -512,7 +512,7 @@ async function cmdLaunch(parsed) {
 
   // Resolve extension path (relative to tool location, not cwd)
   const workspace = parsed.workspace || process.cwd();
-  const extensionPath = resolve(__dirname, '..');  // extension/ directory
+  const extensionPath = resolve(__dirname, '..');  // src/PPDS.Extension/ directory
 
   // Spawn VS Code
   const codeProcess = spawn('code', [
@@ -565,7 +565,7 @@ Add to the switch statement:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp launch command — spawns VS Code with extension"
 ```
 
@@ -574,7 +574,7 @@ git commit -m "feat(tools): webview-cdp launch command — spawns VS Code with e
 ### Task 5: Implement `close` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add close command implementation**
 
@@ -627,7 +627,7 @@ async function cmdClose() {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp close command — kills managed VS Code instance"
 ```
 
@@ -638,7 +638,7 @@ git commit -m "feat(tools): webview-cdp close command — kills managed VS Code 
 ### Task 6: Implement `screenshot` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add screenshot command**
 
@@ -699,7 +699,7 @@ async function cmdScreenshot(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp screenshot command — captures webview as PNG"
 ```
 
@@ -708,7 +708,7 @@ git commit -m "feat(tools): webview-cdp screenshot command — captures webview 
 ### Task 7: Implement `eval` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add eval command**
 
@@ -750,7 +750,7 @@ async function cmdEval(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp eval command — runs JS in webview context"
 ```
 
@@ -759,7 +759,7 @@ git commit -m "feat(tools): webview-cdp eval command — runs JS in webview cont
 ### Task 8: Implement `click` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add click command**
 
@@ -819,7 +819,7 @@ async function cmdClick(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp click command — left and right click via CSS selector"
 ```
 
@@ -830,7 +830,7 @@ git commit -m "feat(tools): webview-cdp click command — left and right click v
 ### Task 9: Implement `type` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add type command**
 
@@ -876,7 +876,7 @@ async function cmdType(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp type command — types text into inputs"
 ```
 
@@ -885,7 +885,7 @@ git commit -m "feat(tools): webview-cdp type command — types text into inputs"
 ### Task 10: Implement `select` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add select command**
 
@@ -933,7 +933,7 @@ async function cmdSelect(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp select command — selects dropdown options"
 ```
 
@@ -942,7 +942,7 @@ git commit -m "feat(tools): webview-cdp select command — selects dropdown opti
 ### Task 11: Implement `key` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add key command**
 
@@ -985,7 +985,7 @@ async function cmdKey(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp key command — dispatches keyboard shortcuts"
 ```
 
@@ -994,7 +994,7 @@ git commit -m "feat(tools): webview-cdp key command — dispatches keyboard shor
 ### Task 12: Implement `mouse` command
 
 **Files:**
-- Modify: `extension/tools/webview-cdp.mjs`
+- Modify: `src/PPDS.Extension/tools/webview-cdp.mjs`
 
 - [ ] **Step 1: Add mouse command**
 
@@ -1041,7 +1041,7 @@ async function cmdMouse(parsed) {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/tools/webview-cdp.mjs
+git add src/PPDS.Extension/tools/webview-cdp.mjs
 git commit -m "feat(tools): webview-cdp mouse command — raw mouse events for drag interactions"
 ```
 
@@ -1076,24 +1076,24 @@ Interact with extension webview panels running inside VS Code. Take screenshots 
 
 ## Setup
 
-The tool is at `extension/tools/webview-cdp.mjs`. No additional installation needed.
+The tool is at `src/PPDS.Extension/tools/webview-cdp.mjs`. No additional installation needed.
 
 ## Workflow
 
 ```bash
 # 1. Start a VS Code instance with the extension loaded
-node extension/tools/webview-cdp.mjs launch 9223
+node src/PPDS.Extension/tools/webview-cdp.mjs launch 9223
 
 # 2. After compiling (npm run compile), verify your work
-node extension/tools/webview-cdp.mjs screenshot current-state.png
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot current-state.png
 # IMPORTANT: Actually look at the screenshot to verify the UI
 
 # 3. Interact and verify
-node extension/tools/webview-cdp.mjs click "#my-button"
-node extension/tools/webview-cdp.mjs screenshot after-click.png
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#my-button"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot after-click.png
 
 # 4. When done
-node extension/tools/webview-cdp.mjs close
+node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
 ## Commands
@@ -1117,36 +1117,36 @@ All commands except `launch` and `close` accept `--target N` to select a specifi
 
 ### Verify a button click
 ```bash
-node extension/tools/webview-cdp.mjs click "#execute-btn"
-node extension/tools/webview-cdp.mjs screenshot after-execute.png
+node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot after-execute.png
 ```
 
 ### Test a keyboard shortcut
 ```bash
-node extension/tools/webview-cdp.mjs key "ctrl+enter"
-node extension/tools/webview-cdp.mjs screenshot after-shortcut.png
+node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+enter"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot after-shortcut.png
 ```
 
 ### Test a context menu
 ```bash
-node extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
-node extension/tools/webview-cdp.mjs screenshot context-menu.png
-node extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
+node src/PPDS.Extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot context-menu.png
+node src/PPDS.Extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
 ```
 
 ### Test drag selection
 ```bash
-node extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('td[data-row=\"2\"]').getBoundingClientRect())"
-node extension/tools/webview-cdp.mjs mouse mousedown 150 200
-node extension/tools/webview-cdp.mjs mouse mousemove 300 250
-node extension/tools/webview-cdp.mjs mouse mouseup 300 250
-node extension/tools/webview-cdp.mjs screenshot after-drag.png
+node src/PPDS.Extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('td[data-row=\"2\"]').getBoundingClientRect())"
+node src/PPDS.Extension/tools/webview-cdp.mjs mouse mousedown 150 200
+node src/PPDS.Extension/tools/webview-cdp.mjs mouse mousemove 300 250
+node src/PPDS.Extension/tools/webview-cdp.mjs mouse mouseup 300 250
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot after-drag.png
 ```
 
 ### Check DOM state
 ```bash
-node extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selected') !== null"
-node extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
+node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selected') !== null"
+node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
 ```
 
 ## Gap Protocol
@@ -1182,60 +1182,60 @@ git commit -m "feat(tools): webview-cdp skill file — teaches AI agents the too
 
 This is the proving test from the spec. Run it manually to verify all commands work end-to-end.
 
-**Prerequisites:** The extension must be compiled (`cd extension && npm run compile`).
+**Prerequisites:** The extension must be compiled (`cd src/PPDS.Extension && npm run compile`).
 
 - [ ] **Step 1: Launch VS Code**
 
-Run: `node extension/tools/webview-cdp.mjs launch 9223`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs launch 9223`
 Expected: "VS Code launched on port 9223 (PID NNNNN)"
-Verify: VS Code window opens, session file exists at `extension/tools/.webview-cdp-session.json`
+Verify: VS Code window opens, session file exists at `src/PPDS.Extension/tools/.webview-cdp-session.json`
 
 - [ ] **Step 2: Wait for VS Code to fully load, then test connect**
 
 Wait ~10 seconds for the extension to activate and a webview to open (may need to open one manually via command palette), then:
 
-Run: `node extension/tools/webview-cdp.mjs connect`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs connect`
 Expected: "Found N webview target(s):" with at least one listed
 
 - [ ] **Step 3: Take a screenshot**
 
-Run: `node extension/tools/webview-cdp.mjs screenshot test-initial.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot test-initial.png`
 Expected: PNG file created showing webview content. **Open the file and verify** it shows the actual webview panel.
 
 - [ ] **Step 4: Test eval**
 
-Run: `node extension/tools/webview-cdp.mjs eval "1 + 1"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "1 + 1"`
 Expected: `2`
 
-Run: `node extension/tools/webview-cdp.mjs eval "document.body.children.length"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.body.children.length"`
 Expected: A positive integer
 
 - [ ] **Step 5: Test click**
 
-Run: `node extension/tools/webview-cdp.mjs click "#execute-btn"`
-Run: `node extension/tools/webview-cdp.mjs screenshot test-after-click.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot test-after-click.png`
 Expected: Screenshot shows the Execute button was activated (loading state or error message since no daemon is running)
 
 - [ ] **Step 6: Test type**
 
-Run: `node extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT 1"`
-Run: `node extension/tools/webview-cdp.mjs eval "document.querySelector('#sql-editor').value"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT 1"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs eval "document.querySelector('#sql-editor').value"`
 Expected: `"SELECT 1"`
 
 - [ ] **Step 7: Test key**
 
-Run: `node extension/tools/webview-cdp.mjs key "Escape"`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs key "Escape"`
 Expected: No error (exits cleanly)
 
 - [ ] **Step 8: Test right-click**
 
-Run: `node extension/tools/webview-cdp.mjs click "#sql-editor" --right`
-Run: `node extension/tools/webview-cdp.mjs screenshot test-right-click.png`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs click "#sql-editor" --right`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs screenshot test-right-click.png`
 Expected: Screenshot may show context menu (depends on whether the element has a contextmenu handler)
 
 - [ ] **Step 9: Clean up**
 
-Run: `node extension/tools/webview-cdp.mjs close`
+Run: `node src/PPDS.Extension/tools/webview-cdp.mjs close`
 Expected: "VS Code closed (PID NNNNN)"
 Verify: VS Code window closes, session file deleted
 
@@ -1243,7 +1243,7 @@ Verify: VS Code window closes, session file deleted
 
 ```bash
 rm -f test-initial.png test-after-click.png test-right-click.png
-git add extension/tools/webview-cdp.mjs .agents/skills/webview-cdp/SKILL.md
+git add src/PPDS.Extension/tools/webview-cdp.mjs .agents/skills/webview-cdp/SKILL.md
 git commit -m "feat(tools): webview-cdp integration verified — all commands working"
 ```
 
@@ -1255,12 +1255,12 @@ git commit -m "feat(tools): webview-cdp integration verified — all commands wo
 
 - [ ] **Step 1: Run vitest**
 
-Run: `cd extension && npx vitest run tools/webview-cdp.test.mjs`
+Run: `cd src/PPDS.Extension && npx vitest run tools/webview-cdp.test.mjs`
 Expected: All tests pass
 
 - [ ] **Step 2: Run existing extension tests to check for regressions**
 
-Run: `cd extension && npm run test`
+Run: `cd src/PPDS.Extension && npm run test`
 Expected: All existing tests still pass
 
 - [ ] **Step 3: Final commit if any fixes were needed**

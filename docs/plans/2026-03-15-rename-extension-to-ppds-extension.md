@@ -1,13 +1,13 @@
 # Plan: Rename `src/extension/` → `src/PPDS.Extension/`
 
 **Date:** 2026-03-15
-**Status:** Pending
+**Status:** Complete
 **Branch:** feature/vscode-extension-mvp (or dedicated branch)
 
 ## Motivation
 
-`src/extension/` is the only project under `src/` that doesn't follow the `PPDS.*` naming convention. This inconsistency:
-- Caused the daemon debug path bug (relative path from `src/extension/` to `src/PPDS.Cli/` was miscalculated)
+`src/PPDS.Extension/` is the only project under `src/` that doesn't follow the `PPDS.*` naming convention. This inconsistency:
+- Caused the daemon debug path bug (relative path from `src/PPDS.Extension/` to `src/PPDS.Cli/` was miscalculated)
 - Creates cognitive friction when navigating the codebase
 - Makes path calculations non-obvious (is it `../PPDS.Cli` or `../src/PPDS.Cli`?)
 
@@ -21,14 +21,14 @@
 ### Step 1: Rename the folder
 
 ```bash
-git mv src/extension src/PPDS.Extension
+git mv src/PPDS.Extension src/PPDS.Extension
 ```
 
 ### Step 2: Root configuration (4 files)
 
 | File | What to change |
 |------|---------------|
-| `package.json` | All `ext:*` npm scripts use `--prefix src/extension` → `--prefix src/PPDS.Extension` |
+| `package.json` | All `ext:*` npm scripts use `--prefix src/PPDS.Extension` → `--prefix src/PPDS.Extension` |
 | `ppds.code-workspace` | Folder path and task config references |
 | `.gitignore` | `extension/test-results/`, `extension/playwright-report/` |
 | `README.md` | Documentation reference |
@@ -103,5 +103,5 @@ npm run ext:test
 
 Single atomic commit:
 ```
-refactor: rename src/extension/ to src/PPDS.Extension/ for naming consistency
+refactor: rename src/PPDS.Extension/ to src/PPDS.Extension/ for naming consistency
 ```

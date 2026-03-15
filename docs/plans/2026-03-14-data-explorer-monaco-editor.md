@@ -16,12 +16,12 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `extension/package.json` | Add `monaco-editor` dependency |
-| Modify | `extension/esbuild.js` | Add browser-targeted Monaco bundle build |
-| Create | `extension/src/panels/monaco-entry.ts` | Monaco webview entry point — initializes editor + workers |
-| Modify | `extension/src/panels/QueryPanel.ts` | Replace textarea with Monaco div, update CSP, localResourceRoots, add completion bridge + language toggle, update all editor references |
-| Create | `extension/src/__tests__/panels/monacoUtils.test.ts` | Unit tests for detectLanguage, mapCompletionKind |
-| Create | `extension/src/panels/monacoUtils.ts` | Pure utility functions (testable without Monaco) |
+| Modify | `src/PPDS.Extension/package.json` | Add `monaco-editor` dependency |
+| Modify | `src/PPDS.Extension/esbuild.js` | Add browser-targeted Monaco bundle build |
+| Create | `src/PPDS.Extension/src/panels/monaco-entry.ts` | Monaco webview entry point — initializes editor + workers |
+| Modify | `src/PPDS.Extension/src/panels/QueryPanel.ts` | Replace textarea with Monaco div, update CSP, localResourceRoots, add completion bridge + language toggle, update all editor references |
+| Create | `src/PPDS.Extension/src/__tests__/panels/monacoUtils.test.ts` | Unit tests for detectLanguage, mapCompletionKind |
+| Create | `src/PPDS.Extension/src/panels/monacoUtils.ts` | Pure utility functions (testable without Monaco) |
 
 ---
 
@@ -30,16 +30,16 @@
 ### Task 1: Install monaco-editor + Configure esbuild
 
 **Files:**
-- Modify: `extension/package.json`
-- Modify: `extension/esbuild.js`
+- Modify: `src/PPDS.Extension/package.json`
+- Modify: `src/PPDS.Extension/esbuild.js`
 
 - [ ] **Step 1: Install monaco-editor**
 
-Run: `cd extension && npm install monaco-editor`
+Run: `cd src/PPDS.Extension && npm install monaco-editor`
 
 - [ ] **Step 2: Create Monaco webview entry point**
 
-Create `extension/src/panels/monaco-entry.ts`:
+Create `src/PPDS.Extension/src/panels/monaco-entry.ts`:
 
 ```typescript
 /**
@@ -73,7 +73,7 @@ import * as monaco from 'monaco-editor';
 
 - [ ] **Step 3: Create editor worker entry point**
 
-Create `extension/src/panels/monaco-worker.ts`:
+Create `src/PPDS.Extension/src/panels/monaco-worker.ts`:
 
 ```typescript
 /**
@@ -85,7 +85,7 @@ import 'monaco-editor/esm/vs/editor/editor.worker';
 
 - [ ] **Step 4: Update esbuild.js with Monaco builds**
 
-Replace the entire `extension/esbuild.js`:
+Replace the entire `src/PPDS.Extension/esbuild.js`:
 
 ```javascript
 const esbuild = require('esbuild');
@@ -147,13 +147,13 @@ main().catch(e => { console.error(e); process.exit(1); });
 
 - [ ] **Step 5: Verify builds succeed**
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: Three files created in `dist/`: `extension.js`, `monaco-editor.js`, `editor.worker.js`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/package.json extension/package-lock.json extension/esbuild.js extension/src/panels/monaco-entry.ts extension/src/panels/monaco-worker.ts
+git add src/PPDS.Extension/package.json extension/package-lock.json src/PPDS.Extension/esbuild.js src/PPDS.Extension/src/panels/monaco-entry.ts src/PPDS.Extension/src/panels/monaco-worker.ts
 git commit -m "build(extension): add Monaco Editor bundle infrastructure"
 ```
 
@@ -164,12 +164,12 @@ git commit -m "build(extension): add Monaco Editor bundle infrastructure"
 ### Task 2: Utility Functions + Tests
 
 **Files:**
-- Create: `extension/src/panels/monacoUtils.ts`
-- Create: `extension/src/__tests__/panels/monacoUtils.test.ts`
+- Create: `src/PPDS.Extension/src/panels/monacoUtils.ts`
+- Create: `src/PPDS.Extension/src/__tests__/panels/monacoUtils.test.ts`
 
 - [ ] **Step 1: Create pure utility functions**
 
-Create `extension/src/panels/monacoUtils.ts`:
+Create `src/PPDS.Extension/src/panels/monacoUtils.ts`:
 
 ```typescript
 /**
@@ -222,7 +222,7 @@ export function mapCompletionItems(
 
 - [ ] **Step 2: Write tests**
 
-Create `extension/src/__tests__/panels/monacoUtils.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/panels/monacoUtils.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -300,20 +300,20 @@ describe('mapCompletionItems', () => {
 
 - [ ] **Step 3: Run tests**
 
-Run: `cd extension && npx vitest run src/__tests__/panels/monacoUtils.test.ts`
+Run: `cd src/PPDS.Extension && npx vitest run src/__tests__/panels/monacoUtils.test.ts`
 Expected: All PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add extension/src/panels/monacoUtils.ts extension/src/__tests__/panels/monacoUtils.test.ts
+git add src/PPDS.Extension/src/panels/monacoUtils.ts src/PPDS.Extension/src/__tests__/panels/monacoUtils.test.ts
 git commit -m "feat(extension): add Monaco utility functions with tests"
 ```
 
 ### Task 3: Replace Textarea with Monaco Editor
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 This is the largest task. It modifies the webview HTML, CSS, JS, CSP, and the host-side message handler.
 
@@ -527,23 +527,23 @@ Set `this.lastLanguage = language;` alongside `this.lastSql = sql;`.
 
 - [ ] **Step 10: Verify compilation**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: All three builds succeed
 
 - [ ] **Step 11: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): replace textarea with Monaco Editor + language auto-detection"
 ```
 
 ### Task 4: Completion Provider Bridge
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 - [ ] **Step 1: Add completion request handling in host-side message handler**
 
@@ -646,13 +646,13 @@ In the webview's `window.addEventListener('message', ...)`, add a case:
 
 - [ ] **Step 4: Verify compilation + build**
 
-Run: `cd extension && npx tsc --noEmit && node esbuild.js`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit && node esbuild.js`
 Expected: No errors, three files built
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "feat(extension): wire Monaco IntelliSense to daemon query/complete endpoint"
 ```
 
@@ -664,27 +664,27 @@ git commit -m "feat(extension): wire Monaco IntelliSense to daemon query/complet
 
 - [ ] **Step 1: Run all extension tests**
 
-Run: `cd extension && npx vitest run`
+Run: `cd src/PPDS.Extension && npx vitest run`
 Expected: All new tests PASS, pre-existing failures unchanged
 
 - [ ] **Step 2: Run esbuild**
 
-Run: `cd extension && node esbuild.js`
+Run: `cd src/PPDS.Extension && node esbuild.js`
 Expected: Three output files in `dist/`
 
 - [ ] **Step 3: Compile TypeScript**
 
-Run: `cd extension && npx tsc --noEmit`
+Run: `cd src/PPDS.Extension && npx tsc --noEmit`
 Expected: No errors
 
 - [ ] **Step 4: Verify dist files exist**
 
-Run: `ls -la extension/dist/monaco-editor.js extension/dist/editor.worker.js extension/dist/extension.js`
+Run: `ls -la src/PPDS.Extension/dist/monaco-editor.js src/PPDS.Extension/dist/editor.worker.js src/PPDS.Extension/dist/extension.js`
 Expected: All three files present
 
 - [ ] **Step 5: Add dist/ patterns to .vscodeignore if needed**
 
-Check `extension/.vscodeignore` — ensure `dist/` files are included in the packaged extension (they should NOT be ignored). Monaco files must ship.
+Check `src/PPDS.Extension/.vscodeignore` — ensure `dist/` files are included in the packaged extension (they should NOT be ignored). Monaco files must ship.
 
 - [ ] **Step 6: Final commit if any fixes needed**
 

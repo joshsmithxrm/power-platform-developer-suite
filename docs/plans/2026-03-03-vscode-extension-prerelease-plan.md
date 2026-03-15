@@ -15,7 +15,7 @@
 ### Task 1: Update package.json — Version and Preview
 
 **Files:**
-- Modify: `.worktrees/vscode-extension-mvp/extension/package.json:5-7`
+- Modify: `.worktrees/vscode-extension-mvp/src/PPDS.Extension/package.json:5-7`
 
 **Step 1: Update version and remove preview field**
 
@@ -45,7 +45,7 @@ Expected: `Valid JSON`
 
 ```bash
 cd .worktrees/vscode-extension-mvp
-git add extension/package.json
+git add src/PPDS.Extension/package.json
 git commit -m "chore: set extension version to 0.5.0 for pre-release channel
 
 Remove preview field (handled by --pre-release flag at publish time).
@@ -58,7 +58,7 @@ convention (odd = pre-release, even = stable)."
 ### Task 2: Update package.json — Copy Legacy Keywords
 
 **Files:**
-- Modify: `.worktrees/vscode-extension-mvp/extension/package.json:15-21`
+- Modify: `.worktrees/vscode-extension-mvp/src/PPDS.Extension/package.json:15-21`
 
 **Step 1: Replace keywords array**
 
@@ -125,7 +125,7 @@ Expected: `Valid JSON`
 
 ```bash
 cd .worktrees/vscode-extension-mvp
-git add extension/package.json
+git add src/PPDS.Extension/package.json
 git commit -m "chore: restore full keyword list from legacy extension
 
 Copy all 35 marketplace keywords from the archived extension for
@@ -137,7 +137,7 @@ search discoverability."
 ### Task 3: Update package.json — Enhance Description
 
 **Files:**
-- Modify: `.worktrees/vscode-extension-mvp/extension/package.json:4`
+- Modify: `.worktrees/vscode-extension-mvp/src/PPDS.Extension/package.json:4`
 
 **Step 1: Update description to match legacy quality**
 
@@ -164,7 +164,7 @@ Expected: `Valid JSON`
 
 ```bash
 cd .worktrees/vscode-extension-mvp
-git add extension/package.json
+git add src/PPDS.Extension/package.json
 git commit -m "chore: use legacy extension description for marketplace SEO"
 ```
 
@@ -400,7 +400,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: extension/package-lock.json
+          cache-dependency-path: src/PPDS.Extension/package-lock.json
 
       - name: Install dependencies
         working-directory: extension
@@ -559,7 +559,7 @@ Expected output should include:
 - `extension/README.md`
 - `extension/CHANGELOG.md`
 - `extension/LICENSE` (or root LICENSE)
-- `extension/package.json`
+- `src/PPDS.Extension/package.json`
 
 Should NOT include:
 - `src/**` (TypeScript source)

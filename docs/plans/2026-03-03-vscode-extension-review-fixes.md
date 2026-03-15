@@ -96,14 +96,14 @@ Also fix any other `when` clauses that reference `ppdsnb` with quotes — search
 **Step 3: Verify build**
 
 ```bash
-cd extension && npm run compile
+cd src/PPDS.Extension && npm run compile
 ```
 Expected: Builds without errors.
 
 **Step 4: Commit**
 
 ```bash
-git add extension/package.json
+git add src/PPDS.Extension/package.json
 git commit -m "fix(extension): remove conflicting keybindings and fix notebook when clause quoting"
 ```
 
@@ -112,12 +112,12 @@ git commit -m "fix(extension): remove conflicting keybindings and fix notebook w
 ## Task 2: Fix Race Condition in DaemonClient.ensureConnected()
 
 **Files:**
-- Modify: `extension/src/daemonClient.ts`
-- Modify: `extension/src/__tests__/daemonClient.test.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts`
+- Modify: `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`
 
 **Step 1: Add connecting promise guard**
 
-In `extension/src/daemonClient.ts`, add a private field near the other private fields:
+In `src/PPDS.Extension/src/daemonClient.ts`, add a private field near the other private fields:
 
 ```typescript
 private connectingPromise: Promise<void> | null = null;
@@ -141,7 +141,7 @@ This ensures that if two RPC calls arrive concurrently during startup, only one 
 
 **Step 2: Add test for concurrent connection**
 
-Add to `extension/src/__tests__/daemonClient.test.ts`:
+Add to `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`:
 
 ```typescript
 it('should not spawn multiple daemon processes on concurrent calls', async () => {
@@ -167,7 +167,7 @@ this.connectingPromise = null;
 **Step 4: Commit**
 
 ```bash
-git add extension/src/daemonClient.ts extension/src/__tests__/daemonClient.test.ts
+git add src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/src/__tests__/daemonClient.test.ts
 git commit -m "fix(extension): prevent race condition spawning multiple daemon processes"
 ```
 
@@ -176,7 +176,7 @@ git commit -m "fix(extension): prevent race condition spawning multiple daemon p
 ## Task 3: Fix loadMore Sending Empty SQL in QueryPanel
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Store the last executed SQL**
 
@@ -218,7 +218,7 @@ private async loadMore(pagingCookie: string, page: number): Promise<void> {
 **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "fix(extension): pass original SQL to loadMore pagination instead of empty string"
 ```
 
@@ -271,7 +271,7 @@ git commit -m "fix(daemon): throw NotSupported for useTds parameter until TDS ro
 The current fixture uses `electron.launch()` with the `code` shell wrapper, which won't work. Replace with `@vscode/test-electron` which is the official VS Code testing approach.
 
 ```bash
-cd extension && npm install -D @vscode/test-electron
+cd src/PPDS.Extension && npm install -D @vscode/test-electron
 ```
 
 Replace `extension/e2e/fixtures.ts` entirely:
@@ -330,7 +330,7 @@ use: {
 **Step 3: Commit**
 
 ```bash
-git add extension/e2e/fixtures.ts extension/playwright.config.ts extension/package.json extension/package-lock.json
+git add extension/e2e/fixtures.ts extension/playwright.config.ts src/PPDS.Extension/package.json src/PPDS.Extension/package-lock.json
 git commit -m "fix(extension): use @vscode/test-electron for Playwright E2E fixtures"
 ```
 
@@ -339,7 +339,7 @@ git commit -m "fix(extension): use @vscode/test-electron for Playwright E2E fixt
 ## Task 6: Fix Device Code Handler Leak + listProfiles Not Switching
 
 **Files:**
-- Modify: `extension/src/commands/profileCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Step 1: Make device code handler registration idempotent**
 
@@ -393,7 +393,7 @@ if (selected) {
 **Step 3: Commit**
 
 ```bash
-git add extension/src/commands/profileCommands.ts
+git add src/PPDS.Extension/src/commands/profileCommands.ts
 git commit -m "fix(extension): register device code handler once and wire listProfiles to authSelect"
 ```
 
@@ -402,7 +402,7 @@ git commit -m "fix(extension): register device code handler once and wire listPr
 ## Task 7: Fix Tree Provider Disposal + Duplicate Command
 
 **Files:**
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Add tree providers to subscriptions**
 
@@ -424,7 +424,7 @@ const openDataExplorerCmd = vscode.commands.registerCommand('ppds.openDataExplor
 context.subscriptions.push(openDataExplorerCmd);
 ```
 
-If the tools tree view references `ppds.openDataExplorer`, update it to use `ppds.dataExplorer` instead (check `extension/src/views/toolsTreeView.ts` for the command reference and update it).
+If the tools tree view references `ppds.openDataExplorer`, update it to use `ppds.dataExplorer` instead (check `src/PPDS.Extension/src/views/toolsTreeView.ts` for the command reference and update it).
 
 **Step 3: Verify no other references to ppds.openDataExplorer**
 
@@ -433,7 +433,7 @@ Search the codebase for `ppds.openDataExplorer` and update any remaining referen
 **Step 4: Commit**
 
 ```bash
-git add extension/src/extension.ts extension/src/views/toolsTreeView.ts extension/package.json
+git add src/PPDS.Extension/src/extension.ts src/PPDS.Extension/src/views/toolsTreeView.ts src/PPDS.Extension/package.json
 git commit -m "fix(extension): add tree provider disposal and remove duplicate dataExplorer command"
 ```
 
@@ -442,7 +442,7 @@ git commit -m "fix(extension): add tree provider disposal and remove duplicate d
 ## Task 8: Add Manual URL Entry to Environment Selector
 
 **Files:**
-- Modify: `extension/src/commands/environmentCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/environmentCommands.ts`
 
 **Step 1: Add "Enter URL manually..." option to environment QuickPick**
 
@@ -493,7 +493,7 @@ if (selected?.apiUrl === '__manual__') {
 **Step 3: Commit**
 
 ```bash
-git add extension/src/commands/environmentCommands.ts
+git add src/PPDS.Extension/src/commands/environmentCommands.ts
 git commit -m "fix(extension): add manual URL entry option to environment selector"
 ```
 
@@ -587,7 +587,7 @@ git commit -m "fix(daemon): correct error codes, add export safety cap, and extr
 ## Task 10: Fix Webview Clipboard to Use Extension Host
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
 
 **Step 1: Replace navigator.clipboard with message-based clipboard**
 
@@ -618,7 +618,7 @@ case 'copyToClipboard':
 **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/QueryPanel.ts
+git add src/PPDS.Extension/src/panels/QueryPanel.ts
 git commit -m "fix(extension): use extension host clipboard instead of navigator.clipboard in webview"
 ```
 
@@ -627,7 +627,7 @@ git commit -m "fix(extension): use extension host clipboard instead of navigator
 ## Task 11: Add Missing Daemon Client Unit Tests
 
 **Files:**
-- Modify: `extension/src/__tests__/daemonClient.test.ts`
+- Modify: `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`
 
 **Step 1: Add tests for all untested RPC methods**
 
@@ -718,19 +718,19 @@ it('should call schema/attributes', async () => {
 });
 ```
 
-Adapt the exact mock setup and method signatures to match the actual `DaemonClient` implementation. Read `extension/src/daemonClient.ts` to verify parameter names.
+Adapt the exact mock setup and method signatures to match the actual `DaemonClient` implementation. Read `src/PPDS.Extension/src/daemonClient.ts` to verify parameter names.
 
 **Step 2: Run tests**
 
 ```bash
-cd extension && npx vitest run
+cd src/PPDS.Extension && npx vitest run
 ```
 Expected: All tests pass.
 
 **Step 3: Commit**
 
 ```bash
-git add extension/src/__tests__/daemonClient.test.ts
+git add src/PPDS.Extension/src/__tests__/daemonClient.test.ts
 git commit -m "test(extension): add unit tests for all daemon client RPC methods"
 ```
 
@@ -739,10 +739,10 @@ git commit -m "test(extension): add unit tests for all daemon client RPC methods
 ## Task 12: Minor Cleanup
 
 **Files:**
-- Modify: `extension/src/panels/QueryPanel.ts`
-- Modify: `extension/src/panels/getWebviewContent.ts`
+- Modify: `src/PPDS.Extension/src/panels/QueryPanel.ts`
+- Modify: `src/PPDS.Extension/src/panels/getWebviewContent.ts`
 - Modify: `extension/esbuild.js`
-- Modify: `extension/src/notebooks/DataverseNotebookController.ts`
+- Modify: `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
 
 **Step 1: Fix escapeHtml consistency in QueryPanel webview**
@@ -766,13 +766,13 @@ logLevel: 'warning',
 
 **Step 3: Remove dead getWebviewContent function if unused**
 
-Check if `getWebviewContent()` in `extension/src/panels/getWebviewContent.ts` is imported and used anywhere other than `getNonce()`. If only `getNonce` is used, either:
+Check if `getWebviewContent()` in `src/PPDS.Extension/src/panels/getWebviewContent.ts` is imported and used anywhere other than `getNonce()`. If only `getNonce` is used, either:
 - Export only `getNonce` and remove the unused `getWebviewContent` function, OR
 - Have `QueryPanel` use `getWebviewContent` instead of building HTML inline
 
 **Step 4: Add comment about per-notebook environment limitation**
 
-In `extension/src/notebooks/DataverseNotebookController.ts`, add a comment near `selectedEnvironmentUrl`:
+In `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`, add a comment near `selectedEnvironmentUrl`:
 
 ```typescript
 /**
@@ -825,7 +825,7 @@ Then replace the duplicated blocks in both methods with `FireAndForgetHistorySav
 **Step 7: Run all tests**
 
 ```bash
-cd extension && npx vitest run
+cd src/PPDS.Extension && npx vitest run
 dotnet test tests/PPDS.Cli.DaemonTests --filter Category!=Integration
 ```
 
@@ -842,8 +842,8 @@ git commit -m "fix: minor cleanup — escapeHtml consistency, esbuild logging, r
 
 After all 12 tasks are complete:
 
-1. **Build check:** `cd extension && npm run compile` — should succeed
-2. **Extension tests:** `cd extension && npx vitest run` — all pass
+1. **Build check:** `cd src/PPDS.Extension && npm run compile` — should succeed
+2. **Extension tests:** `cd src/PPDS.Extension && npx vitest run` — all pass
 3. **Daemon tests:** `dotnet test tests/PPDS.Cli.DaemonTests --filter Category!=Integration` — all pass
 4. **Manual verification:** Launch extension dev host (`F5` in VS Code) and verify:
    - No keybinding conflicts (Ctrl+Shift+P opens Command Palette, not PPDS)

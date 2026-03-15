@@ -44,7 +44,7 @@ Fail: report failing test names and assertion messages
 **Gate 3: TypeScript Build** (if TS/JS files changed)
 
 ```bash
-npm run compile --prefix src/extension
+npm run compile --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -53,7 +53,7 @@ Fail: report exact error messages with file:line
 **Gate 3.5: TypeScript Type Check** (if TS/JS files changed)
 
 ```bash
-npm run typecheck:all --prefix src/extension
+npm run typecheck:all --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors across both host and webview tsconfigs
@@ -64,7 +64,7 @@ Note: `compile` (Gate 3) only runs esbuild which does NOT type-check. This gate 
 **Gate 4: TypeScript Lint** (if TS/JS files changed)
 
 ```bash
-npm run lint --prefix src/extension
+npm run lint --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -73,7 +73,7 @@ Fail: report lint violations
 **Gate 4.5: CSS Lint** (if CSS files changed)
 
 ```bash
-npm run lint:css --prefix src/extension
+npm run lint:css --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -82,7 +82,7 @@ Fail: report CSS lint violations with file:line
 **Gate 4.6: Dead Code Analysis** (if TS/JS files changed)
 
 ```bash
-npm run dead-code --prefix src/extension
+npm run dead-code --prefix src/PPDS.Extension
 ```
 
 Pass: 0 unused exports
@@ -91,7 +91,7 @@ Fail: report unused exports/files
 **Gate 5: TypeScript Tests** (if TS/JS files changed)
 
 ```bash
-npm test --prefix src/extension
+npm test --prefix src/PPDS.Extension
 ```
 
 Pass: 0 failures
@@ -102,7 +102,7 @@ Fail: report failing test names and messages
 Read `specs/README.md` to map changed files to specs. For each relevant spec with ACs:
 - Extract test method names from the AC table
 - For .NET tests: `dotnet test --filter "FullyQualifiedName~{method}" -v q --no-build`
-- For TypeScript tests: `npx vitest run -t "{method}" --prefix src/extension`
+- For TypeScript tests: `npx vitest run -t "{method}" --prefix src/PPDS.Extension`
 - Report which ACs pass and which fail
 
 ### Step 3: Report

@@ -3,7 +3,7 @@
 **Status:** Draft
 **Version:** 1.0
 **Last Updated:** 2026-03-14
-**Code:** [src/PPDS.Dataverse/Services/SolutionService.cs](../src/PPDS.Dataverse/Services/SolutionService.cs) | [extension/src/panels/SolutionsPanel.ts](../extension/src/panels/SolutionsPanel.ts)
+**Code:** [src/PPDS.Dataverse/Services/SolutionService.cs](../src/PPDS.Dataverse/Services/SolutionService.cs) | [src/PPDS.Extension/src/panels/SolutionsPanel.ts](../src/PPDS.Extension/src/panels/SolutionsPanel.ts)
 
 ---
 

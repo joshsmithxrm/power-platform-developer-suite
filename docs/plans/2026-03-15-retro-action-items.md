@@ -14,7 +14,7 @@
 
 ### Task 1: Fix pre-commit hook extension path
 
-The hook silently skips extension lint because it checks `extension/` which no longer exists.
+The hook silently skips extension lint because it checks `src/PPDS.Extension/` which no longer exists.
 
 **Files:**
 - Modify: `.claude/hooks/pre-commit-validate.py:63-64`
@@ -23,12 +23,12 @@ The hook silently skips extension lint because it checks `extension/` which no l
 
 Change line 63-64 from:
 ```python
-        # Run extension lint if extension/ has changes or exists
+        # Run extension lint if src/PPDS.Extension/ has changes or exists
         extension_dir = os.path.join(project_dir, "extension")
 ```
 to:
 ```python
-        # Run extension lint if src/extension/ has changes or exists
+        # Run extension lint if src/PPDS.Extension/ has changes or exists
         extension_dir = os.path.join(project_dir, "src", "extension")
 ```
 
@@ -41,12 +41,12 @@ Expected: `True`
 
 ```bash
 git add .claude/hooks/pre-commit-validate.py
-git commit -m "fix(hooks): update extension path to src/extension/ in pre-commit hook"
+git commit -m "fix(hooks): update extension path to src/PPDS.Extension/ in pre-commit hook"
 ```
 
 ### Task 2: Fix /verify detection path and TUI mode
 
-Two issues: line 31 uses old `extension/` path, and TUI mode references nonexistent `mcp-tui-test`.
+Two issues: line 31 uses old `src/PPDS.Extension/` path, and TUI mode references nonexistent `mcp-tui-test`.
 
 **Files:**
 - Modify: `.claude/commands/verify.md:20,31,58-79`
@@ -55,11 +55,11 @@ Two issues: line 31 uses old `extension/` path, and TUI mode references nonexist
 
 Change line 31 from:
 ```
-- `extension/` → Extension mode
+- `src/PPDS.Extension/` → Extension mode
 ```
 to:
 ```
-- `src/extension/` → Extension mode
+- `src/PPDS.Extension/` → Extension mode
 ```
 
 - [ ] **Step 2: Mark TUI mode as not yet available**
@@ -147,7 +147,7 @@ Insert after line 71 (end of Gate 4 section), before `**Gate 5: TypeScript Tests
 **Gate 4.5: CSS Lint** (if CSS files changed)
 
 ```bash
-npm run lint:css --prefix src/extension
+npm run lint:css --prefix src/PPDS.Extension
 ```
 
 Pass: 0 errors
@@ -156,7 +156,7 @@ Fail: report CSS lint violations with file:line
 **Gate 4.6: Dead Code Analysis** (if TS/JS files changed)
 
 ```bash
-npm run dead-code --prefix src/extension
+npm run dead-code --prefix src/PPDS.Extension
 ```
 
 Pass: 0 unused exports

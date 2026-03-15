@@ -4,7 +4,7 @@
 
 **Goal:** Fix VS Code extension UX issues: structured logging, input persistence, inline environment picker, tree welcome states, token invalidation, and show logs command.
 
-**Architecture:** All changes are in the `extension/` directory except no C# changes. LogOutputChannel is created once in `extension.ts` and threaded through to consumers. Context keys drive declarative `viewsWelcome` content. Profile creation flow is reworked for user-based auth to inline environment discovery.
+**Architecture:** All changes are in the `src/PPDS.Extension/` directory except no C# changes. LogOutputChannel is created once in `extension.ts` and threaded through to consumers. Context keys drive declarative `viewsWelcome` content. Profile creation flow is reworked for user-based auth to inline environment discovery.
 
 **Tech Stack:** TypeScript (VS Code Extension API), Vitest
 
@@ -15,10 +15,10 @@
 ## Task 1: Switch to LogOutputChannel
 
 **Files:**
-- Modify: `extension/src/extension.ts`
-- Modify: `extension/src/daemonClient.ts`
-- Modify: `extension/src/__tests__/daemonClient.test.ts`
-- Modify: `extension/src/__tests__/integration/smokeTest.test.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/daemonClient.ts`
+- Modify: `src/PPDS.Extension/src/__tests__/daemonClient.test.ts`
+- Modify: `src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts`
 
 **Step 1: Update `extension.ts` — create LogOutputChannel and pass to DaemonClient**
 
@@ -131,7 +131,7 @@ createOutputChannel: vi.fn(() => ({
 **Step 5: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass (0 lint errors, esbuild succeeds, 85 tests pass).
@@ -139,9 +139,9 @@ Expected: All pass (0 lint errors, esbuild succeeds, 85 tests pass).
 **Step 6: Commit**
 
 ```bash
-git add extension/src/extension.ts extension/src/daemonClient.ts \
-       extension/src/__tests__/daemonClient.test.ts \
-       extension/src/__tests__/integration/smokeTest.test.ts
+git add src/PPDS.Extension/src/extension.ts src/PPDS.Extension/src/daemonClient.ts \
+       src/PPDS.Extension/src/__tests__/daemonClient.test.ts \
+       src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts
 git commit -m "refactor(extension): switch to LogOutputChannel for structured logging
 
 Replace raw OutputChannel with LogOutputChannel for automatic timestamps
@@ -155,10 +155,10 @@ log levels (info/debug/warn/error)."
 ## Task 2: Add ignoreFocusOut to All Inputs
 
 **Files:**
-- Modify: `extension/src/commands/profileCommands.ts`
-- Modify: `extension/src/commands/environmentCommands.ts`
-- Modify: `extension/src/commands/environmentConfigCommand.ts`
-- Modify: `extension/src/notebooks/DataverseNotebookController.ts`
+- Modify: `src/PPDS.Extension/src/commands/profileCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/environmentCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/environmentConfigCommand.ts`
+- Modify: `src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts`
 
 **Step 1: `profileCommands.ts` — add `ignoreFocusOut: true` to all inputs**
 
@@ -208,7 +208,7 @@ Add `ignoreFocusOut: true` to the options object.
 **Step 5: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass.
@@ -216,10 +216,10 @@ Expected: All pass.
 **Step 6: Commit**
 
 ```bash
-git add extension/src/commands/profileCommands.ts \
-       extension/src/commands/environmentCommands.ts \
-       extension/src/commands/environmentConfigCommand.ts \
-       extension/src/notebooks/DataverseNotebookController.ts
+git add src/PPDS.Extension/src/commands/profileCommands.ts \
+       src/PPDS.Extension/src/commands/environmentCommands.ts \
+       src/PPDS.Extension/src/commands/environmentConfigCommand.ts \
+       src/PPDS.Extension/src/notebooks/DataverseNotebookController.ts
 git commit -m "fix(extension): prevent input dismissal on focus loss
 
 Add ignoreFocusOut: true to all showQuickPick and showInputBox calls
@@ -232,7 +232,7 @@ losing their input progress. Users can still cancel with Escape."
 ## Task 3: Rework Profile Creation — Inline Environment Picker
 
 **Files:**
-- Modify: `extension/src/commands/profileCommands.ts`
+- Modify: `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Step 1: Rework `runCreateProfileWizard` for user-based auth flow**
 
@@ -359,7 +359,7 @@ async function collectAuthMethodParams(authMethodId: string): Promise<AuthParams
 **Step 3: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass.
@@ -367,7 +367,7 @@ Expected: All pass.
 **Step 4: Commit**
 
 ```bash
-git add extension/src/commands/profileCommands.ts
+git add src/PPDS.Extension/src/commands/profileCommands.ts
 git commit -m "feat(extension): inline environment picker for user-based auth
 
 Replace raw URL text input with post-authentication environment
@@ -382,10 +382,10 @@ token must be scoped to a specific resource."
 ## Task 4: Tree View Welcome & Error States
 
 **Files:**
-- Modify: `extension/package.json`
-- Modify: `extension/src/extension.ts`
-- Modify: `extension/src/views/profileTreeView.ts`
-- Modify: `extension/src/views/solutionsTreeView.ts`
+- Modify: `src/PPDS.Extension/package.json`
+- Modify: `src/PPDS.Extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/src/views/profileTreeView.ts`
+- Modify: `src/PPDS.Extension/src/views/solutionsTreeView.ts`
 
 **Step 1: Add `viewsWelcome` to `package.json`**
 
@@ -505,7 +505,7 @@ Update `smokeTest.test.ts` if needed — `ProfileTreeDataProvider` and `Solution
 **Step 7: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass.
@@ -513,11 +513,11 @@ Expected: All pass.
 **Step 8: Commit**
 
 ```bash
-git add extension/package.json extension/src/extension.ts \
-       extension/src/views/profileTreeView.ts \
-       extension/src/views/solutionsTreeView.ts \
-       extension/src/__tests__/views/profileTreeView.test.ts \
-       extension/src/__tests__/integration/smokeTest.test.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts \
+       src/PPDS.Extension/src/views/profileTreeView.ts \
+       src/PPDS.Extension/src/views/solutionsTreeView.ts \
+       src/PPDS.Extension/src/__tests__/views/profileTreeView.test.ts \
+       src/PPDS.Extension/src/__tests__/integration/smokeTest.test.ts
 git commit -m "feat(extension): add tree view welcome and error states
 
 Add viewsWelcome contributions for Profiles and Solutions views with
@@ -532,8 +532,8 @@ silently swallowing them."
 ## Task 5: Invalidate Tokens Context Menu
 
 **Files:**
-- Modify: `extension/package.json`
-- Modify: `extension/src/commands/profileCommands.ts`
+- Modify: `src/PPDS.Extension/package.json`
+- Modify: `src/PPDS.Extension/src/commands/profileCommands.ts`
 
 **Step 1: Register the command in `profileCommands.ts`**
 
@@ -598,7 +598,7 @@ Add to the `view/item/context` menus array (after the deleteProfile entry):
 **Step 3: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass.
@@ -606,7 +606,7 @@ Expected: All pass.
 **Step 4: Commit**
 
 ```bash
-git add extension/package.json extension/src/commands/profileCommands.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/commands/profileCommands.ts
 git commit -m "feat(extension): add invalidate tokens context menu action
 
 Add ppds.invalidateProfile command to the profile tree item context
@@ -619,8 +619,8 @@ on next use. Includes confirmation dialog before invalidation."
 ## Task 6: Show Logs Command
 
 **Files:**
-- Modify: `extension/package.json`
-- Modify: `extension/src/extension.ts`
+- Modify: `src/PPDS.Extension/package.json`
+- Modify: `src/PPDS.Extension/src/extension.ts`
 
 **Step 1: Register the command in `extension.ts`**
 
@@ -648,7 +648,7 @@ Add to the `commands` array:
 
 **Step 3: Add to Tools tree view**
 
-In `extension/src/views/toolsTreeView.ts`, add a "Show Logs" entry to the static tools array:
+In `src/PPDS.Extension/src/views/toolsTreeView.ts`, add a "Show Logs" entry to the static tools array:
 
 ```ts
 private static readonly tools: { label: string; commandId: string; icon: string; alwaysEnabled?: boolean }[] = [
@@ -669,7 +669,7 @@ return ToolsTreeDataProvider.tools.map(
 **Step 4: Run lint, compile, and tests**
 
 ```bash
-cd extension && npm run lint && npm run compile && npm run test
+cd src/PPDS.Extension && npm run lint && npm run compile && npm run test
 ```
 
 Expected: All pass.
@@ -677,8 +677,8 @@ Expected: All pass.
 **Step 5: Commit**
 
 ```bash
-git add extension/package.json extension/src/extension.ts \
-       extension/src/views/toolsTreeView.ts
+git add src/PPDS.Extension/package.json src/PPDS.Extension/src/extension.ts \
+       src/PPDS.Extension/src/views/toolsTreeView.ts
 git commit -m "feat(extension): add Show Logs command and tools tree entry
 
 Register ppds.showLogs command to open the PPDS LogOutputChannel.
@@ -692,9 +692,9 @@ view for easy discoverability during debugging."
 
 After all tasks:
 
-1. `cd extension && npm run lint` — 0 errors
-2. `cd extension && npm run compile` — esbuild succeeds
-3. `cd extension && npm run test` — all tests pass
+1. `cd src/PPDS.Extension && npm run lint` — 0 errors
+2. `cd src/PPDS.Extension && npm run compile` — esbuild succeeds
+3. `cd src/PPDS.Extension && npm run test` — all tests pass
 4. `npm run local` — install and manually verify:
    - Click away from an input dialog → it persists (Escape still cancels)
    - Create a deviceCode profile → environment picker shown inline after auth

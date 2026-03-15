@@ -132,7 +132,7 @@ export class DaemonClient implements vscode.Disposable {
             return bundledPath;
         } catch { /* not bundled */ }
 
-        // 2. Debug build output (F5 development — extensionPath is src/extension/)
+        // 2. Debug build output (F5 development — extensionPath is src/PPDS.Extension/)
         const debugPath = path.join(
             this.extensionPath, '..', 'PPDS.Cli', 'bin', 'Debug', 'net8.0', `ppds${ext}`
         );

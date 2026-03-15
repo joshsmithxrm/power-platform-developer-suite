@@ -39,14 +39,14 @@ Verification Phase (Task 10, depends on all)
 ### Task 1: npm Script Cleanup + Root Package.json
 
 **Files:**
-- Modify: `extension/package.json` (scripts section)
+- Modify: `src/PPDS.Extension/package.json` (scripts section)
 - Create: `package.json` (repo root)
-- Modify: `extension/scripts/build-local.js` (if references old script names)
+- Modify: `src/PPDS.Extension/scripts/build-local.js` (if references old script names)
 - Modify: `.vscode/tasks.json` (if references old script names)
 
-- [ ] **Step 1: Rename scripts in extension/package.json**
+- [ ] **Step 1: Rename scripts in src/PPDS.Extension/package.json**
 
-Apply these renames in the `"scripts"` section of `extension/package.json`:
+Apply these renames in the `"scripts"` section of `src/PPDS.Extension/package.json`:
 
 | Old Name | New Name |
 |----------|----------|
@@ -67,7 +67,7 @@ The `local` script runs `node scripts/build-local.js` — check if `build-local.
 
 - [ ] **Step 2: Update launch.json task references**
 
-Check `.vscode/launch.json` and `extension/.vscode/launch.json` for any `preLaunchTask` or task references that use old npm script names. Update if found.
+Check `.vscode/launch.json` and `src/PPDS.Extension/.vscode/launch.json` for any `preLaunchTask` or task references that use old npm script names. Update if found.
 
 Also check `.vscode/tasks.json` for npm script references.
 
@@ -80,24 +80,24 @@ Create `package.json` at repo root:
   "private": true,
   "description": "PPDS workspace — root proxy scripts for extension and TUI",
   "scripts": {
-    "ext:compile": "npm run compile --prefix extension",
-    "ext:watch": "npm run watch --prefix extension",
-    "ext:package": "npm run package --prefix extension",
-    "ext:lint": "npm run lint --prefix extension",
-    "ext:test": "npm run test --prefix extension",
-    "ext:test:watch": "npm run test:watch --prefix extension",
-    "ext:test:e2e": "npm run test:e2e --prefix extension",
-    "ext:vsce:package": "npm run vsce:package --prefix extension",
-    "ext:local": "npm run local --prefix extension",
-    "ext:local:install": "npm run local:install --prefix extension",
-    "ext:local:uninstall": "npm run local:uninstall --prefix extension",
-    "ext:local:revert": "npm run local:revert --prefix extension",
-    "ext:release:test": "npm run release:test --prefix extension",
-    "ext:bundle:cli": "npm run bundle:cli --prefix extension",
-    "ext:package:win32-x64": "npm run package:win32-x64 --prefix extension",
-    "ext:package:linux-x64": "npm run package:linux-x64 --prefix extension",
-    "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix extension",
-    "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix extension",
+    "ext:compile": "npm run compile --prefix src/PPDS.Extension",
+    "ext:watch": "npm run watch --prefix src/PPDS.Extension",
+    "ext:package": "npm run package --prefix src/PPDS.Extension",
+    "ext:lint": "npm run lint --prefix src/PPDS.Extension",
+    "ext:test": "npm run test --prefix src/PPDS.Extension",
+    "ext:test:watch": "npm run test:watch --prefix src/PPDS.Extension",
+    "ext:test:e2e": "npm run test:e2e --prefix src/PPDS.Extension",
+    "ext:vsce:package": "npm run vsce:package --prefix src/PPDS.Extension",
+    "ext:local": "npm run local --prefix src/PPDS.Extension",
+    "ext:local:install": "npm run local:install --prefix src/PPDS.Extension",
+    "ext:local:uninstall": "npm run local:uninstall --prefix src/PPDS.Extension",
+    "ext:local:revert": "npm run local:revert --prefix src/PPDS.Extension",
+    "ext:release:test": "npm run release:test --prefix src/PPDS.Extension",
+    "ext:bundle:cli": "npm run bundle:cli --prefix src/PPDS.Extension",
+    "ext:package:win32-x64": "npm run package:win32-x64 --prefix src/PPDS.Extension",
+    "ext:package:linux-x64": "npm run package:linux-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix src/PPDS.Extension",
     "tui:test": "npm test --prefix tests/tui-e2e",
     "tui:test:update": "npm run test:update --prefix tests/tui-e2e",
     "tui:test:headed": "npm run test:headed --prefix tests/tui-e2e"
@@ -118,7 +118,7 @@ Expected: all pass with 0 errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/package.json package.json
+git add src/PPDS.Extension/package.json package.json
 # Also add any modified launch.json, tasks.json, or build scripts
 git commit -m "chore: rename npm scripts to colon convention + add root proxy scripts
 
@@ -277,7 +277,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 Based on $ARGUMENTS or recent changes:
 - `src/PPDS.Cli/Commands/` → CLI mode
 - `src/PPDS.Cli/Tui/` → TUI mode
-- `extension/` → Extension mode
+- `src/PPDS.Extension/` → Extension mode
 - `src/PPDS.Mcp/` → MCP mode
 - No clear match → Ask user
 
@@ -286,7 +286,7 @@ Based on $ARGUMENTS or recent changes:
 Always run the relevant unit tests before interactive verification. If tests fail, fix them first — don't waste MCP verification cycles on broken code.
 
 - CLI/TUI: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-- Extension: `npm run test --prefix extension`
+- Extension: `npm run test --prefix src/PPDS.Extension`
 - MCP: `dotnet test --filter "FullyQualifiedName~Mcp" -v q`
 
 ### 3. CLI Mode
@@ -360,7 +360,7 @@ Use `code_checker` to read VS Code diagnostics:
 
 Start the webview dev server:
 ```bash
-npm run dev:webview --prefix extension
+npm run dev:webview --prefix src/PPDS.Extension
 ```
 
 Use Playwright MCP:
@@ -432,14 +432,14 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ### Task 4: Build ppds.debug.* Diagnostic Commands
 
 **Files:**
-- Create: `extension/src/commands/debugCommands.ts`
-- Create: `extension/src/__tests__/commands/debugCommands.test.ts`
-- Modify: `extension/src/extension.ts` (register debug commands)
-- Modify: `extension/package.json` (add command contributions)
+- Create: `src/PPDS.Extension/src/commands/debugCommands.ts`
+- Create: `src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts`
+- Modify: `src/PPDS.Extension/src/extension.ts` (register debug commands)
+- Modify: `src/PPDS.Extension/package.json` (add command contributions)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `extension/src/__tests__/commands/debugCommands.test.ts`:
+Create `src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -538,13 +538,13 @@ describe('debugCommands', () => {
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-npm run test --prefix extension -- --run src/__tests__/commands/debugCommands.test.ts
+npm run test --prefix src/PPDS.Extension -- --run src/__tests__/commands/debugCommands.test.ts
 ```
 Expected: FAIL — module `../../commands/debugCommands.js` not found.
 
 - [ ] **Step 3: Implement debugCommands.ts**
 
-Create `extension/src/commands/debugCommands.ts`:
+Create `src/PPDS.Extension/src/commands/debugCommands.ts`:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -645,18 +645,18 @@ export function registerDebugCommands(
 - `isReady(): boolean` — returns whether daemon connection is active
 - `getProcessId(): number | undefined` — returns the spawned process PID
 
-Read `extension/src/daemonClient.ts` to check if these already exist. If not, add them as thin wrappers over existing internal state (the daemon already tracks its child process).
+Read `src/PPDS.Extension/src/daemonClient.ts` to check if these already exist. If not, add them as thin wrappers over existing internal state (the daemon already tracks its child process).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-npm run test --prefix extension -- --run src/__tests__/commands/debugCommands.test.ts
+npm run test --prefix src/PPDS.Extension -- --run src/__tests__/commands/debugCommands.test.ts
 ```
 Expected: PASS — all tests green.
 
 - [ ] **Step 5: Add command contributions to package.json**
 
-In `extension/package.json`, add to `contributes.commands` array:
+In `src/PPDS.Extension/package.json`, add to `contributes.commands` array:
 
 ```json
 { "command": "ppds.debug.daemonStatus", "title": "PPDS Debug: Daemon Status" },
@@ -667,7 +667,7 @@ In `extension/package.json`, add to `contributes.commands` array:
 
 - [ ] **Step 6: Register debug commands in extension.ts**
 
-In `extension/src/extension.ts`, import and call `registerDebugCommands` near the end of `activate()`:
+In `src/PPDS.Extension/src/extension.ts`, import and call `registerDebugCommands` near the end of `activate()`:
 
 ```typescript
 import { registerDebugCommands } from './commands/debugCommands.js';
@@ -696,14 +696,14 @@ static get instanceCount(): number { return SolutionsPanel.panels.size; }
 - [ ] **Step 7: Run full extension tests**
 
 ```bash
-npm run lint --prefix extension && npm run compile --prefix extension && npm run test --prefix extension
+npm run lint --prefix src/PPDS.Extension && npm run compile --prefix src/PPDS.Extension && npm run test --prefix src/PPDS.Extension
 ```
 Expected: 0 errors, all tests pass.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add extension/src/commands/debugCommands.ts extension/src/__tests__/commands/debugCommands.test.ts extension/src/extension.ts extension/src/daemonClient.ts extension/package.json extension/src/panels/QueryPanel.ts extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/commands/debugCommands.ts src/PPDS.Extension/src/__tests__/commands/debugCommands.test.ts src/PPDS.Extension/src/extension.ts src/PPDS.Extension/src/daemonClient.ts src/PPDS.Extension/package.json src/PPDS.Extension/src/panels/QueryPanel.ts src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat(extension): add ppds.debug.* diagnostic commands for AI verification
 
 Commands: daemonStatus, extensionState, treeViewState, panelState.
@@ -719,17 +719,17 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ### Task 5: Build Webview Standalone Dev Mode
 
 **Files:**
-- Create: `extension/dev/index.html`
-- Create: `extension/dev/mock-vscode-api.js`
-- Create: `extension/dev/query-panel.html`
-- Create: `extension/dev/vite.config.ts`
-- Modify: `extension/package.json` (add `dev:webview` script)
+- Create: `src/PPDS.Extension/dev/index.html`
+- Create: `src/PPDS.Extension/dev/mock-vscode-api.js`
+- Create: `src/PPDS.Extension/dev/query-panel.html`
+- Create: `src/PPDS.Extension/dev/vite.config.ts`
+- Modify: `src/PPDS.Extension/package.json` (add `dev:webview` script)
 
 The goal is a minimal standalone page that renders the QueryPanel webview HTML in a browser, with a mock VS Code API that returns sample data. Playwright MCP can then navigate to it for visual verification.
 
 - [ ] **Step 1: Read QueryPanel.getHtmlContent() to understand the HTML structure**
 
-Read `extension/src/panels/QueryPanel.ts`, specifically the `getHtmlContent()` method. Understand:
+Read `src/PPDS.Extension/src/panels/QueryPanel.ts`, specifically the `getHtmlContent()` method. Understand:
 - What CSS is inlined
 - What JS is inlined
 - What DOM structure is created
@@ -738,7 +738,7 @@ Read `extension/src/panels/QueryPanel.ts`, specifically the `getHtmlContent()` m
 
 - [ ] **Step 2: Create the mock VS Code API**
 
-Create `extension/dev/mock-vscode-api.js`:
+Create `src/PPDS.Extension/dev/mock-vscode-api.js`:
 
 ```javascript
 /**
@@ -782,7 +782,7 @@ window.acquireVsCodeApi = function () {
 
 - [ ] **Step 3: Create the query panel dev page**
 
-Create `extension/dev/query-panel.html`. This needs to replicate the HTML that `QueryPanel.getHtmlContent()` produces, but loading the mock API first.
+Create `src/PPDS.Extension/dev/query-panel.html`. This needs to replicate the HTML that `QueryPanel.getHtmlContent()` produces, but loading the mock API first.
 
 The exact HTML depends on what you find in Step 1. The structure should be:
 
@@ -822,7 +822,7 @@ The exact HTML depends on what you find in Step 1. The structure should be:
 
 - [ ] **Step 4: Create Vite config for dev server**
 
-Create `extension/dev/vite.config.ts`:
+Create `src/PPDS.Extension/dev/vite.config.ts`:
 
 ```typescript
 import { defineConfig } from 'vite';
@@ -838,7 +838,7 @@ export default defineConfig({
 
 - [ ] **Step 5: Add dev:webview npm script**
 
-In `extension/package.json`, add to scripts:
+In `src/PPDS.Extension/package.json`, add to scripts:
 
 ```json
 "dev:webview": "npx vite dev/",
@@ -847,13 +847,13 @@ In `extension/package.json`, add to scripts:
 In root `package.json`, add proxy:
 
 ```json
-"ext:dev:webview": "npm run dev:webview --prefix extension"
+"ext:dev:webview": "npm run dev:webview --prefix src/PPDS.Extension"
 ```
 
 - [ ] **Step 6: Test the dev server**
 
 ```bash
-npm run dev:webview --prefix extension &
+npm run dev:webview --prefix src/PPDS.Extension &
 # Wait for server to start, then verify
 curl -s http://localhost:5173/query-panel.html | head -20
 ```
@@ -865,7 +865,7 @@ Kill the dev server when done.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add extension/dev/ extension/package.json package.json
+git add src/PPDS.Extension/dev/ src/PPDS.Extension/package.json package.json
 git commit -m "feat(extension): add webview standalone dev mode for Playwright verification
 
 Creates dev server at localhost:5173 with mock VS Code API.
@@ -954,7 +954,7 @@ cd <root>/extension && npm run lint && npm run compile && npm run test && npm ru
 
 Then reload VS Code (Ctrl+Shift+P → Reload Window) and test manually.
 
-**Useful npm scripts** (run from repo root or use `--prefix extension`):
+**Useful npm scripts** (run from repo root or use `--prefix src/PPDS.Extension`):
 
 | Request | Command |
 |---------|---------|
@@ -1011,7 +1011,7 @@ Depends on: Task 2 (skill renames), Task 3 (/verify exists)
 In `.claude/commands/implement.md`, update **Step 5 Section C (Verify Phase Gate)** to add after the test suite run:
 
 ```markdown
-- If the phase touches extension code (`extension/` directory):
+- If the phase touches extension code (`src/PPDS.Extension/` directory):
   Invoke `/verify extension` to check daemon status, tree views, and panel state.
 - If the phase touches TUI code (`src/PPDS.Cli/Tui/`):
   Invoke `/verify tui` to check TUI rendering.
@@ -1032,7 +1032,7 @@ Replace all references to old skill names:
 git add .claude/commands/implement.md
 git commit -m "docs: update /implement with /verify at phase gates + renamed skill refs
 
-Add extension/tui/mcp verification steps to phase gates.
+Add src/PPDS.Extension/tui/mcp verification steps to phase gates.
 Update all skill cross-references to new short names.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
@@ -1186,7 +1186,7 @@ Or use the debug commands to inspect panel state after the query.
 
 Start the dev server:
 ```bash
-npm run dev:webview --prefix extension
+npm run dev:webview --prefix src/PPDS.Extension
 ```
 
 Use Playwright MCP:

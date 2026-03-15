@@ -83,8 +83,8 @@ states.json
 node_modules/
 
 # VS Code Extension test artifacts
-extension/test-results/
-extension/playwright-report/
+src/PPDS.Extension/test-results/
+src/PPDS.Extension/playwright-report/
 .vscode-test/
 
 # Git worktrees

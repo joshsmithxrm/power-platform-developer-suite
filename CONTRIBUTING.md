@@ -120,7 +120,7 @@ power-platform-developer-suite/
 │   ├── PPDS.Auth/           # Authentication profiles
 │   ├── PPDS.Cli/            # CLI tool + TUI
 │   ├── PPDS.Mcp/            # MCP server
-│   └── extension/            # VS Code extension
+│   └── PPDS.Extension/       # VS Code extension
 ├── tests/                   # Test projects
 ├── docs/specs/             # Feature specifications
 └── templates/claude/       # Claude Code integration

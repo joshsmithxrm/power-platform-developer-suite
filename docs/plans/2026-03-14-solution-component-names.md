@@ -991,7 +991,7 @@ git commit -m "feat: wire ComponentNameResolver into SolutionService.GetComponen
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs:1830-1838,2546-2583`
-- Modify: `extension/src/types.ts:175-182`
+- Modify: `src/PPDS.Extension/src/types.ts:175-182`
 
 - [ ] **Step 1: Add name fields to SolutionComponentInfoDto**
 
@@ -1029,7 +1029,7 @@ SchemaName = c.SchemaName
 
 - [ ] **Step 3: Update TypeScript interface**
 
-In `extension/src/types.ts:175-182`, replace:
+In `src/PPDS.Extension/src/types.ts:175-182`, replace:
 
 ```typescript
 export interface SolutionComponentInfoDto {
@@ -1060,13 +1060,13 @@ export interface SolutionComponentInfoDto {
 
 - [ ] **Step 4: Run tests**
 
-Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q && cd extension && npm run ext:test`
+Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q && cd src/PPDS.Extension && npm run ext:test`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs extension/src/types.ts
+git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs src/PPDS.Extension/src/types.ts
 git commit -m "feat: add name fields to SolutionComponentInfoDto and TypeScript interface"
 ```
 
@@ -1080,11 +1080,11 @@ Update the webview to display component names and detail cards.
 
 **AC:** AC-05
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts:240-246`
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts:240-246`
 
 - [ ] **Step 1: Update component mapping in loadComponents**
 
-In `extension/src/panels/SolutionsPanel.ts:240-246`, replace:
+In `src/PPDS.Extension/src/panels/SolutionsPanel.ts:240-246`, replace:
 
 ```typescript
 components: components.map(c => ({
@@ -1108,13 +1108,13 @@ components: components.map(c => ({
 
 - [ ] **Step 2: Run extension tests**
 
-Run: `cd extension && npm run ext:test`
+Run: `cd src/PPDS.Extension && npm run ext:test`
 Expected: All tests PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat: forward component name and detail fields from daemon to webview"
 ```
 
@@ -1124,7 +1124,7 @@ git commit -m "feat: forward component name and detail fields from daemon to web
 
 **AC:** AC-05, AC-11
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts:617-624` (webview `renderComponents` function)
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts:617-624` (webview `renderComponents` function)
 
 - [ ] **Step 1: Update renderComponents to display names**
 
@@ -1164,13 +1164,13 @@ Note: All dynamic values go through `escapeHtml()` or `escapeAttr()` (Constituti
 
 - [ ] **Step 2: Run extension tests**
 
-Run: `cd extension && npm run ext:test`
+Run: `cd src/PPDS.Extension && npm run ext:test`
 Expected: All tests PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat: display component names with logicalName > schemaName > displayName priority"
 ```
 
@@ -1180,7 +1180,7 @@ git commit -m "feat: display component names with logicalName > schemaName > dis
 
 **AC:** AC-06, AC-07, AC-13
 **Files:**
-- Modify: `extension/src/panels/SolutionsPanel.ts` (webview JavaScript section)
+- Modify: `src/PPDS.Extension/src/panels/SolutionsPanel.ts` (webview JavaScript section)
 
 - [ ] **Step 1: Add detail card rendering in renderComponents**
 
@@ -1303,7 +1303,7 @@ Note: The copy button is handled within the component click handler via `e.targe
 
 - [ ] **Step 4: Run extension tests**
 
-Run: `cd extension && npm run ext:test`
+Run: `cd src/PPDS.Extension && npm run ext:test`
 Expected: All tests PASS
 
 - [ ] **Step 5: Manual smoke test**
@@ -1319,7 +1319,7 @@ Open the extension in VS Code, connect to a Dataverse environment, open the Solu
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extension/src/panels/SolutionsPanel.ts
+git add src/PPDS.Extension/src/panels/SolutionsPanel.ts
 git commit -m "feat: add click-to-expand detail cards with copy and keyboard support"
 ```
 
@@ -1336,7 +1336,7 @@ Expected: All tests PASS
 
 - [ ] **Step 2: Run all extension tests**
 
-Run: `cd extension && npm run ext:test`
+Run: `cd src/PPDS.Extension && npm run ext:test`
 Expected: All tests PASS
 
 - [ ] **Step 3: Verify AC coverage**
