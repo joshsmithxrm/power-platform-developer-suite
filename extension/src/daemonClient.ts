@@ -63,6 +63,8 @@ export type {
     SchemaAttributesResponse,
 } from './types.js';
 
+export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';
+
 /**
  * Client for communicating with the ppds serve daemon via JSON-RPC.
  *
@@ -92,11 +94,29 @@ export class DaemonClient implements vscode.Disposable {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
     private _disposed = false;
+    private _state: DaemonState = 'stopped';
+    private _heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    private static readonly HEARTBEAT_INTERVAL_MS = 30_000;
+
+    private readonly _onDidChangeState = new vscode.EventEmitter<DaemonState>();
+    readonly onDidChangeState = this._onDidChangeState.event;
+
+    private readonly _onDidReconnect = new vscode.EventEmitter<void>();
+    readonly onDidReconnect = this._onDidReconnect.event;
+
     private extensionPath: string;
 
     constructor(extensionPath: string, private readonly log: vscode.LogOutputChannel) {
         this.extensionPath = extensionPath;
     }
+
+    private setState(state: DaemonState): void {
+        if (this._state === state) return;
+        this._state = state;
+        this._onDidChangeState.fire(state);
+    }
+
+    get state(): DaemonState { return this._state; }
 
     /**
      * Resolves the path to the ppds CLI binary.
@@ -136,6 +156,8 @@ export class DaemonClient implements vscode.Disposable {
         if (this.connection) {
             return; // Already running
         }
+
+        this.setState('starting');
 
         const ppdsPath = this.resolvePpdsPath();
         this.log.info(`Starting ppds serve daemon (${ppdsPath})...`);
@@ -225,6 +247,7 @@ export class DaemonClient implements vscode.Disposable {
             this.connection = null;
             this.process?.kill();
             this.process = null;
+            this.setState('error');
             throw err;
         } finally {
             clearTimeout(timeoutId);
@@ -240,9 +263,13 @@ export class DaemonClient implements vscode.Disposable {
             this.log.warn(`Daemon exited with code ${code}`);
             this.connection = null;
             this.process = null;
+            this.stopHeartbeat();
+            this.setState('error');
         });
 
         this.log.info('Daemon connection established');
+        this.setState('ready');
+        this.startHeartbeat();
     }
 
     // ── Auth methods ────────────────────────────────────────────────────────
@@ -701,11 +728,61 @@ export class DaemonClient implements vscode.Disposable {
         if (this._disposed) throw new Error('DaemonClient is disposed');
         if (this.connection) return;
         if (!this.connectingPromise) {
-            this.connectingPromise = this.start().finally(() => {
+            const wasConnectedBefore = this._state === 'error';
+            this.setState('reconnecting');
+            this.connectingPromise = this.start().then(() => {
+                if (wasConnectedBefore) {
+                    this._onDidReconnect.fire();
+                }
+            }).finally(() => {
                 this.connectingPromise = null;
             });
         }
         await this.connectingPromise;
+    }
+
+    private startHeartbeat(): void {
+        this.stopHeartbeat();
+        this._heartbeatTimer = setInterval(async () => {
+            if (!this.connection || this._disposed) {
+                this.stopHeartbeat();
+                return;
+            }
+            try {
+                // Use auth/list as heartbeat ping
+                // TODO: Consider a lightweight health/ping endpoint
+                await this.connection.sendRequest('auth/list');
+            } catch {
+                this.log.warn('Heartbeat failed — daemon may be unresponsive');
+                this.connection?.dispose();
+                this.connection = null;
+                this.process?.kill();
+                this.process = null;
+                this.stopHeartbeat();
+                this.setState('error');
+            }
+        }, DaemonClient.HEARTBEAT_INTERVAL_MS);
+    }
+
+    private stopHeartbeat(): void {
+        if (this._heartbeatTimer) {
+            clearInterval(this._heartbeatTimer);
+            this._heartbeatTimer = undefined;
+        }
+    }
+
+    async restart(): Promise<void> {
+        if (this._disposed) throw new Error('DaemonClient is disposed');
+        this.stopHeartbeat();
+        if (this.connection) {
+            this.connection.dispose();
+            this.connection = null;
+        }
+        if (this.process) {
+            this.process.kill();
+            this.process = null;
+        }
+        await this.start();
     }
 
     /**
@@ -713,9 +790,9 @@ export class DaemonClient implements vscode.Disposable {
      */
     dispose(): void {
         this.log.info('Disposing daemon client...');
-
         this._disposed = true;
         this.connectingPromise = null;
+        this.stopHeartbeat();
 
         if (this.connection) {
             this.connection.dispose();
@@ -726,5 +803,10 @@ export class DaemonClient implements vscode.Disposable {
             this.process.kill();
             this.process = null;
         }
+
+        // Dispose EventEmitters LAST
+        this.setState('stopped');
+        this._onDidChangeState.dispose();
+        this._onDidReconnect.dispose();
     }
 }
