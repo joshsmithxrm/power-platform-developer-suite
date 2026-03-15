@@ -11,7 +11,7 @@ const SESSION_FILE = resolve(__dirname, '.webview-cdp-session.json');
 const LOG_FILE = resolve(__dirname, '.webview-cdp-console.log');
 const PROFILE_DIR = resolve(__dirname, '.webview-cdp-profile');
 const VALID_COMMANDS = ['launch', 'close', 'connect', 'command', 'wait',
-  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs', 'text'];
+  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs', 'text', 'notebook'];
 const VALID_MODIFIERS = ['ctrl', 'shift', 'alt', 'meta'];
 const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
@@ -76,6 +76,13 @@ export function parseArgs(argv) {
       else if (rest[i] === '--level' && i + 1 < rest.length) { level = rest[++i]; }
     }
     return { command, channel, level };
+  }
+  if (command === 'notebook') {
+    const NOTEBOOK_SUBCOMMANDS = ['run', 'run-all'];
+    const subcommand = rest[0];
+    if (!subcommand) throw new Error('notebook requires a subcommand: ' + NOTEBOOK_SUBCOMMANDS.join(', '));
+    if (!NOTEBOOK_SUBCOMMANDS.includes(subcommand)) throw new Error(`Unknown notebook subcommand: ${subcommand}. Valid: ${NOTEBOOK_SUBCOMMANDS.join(', ')}`);
+    return { command, subcommand };
   }
 
   // Interaction commands: click, eval, type, select, screenshot, mouse, key
@@ -386,6 +393,29 @@ async function runDaemon(workspace) {
         }
         throw new Error(`Timeout: no webview found within ${timeout / 1000} seconds`);
       }
+      case 'notebook': {
+        if (params.subcommand === 'run') {
+          // Click the run button on the focused/selected cell.
+          // This is more reliable than command palette (which steals focus)
+          // or Ctrl+Enter (which may trigger executeAndInsertBelow).
+          // VS Code notebook cells have a run button in the cell toolbar
+          // with the codicon-notebook-execute icon.
+          const runBtn = page.locator('.notebook-cell-list .cell-focus-indicator-top + .cell-inner-container .run-button-container button, .notebook-cell-list .focused .run-button-container button, .notebook-cell-list .cell-selected .run-button-container button').first();
+          try {
+            await runBtn.click({ timeout: 3000 });
+          } catch {
+            // Fallback: use command palette — works when button not visible
+            await executeCommand('Notebook: Run Cell');
+          }
+          await page.waitForTimeout(500);
+          return {};
+        }
+        if (params.subcommand === 'run-all') {
+          await executeCommand('Notebook: Run All');
+          return {};
+        }
+        throw new Error(`Unknown notebook subcommand: ${params.subcommand}`);
+      }
       case 'logs': {
         if (params.channel) {
           const logsDir = resolve(PROFILE_DIR, 'logs');
@@ -639,6 +669,12 @@ async function cmdLogs(parsed) {
   console.log(result.logs);
 }
 
+async function cmdNotebook(parsed) {
+  const session = readSession();
+  await sendToDaemon(session, 'notebook', { subcommand: parsed.subcommand });
+  console.log(`notebook ${parsed.subcommand}: done`);
+}
+
 // ── Main dispatch ──────────────────────────────────────────────────
 
 async function main() {
@@ -667,6 +703,7 @@ async function main() {
     case 'key': await cmdKey(parsed); break;
     case 'mouse': await cmdMouse(parsed); break;
     case 'logs': await cmdLogs(parsed); break;
+    case 'notebook': await cmdNotebook(parsed); break;
   }
 }
 
