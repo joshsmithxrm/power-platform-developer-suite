@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 
 /**
@@ -46,7 +47,7 @@ export abstract class WebviewPanelBase<
     }
 
     /** Override in subclasses to handle incoming messages from the webview. */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     protected handleMessage(_message: TIncoming): void {
         // Default: no-op. Subclasses override to handle typed incoming messages.
     }

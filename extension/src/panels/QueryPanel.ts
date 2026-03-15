@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
-import { WebviewPanelBase } from './WebviewPanelBase.js';
-import { getNonce } from './webviewUtils.js';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { isAuthError } from '../utils/errorUtils.js';
+
+import { getNonce } from './webviewUtils.js';
+import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
 import type { QueryPanelWebviewToHost, QueryPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
@@ -147,12 +149,14 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                                 this.postMessage({ command: 'loadQuery', sql: initialSql });
                             }
                             // Initialize environment from active profile
-                            this.initEnvironment();
+                            void this.initEnvironment();
                             break;
                         case 'webviewError': {
                             const errMsg = message.error;
                             const errStack = message.stack;
+                            // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
                             console.error(`[PPDS Webview] ${errMsg}`);
+                            // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
                             if (errStack) console.error(`[PPDS Webview Stack] ${errStack}`);
                             vscode.window.showErrorMessage(`PPDS Data Explorer: ${errMsg}`);
                             break;
@@ -453,22 +457,22 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     getHtmlContent(webview: vscode.Webview): string {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
-        );
+        ).toString();
         const monacoUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'monaco-editor.js')
-        );
+        ).toString();
         const monacoCssUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'monaco-editor.css')
-        );
+        ).toString();
         const workerUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'editor.worker.js')
-        );
+        ).toString();
         const queryPanelJsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'query-panel.js')
-        );
+        ).toString();
         const queryPanelCssUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'dist', 'query-panel.css')
-        );
+        ).toString();
         const nonce = getNonce();
 
         return `<!DOCTYPE html>

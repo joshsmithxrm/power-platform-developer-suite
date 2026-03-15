@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient, AuthWhoResponse } from '../daemonClient.js';
 import type { ProfileInfo } from '../types.js';
 
@@ -21,17 +22,19 @@ export function registerProfileCommands(
 ): void {
 
     // ── Device Code Handler (registered once, not per createProfile call) ─
-    daemonClient.onDeviceCode(async ({ userCode, verificationUrl, message }) => {
-        const action = await vscode.window.showInformationMessage(
-            message || `Enter code: ${userCode}`,
-            { modal: false },
-            'Open Browser', 'Copy Code'
-        );
-        if (action === 'Open Browser') {
-            await vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
-        } else if (action === 'Copy Code') {
-            await vscode.env.clipboard.writeText(userCode);
-        }
+    daemonClient.onDeviceCode(({ userCode, verificationUrl, message }) => {
+        void (async (): Promise<void> => {
+            const action = await vscode.window.showInformationMessage(
+                message || `Enter code: ${userCode}`,
+                { modal: false },
+                'Open Browser', 'Copy Code'
+            );
+            if (action === 'Open Browser') {
+                await vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
+            } else if (action === 'Copy Code') {
+                await vscode.env.clipboard.writeText(userCode);
+            }
+        })();
     });
 
     // ── Refresh Profiles ────────────────────────────────────────────────

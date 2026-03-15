@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+
 import { DaemonClient } from './daemonClient.js';
+import type { ProfileInfo } from './types.js';
 import { ProfileTreeDataProvider, getProfileId } from './views/profileTreeView.js';
 import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
@@ -26,11 +28,12 @@ let logChannel: vscode.LogOutputChannel | undefined;
  * from command callbacks are logged to the PPDS output channel so they
  * appear in user-submitted log files, not just the dev console.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
 function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic command wrapper accepts arbitrary args
     return async (...args: any[]) => {
         try {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- forwarding opaque command args
             await handler(...args);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -42,7 +45,8 @@ function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void
     };
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export function activate(context: vscode.ExtensionContext): void {
+    // eslint-disable-next-line no-console -- startup diagnostic before LogOutputChannel exists
     console.log('Power Platform Developer Suite is now active');
 
     // ── Legacy State Migration ────────────────────────────────────────
@@ -57,7 +61,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Global unhandled rejection logging — catches async errors that escape
     // individual command handlers so they appear in the PPDS log for diagnostics
-    const rejectionHandler = (reason: unknown) => {
+    const rejectionHandler = (reason: unknown): void => {
         const msg = reason instanceof Error ? reason.message : String(reason);
         const stack = reason instanceof Error ? reason.stack : undefined;
         logChannel?.error(`Unhandled rejection: ${msg}`);
@@ -127,7 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return orderA - orderB;
             });
 
-            const targetId = getProfileId(item.profile as any);
+            const targetId = getProfileId(item.profile as ProfileInfo);
             const targetIdx = sorted.findIndex(i => i.id === targetId);
             const swapIdx = direction === 'up' ? targetIdx - 1 : targetIdx + 1;
 
@@ -147,7 +151,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     context.subscriptions.push(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- VS Code command args are untyped
         vscode.commands.registerCommand('ppds.moveProfileUp', (item) => moveProfile(item, 'up')),
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- VS Code command args are untyped
         vscode.commands.registerCommand('ppds.moveProfileDown', (item) => moveProfile(item, 'down')),
     );
 
@@ -160,8 +166,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(toolsTreeView, toolsTreeProvider);
 
     // Sync tools tree disabled state with profile availability
-    const refreshToolsState = () => {
-        client.authList().then(result => {
+    const refreshToolsState = (): void => {
+        void client.authList().then(result => {
             toolsTreeProvider.setHasActiveProfile(result.activeProfile !== null);
         }).catch(() => {
             toolsTreeProvider.setHasActiveProfile(false);
@@ -309,7 +315,7 @@ export function activate(context: vscode.ExtensionContext) {
             QueryPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
-            openQueryInNotebook(sql ?? '');
+            void openQueryInNotebook(sql ?? '');
         }),
     );
 
@@ -333,6 +339,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 }
 
-export function deactivate() {
+export function deactivate(): void {
     // Cleanup is handled by disposables
 }

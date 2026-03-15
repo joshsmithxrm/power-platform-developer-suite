@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient, DaemonState } from './daemonClient.js';
 
 export class DaemonStatusBar implements vscode.Disposable {

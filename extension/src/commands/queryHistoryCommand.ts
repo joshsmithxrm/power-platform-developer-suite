@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { QueryHistoryEntryDto } from '../types.js';
 
@@ -148,7 +149,7 @@ export async function showQueryHistory(daemon: DaemonClient): Promise<string | u
         }));
 
         disposables.push(quickPick.onDidHide(() => {
-            disposables.forEach(d => d.dispose());
+            disposables.forEach(d => { d.dispose(); });
             quickPick.dispose();
             if (!resolved) { resolved = true; resolve(undefined); }
         }));

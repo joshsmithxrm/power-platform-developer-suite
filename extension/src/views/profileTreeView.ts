@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import type { DaemonClient } from '../daemonClient.js';
 import type { ProfileInfo } from '../types.js';
 
@@ -247,7 +248,7 @@ export class ProfileTreeDataProvider
         }
 
         // Sort: active/default first, then alphabetical
-        const envItems = items.filter(i => i instanceof EnvironmentTreeItem) as EnvironmentTreeItem[];
+        const envItems = items.filter(i => i instanceof EnvironmentTreeItem);
         const otherItems = items.filter(i => !(i instanceof EnvironmentTreeItem));
         envItems.sort((a, b) => {
             if (a.isActive && !b.isActive) return -1;
