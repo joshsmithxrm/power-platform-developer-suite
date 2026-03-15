@@ -21,8 +21,10 @@ using PPDS.Dataverse.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Intellisense;
 using PPDS.Query.Parsing;
+using PPDS.Query.Planning;
 using PPDS.Query.Transpilation;
 using StreamJsonRpc;
 
@@ -921,7 +923,9 @@ public class RpcMethodHandler : IDisposable
                 request.Count,
                 ct);
 
-            return MapToResponse(result, query);
+            var mapped = MapToResponse(result, query);
+            mapped.QueryMode = "dataverse";
+            return mapped;
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
@@ -1017,7 +1021,9 @@ public class RpcMethodHandler : IDisposable
                     sp.GetService<ILogger<TdsQueryExecutor>>());
 
                 var result = await tdsExecutor.ExecuteSqlAsync(request.Sql, request.Top, ct);
-                return MapToResponse(result, null);
+                var mapped = MapToResponse(result, null);
+                mapped.QueryMode = "tds";
+                return mapped;
             }, cancellationToken);
 
             // Auto-save to history (fire-and-forget)
@@ -1034,7 +1040,8 @@ public class RpcMethodHandler : IDisposable
             return new QueryResultResponse
             {
                 Success = true,
-                ExecutedFetchXml = fetchXml
+                ExecutedFetchXml = fetchXml,
+                QueryMode = "dataverse"
             };
         }
 
@@ -1048,7 +1055,9 @@ public class RpcMethodHandler : IDisposable
                 request.Count,
                 ct);
 
-            return MapToResponse(result, fetchXml);
+            var mapped = MapToResponse(result, fetchXml);
+            mapped.QueryMode = "dataverse";
+            return mapped;
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
@@ -1225,9 +1234,9 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
-    /// Returns the execution plan for a SQL query by transpiling it to FetchXML.
-    /// Since Dataverse SQL is always transpiled to FetchXML for execution,
-    /// the FetchXML output serves as the execution plan.
+    /// Returns the execution plan for a SQL query.
+    /// Builds a full plan tree showing node types, descriptions, and estimated row counts.
+    /// Falls back to transpiled FetchXML if plan building fails.
     /// </summary>
     [JsonRpcMethod("query/explain")]
     public Task<QueryExplainResponse> QueryExplainAsync(
@@ -1241,13 +1250,36 @@ public class RpcMethodHandler : IDisposable
                 "The 'sql' parameter is required");
         }
 
-        var fetchXml = TranspileSqlToFetchXml(request.Sql);
-
-        return Task.FromResult(new QueryExplainResponse
+        try
         {
-            Plan = fetchXml,
-            Format = "fetchxml"
-        });
+            var parser = new QueryParser();
+            var fragment = parser.Parse(request.Sql);
+
+            var fetchXmlGen = new FetchXmlGeneratorService();
+            var planBuilder = new ExecutionPlanBuilder(fetchXmlGen);
+            var planResult = planBuilder.Plan(fragment, new QueryPlanOptions());
+            var description = QueryPlanDescription.FromNode(planResult.RootNode);
+            var formatted = Tui.Components.QueryPlanView.FormatPlanTree(description);
+
+            // Also include the transpiled FetchXML for reference
+            var fetchXml = TranspileSqlToFetchXml(request.Sql);
+
+            return Task.FromResult(new QueryExplainResponse
+            {
+                Plan = formatted + "\n\n--- FetchXML ---\n" + fetchXml,
+                Format = "text"
+            });
+        }
+        catch
+        {
+            // Fall back to just the transpiled FetchXML if plan building fails
+            var fetchXml = TranspileSqlToFetchXml(request.Sql);
+            return Task.FromResult(new QueryExplainResponse
+            {
+                Plan = fetchXml,
+                Format = "fetchxml"
+            });
+        }
     }
 
     /// <summary>
@@ -2398,6 +2430,10 @@ public class QueryResultResponse
 
     [JsonPropertyName("executionTimeMs")]
     public long ExecutionTimeMs { get; set; }
+
+    [JsonPropertyName("queryMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QueryMode { get; set; }
 }
 
 /// <summary>
