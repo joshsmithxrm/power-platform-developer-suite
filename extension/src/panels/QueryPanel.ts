@@ -821,6 +821,19 @@ export class QueryPanel extends WebviewPanelBase {
     });
 
     // ── Keyboard shortcuts ──
+    // Ctrl+C with table selection: use CAPTURE phase to intercept before Monaco.
+    // When the user has selected cells in the results grid, Ctrl+C should copy
+    // from the grid — not from Monaco's editor. Monaco would otherwise intercept
+    // the event and copy its own (empty) selection.
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && anchor) {
+            e.preventDefault();
+            e.stopPropagation();
+            copySelection(e.shiftKey);
+            return;
+        }
+    }, true); // capture phase — fires before Monaco's handlers
+
     document.addEventListener('keydown', (e) => {
         // Filter toggle
         if (e.key === '/' && !editor.hasTextFocus() && document.activeElement !== filterInput) {
@@ -848,16 +861,6 @@ export class QueryPanel extends WebviewPanelBase {
                 anchor = { row: 0, col: 0 };
                 focus = { row: displayedRows.length - 1, col: columns.length - 1 };
                 updateSelectionVisuals();
-            }
-            return;
-        }
-
-        // Ctrl+C / Ctrl+Shift+C: copy selection
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-            console.log('[PPDS Copy] Ctrl+C pressed. editorFocus:', editor.hasTextFocus(), 'anchor:', anchor, 'activeElement:', document.activeElement?.tagName);
-            if (!editor.hasTextFocus() && document.activeElement !== filterInput && anchor) {
-                e.preventDefault();
-                copySelection(e.shiftKey);
             }
             return;
         }
