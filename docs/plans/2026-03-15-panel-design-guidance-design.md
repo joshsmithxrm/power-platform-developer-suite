@@ -39,7 +39,8 @@ Catalog of existing patterns with reference panels:
 |---------|--------|-----------|
 | Data table | `query-panel.css` `.results-table` | QueryPanel |
 | Tree/list | `solutions-panel.css` `.solution-list` | SolutionsPanel |
-| Detail card | `solutions-panel.css` `.detail-card` | SolutionsPanel |
+| Detail card (standalone) | `solutions-panel.css` `.detail-card` | SolutionsPanel |
+| Detail card (inline/nested) | `solutions-panel.css` `.component-detail-card` | SolutionsPanel |
 | Filter bar | `query-panel.css` `.filter-bar` | QueryPanel |
 | Dropdown menu | `query-panel.css` `.dropdown-menu` | QueryPanel |
 | Context menu | `query-panel.css` `.context-menu` | QueryPanel |
@@ -51,15 +52,17 @@ Rules: `@import './shared.css'`, copy patterns don't cross-import, use `var(--vs
 Implement a `data-env-type` attribute on the toolbar element, set when environment is selected. Add CSS rules to `shared.css` for colored top-border accents:
 
 - Production: red (`--vscode-testing-iconFailed`)
-- Sandbox/Test: yellow (`--vscode-editorWarning-foreground`)
+- Sandbox: yellow (`--vscode-editorWarning-foreground`)
 - Development: green (`--vscode-testing-iconPassed`)
+- Test: yellow (`--vscode-editorWarning-foreground`) — same color as Sandbox, separate `data-env-type` value
 - Trial: blue (`--vscode-editorInfo-foreground`)
+- Unknown/null: no attribute set, no accent border (natural CSS default)
 
-This maps to TUI's `StatusBar_Production/Sandbox/Development/Test/Trial` schemes. The accent is subtle (3px top border) — panels don't get repainted.
+This maps to TUI's five-value `StatusBar_Production/Sandbox/Development/Test/Trial` scheme. The accent is subtle (3px top border) — panels don't get repainted.
 
 Implementation touches:
-- `shared.css`: ~6 lines of `[data-env-type]` selectors
-- `environmentPicker.ts`: set attribute when env is resolved
+- `shared.css`: `[data-env-type]` selectors for all five types
+- `environmentPicker.ts`: extend `showEnvironmentPicker` return type to include `type` from `EnvironmentInfo.type`, set `data-env-type` attribute on toolbar when env is selected. Remove attribute when type is null/Unknown.
 - Host panels: pass environment type from daemon response
 
 ### 4. Keyboard Shortcuts
