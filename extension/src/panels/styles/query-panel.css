@@ -4,7 +4,8 @@
 
 .editor-container {
     flex-shrink: 0;
-    border-bottom: 1px solid var(--vscode-panel-border);
+    border-bottom: 2px solid var(--vscode-panel-border);
+    background: var(--vscode-editor-background, var(--vscode-panel-background));
 }
 
 .editor-wrapper {
@@ -19,6 +20,19 @@
 #sql-editor {
     position: absolute;
     inset: 0;
+}
+
+/* Visible resize grab handle */
+.editor-container::after {
+    content: '';
+    display: block;
+    height: 4px;
+    cursor: ns-resize;
+    background: transparent;
+    transition: background 0.15s;
+}
+.editor-container:hover::after {
+    background: var(--vscode-focusBorder);
 }
 
 /* ── Language toggle pill ───────────────────────────────────────────────── */
