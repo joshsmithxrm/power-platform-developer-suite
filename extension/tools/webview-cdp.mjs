@@ -1,13 +1,17 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SESSION_FILE = resolve(__dirname, '.webview-cdp-session.json');
-const VALID_COMMANDS = ['launch', 'attach', 'close', 'connect', 'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse'];
+const LOG_FILE = resolve(__dirname, '.webview-cdp-console.log');
+const PROFILE_DIR = resolve(__dirname, '.webview-cdp-profile');
+const VALID_COMMANDS = ['launch', 'close', 'connect', 'command', 'wait',
+  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs'];
 const VALID_MODIFIERS = ['ctrl', 'shift', 'alt', 'meta'];
 const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
@@ -32,15 +36,13 @@ export function parseKeyCombo(combo) {
     }
     modifiers[m] = true;
   }
-  const keyMap = { enter: 'Enter', escape: 'Escape', tab: 'Tab', backspace: 'Backspace',
+  const keyMap = {
+    enter: 'Enter', escape: 'Escape', tab: 'Tab', backspace: 'Backspace',
     delete: 'Delete', arrowup: 'ArrowUp', arrowdown: 'ArrowDown',
-    arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', space: ' ' };
+    arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', space: ' ',
+  };
   const normalizedKey = keyMap[key.toLowerCase()] || key;
   return { key: normalizedKey, modifiers };
-}
-
-export function filterWebviewTargets(targets) {
-  return targets.filter(t => t.type === 'iframe' && t.url && t.url.startsWith('vscode-webview://'));
 }
 
 export function parseArgs(argv) {
@@ -49,716 +51,530 @@ export function parseArgs(argv) {
   if (!VALID_COMMANDS.includes(command)) throw new Error(`Unknown command: ${command}`);
 
   const rest = argv.slice(1);
-  let target, right = false, page = false, port = 9223;
-  const args = [];
 
-  for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--target' && i + 1 < rest.length) {
-      target = parseInt(rest[++i], 10);
-    } else if (rest[i] === '--right') {
-      right = true;
-    } else if (rest[i] === '--page') {
-      page = true;
-    } else if (rest[i] === '--port' && i + 1 < rest.length) {
-      port = validatePort(parseInt(rest[++i], 10));
-    } else {
-      args.push(rest[i]);
-    }
-  }
-
+  // Simple commands with no interaction flags
   if (command === 'launch') {
-    const launchPort = args[0] ? validatePort(parseInt(args[0], 10)) : 9223;
-    return { command, port: launchPort, workspace: args[1], args: [] };
+    return { command, workspace: rest[0] };
+  }
+  if (command === 'close' || command === 'connect') {
+    return { command };
+  }
+  if (command === 'command') {
+    return { command, args: rest };
+  }
+  if (command === 'wait') {
+    let timeout = 30000, ext;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '--ext' && i + 1 < rest.length) { ext = rest[++i]; }
+      else { const n = parseInt(rest[i], 10); if (!isNaN(n)) timeout = n; }
+    }
+    return { command, timeout, ext };
+  }
+  if (command === 'logs') {
+    let channel, level;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '--channel' && i + 1 < rest.length) { channel = rest[++i]; }
+      else if (rest[i] === '--level' && i + 1 < rest.length) { level = rest[++i]; }
+    }
+    return { command, channel, level };
   }
 
-  if (command === 'attach') {
-    const attachPort = args[0] ? validatePort(parseInt(args[0], 10)) : undefined;
-    return { command, port: attachPort, args: [] };
+  // Interaction commands: click, eval, type, select, screenshot, mouse, key
+  let target, ext, right = false, page = false;
+  const args = [];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--target' && i + 1 < rest.length) { target = parseInt(rest[++i], 10); }
+    else if (rest[i] === '--ext' && i + 1 < rest.length) { ext = rest[++i]; }
+    else if (rest[i] === '--right') { right = true; }
+    else if (rest[i] === '--page') { page = true; }
+    else { args.push(rest[i]); }
   }
 
-  const result = { command, port, args, page };
-  if (target !== undefined) result.target = target;
-  if (command === 'click') result.right = right;
-  return result;
+  // key command: only has args and page (no target/ext/right)
+  if (command === 'key') {
+    return { command, args, page };
+  }
+  // click: has right flag
+  if (command === 'click') {
+    return { command, args, page, right, target, ext };
+  }
+  // all others: args, page, target, ext
+  return { command, args, page, target, ext };
 }
 
 // ── Session file I/O ───────────────────────────────────────────────
 
 function readSession() {
-  if (!existsSync(SESSION_FILE)) {
-    throw new Error('No session found. Run `webview-cdp launch` or `webview-cdp attach` first.');
-  }
+  if (!existsSync(SESSION_FILE))
+    throw new Error('No session found. Run `webview-cdp launch` first.');
   return JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
 }
 
-function writeSession(pid, port, mode = 'launch') {
-  writeFileSync(SESSION_FILE, JSON.stringify({ pid, port, mode }, null, 2));
+function writeSession(data) {
+  writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
 }
 
 function deleteSession() {
   if (existsSync(SESSION_FILE)) unlinkSync(SESSION_FILE);
 }
 
-// ── CDP helpers ────────────────────────────────────────────────────
+// ── HTTP Client (caller mode) ──────────────────────────────────────
 
-async function fetchTargets(port) {
-  const res = await fetch(`http://localhost:${port}/json/list`);
-  if (!res.ok) throw new Error(`CDP endpoint returned ${res.status}`);
-  return res.json();
-}
-
-async function connectWebSocket(url, timeoutMs = 5000) {
-  const { default: WebSocket } = await import('ws');
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('WebSocket connection timeout')), timeoutMs);
-    const ws = new WebSocket(url);
-    ws.on('open', () => { clearTimeout(timer); resolve(ws); });
-    ws.on('error', (err) => { clearTimeout(timer); reject(err); });
+async function sendToDaemon(session, action, params = {}) {
+  const body = JSON.stringify({ action, ...params });
+  const res = await fetch(`http://localhost:${session.daemonPort}/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
   });
+  const result = await res.json();
+  if (!result.success) throw new Error(result.error);
+  return result;
 }
 
-function sendCDP(ws, method, params = {}, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    const id = Math.floor(Math.random() * 1e9);
-    const timer = setTimeout(() => {
-      ws.off('message', handler);
-      reject(new Error(`CDP timeout (${method}): no response within ${timeoutMs}ms`));
-    }, timeoutMs);
-    const handler = (data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.id === id) {
-        clearTimeout(timer);
-        ws.off('message', handler);
-        if (msg.error) reject(new Error(`CDP error (${method}): ${msg.error.message}`));
-        else resolve(msg.result);
-      }
-    };
-    ws.on('message', handler);
-    ws.send(JSON.stringify({ id, method, params }));
+// ── Daemon Mode ────────────────────────────────────────────────────
+
+async function runDaemon(workspace) {
+  // Dynamic import — callers don't need Playwright
+  const { _electron: electron } = await import('@playwright/test');
+  const { downloadAndUnzipVSCode } = await import('@vscode/test-electron');
+
+  const execPath = await downloadAndUnzipVSCode();
+  const extensionPath = resolve(__dirname, '..');
+
+  const electronApp = await electron.launch({
+    executablePath: execPath,
+    args: [
+      '--extensionDevelopmentPath=' + extensionPath,
+      '--user-data-dir=' + PROFILE_DIR,
+      '--no-sandbox',
+      '--disable-gpu',
+      '--log=trace',
+      '--disable-workspace-trust',
+      '--skip-release-notes',
+      '--disable-telemetry',
+      '--disable-crash-reporter',
+      workspace,
+    ],
   });
-}
 
-async function discoverContext(ws) {
-  const contexts = [];
-  const contextHandler = (data) => {
-    const msg = JSON.parse(data.toString());
-    if (msg.method === 'Runtime.executionContextCreated') {
-      contexts.push(msg.params.context);
-    }
-  };
-  ws.on('message', contextHandler);
-  await sendCDP(ws, 'Runtime.enable');
-  await new Promise(r => setTimeout(r, 500));
-  ws.off('message', contextHandler);
+  const page = await electronApp.firstWindow();
+  await page.waitForSelector('[id="workbench.parts.editor"]', { timeout: 60000 });
 
-  for (const ctx of contexts) {
-    try {
-      const result = await sendCDP(ws, 'Runtime.evaluate', {
-        expression: 'document.body !== null',
-        contextId: ctx.id,
-        returnByValue: true,
-      });
-      if (result.result && result.result.value === true) {
-        const probe = await sendCDP(ws, 'Runtime.evaluate', {
-          expression: 'document.body.children.length',
-          contextId: ctx.id,
-          returnByValue: true,
-        });
-        if (probe.result && probe.result.value > 0) {
-          return ctx.id;
-        }
-      }
-    } catch {
-      // Context may not be valid, skip
-    }
-  }
-  throw new Error('Could not find webview execution context. Webview may still be loading.');
-}
-
-// ── Shared command infrastructure ──────────────────────────────────
-
-async function withWebview(port, targetIndex, fn) {
-  let allTargets;
+  // Try dialog interception
   try {
-    allTargets = await fetchTargets(port);
+    await electronApp.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
+      dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+      dialog.showSaveDialog = async () => ({ canceled: true, filePath: undefined });
+    });
+    console.error('Dialog hooks installed');
   } catch {
-    throw new Error('Connection refused. VS Code may have closed.');
+    console.error('Dialog hooks not available — native dialogs may block');
   }
 
-  const webviews = filterWebviewTargets(allTargets);
-  if (webviews.length === 0) {
-    throw new Error('No webview found. Is a webview panel open?');
-  }
+  // Console capture
+  if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
+  page.on('console', msg => {
+    appendFileSync(LOG_FILE, JSON.stringify({
+      level: msg.type(), message: msg.text(),
+      source: 'main', timestamp: new Date().toISOString(),
+    }) + '\n');
+  });
+  page.on('pageerror', err => {
+    appendFileSync(LOG_FILE, JSON.stringify({
+      level: 'error', message: 'Uncaught: ' + err.message,
+      source: 'main', timestamp: new Date().toISOString(),
+    }) + '\n');
+  });
 
-  const idx = targetIndex ?? 0;
-  if (idx < 0 || idx >= webviews.length) {
-    throw new Error(`Target index ${idx} out of range (found ${webviews.length} webviews)`);
-  }
-
-  const target = webviews[idx];
-  const ws = await connectWebSocket(target.webSocketDebuggerUrl);
-  try {
-    const contextId = await discoverContext(ws);
-    return await fn(ws, contextId, target);
-  } finally {
-    ws.close();
-  }
-}
-
-async function withPage(port, fn) {
-  let allTargets;
-  try {
-    allTargets = await fetchTargets(port);
-  } catch {
-    throw new Error('Connection refused. VS Code may have closed.');
-  }
-
-  // Find the main VS Code page target
-  const pages = allTargets.filter(t => t.type === 'page');
-  if (pages.length === 0) {
-    throw new Error('No page target found. Is VS Code running?');
-  }
-
-  // Prefer the page with "Visual Studio Code" in the title, fall back to first page
-  const target = pages.find(t => t.title?.includes('Visual Studio Code')) || pages[0];
-  const ws = await connectWebSocket(target.webSocketDebuggerUrl);
-  try {
-    // No context discovery needed — use default context (no contextId = main frame)
-    return await fn(ws, undefined, target);
-  } finally {
-    ws.close();
-  }
-}
-
-// Helper to route through withPage or withWebview based on --page flag
-async function withTarget(parsed, fn) {
-  const session = readSession();
-  if (parsed.page) {
-    return withPage(session.port, fn);
-  }
-  return withWebview(session.port, parsed.target, fn);
-}
-
-// ── Command: launch ────────────────────────────────────────────────
-
-function findVSCodeExecutable() {
-  if (process.platform === 'win32') {
-    // Try common install locations for Code.exe (not the code.cmd wrapper)
-    const candidates = [
-      resolve(process.env.LOCALAPPDATA || '', 'Programs/Microsoft VS Code/Code.exe'),
-      resolve(process.env.PROGRAMFILES || '', 'Microsoft VS Code/Code.exe'),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) return candidate;
-    }
-    // Fall back to 'code' wrapper (may not honor --remote-debugging-port)
-    return 'code';
-  }
-  // macOS/Linux: use 'code' binary directly
-  return 'code';
-}
-
-async function discoverCDPPort(pid, requestedPort, timeoutMs = 20000) {
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < timeoutMs) {
-    // First try the requested port
-    try {
-      const res = await fetch(`http://localhost:${requestedPort}/json/version`);
-      await res.json();
-      return requestedPort;
-    } catch {
-      // Not on requested port yet
-    }
-
-    // On Windows, scan ports opened by the VS Code process tree
-    if (process.platform === 'win32') {
-      try {
-        // Use -EncodedCommand to avoid bash/shell escaping issues with $_ in PowerShell
-        const psScript = `
-          $procs = Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} -or $_.ProcessId -eq ${pid} } | Select-Object -ExpandProperty ProcessId
-          if ($procs) { Get-NetTCPConnection -State Listen -OwningProcess $procs -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort }
-        `;
-        const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-        const output = execSync(
-          `powershell -NoProfile -EncodedCommand ${encoded}`,
-          { encoding: 'utf-8', timeout: 5000 }
-        );
-        const ports = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
-        for (const candidatePort of ports) {
-          try {
-            const res = await fetch(`http://localhost:${candidatePort}/json/version`);
-            await res.json();
-            return candidatePort;
-          } catch {
-            // Not a CDP endpoint
-          }
-        }
-      } catch {
-        // PowerShell command failed, continue polling
+  // Webview frame resolver
+  async function resolveWebviewFrame(targetIndex, extFilter) {
+    const iframes = await page.$$('iframe[class*="webview"]');
+    let filtered = iframes;
+    if (extFilter) {
+      filtered = [];
+      for (const iframe of iframes) {
+        const src = await iframe.getAttribute('src') || '';
+        if (src.includes(extFilter)) filtered.push(iframe);
       }
     }
+    const idx = targetIndex ?? 0;
+    if (filtered.length === 0) throw new Error('No webview found. Open a panel first.');
+    if (idx < 0 || idx >= filtered.length)
+      throw new Error(`Target index ${idx} out of range (found ${filtered.length} webviews)`);
 
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  throw new Error(`Timeout: Could not find VS Code CDP port within ${timeoutMs / 1000} seconds.`);
-}
+    const outerFrame = await filtered[idx].contentFrame();
+    if (!outerFrame) throw new Error('Could not access webview frame');
 
-async function cmdLaunch(parsed) {
-  const port = parsed.port;
-
-  // Check if requested port is in use
-  try {
-    await fetch(`http://localhost:${port}/json/version`);
-    throw new Error(`Port ${port} already in use.`);
-  } catch (err) {
-    if (err.message.includes('already in use')) throw err;
-    // Connection refused = port is free, continue
-  }
-
-  // Resolve paths
-  const workspace = parsed.workspace || process.cwd();
-  const extensionPath = resolve(__dirname, '..');  // extension/ directory
-  const userDataDir = resolve(__dirname, '.webview-cdp-profile');
-
-  // Find the actual VS Code executable (not the wrapper)
-  const vscodeExe = findVSCodeExecutable();
-  const useShell = vscodeExe === 'code'; // only shell for the wrapper
-
-  // Spawn VS Code with isolated profile
-  const codeProcess = spawn(vscodeExe, [
-    '--extensionDevelopmentPath', extensionPath,
-    '--remote-debugging-port', String(port),
-    '--user-data-dir', userDataDir,
-    '--skip-release-notes',
-    '--disable-workspace-trust',
-    workspace,
-  ], {
-    shell: useShell,
-    detached: true,
-    stdio: 'ignore',
-  });
-  codeProcess.unref();
-
-  // Discover the actual CDP port (VS Code may use a different port than requested)
-  const actualPort = await discoverCDPPort(codeProcess.pid, port);
-
-  writeSession(codeProcess.pid, actualPort);
-  if (actualPort !== port) {
-    console.log(`VS Code launched on port ${actualPort} (requested ${port}, PID ${codeProcess.pid})`);
-  } else {
-    console.log(`VS Code launched on port ${actualPort} (PID ${codeProcess.pid})`);
-  }
-}
-
-// ── Command: attach ────────────────────────────────────────────────
-
-async function cmdAttach(parsed) {
-  // If port is provided, try that directly
-  if (parsed.port) {
+    // VS Code nests another iframe inside
     try {
-      await fetchTargets(parsed.port);
-      writeSession(null, parsed.port, 'attach');
-      console.log(`Attached to VS Code on port ${parsed.port}`);
-      return;
-    } catch {
-      throw new Error(`Connection refused on port ${parsed.port}. Is VS Code running with --remote-debugging-port=${parsed.port}?`);
-    }
+      const innerIframe = await outerFrame.waitForSelector('iframe', { timeout: 5000 });
+      const innerFrame = await innerIframe.contentFrame();
+      if (innerFrame) return innerFrame;
+    } catch {}
+    return outerFrame;
   }
 
-  // Auto-discover: scan for VS Code CDP endpoints on common ports and process ports
-  const portsToTry = [];
+  async function resolveTarget(params) {
+    if (params.page) return page;
+    return resolveWebviewFrame(params.target, params.ext);
+  }
 
-  // On Windows, find all VS Code/Electron processes and their listening ports
-  if (process.platform === 'win32') {
+  // Command palette helper
+  async function executeCommand(commandText) {
+    await page.keyboard.press('Control+Shift+P');
+    await page.waitForSelector('.quick-input-widget', { state: 'visible', timeout: 5000 });
+    await page.keyboard.type(commandText, { delay: 50 });
+
     try {
-      // Use -EncodedCommand to avoid bash/shell escaping issues with $_ in PowerShell
-      const psScript = `
-        $pids = Get-Process -Name Code, Electron -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
-        if ($pids) { Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort }
-      `;
-      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-      const output = execSync(
-        `powershell -NoProfile -EncodedCommand ${encoded}`,
-        { encoding: 'utf-8', timeout: 5000 }
+      const firstResult = await page.waitForSelector(
+        '.quick-input-list .quick-input-list-entry',
+        { timeout: 5000 }
       );
-      const discovered = output.trim().split(/\r?\n/).map(p => parseInt(p, 10)).filter(p => p > 1024);
-      portsToTry.push(...discovered);
-    } catch {
-      // No VS Code processes found or PowerShell failed
-    }
-  }
-
-  // Also try common debug ports
-  portsToTry.push(9222, 9223, 9224, 9225);
-
-  // Deduplicate
-  const uniquePorts = [...new Set(portsToTry)];
-
-  for (const candidatePort of uniquePorts) {
-    try {
-      const res = await fetch(`http://localhost:${candidatePort}/json/version`);
-      const info = await res.json();
-      // Verify it's actually VS Code / Electron
-      if (info.Browser && /electron/i.test(info.Browser)) {
-        writeSession(null, candidatePort, 'attach');
-        console.log(`Attached to VS Code on port ${candidatePort} (auto-discovered)`);
+      if (firstResult) {
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(500);
         return;
       }
     } catch {
-      // Not a CDP endpoint on this port
+      await page.keyboard.press('Escape');
+      throw new Error(`Command not found: ${commandText}`);
     }
   }
 
-  throw new Error(
-    'Could not find a VS Code instance with CDP enabled.\n' +
-    'Start VS Code with: code --remote-debugging-port=9223\n' +
-    'Or specify the port: webview-cdp attach <port>'
-  );
+  // Key combo → Playwright format
+  function toPlaywrightCombo(parsed) {
+    const parts = [];
+    if (parsed.modifiers.ctrl) parts.push('Control');
+    if (parsed.modifiers.shift) parts.push('Shift');
+    if (parsed.modifiers.alt) parts.push('Alt');
+    if (parsed.modifiers.meta) parts.push('Meta');
+    parts.push(parsed.key);
+    return parts.join('+');
+  }
+
+  // Action handler
+  async function handleAction(action, params) {
+    switch (action) {
+      case 'screenshot': {
+        const target = await resolveTarget(params);
+        await target.screenshot({ path: resolve(params.file) });
+        return { path: resolve(params.file) };
+      }
+      case 'eval': {
+        const target = await resolveTarget(params);
+        const value = await target.evaluate(params.expression);
+        return { value };
+      }
+      case 'click': {
+        const target = await resolveTarget(params);
+        const opts = {};
+        if (params.right) opts.button = 'right';
+        await target.click(params.selector, opts);
+        return {};
+      }
+      case 'type': {
+        const target = await resolveTarget(params);
+        await target.fill(params.selector, params.text);
+        return {};
+      }
+      case 'select': {
+        const target = await resolveTarget(params);
+        await target.selectOption(params.selector, params.value);
+        return {};
+      }
+      case 'key': {
+        const combo = parseKeyCombo(params.combo);
+        const pwCombo = toPlaywrightCombo(combo);
+        await page.keyboard.press(pwCombo);
+        return {};
+      }
+      case 'mouse': {
+        const methodMap = { mousedown: 'down', mousemove: 'move', mouseup: 'up' };
+        const method = methodMap[params.event];
+        if (!method) throw new Error('Invalid mouse event');
+        await page.mouse[method](params.x, params.y);
+        return {};
+      }
+      case 'command': {
+        await executeCommand(params.text);
+        return {};
+      }
+      case 'connect': {
+        const iframes = await page.$$('iframe[class*="webview"]');
+        const targets = [];
+        for (const iframe of iframes) {
+          const src = await iframe.getAttribute('src') || '';
+          const extMatch = src.match(/extensionId=([^&]*)/);
+          targets.push({ ext: extMatch?.[1] || 'unknown', src });
+        }
+        return { targets };
+      }
+      case 'wait': {
+        const start = Date.now();
+        const timeout = params.timeout || 30000;
+        while (Date.now() - start < timeout) {
+          try {
+            await resolveWebviewFrame(params.target, params.ext);
+            return {};
+          } catch {
+            await new Promise(r => setTimeout(r, 500));
+          }
+        }
+        throw new Error(`Timeout: no webview found within ${timeout / 1000} seconds`);
+      }
+      case 'logs': {
+        if (params.channel) {
+          const logsDir = resolve(PROFILE_DIR, 'logs');
+          if (!existsSync(logsDir)) return { logs: 'No log directory found' };
+          try {
+            const output = execSync(
+              `grep -r "${params.channel}" "${logsDir}" --include="*.log" -l`,
+              { encoding: 'utf-8', timeout: 5000 }
+            ).trim();
+            if (!output) return { logs: `No logs found for channel: ${params.channel}` };
+            const logContent = output.split('\n').map(f => readFileSync(f, 'utf-8')).join('\n');
+            return { logs: logContent };
+          } catch {
+            return { logs: `No logs found for channel: ${params.channel}` };
+          }
+        }
+        if (!existsSync(LOG_FILE)) return { logs: '' };
+        return { logs: readFileSync(LOG_FILE, 'utf-8') };
+      }
+      default:
+        throw new Error(`Unknown action: ${action}`);
+    }
+  }
+
+  // HTTP server helpers
+  function readBody(req) {
+    return new Promise((resolveBody) => {
+      let data = '';
+      req.on('data', chunk => { data += chunk; });
+      req.on('end', () => resolveBody(data));
+    });
+  }
+
+  const server = createServer(async (req, res) => {
+    try {
+      if (req.url === '/health') {
+        res.writeHead(200); res.end('ok'); return;
+      }
+      if (req.url === '/shutdown') {
+        res.writeHead(200); res.end('ok');
+        await cleanup();
+        return;
+      }
+      if (req.url === '/execute' && req.method === 'POST') {
+        const body = await readBody(req);
+        const { action, ...params } = JSON.parse(body);
+        const result = await handleAction(action, params);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, ...result }));
+        return;
+      }
+      res.writeHead(404); res.end('Not found');
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+
+  server.listen(0); // random port
+  const daemonPort = server.address().port;
+
+  writeSession({ daemonPort, daemonPid: process.pid, userDataDir: PROFILE_DIR, logFile: LOG_FILE });
+  console.error(`Daemon ready on port ${daemonPort}`);
+
+  async function cleanup() {
+    try { await electronApp.close(); } catch {}
+    deleteSession();
+    if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
+    server.close();
+    process.exit(0);
+  }
+
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
 }
 
-// ── Command: close ─────────────────────────────────────────────────
+// ── Caller command handlers ────────────────────────────────────────
+
+async function cmdLaunch(parsed) {
+  if (existsSync(SESSION_FILE)) {
+    const session = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
+    try {
+      await fetch(`http://localhost:${session.daemonPort}/health`);
+      console.log('VS Code is already running. Run `close` first.');
+      return;
+    } catch {
+      // Stale session — clean up
+      try { process.kill(session.daemonPid); } catch {}
+      deleteSession();
+    }
+  }
+
+  const workspace = parsed.workspace || process.cwd();
+  const child = spawn(process.execPath, [__filename, '--daemon', workspace], {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  child.unref();
+
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    if (existsSync(SESSION_FILE)) {
+      const session = readSession();
+      console.log(`VS Code launched (daemon PID ${session.daemonPid}, port ${session.daemonPort})`);
+      return;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('Timeout: daemon did not start within 90 seconds');
+}
 
 async function cmdClose() {
   const session = readSession();
-
-  // Refuse to kill an attached instance — that's the user's editor
-  if (session.mode === 'attach') {
-    deleteSession();
-    console.log('Detached from VS Code (session cleaned up). VS Code was not closed.');
-    return;
-  }
-
-  let isVSCode = false;
   try {
-    if (process.platform === 'win32') {
-      const output = execSync(`tasklist /FI "PID eq ${session.pid}" /FO CSV /NH`, { encoding: 'utf-8' });
-      isVSCode = /code|electron/i.test(output);
-    } else {
-      const output = execSync(`ps -p ${session.pid} -o comm=`, { encoding: 'utf-8' });
-      isVSCode = /code|electron/i.test(output);
-    }
+    await fetch(`http://localhost:${session.daemonPort}/shutdown`);
   } catch {
-    // Process may already be dead
+    try { process.kill(session.daemonPid); } catch {}
   }
-
-  if (isVSCode) {
-    try {
-      if (process.platform === 'win32') {
-        execSync(`taskkill /PID ${session.pid} /T /F`, { stdio: 'ignore' });
-      } else {
-        process.kill(-session.pid, 'SIGTERM');
-      }
-    } catch {
-      // Process already dead, that's fine
+  const start = Date.now();
+  while (Date.now() - start < 10000) {
+    if (!existsSync(SESSION_FILE)) {
+      console.log('VS Code closed');
+      return;
     }
-    console.log(`VS Code closed (PID ${session.pid})`);
-  } else {
-    console.log(`Warning: PID ${session.pid} is not a VS Code process. Session file cleaned up.`);
+    await new Promise(r => setTimeout(r, 200));
   }
-
+  // Force cleanup
+  try { process.kill(session.daemonPid); } catch {}
   deleteSession();
+  if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
+  console.log('VS Code closed (forced)');
 }
-
-// ── Command: connect ───────────────────────────────────────────────
-
-async function cmdConnect(parsed) {
-  let port = parsed.port;
-  if (parsed.args[0]) {
-    port = validatePort(parseInt(parsed.args[0], 10));
-  } else if (existsSync(SESSION_FILE)) {
-    port = readSession().port;
-  }
-  let allTargets;
-  try {
-    allTargets = await fetchTargets(port);
-  } catch {
-    throw new Error('Connection refused. VS Code may have closed.');
-  }
-
-  const webviews = filterWebviewTargets(allTargets);
-  if (webviews.length === 0) {
-    throw new Error('No webview found. Is a webview panel open?');
-  }
-
-  console.log(`Found ${webviews.length} webview target(s):`);
-  webviews.forEach((t, i) => {
-    const extMatch = t.url.match(/extensionId=([^&]+)/);
-    const ext = extMatch ? extMatch[1] : 'unknown';
-    console.log(`  ${i}: ${ext} — ${t.title || t.url}`);
-  });
-}
-
-// ── Command: screenshot ────────────────────────────────────────────
 
 async function cmdScreenshot(parsed) {
-  const filePath = parsed.args[0];
-  if (!filePath) throw new Error('Usage: screenshot <file>');
-
-  const dir = dirname(resolve(filePath));
-  if (!existsSync(dir)) throw new Error(`Cannot write to: ${filePath}`);
-
-  await withTarget(parsed, async (ws, contextId) => {
-    try {
-      await sendCDP(ws, 'Page.enable');
-      const result = await sendCDP(ws, 'Page.captureScreenshot', { format: 'png' });
-      const buffer = Buffer.from(result.data, 'base64');
-      writeFileSync(resolve(filePath), buffer);
-      console.log(resolve(filePath));
-      return;
-    } catch {
-      // Page domain may not be available on iframe targets — fall back
-    }
-
-    const session = readSession();
-    const allTargets = await fetchTargets(session.port);
-    const pageTargets = allTargets.filter(t => t.type === 'page' && t.title?.includes('Visual Studio Code'));
-    if (pageTargets.length === 0) throw new Error('Cannot capture screenshot: no page target found');
-
-    const pageWs = await connectWebSocket(pageTargets[0].webSocketDebuggerUrl);
-    try {
-      await sendCDP(pageWs, 'Page.enable');
-      const result = await sendCDP(pageWs, 'Page.captureScreenshot', { format: 'png' });
-      const buffer = Buffer.from(result.data, 'base64');
-      writeFileSync(resolve(filePath), buffer);
-      console.log(resolve(filePath));
-    } finally {
-      pageWs.close();
-    }
+  if (!parsed.args[0]) throw new Error('Usage: screenshot <file>');
+  const session = readSession();
+  const result = await sendToDaemon(session, 'screenshot', {
+    file: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
+  console.log(result.path);
 }
-
-// ── Command: eval ──────────────────────────────────────────────────
 
 async function cmdEval(parsed) {
-  const expression = parsed.args[0];
-  if (!expression) throw new Error('Empty expression');
-
-  await withTarget(parsed, async (ws, contextId) => {
-    const evalParams = {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    };
-    if (contextId !== undefined) evalParams.contextId = contextId;
-
-    const result = await sendCDP(ws, 'Runtime.evaluate', evalParams);
-
-    if (result.exceptionDetails) {
-      const msg = result.exceptionDetails.exception?.description
-        || result.exceptionDetails.text
-        || 'Unknown eval error';
-      throw new Error(`Eval error: ${msg}`);
-    }
-
-    const value = result.result.value;
-    console.log(JSON.stringify(value));
+  if (!parsed.args[0]) throw new Error('Empty expression');
+  const session = readSession();
+  const result = await sendToDaemon(session, 'eval', {
+    expression: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
+  console.log(JSON.stringify(result.value));
 }
-
-// ── Command: click ─────────────────────────────────────────────────
 
 async function cmdClick(parsed) {
-  const selector = parsed.args[0];
-  if (!selector) throw new Error('Empty selector');
-
-  await withTarget(parsed, async (ws, contextId) => {
-    const evalParams = {
-      expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
-      returnByValue: true,
-    };
-    if (contextId !== undefined) evalParams.contextId = contextId;
-
-    const check = await sendCDP(ws, 'Runtime.evaluate', evalParams);
-    if (!check.result.value) {
-      throw new Error(`Element not found: ${selector}`);
-    }
-
-    if (parsed.right) {
-      const rightParams = {
-        expression: `(() => {
-          const el = document.querySelector(${JSON.stringify(selector)});
-          const rect = el.getBoundingClientRect();
-          const x = rect.left + rect.width / 2;
-          const y = rect.top + rect.height / 2;
-          el.dispatchEvent(new MouseEvent('contextmenu', {
-            bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2
-          }));
-        })()`,
-        returnByValue: true,
-        awaitPromise: true,
-      };
-      if (contextId !== undefined) rightParams.contextId = contextId;
-      await sendCDP(ws, 'Runtime.evaluate', rightParams);
-    } else {
-      const clickParams = {
-        expression: `document.querySelector(${JSON.stringify(selector)}).click()`,
-        returnByValue: true,
-      };
-      if (contextId !== undefined) clickParams.contextId = contextId;
-      await sendCDP(ws, 'Runtime.evaluate', clickParams);
-    }
+  if (!parsed.args[0]) throw new Error('Empty selector');
+  const session = readSession();
+  await sendToDaemon(session, 'click', {
+    selector: parsed.args[0], right: parsed.right, page: parsed.page,
+    target: parsed.target, ext: parsed.ext,
   });
 }
-
-// ── Command: type ──────────────────────────────────────────────────
 
 async function cmdType(parsed) {
-  const selector = parsed.args[0];
-  const text = parsed.args[1];
-  if (!selector || text === undefined) throw new Error('Usage: type <selector> <text>');
-
-  await withTarget(parsed, async (ws, contextId) => {
-    const checkParams = {
-      expression: `document.querySelector(${JSON.stringify(selector)}) !== null`,
-      returnByValue: true,
-    };
-    if (contextId !== undefined) checkParams.contextId = contextId;
-    const check = await sendCDP(ws, 'Runtime.evaluate', checkParams);
-    if (!check.result.value) throw new Error(`Element not found: ${selector}`);
-
-    const typeParams = {
-      expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        el.focus();
-        el.value = ${JSON.stringify(text)};
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-      returnByValue: true,
-      awaitPromise: true,
-    };
-    if (contextId !== undefined) typeParams.contextId = contextId;
-    await sendCDP(ws, 'Runtime.evaluate', typeParams);
+  if (!parsed.args[0] || parsed.args[1] === undefined) throw new Error('Usage: type <selector> <text>');
+  const session = readSession();
+  await sendToDaemon(session, 'type', {
+    selector: parsed.args[0], text: parsed.args[1], page: parsed.page,
+    target: parsed.target, ext: parsed.ext,
   });
 }
-
-// ── Command: select ────────────────────────────────────────────────
 
 async function cmdSelect(parsed) {
-  const selector = parsed.args[0];
-  const value = parsed.args[1];
-  if (!selector || value === undefined) throw new Error('Usage: select <selector> <value>');
-
-  await withTarget(parsed, async (ws, contextId) => {
-    const selectParams = {
-      expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return { error: 'not_found' };
-        const options = Array.from(el.options || el.querySelectorAll('option'));
-        let option = options.find(o => o.value === ${JSON.stringify(value)});
-        if (!option) option = options.find(o => o.textContent.trim() === ${JSON.stringify(value)});
-        if (!option) return { error: 'option_not_found' };
-        el.value = option.value;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { success: true, selected: option.value };
-      })()`,
-      returnByValue: true,
-      awaitPromise: true,
-    };
-    if (contextId !== undefined) selectParams.contextId = contextId;
-    const result = await sendCDP(ws, 'Runtime.evaluate', selectParams);
-
-    const val = result.result.value;
-    if (val?.error === 'not_found') throw new Error(`Element not found: ${selector}`);
-    if (val?.error === 'option_not_found') throw new Error(`Option not found: ${value}`);
+  if (!parsed.args[0] || parsed.args[1] === undefined) throw new Error('Usage: select <selector> <value>');
+  const session = readSession();
+  await sendToDaemon(session, 'select', {
+    selector: parsed.args[0], value: parsed.args[1], page: parsed.page,
+    target: parsed.target, ext: parsed.ext,
   });
 }
-
-// ── Command: key ───────────────────────────────────────────────────
 
 async function cmdKey(parsed) {
-  const combo = parsed.args[0];
-  if (!combo) throw new Error('Empty key combo');
-  const { key, modifiers } = parseKeyCombo(combo);
-
-  await withTarget(parsed, async (ws, contextId) => {
-    const dispatchParams = {
-      type: 'keyDown',
-      key,
-      modifiers: (modifiers.alt ? 1 : 0) | (modifiers.ctrl ? 2 : 0)
-        | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0),
-    };
-
-    if (key.length === 1) {
-      dispatchParams.text = key;
-    }
-
-    await sendCDP(ws, 'Input.dispatchKeyEvent', dispatchParams);
-    const { text, ...keyUpParams } = dispatchParams;
-    await sendCDP(ws, 'Input.dispatchKeyEvent', { ...keyUpParams, type: 'keyUp' });
-  });
+  if (!parsed.args[0]) throw new Error('Empty key combo');
+  const session = readSession();
+  await sendToDaemon(session, 'key', { combo: parsed.args[0], page: parsed.page });
 }
-
-// ── Command: mouse ─────────────────────────────────────────────────
 
 async function cmdMouse(parsed) {
   const event = parsed.args[0];
   const x = parseFloat(parsed.args[1]);
   const y = parseFloat(parsed.args[2]);
+  if (!VALID_MOUSE_EVENTS.includes(event)) throw new Error('Invalid mouse event. Must be: mousedown, mousemove, mouseup');
+  if (isNaN(x) || isNaN(y) || x < 0 || y < 0) throw new Error('Invalid coordinates');
+  const session = readSession();
+  await sendToDaemon(session, 'mouse', { event, x, y, page: parsed.page, target: parsed.target, ext: parsed.ext });
+}
 
-  if (!VALID_MOUSE_EVENTS.includes(event)) {
-    throw new Error('Invalid mouse event. Must be: mousedown, mousemove, mouseup');
+async function cmdCommand(parsed) {
+  if (!parsed.args[0]) throw new Error('Empty command');
+  const session = readSession();
+  await sendToDaemon(session, 'command', { text: parsed.args[0] });
+}
+
+async function cmdWait(parsed) {
+  const session = readSession();
+  await sendToDaemon(session, 'wait', { timeout: parsed.timeout, ext: parsed.ext, target: parsed.target });
+  console.log('Webview ready');
+}
+
+async function cmdConnect() {
+  const session = readSession();
+  const result = await sendToDaemon(session, 'connect', {});
+  if (result.targets.length === 0) {
+    throw new Error('No webview found. Is a webview panel open?');
   }
-  if (isNaN(x) || isNaN(y) || x < 0 || y < 0) {
-    throw new Error('Invalid coordinates');
-  }
-
-  const cdpTypeMap = {
-    mousedown: 'mousePressed',
-    mousemove: 'mouseMoved',
-    mouseup: 'mouseReleased',
-  };
-
-  await withTarget(parsed, async (ws, contextId) => {
-    await sendCDP(ws, 'Input.dispatchMouseEvent', {
-      type: cdpTypeMap[event],
-      x, y,
-      button: event === 'mousemove' ? 'none' : 'left',
-      clickCount: event === 'mousedown' ? 1 : 0,
-    });
+  console.log(`Found ${result.targets.length} webview target(s):`);
+  result.targets.forEach((t, i) => {
+    console.log(`  ${i}: ${t.ext} — ${t.src.substring(0, 80)}`);
   });
 }
 
-// ── Command dispatch ───────────────────────────────────────────────
+async function cmdLogs(parsed) {
+  const session = readSession();
+  const result = await sendToDaemon(session, 'logs', { channel: parsed.channel, level: parsed.level });
+  console.log(result.logs);
+}
+
+// ── Main dispatch ──────────────────────────────────────────────────
 
 async function main() {
-  const parsed = parseArgs(process.argv.slice(2));
+  // Daemon mode
+  if (process.argv.includes('--daemon')) {
+    const daemonIdx = process.argv.indexOf('--daemon');
+    const workspace = process.argv[daemonIdx + 1] || process.cwd();
+    await runDaemon(workspace);
+    return;
+  }
 
+  // Caller mode
+  const parsed = parseArgs(process.argv.slice(2));
   switch (parsed.command) {
-    case 'launch':
-      await cmdLaunch(parsed);
-      break;
-    case 'attach':
-      await cmdAttach(parsed);
-      break;
-    case 'close':
-      await cmdClose();
-      break;
-    case 'connect':
-      await cmdConnect(parsed);
-      break;
-    case 'screenshot':
-      await cmdScreenshot(parsed);
-      break;
-    case 'eval':
-      await cmdEval(parsed);
-      break;
-    case 'click':
-      await cmdClick(parsed);
-      break;
-    case 'type':
-      await cmdType(parsed);
-      break;
-    case 'select':
-      await cmdSelect(parsed);
-      break;
-    case 'key':
-      await cmdKey(parsed);
-      break;
-    case 'mouse':
-      await cmdMouse(parsed);
-      break;
+    case 'launch': await cmdLaunch(parsed); break;
+    case 'close': await cmdClose(); break;
+    case 'connect': await cmdConnect(parsed); break;
+    case 'command': await cmdCommand(parsed); break;
+    case 'wait': await cmdWait(parsed); break;
+    case 'screenshot': await cmdScreenshot(parsed); break;
+    case 'eval': await cmdEval(parsed); break;
+    case 'click': await cmdClick(parsed); break;
+    case 'type': await cmdType(parsed); break;
+    case 'select': await cmdSelect(parsed); break;
+    case 'key': await cmdKey(parsed); break;
+    case 'mouse': await cmdMouse(parsed); break;
+    case 'logs': await cmdLogs(parsed); break;
   }
 }
 
