@@ -23,7 +23,7 @@ The tool is at `extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@
 ## Core Workflow
 
 ```bash
-# 1. Launch VS Code with the extension (--build ensures fresh compilation)
+# 1. Launch VS Code with the extension (--build compiles extension + daemon)
 node extension/tools/webview-cdp.mjs launch --build
 
 # 2. Open a panel via command palette
@@ -51,7 +51,7 @@ node extension/tools/webview-cdp.mjs close
 
 | Command | Example | Purpose |
 |---------|---------|---------|
-| `launch [workspace] [--build]` | `launch` or `launch --build` | Start VS Code with extension (--build compiles first) |
+| `launch [workspace] [--build]` | `launch` or `launch --build` | Start VS Code with extension (--build compiles extension + daemon first) |
 | `close` | `close` | Shut down VS Code and daemon |
 | `connect` | `connect` | List available webview frames |
 | `command "<cmd>"` | `command "PPDS: Data Explorer"` | Execute VS Code command via command palette |
