@@ -18,7 +18,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 |------|----------------------|
 | cli | None (uses Bash tool directly) |
 | tui | `mcp-tui-test` configured in Claude Code |
-| extension | `acomagu/vscode-as-mcp-server` installed in VS Code + Playwright MCP for webview |
+| extension | `src/extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
 | mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
 
 ## Process
@@ -80,48 +80,48 @@ npm test --prefix tests/tui-e2e
 
 ### 5. Extension Mode
 
-**Phase A: Functional Verification (acomagu MCP + ppds.debug.*)**
+**Phase A: Functional Verification (webview-cdp)**
 
-Use `execute_vscode_command` to run diagnostic commands:
+Launch VS Code with the extension and verify panels load:
 
-```
--> execute_vscode_command("ppds.debug.daemonStatus")
-   Verify: daemon is "ready", process ID present
-
--> execute_vscode_command("ppds.debug.extensionState")
-   Verify: activation succeeded, no errors
-
--> execute_vscode_command("ppds.debug.treeViewState")
-   Verify: profiles tree populated (if auth configured)
-
--> execute_vscode_command("ppds.dataExplorer")
-   Opens Data Explorer panel
-
--> execute_vscode_command("ppds.debug.panelState")
-   Verify: QueryPanel instance exists
-```
-
-Use `code_checker` to read VS Code diagnostics:
-```
--> code_checker()
-   Verify: no errors from PPDS extension
-```
-
-**Phase B: Webview Visual Verification (Playwright MCP)**
-
-Start the webview dev server:
 ```bash
-npm run dev:webview --prefix extension
+# Build and launch (compiles extension + daemon)
+node src/extension/tools/webview-cdp.mjs launch --build
+
+# Open Data Explorer and wait for webview
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+
+# Screenshot to verify panel rendered correctly
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
+# LOOK at the screenshot — verify layout, no blank areas, controls visible
+
+# Check for runtime errors
+node src/extension/tools/webview-cdp.mjs logs
+node src/extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
-Use Playwright MCP:
+**Phase B: Interaction Verification (if testing interactive features)**
+
+```bash
+# Test query execution
+node src/extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
+node src/extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
+
+# Test Solutions Panel
+node src/extension/tools/webview-cdp.mjs command "PPDS: Solutions"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
 ```
--> browser_navigate("http://localhost:5173/query-panel.html")
--> browser_snapshot() -> verify query input, execute button, results area
--> browser_fill_form("#sql-input", "SELECT TOP 5 name FROM account")
--> browser_click("#execute-btn")
--> browser_snapshot() -> verify results table rendered
+
+**Phase C: Cleanup**
+
+```bash
+node src/extension/tools/webview-cdp.mjs close
 ```
+
+See @webview-cdp skill for full command reference and common patterns.
 
 ### 6. MCP Mode
 
