@@ -71,6 +71,39 @@ try {
 let currentLanguage = 'sql';
 let manualOverride = false;
 
+// ── Resize handle (editor height splitter) ──
+const resizeHandle = document.getElementById('resize-handle')!;
+const editorWrapper = document.querySelector('.editor-wrapper') as HTMLElement;
+let resizing = false;
+let startY = 0;
+let startHeight = 0;
+
+resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
+    e.preventDefault();
+    resizing = true;
+    startY = e.clientY;
+    startHeight = editorWrapper.offsetHeight;
+    resizeHandle.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e: MouseEvent) => {
+    if (!resizing) return;
+    const delta = e.clientY - startY;
+    const newHeight = Math.max(80, Math.min(startHeight + delta, 500));
+    editorWrapper.style.height = newHeight + 'px';
+    if (editor) editor.layout();
+});
+
+document.addEventListener('mouseup', () => {
+    if (!resizing) return;
+    resizing = false;
+    resizeHandle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+});
+
 const executeBtn = document.getElementById('execute-btn') as HTMLElement;
 const cancelBtn = document.getElementById('cancel-btn') as HTMLElement;
 const exportBtn = document.getElementById('export-btn') as HTMLElement;

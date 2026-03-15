@@ -626,6 +626,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     </div>
 </div>
 
+<div class="resize-handle" id="resize-handle"></div>
+
 <div class="filter-bar" id="filter-bar">
     <span class="codicon codicon-filter"></span>
     <input type="text" id="filter-input" placeholder="Filter results..." />
