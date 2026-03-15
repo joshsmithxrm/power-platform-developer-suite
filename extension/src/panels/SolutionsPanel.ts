@@ -8,7 +8,14 @@ import { isAuthError } from '../utils/errorUtils.js';
 
 interface ComponentGroup {
     typeName: string;
-    components: { objectId: string; isMetadata: boolean }[];
+    components: {
+        objectId: string;
+        isMetadata: boolean;
+        logicalName?: string;
+        schemaName?: string;
+        displayName?: string;
+        rootComponentBehavior: number;
+    }[];
 }
 
 export class SolutionsPanel extends WebviewPanelBase {
@@ -242,6 +249,10 @@ export class SolutionsPanel extends WebviewPanelBase {
                     components: components.map(c => ({
                         objectId: c.objectId,
                         isMetadata: c.isMetadata,
+                        logicalName: c.logicalName,
+                        schemaName: c.schemaName,
+                        displayName: c.displayName,
+                        rootComponentBehavior: c.rootComponentBehavior,
                     })),
                 }));
 
