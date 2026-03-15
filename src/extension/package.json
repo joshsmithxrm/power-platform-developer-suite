@@ -479,7 +479,8 @@
     "dev:webview": "npx vite dev/",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:webview": "tsc --noEmit -p tsconfig.webview.json",
-    "typecheck:all": "npm run typecheck && npm run typecheck:webview"
+    "typecheck:all": "npm run typecheck && npm run typecheck:webview",
+    "prepare": "cd ../.. && git config core.hooksPath scripts/hooks"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^1.4.0",
