@@ -114,4 +114,11 @@ export function registerBrowserCommands(
             }
         }),
     );
+
+    // ── Open Documentation ─────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ppds.openDocumentation', () => {
+            void vscode.env.openExternal(vscode.Uri.parse('https://ppds.dev'));
+        })
+    );
 }
