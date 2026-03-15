@@ -154,27 +154,19 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(profileTreeView, profileTreeProvider);
 
     // ── Profile expansion persistence ────────────────────────────────────
-    // DEBUG: Log what's in globalState at startup
-    const startupExpandedIds = context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? [];
-    logChannel.info(`[expand-debug] Startup expandedIds in globalState: [${startupExpandedIds.join(', ')}]`);
-
     context.subscriptions.push(
         profileTreeView.onDidExpandElement(e => {
             if (e.element instanceof ProfileTreeItem && e.element.id) {
                 const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
                 ids.add(e.element.id);
-                const updated = [...ids];
-                logChannel.info(`[expand-debug] onDidExpandElement: id="${e.element.id}", saving expandedIds=[${updated.join(', ')}]`);
-                void context.globalState.update('ppds.profiles.expandedIds', updated);
+                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
             }
         }),
         profileTreeView.onDidCollapseElement(e => {
             if (e.element instanceof ProfileTreeItem && e.element.id) {
                 const ids = new Set(context.globalState.get<string[]>('ppds.profiles.expandedIds') ?? []);
                 ids.delete(e.element.id);
-                const updated = [...ids];
-                logChannel.info(`[expand-debug] onDidCollapseElement: id="${e.element.id}", saving expandedIds=[${updated.join(', ')}]`);
-                void context.globalState.update('ppds.profiles.expandedIds', updated);
+                void context.globalState.update('ppds.profiles.expandedIds', [...ids]);
             }
         }),
     );

@@ -175,15 +175,8 @@ export class ProfileTreeDataProvider
             if (result.profiles.length === 0) {
                 return [];
             }
-            const rawExpandedIds = this.globalState?.get<string[]>('ppds.profiles.expandedIds') ?? [];
-            const expandedIds = new Set(rawExpandedIds);
-            this.log.info(`[expand-debug] getProfiles: globalState expandedIds=[${rawExpandedIds.join(', ')}]`);
-            const items = result.profiles.map(p => {
-                const stableId = `profile://${p.identity}//${p.authMethod}//${p.cloud}`;
-                const isExpanded = expandedIds.has(stableId);
-                this.log.info(`[expand-debug] getProfiles: profile="${p.name ?? p.index}" stableId="${stableId}" isExpanded=${isExpanded} collapsibleState=${isExpanded ? 'Expanded' : 'Collapsed'}`);
-                return new ProfileTreeItem(p, expandedIds);
-            });
+            const expandedIds = new Set(this.globalState?.get<string[]>('ppds.profiles.expandedIds') ?? []);
+            const items = result.profiles.map(p => new ProfileTreeItem(p, expandedIds));
 
             // Apply user-defined sort order from globalState
             const sortOrder = this.globalState?.get<Record<string, number>>('ppds.profiles.sortOrder');
