@@ -4,6 +4,7 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { SolutionComponentInfoDto } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 
+import { buildMakerUrl } from '../commands/browserCommands.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
 import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
@@ -96,11 +97,11 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                             await vscode.env.clipboard.writeText(message.text);
                             break;
                         case 'openInMaker': {
-                            if (this.environmentId && message.solutionId) {
-                                const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions/${message.solutionId}`;
-                                await vscode.env.openExternal(vscode.Uri.parse(url));
-                            } else if (this.environmentId) {
-                                const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions`;
+                            if (this.environmentId) {
+                                let url = buildMakerUrl(this.environmentId);
+                                if (message.solutionId) {
+                                    url = `${url}/${message.solutionId}`;
+                                }
                                 await vscode.env.openExternal(vscode.Uri.parse(url));
                             } else {
                                 vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
