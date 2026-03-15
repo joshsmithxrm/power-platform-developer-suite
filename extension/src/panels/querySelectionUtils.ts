@@ -4,14 +4,14 @@
  * The webview IIFE has inline copies of these — keep in sync.
  */
 
-export interface SelectionRect {
+interface SelectionRect {
     minRow: number;
     maxRow: number;
     minCol: number;
     maxCol: number;
 }
 
-export interface CellCoord {
+interface CellCoord {
     row: number;
     col: number;
 }

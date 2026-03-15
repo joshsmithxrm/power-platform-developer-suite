@@ -1,0 +1,23 @@
+{
+  "entry": [
+    "src/extension.ts",
+    "src/panels/monaco-entry.ts",
+    "src/panels/monaco-worker.ts",
+    "src/panels/webview/query-panel.ts",
+    "src/panels/webview/solutions-panel.ts",
+    "src/panels/webview/shared/vscode-api.ts"
+  ],
+  "ignore": [
+    "esbuild.js",
+    "dev/**",
+    "scripts/**"
+  ],
+  "ignoreDependencies": [
+    "@vscode/webview-ui-toolkit",
+    "esbuild"
+  ],
+  "ignoreBinaries": [
+    "code",
+    "vite"
+  ]
+}

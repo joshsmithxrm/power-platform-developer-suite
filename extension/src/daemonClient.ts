@@ -39,31 +39,8 @@ import type {
     SchemaAttributesResponse,
 } from './types.js';
 
-// Re-export types that other modules may need via daemonClient
-export type {
-    AuthListResponse,
-    AuthWhoResponse,
-    AuthSelectResponse,
-    EnvListResponse,
-    EnvSelectResponse,
-    EnvConfigGetResponse,
-    EnvConfigSetResponse,
-    EnvWhoResponse,
-    QueryResultResponse,
-    QueryCompleteResponse,
-    QueryHistoryListResponse,
-    QueryHistoryDeleteResponse,
-    QueryExportResponse,
-    QueryExplainResponse,
-    ProfileCreateResponse,
-    ProfileDeleteResponse,
-    ProfileRenameResponse,
-    ProfilesInvalidateResponse,
-    SolutionsListResponse,
-    SolutionComponentsResponse,
-    SchemaEntitiesResponse,
-    SchemaAttributesResponse,
-} from './types.js';
+// Re-export AuthWhoResponse for profileCommands.ts convenience
+export type { AuthWhoResponse } from './types.js';
 
 export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';
 
