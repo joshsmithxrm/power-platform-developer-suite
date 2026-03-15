@@ -394,7 +394,10 @@ async function runDaemon(workspace) {
           }
           const logFiles = findLogFiles(logsDir);
           const matching = logFiles
-            .filter(f => { try { return readFileSync(f, 'utf-8').includes(params.channel); } catch { return false; } });
+            .filter(f => {
+              const name = f.split(/[\\/]/).pop();
+              return name.toLowerCase().includes(params.channel.toLowerCase());
+            });
           if (matching.length === 0) return { logs: `No logs found for channel: ${params.channel}` };
           const logContent = matching.map(f => readFileSync(f, 'utf-8')).join('\n');
           return { logs: logContent };
