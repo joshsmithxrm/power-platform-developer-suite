@@ -1,31 +1,36 @@
 # VS Code Webview CDP Tool
 
 **Status:** Draft
-**Version:** 1.0
-**Last Updated:** 2026-03-14
+**Version:** 2.0
+**Last Updated:** 2026-03-15
 **Code:** [extension/tools/](../extension/tools/) | None
 
 ---
 
 ## Overview
 
-A CLI tool that connects to a running VS Code instance via Chrome DevTools Protocol (CDP) and provides direct access to extension webview panel content. Enables AI agents (Claude Code) to see, interact with, and verify webview UI during development — closing the feedback loop between implementation and visual verification.
+A CLI tool that launches and controls VS Code via Playwright's Electron integration, providing AI agents with full visual and interactive access to extension webview panels. Enables screenshots, DOM interaction, command palette execution, keyboard shortcuts, console log capture, and output channel reading — closing the feedback loop between implementation and visual verification.
+
+### Version History
+
+- **v1.0** — Raw CDP over WebSocket. Proved the concept but could not execute VS Code commands, read console logs, or reliably trigger keyboard shortcuts in VS Code's native UI.
+- **v2.0** (this version) — Playwright Electron engine. Replaces raw CDP with `@playwright/test`'s `_electron` module. Fixes all v1 gaps: command palette, keyboard shortcuts, console capture, webview frame traversal, output channel logs.
 
 ### Goals
 
-- **Visual feedback**: AI agents can take screenshots of webview panels to see what they've built
-- **DOM interaction**: Click elements, type text, send keyboard shortcuts, right-click context menus, interact with dropdowns and checkboxes
-- **State inspection**: Run arbitrary JavaScript in the webview context to read DOM state, CSS classes, element attributes
+- **Visual feedback**: AI agents can take screenshots of webview panels and full VS Code window
+- **DOM interaction**: Click elements, type text, send keyboard shortcuts, right-click context menus, interact with dropdowns and checkboxes — in both webview content and VS Code's native UI
+- **Command execution**: Open panels, run VS Code commands, interact with the command palette
+- **Telemetry**: Capture console output, page errors, and extension output channel logs
 - **Self-managing lifecycle**: Launch and close VS Code instances without manual intervention
-- **Generic and stable**: No knowledge of any specific webview's DOM structure — works with any VS Code extension webview without tool updates when the DOM changes
+- **Generic and stable**: No knowledge of any specific webview's DOM structure
 
 ### Non-Goals
 
 - Debugging (breakpoints, step-through) — use VS Code's built-in debugger
-- Testing VS Code native UI (command palette, settings, tree views) — use existing VS Code MCP
+- Attaching to a user's running VS Code instance (deferred — `attach` may return in a future version)
 - Automated regression testing in CI — use Vitest unit tests and Playwright E2E tests
 - Recording/playback of interaction sequences
-- Accessibility tree snapshots (use `eval` with custom JS if needed)
 
 ---
 
@@ -36,51 +41,96 @@ Claude Code
     │
     │  Bash: node webview-cdp.mjs <command> [args]
     ▼
-┌──────────────────────┐
-│   webview-cdp CLI     │  Single-file Node.js script (~300 lines)
-│                       │  Reads extension/tools/.webview-cdp-session.json
-└───────┬──────────────┘
+┌──────────────────────────┐
+│   webview-cdp CLI         │  Short-lived process per command
+│   (caller)                │  Reads .webview-cdp-session.json
+└───────┬──────────────────┘
         │
-        │  1. GET http://localhost:<port>/json/list
-        │  2. Find iframe target (type: "iframe", URL: vscode-webview://)
-        │  3. Open WebSocket to target's webSocketDebuggerUrl
-        │  4. Send Runtime.enable, discover execution contexts
-        │  5. Find active-frame context (match by URL pattern)
-        │  6. Execute command via Runtime.evaluate / Input.dispatch*
-        │  7. Close WebSocket, exit
-        ▼
-┌──────────────────────┐
-│  VS Code (Electron)   │  Launched with --extensionDevelopmentPath
-│  --remote-debugging-  │  and --remote-debugging-port=<port>
-│   port=<port>         │
-│                       │
-│  ┌─────────────────┐  │
-│  │ Extension Host   │  │
-│  │  └─ QueryPanel   │  │
-│  │     └─ webview   │──│── iframe CDP target
-│  │        └─ active  │  │   (webSocketDebuggerUrl)
-│  │           -frame  │  │
-│  └─────────────────┘  │
-└──────────────────────┘
+        ├── launch:  forks daemon → daemon starts VS Code
+        │            daemon writes session file with wsEndpoint + daemon PID
+        │            daemon captures console logs continuously
+        │
+        ├── other commands:  chromium.connectOverCDP(wsEndpoint)
+        │   → gets Page → Playwright APIs for interaction
+        │   → webview access via contentFrame() chain
+        │
+        └── close:  sends SIGTERM to daemon PID
+                    daemon calls browser.close() → VS Code shuts down
+                    daemon deletes session file and exits
+
+┌─────────────────────────┐     ┌──────────────────────────┐
+│  webview-cdp daemon      │────▶│  VS Code (Electron)       │
+│  (long-lived background) │     │                           │
+│                          │     │  ┌─────────────────────┐  │
+│  Holds ElectronApp alive │     │  │ Main Page            │  │
+│  Captures console logs   │     │  │  ├─ Sidebar          │  │
+│  Writes to .console.log  │     │  │  ├─ Command Palette  │  │
+│  Handles SIGTERM cleanup │     │  │  ├─ Notifications    │  │
+└─────────────────────────┘     │  │  └─ Webview Panel    │  │
+                                │  │     └─ outer iframe  │  │
+                                │  │        └─ inner frame│  │
+                                │  └─────────────────────┘  │
+                                └──────────────────────────┘
 ```
 
-Each CLI invocation is stateless: connect, execute, disconnect. The VS Code process persists independently between invocations. A session file tracks the PID and port to avoid passing them on every command.
+### Connection Model
+
+**Why a daemon:** Playwright's `_electron.launch()` creates VS Code as a child process. When the parent Node.js process exits, the child is killed. Empirically verified: the wsEndpoint becomes invalid immediately on parent exit. A long-lived daemon process is required to keep VS Code alive across multiple CLI invocations.
+
+**Launch** forks a daemon process (`node webview-cdp.mjs --daemon`). The daemon:
+1. Calls `_electron.launch()` to start VS Code
+2. Waits for workbench ready
+3. Installs dialog interception hooks
+4. Starts console capture (`page.on('console')`, `page.on('pageerror')`) writing to `.webview-cdp-console.log`
+5. Passes `--remote-debugging-port` to VS Code so CDP is exposed
+6. Writes session file with `{ wsEndpoint, daemonPid, userDataDir, logFile }`
+7. Listens for `SIGTERM` / `SIGINT` to trigger clean shutdown
+8. The foreground `launch` process polls until the session file appears, prints confirmation, and exits
+
+**Subsequent commands** use `chromium.connectOverCDP(wsEndpoint)` to reconnect to the VS Code instance. This returns a `Browser` → `BrowserContext` → `Page`, giving full Playwright API access. Each command connects, executes, disconnects. The daemon stays alive throughout.
+
+**Close** reads the daemon PID from the session file and sends `SIGTERM`. The daemon catches this, calls `electronApp.close()` (which cleanly shuts down VS Code and its process tree), deletes the session file and console log, then exits.
+
+**Orphan detection:** If `launch` finds an existing session file, it attempts to connect to the wsEndpoint. If the connection succeeds, the previous instance is still running — the tool warns and exits. If the connection fails, the session is stale — the tool kills the daemon PID (if still alive), deletes the stale session file, and proceeds with a fresh launch.
+
+### Webview Frame Traversal
+
+VS Code renders extension webviews inside a double-nested iframe structure:
+
+```
+Page (VS Code workbench)
+  └─ iframe[class*="webview"] (webview container)
+       └─ iframe (active-frame — extension's actual DOM)
+```
+
+The tool traverses this using the proven pattern from the archived E2E helpers:
+
+```js
+const outerIframe = await page.waitForSelector('iframe[class*="webview"]');
+const outerFrame = await outerIframe.contentFrame();
+const innerIframe = await outerFrame.waitForSelector('iframe');
+const innerFrame = await innerIframe.contentFrame();
+// innerFrame is the extension's DOM — use frame.click(), frame.evaluate(), etc.
+```
 
 ### Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| `webview-cdp.mjs` | CLI entry point, argument parsing, command dispatch |
-| Target discovery | Fetch `/json/list`, filter for iframe targets with `vscode-webview://` URLs |
-| Context discovery | Listen for `Runtime.executionContextCreated`, find active-frame context by URL pattern |
-| Session file | `.webview-cdp-session.json` — persists PID and port between invocations |
-| Skill file | `.agents/skills/webview-cdp/SKILL.md` — teaches AI agents when/how to use the tool |
+| `webview-cdp.mjs` | CLI entry point (caller mode) + daemon mode (`--daemon` flag). Single file handles both roles. |
+| Daemon process | Long-lived background process holding `ElectronApplication` alive, capturing console logs continuously |
+| Launch engine | `_electron.launch()` + `@vscode/test-electron` for VS Code binary management |
+| Session file | `.webview-cdp-session.json` — persists `wsEndpoint`, `daemonPid`, `userDataDir`, `logFile` |
+| Frame resolver | `contentFrame()` chain to reach webview inner frames |
+| Command palette helper | Open palette, type command, select result — adapted from archived `CommandPaletteHelper.ts` pattern |
+| Console capture | `page.on('console')` + `page.on('pageerror')` running in daemon, writing JSONL to `.webview-cdp-console.log` |
+| Skill file | `.agents/skills/webview-cdp/SKILL.md` — teaches AI agents when/how to use the tool. **Must be fully rewritten for v2** — the v1 skill file actively contradicts v2 capabilities (claims keyboard shortcuts don't work, documents removed `attach` command, missing `command`/`wait`/`logs`). Must also include guidance to save screenshots to temp directories. |
 
 ### Dependencies
 
 - **Runtime:** Node.js (already required by the extension build toolchain)
-- **npm:** `ws` (WebSocket client)
-- **VS Code:** Must support `--remote-debugging-port` and `--extensionDevelopmentPath` flags (stable Electron feature)
+- **npm:** `@playwright/test` (already a dev dependency), `@vscode/test-electron` (already a dev dependency)
+- **Removed:** `ws` (no longer needed — Playwright handles all WebSocket communication)
 - Depends on: [architecture.md](./architecture.md) (extension webview panel architecture)
 
 ---
@@ -89,132 +139,177 @@ Each CLI invocation is stateless: connect, execute, disconnect. The VS Code proc
 
 ### Core Requirements
 
-1. The tool MUST connect to a VS Code instance's CDP endpoint and discover webview iframe targets
-2. The tool MUST find the correct execution context within the nested iframe structure (wrapper → active-frame)
-3. The tool MUST NOT contain any knowledge of specific webview DOM structures — it is a generic pipe
-4. The tool MUST manage VS Code lifecycle (launch with extension loaded, clean shutdown)
-5. The tool MUST handle the case where multiple webview panels are open (target selection)
-6. Screenshots MUST capture the webview content as rendered in VS Code, not a separate browser
+1. The tool MUST launch VS Code via Playwright's `_electron.launch()` and manage the full lifecycle
+2. The tool MUST traverse the double-nested iframe structure to reach webview content
+3. The tool MUST execute VS Code commands via the command palette
+4. The tool MUST capture console output and page errors during the session
+5. The tool MUST provide access to extension output channel logs
+6. The tool MUST NOT contain any knowledge of specific webview DOM structures — it is a generic pipe
+7. Screenshots MUST capture the webview content as rendered in VS Code
+8. Keyboard shortcuts MUST trigger VS Code's native keybinding system
 
 ### Command Interface
 
 | Command | Signature | Purpose |
 |---------|-----------|---------|
-| `launch` | `launch [port] [workspace]` | Start VS Code with extension and remote debugging |
-| `close` | `close` | Kill the managed VS Code instance |
-| `connect` | `connect [port]` | Test connectivity, list available webview targets |
-| `screenshot` | `screenshot <file> [--target N]` | Capture webview panel as PNG |
-| `eval` | `eval "<js>" [--target N]` | Run JavaScript in webview context, print result |
-| `click` | `click "<selector>" [--right] [--target N]` | Left or right click an element |
-| `type` | `type "<selector>" "<text>" [--target N]` | Clear element and type text |
-| `select` | `select "<selector>" "<value>" [--target N]` | Select dropdown option |
-| `key` | `key "<combo>" [--target N]` | Send keyboard shortcut (e.g., `ctrl+c`, `ctrl+enter`, `Escape`) |
-| `mouse` | `mouse <event> <x> <y> [--target N]` | Dispatch mousedown/mousemove/mouseup at coordinates |
+| `launch` | `launch [workspace]` | Start VS Code with extension via Playwright Electron |
+| `close` | `close` | Shut down VS Code cleanly via Playwright |
+| `connect` | `connect` | List available webview frames |
+| `command` | `command "<vs-code-command>"` | Execute a VS Code command via command palette |
+| `wait` | `wait [timeout] [--ext "<id>"]` | Wait until a webview frame appears (optionally matching extension ID) |
+| `screenshot` | `screenshot <file> [--page] [--target N]` | Capture webview content (default) or full window (`--page`) as PNG |
+| `eval` | `eval "<js>" [--page] [--target N]` | Run JavaScript in webview or page context |
+| `click` | `click "<selector>" [--right] [--page] [--target N]` | Click element in webview or VS Code UI |
+| `type` | `type "<selector>" "<text>" [--page] [--target N]` | Type text into an input element |
+| `select` | `select "<selector>" "<value>" [--page] [--target N]` | Select dropdown option |
+| `key` | `key "<combo>" [--page]` | Send keyboard shortcut (works everywhere now) |
+| `mouse` | `mouse <event> <x> <y> [--page] [--target N]` | Dispatch mouse event at coordinates |
+| `logs` | `logs [--channel "<name>"] [--level "<level>"]` | Read captured console logs or output channel content |
 
 ### Primary Flows
 
-**Launch flow:**
+**Launch flow (caller process):**
 
-1. **Check port**: Verify port is not already in use — error if occupied
-2. **Resolve paths**: Find `extension/` directory relative to workspace
-3. **Spawn VS Code**: `code --extensionDevelopmentPath=<ext> --remote-debugging-port=<port> <workspace>`
-4. **Wait for CDP**: Poll `http://localhost:<port>/json/list` every 500ms, up to 15 seconds
-5. **Write session**: Save `{ pid, port }` to `.webview-cdp-session.json`
-6. **Print confirmation**: Output port and PID to stdout
+1. **Check for stale session**: If session file exists, try connecting to wsEndpoint. If connection succeeds, warn "VS Code already running" and exit. If fails, kill stale daemon PID, delete session file.
+2. **Fork daemon**: Spawn `node webview-cdp.mjs --daemon [workspace]` as a detached background process with stdio piped to `/dev/null`.
+3. **Wait for session**: Poll for session file to appear (daemon writes it when VS Code is ready), up to 60 seconds.
+4. **Print confirmation**: Read session file, output "VS Code launched on port X (daemon PID Y)" to stdout, exit.
+
+**Launch flow (daemon process — `--daemon` flag):**
+
+1. **Download VS Code** (if not cached): `@vscode/test-electron` handles this automatically
+2. **Resolve extension path**: Find `extension/` relative to tool location
+3. **Launch via Playwright**: `_electron.launch({ executablePath, args: ['--extensionDevelopmentPath=...', '--user-data-dir=...', '--remote-debugging-port=0', '--log=trace'] })`
+4. **Get main window**: `electronApp.firstWindow()`
+5. **Wait for workbench**: `page.waitForSelector('[id="workbench.parts.editor"]', { timeout: 60000 })`
+6. **Discover wsEndpoint**: Get the CDP WebSocket URL from the launched instance (via `--remote-debugging-port` and `/json/version` endpoint)
+7. **Intercept native dialogs**: `electronApp.evaluate()` to hook `dialog.showMessageBox`, `dialog.showOpenDialog`, `dialog.showSaveDialog` — auto-dismiss to prevent blocking. If hooks fail, log a warning and continue.
+8. **Start console capture**: `page.on('console', ...)` and `page.on('pageerror', ...)` — write JSONL to `.webview-cdp-console.log` continuously
+9. **Write session file**: `{ wsEndpoint, daemonPid: process.pid, userDataDir, logFile }`
+10. **Wait for shutdown signal**: Listen for `SIGTERM` / `SIGINT`. On signal, call `electronApp.close()`, delete session file, delete console log, exit.
 
 **Command execution flow (all commands except launch/close):**
 
-1. **Read session**: Load port from `.webview-cdp-session.json` (or accept `--port` override)
-2. **Discover targets**: `GET http://localhost:<port>/json/list`, filter for `type: "iframe"` with `vscode-webview://` URL
-3. **Select target**: Use `--target N` index, or default to first iframe target found
-4. **Connect WebSocket**: Open connection to target's `webSocketDebuggerUrl`
-5. **Discover context**: Send `Runtime.enable`, collect `executionContextCreated` events, find active-frame context by matching URL containing `/active-frame/` or by probing with `document.body !== null`
-6. **Execute**: Run the command-specific CDP calls
-7. **Output result**: Print to stdout (screenshot path, eval result, or nothing on success)
-8. **Disconnect**: Close WebSocket, exit with code 0
+1. **Read session**: Load `wsEndpoint` from `.webview-cdp-session.json`
+2. **Connect**: `chromium.connectOverCDP(wsEndpoint)` → get `Browser` → first context → first page
+3. **Resolve target**: If `--page`, use the page directly. Otherwise, traverse the `contentFrame()` chain to find the webview frame. If `--target N`, select the Nth webview.
+4. **Execute**: Use Playwright's native APIs (`frame.click()`, `page.keyboard.press()`, `frame.evaluate()`, etc.)
+5. **Output result**: Print to stdout
+6. **Disconnect**: Close the browser connection (NOT the VS Code process)
+
+**Command palette flow (`command` action):**
+
+1. **Connect** to page (same as above)
+2. **Press** `Control+Shift+P` via `page.keyboard.press()`
+3. **Wait** for `.quick-input-widget` to become visible (timeout 5 seconds)
+4. **Type** the command name via `page.keyboard.type(text, { delay: 50 })`
+5. **Wait** (up to 5 seconds) for either a result item (`.quick-input-list .quick-input-list-entry`) or the "No matching commands" indicator. If no results, report "Command not found: \<command\>" and press Escape to close palette.
+6. **Press** Enter to execute the first result
+7. **Wait** brief delay (500ms) for command to take effect
+8. **Check** for error notifications (`.notifications-toasts .notification-toast.error`)
 
 **Close flow:**
 
-1. **Read session**: Load PID from `extension/tools/.webview-cdp-session.json`
-2. **Verify process**: Check that the PID belongs to a VS Code / Electron process before killing (prevents killing an unrelated process if the PID was reused after a crash)
-3. **Kill process**: Terminate by PID (or skip if process is already dead)
-4. **Clean up**: Delete session file
+1. **Read session**: Load `daemonPid` from session file
+2. **Signal daemon**: Send `SIGTERM` to the daemon PID (on Windows: `process.kill(daemonPid)`)
+3. **Wait for cleanup**: The daemon catches the signal, calls `electronApp.close()`, deletes session file and console log, then exits. The caller polls until the session file disappears (up to 10 seconds).
+4. **Force kill if needed**: If session file still exists after timeout, force-kill the daemon PID and clean up manually.
 5. **Print confirmation**: Output to stdout
+
+**Logs flow:**
+
+1. **Read session**: Load `logFile` and `userDataDir` paths from session file
+2. **If `--channel`**: Read extension logs from `userDataDir/logs/` directory, filter by channel name
+3. **If no flag**: Read the companion console log file (`.webview-cdp-console.log`). The daemon writes to this file continuously via `page.on('console')`, so it always contains the full session's console output up to the current moment.
+4. **If `--level`**: During `launch`, VS Code was started with `--log=<level>` (default: `trace`). The `logs` command reports what level is active. To change it, the agent would need to relaunch.
+5. **Print**: Output log content to stdout
 
 ### Validation Rules
 
 | Input | Rule | Error |
 |-------|------|-------|
-| `port` | Integer between 1024 and 65535 | "Invalid port: must be 1024-65535" |
 | `screenshot <file>` | File path must be writable (parent directory exists) | "Cannot write to: <path>" |
-| `eval "<js>"` | Expression must be non-empty string | "Empty expression" |
+| `eval "<js>"` | Expression must be non-empty string. Note: bash may expand `${}` and backticks in double-quoted expressions. Use single quotes for the outer shell quoting when expressions contain template literals: `eval 'document.querySelector("td").textContent'` | "Empty expression" |
 | `click "<selector>"` | Selector must be non-empty string | "Empty selector" |
-| `type "<selector>" "<text>"` | Selector and text must both be provided | "Usage: type \<selector\> \<text\>" |
-| `select "<selector>" "<value>"` | Value matches option's `value` attribute or visible text content (tried in that order) | "Option not found: \<value\>" |
-| `mouse <event>` | Event must be one of: `mousedown`, `mousemove`, `mouseup` | "Invalid mouse event. Must be: mousedown, mousemove, mouseup" |
+| `type "<selector>" "<text>"` | Both selector and text must be provided | "Usage: type \<selector\> \<text\>" |
+| `select "<selector>" "<value>"` | Value matches option's `value` attribute or visible text | "Option not found: \<value\>" |
+| `mouse <event>` | Event must be one of: `mousedown`, `mousemove`, `mouseup` | "Invalid mouse event" |
 | `mouse <x> <y>` | Coordinates must be non-negative numbers | "Invalid coordinates" |
-| `key "<combo>"` | Combo must be non-empty. Modifiers must be: `ctrl`, `shift`, `alt`, `meta`. Unrecognized key names (e.g., `ctrl+xyz`) are forwarded to CDP as-is — validation only rejects malformed syntax and unknown modifiers | "Invalid key combo: unknown modifier 'foo'" |
-| `--target N` | N must be a non-negative integer within range of discovered targets | "Target index N out of range (found M webviews)" |
+| `key "<combo>"` | Non-empty. Modifiers must be: `ctrl`, `shift`, `alt`, `meta` | "Invalid key combo" |
+| `command "<cmd>"` | Non-empty string | "Empty command" |
+| `wait [timeout]` | Timeout must be positive integer (milliseconds), default 30000. `--ext` filters by extension ID in webview URL. | "Invalid timeout" |
+| `--target N` | Non-negative integer within range of discovered webview frames. Alternative: `--ext "<extensionId>"` selects webview by extension ID from the URL (more stable than index). | "Target index N out of range" / "No webview found for extension: \<id\>" |
 
 ### Constraints
 
-- Single file implementation (`extension/tools/webview-cdp.mjs`)
-- No dependency on Playwright, Puppeteer, or any browser automation framework — raw CDP over WebSocket only
-- No persistent state beyond the session file — each command is a fresh connection
-- Session file location: `extension/tools/.webview-cdp-session.json` (gitignored via `extension/.gitignore`)
+- Single file implementation (`extension/tools/webview-cdp.mjs`) — handles both caller and daemon modes via `--daemon` flag
+- Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies)
+- `ws` dependency removed — Playwright handles all communication
+- Session file: `extension/tools/.webview-cdp-session.json` (gitignored)
+- Console log file: `extension/tools/.webview-cdp-console.log` (gitignored)
+- User data dir: `extension/tools/.webview-cdp-profile/` (gitignored)
 - All errors to stderr, all results to stdout
 - Exit code 0 on success, 1 on error
-- Single-user tool — not designed for concurrent access from multiple sessions
-- WebSocket connection timeout: 5 seconds per command invocation
+- Single-user tool — not designed for concurrent access
+- `@vscode/test-electron` downloads a specific VS Code build (cached between runs)
+- Daemon process runs detached — survives if the calling terminal is closed
+- Screenshots should be saved to temp directories, never to the repo working tree
 
 ### Security Considerations
 
-- **Local development only**: This tool connects exclusively to `localhost`. It is not designed for, and must not be used for, remote connections. The CDP endpoint is unauthenticated — anyone on the local machine can connect.
-- **Process spawn (CONSTITUTION S2)**: The `launch` command spawns VS Code via `child_process.spawn('code', [...args])` with `shell: true`. Justification: the `code` command on Windows is a batch file (`code.cmd`), which requires shell execution. All arguments are hardcoded strings or validated port numbers — no user-supplied strings are interpolated into the command.
-- **Eval output and secrets (CONSTITUTION S3)**: The `eval` command returns whatever the JavaScript expression produces. If the agent evaluates an expression that reads auth tokens, cookies, or other secrets from the webview DOM, those values will appear in stdout and potentially in conversation logs. This is acceptable for a local development tool — the agent should avoid evaluating expressions that read sensitive data, and the skill file includes this guidance.
+- **Local development only**: Connects exclusively to locally-launched VS Code instances.
+- **Process spawn (CONSTITUTION S2)**: The `launch` command forks a daemon via `child_process.fork()` (no shell needed). The daemon delegates to `@vscode/test-electron` and Playwright's `_electron.launch()`. No `shell: true` anywhere — Playwright handles Electron process management directly.
+- **Eval output and secrets (CONSTITUTION S3)**: The `eval` command returns whatever the JavaScript expression produces. The skill file instructs agents to avoid evaluating expressions that read sensitive data.
 - **No innerHTML (CONSTITUTION S1)**: The tool does not render any HTML. All output is plain text or binary PNG files.
+- **Native dialog interception**: The `launch` command hooks `dialog.showMessageBox`, `dialog.showOpenDialog`, and `dialog.showSaveDialog` to auto-dismiss native OS dialogs. This prevents dialogs from blocking automated interaction. The hooks auto-cancel file dialogs and auto-accept message dialogs. This needs empirical verification during integration testing — if `electronApp.evaluate()` cannot access the `dialog` module, the tool will document native dialogs as a limitation and skip the hooks.
 
 ---
 
 ## Acceptance Criteria
 
-Note: All acceptance criteria require a live VS Code instance and are verified via manual integration testing. Pure functions (argument parsing, session file I/O, target filtering, key combo parsing) will have unit tests in `extension/tools/webview-cdp.test.mjs` but are not listed as ACs since they test implementation details, not user-facing behavior.
+Note: All acceptance criteria require a running VS Code instance and are verified via integration testing. Pure functions (argument parsing, key combo parsing) retain unit tests in `extension/tools/webview-cdp.test.mjs`.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | `launch` starts a VS Code instance with `--extensionDevelopmentPath` and `--remote-debugging-port`, and writes a session file with PID and port | Manual: run `launch`, verify VS Code opens and session file exists | 🔲 |
-| AC-02 | `close` kills the VS Code process by PID and deletes the session file | Manual: run `close` after `launch`, verify VS Code closes and session file is removed | 🔲 |
-| AC-03 | `connect` discovers at least one webview iframe target when a webview panel is open in VS Code | Manual: open a webview panel, run `connect`, verify iframe target listed | 🔲 |
-| AC-04 | `connect` reports "No webview found" when no webview panel is open | Manual: close all webview panels, run `connect`, verify error message | 🔲 |
-| AC-05 | `screenshot` produces a valid PNG file showing the rendered webview content | Manual: open a webview panel, run `screenshot`, open PNG and verify it shows the webview | 🔲 |
-| AC-06 | `eval` executes JavaScript in the webview context and returns the result as JSON to stdout | Manual: run `eval "1 + 1"`, verify output is `2`. Run `eval "document.title"`, verify a non-empty string is returned | 🔲 |
-| AC-07 | `click` triggers a left-click on an element matching the CSS selector, causing the expected UI response | Manual: run `click` on a button element, take screenshot, verify button was activated | 🔲 |
-| AC-08 | `click --right` triggers a right-click on an element, causing a contextmenu event | Manual: run `click --right` on an element, take screenshot, verify context menu is visible | 🔲 |
-| AC-09 | `type` clears the target element and types the provided text | Manual: run `type` on an input/textarea, then `eval` to verify the element's value matches | 🔲 |
-| AC-10 | `key` dispatches keyboard shortcuts that the webview responds to | Manual: run `key "Escape"`, verify any open menu/dialog is dismissed | 🔲 |
-| AC-11 | `mouse` dispatches mousedown/mousemove/mouseup events at specified coordinates | Manual: get element coordinates via `eval`, dispatch mouse events, screenshot to verify state change | 🔲 |
-| AC-12 | `select` chooses an option from a dropdown control by value or visible text | Manual: run `select` on a dropdown element, `eval` to verify selected value | 🔲 |
-| AC-13 | `--target N` flag selects a specific webview when multiple panels are open | Manual: open 2 webview panels, use `--target 0` and `--target 1`, verify different content in screenshots | 🔲 |
-| AC-14 | Context discovery finds the correct execution context (active-frame, not wrapper) regardless of context ID numbering | Manual: run `eval "document.body.children.length"`, verify a positive integer is returned (wrapper frame would return a different structure) | 🔲 |
-| AC-15 | Tool reconnects cleanly on each invocation — no stale WebSocket state between commands | Manual: run 5 commands in sequence (`connect`, `screenshot`, `eval`, `click`, `screenshot`), all succeed independently | 🔲 |
+| AC-01 | `launch` starts VS Code via Playwright Electron with `--extensionDevelopmentPath`, waits for workbench ready, and writes session file with `wsEndpoint` | Manual: run `launch`, verify VS Code opens and session file contains `wsEndpoint` | 🔲 |
+| AC-02 | `close` shuts down VS Code cleanly via Playwright and deletes session file | Manual: run `close` after `launch`, verify VS Code closes and no orphaned processes remain | 🔲 |
+| AC-03 | `connect` lists available webview frames with extension ID identification | Manual: open a webview panel, run `connect`, verify frames listed | 🔲 |
+| AC-04 | `command` executes a VS Code command via command palette | Manual: run `command "ppds.dataExplorer"`, verify Data Explorer panel opens | 🔲 |
+| AC-05 | `wait` blocks until a webview frame appears, then returns | Manual: open panel, run `wait`, verify it returns when webview is detected | 🔲 |
+| AC-06 | `screenshot` captures full VS Code window as PNG | Manual: run `screenshot`, open PNG and verify it shows VS Code with extension | 🔲 |
+| AC-07 | `screenshot` (default, no `--page`) captures webview panel content | Manual: run `screenshot`, verify PNG shows webview content | 🔲 |
+| AC-08 | `eval` executes JavaScript in the webview frame context and returns result | Manual: run `eval "1 + 1"`, verify output is `2` | 🔲 |
+| AC-09 | `eval --page` executes JavaScript in VS Code's main page context | Manual: run `eval --page "document.title"`, verify VS Code title returned | 🔲 |
+| AC-10 | `click` triggers click on element inside webview frame | Manual: click a button in the webview, screenshot to verify | 🔲 |
+| AC-11 | `click --page` triggers click on VS Code native UI element | Manual: click a sidebar item, verify panel opens | 🔲 |
+| AC-12 | `click --right` triggers right-click / context menu | Manual: right-click an element, screenshot to verify context menu | 🔲 |
+| AC-13 | `type` fills text into an input element inside webview | Manual: type into SQL editor, eval to verify value | 🔲 |
+| AC-14 | `key` triggers VS Code keyboard shortcuts in native UI | Manual: run `key "ctrl+shift+p"`, screenshot to verify command palette opens | 🔲 |
+| AC-15 | `key` triggers keyboard shortcuts inside webview | Manual: run `key "ctrl+enter"` after focusing webview, verify query execution | 🔲 |
+| AC-16 | `mouse` dispatches mouse events at coordinates | Manual: dispatch drag sequence, screenshot to verify selection | 🔲 |
+| AC-17 | `select` selects dropdown option inside webview | Manual: select from a dropdown, eval to verify | 🔲 |
+| AC-18 | `logs` returns captured console output from the session | Manual: trigger something that logs, run `logs`, verify output contains expected messages | 🔲 |
+| AC-19 | `logs --channel "PPDS"` reads extension output channel logs | Manual: run `logs --channel "PPDS"`, verify PPDS extension logs returned | 🔲 |
+| AC-20 | `--target N` selects specific webview when multiple panels open | Manual: open 2 panels, verify `--target 0` and `--target 1` show different content | 🔲 |
+| AC-21 | Tool reconnects cleanly on each invocation via `connectOverCDP` | Manual: run 5 commands in sequence, all succeed | 🔲 |
+| AC-22 | No orphaned processes after `close` (including daemon) | Manual: run `close`, verify no VS Code or ppds processes remain from the launched instance | 🔲 |
+| AC-23 | Native dialog interception is attempted during launch. If hooks install successfully, native dialogs are auto-dismissed. If hooks fail, a warning is logged and the tool continues without interception (degraded but functional). | Manual: verify launch logs show either "Dialog hooks installed" or "Dialog hooks not available — native dialogs may block" | 🔲 |
 
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
-| VS Code not running | Any command without prior `launch` | stderr: "No session found. Run `webview-cdp launch` first.", exit 1 |
-| Port in use | `launch 9223` when 9223 is occupied | stderr: "Port 9223 already in use.", exit 1 |
-| No webview open | `screenshot` with no panels open | stderr: "No webview found. Is a webview panel open?", exit 1 |
+| No session | Any command without prior `launch` | stderr: "No session found. Run `webview-cdp launch` first.", exit 1 |
+| VS Code crashed | Command after VS Code died | stderr: "Connection failed. VS Code may have closed.", exit 1 |
+| No webview open | `screenshot` or `eval` without panel open | stderr: "No webview found. Open a panel first.", exit 1 |
 | Selector not found | `click "#nonexistent"` | stderr: "Element not found: #nonexistent", exit 1 |
 | JS eval error | `eval "throw new Error('boom')"` | stderr: "Eval error: boom", exit 1 |
-| VS Code crashed | Command after VS Code was killed externally | stderr: "Connection refused. VS Code may have closed.", exit 1 |
-| Multiple webviews, no target flag | `screenshot out.png` with 3 panels open | Uses first iframe target (index 0) |
-| CDP timeout on launch | VS Code fails to start within 15 seconds | stderr: "Timeout: VS Code did not start within 15 seconds.", exit 1 |
-| Unrecognized key name | `key "ctrl+xyz"` | Forwarded to CDP — key name `xyz` is syntactically valid but may not produce a visible effect |
-| Invalid modifier | `key "foo+a"` | stderr: "Invalid key combo: unknown modifier 'foo'", exit 1 |
-| Stale PID reused | `close` when PID now belongs to a different process | Verify process name before kill — if not VS Code/Electron, delete session file without killing, print warning |
-| Concurrent launch | Two `launch` calls simultaneously | Second call fails with "Port already in use" |
-| Target index out of range | `--target 5` with only 2 webviews | stderr: "Target index 5 out of range (found 2 webviews)", exit 1 |
+| Command not found | `command "nonexistent.cmd"` | Command palette shows "no results" — tool reports: "Command not found: nonexistent.cmd", exit 1 |
+| Wait timeout | `wait 5000` with no panel | stderr: "Timeout: no webview found within 5 seconds", exit 1 |
+| Multiple webviews, no target | `eval "1+1"` with 3 panels | Uses first webview frame (index 0) |
+| Target index out of range | `--target 5` with 2 webviews | stderr: "Target index 5 out of range (found 2 webviews)", exit 1 |
+| Native dialog appears (no interception) | OS file picker triggered | Tool documents this as a limitation if hooks can't be installed |
+| VS Code download on first run | `launch` with no cached VS Code | `@vscode/test-electron` downloads automatically, may take 30-60 seconds on first run |
 
 ---
 
@@ -224,65 +319,58 @@ Note: All acceptance criteria require a live VS Code instance and are verified v
 
 ```json
 {
-  "pid": 12345,
-  "port": 9223
+  "wsEndpoint": "ws://127.0.0.1:52345/devtools/browser/abc123",
+  "daemonPid": 12345,
+  "userDataDir": "/path/to/extension/tools/.webview-cdp-profile",
+  "logFile": "/path/to/extension/tools/.webview-cdp-console.log"
 }
 ```
 
-Written by `launch`, read by all other commands, deleted by `close`. Location: `extension/tools/.webview-cdp-session.json`. Gitignored.
+Written by the daemon during launch, read by all other commands, deleted by the daemon during close.
 
-### CDP Target
+### Console Log Entry
 
 ```json
 {
-  "id": "E0865FCE8D750754FB1C7EA861468825",
-  "type": "iframe",
-  "title": "vscode-webview://...",
-  "url": "vscode-webview://1u8rcrcep.../index.html?...&extensionId=JoshSmithXRM.power-platform-developer-suite",
-  "webSocketDebuggerUrl": "ws://localhost:9223/devtools/page/E0865FCE..."
+  "level": "error",
+  "message": "Uncaught TypeError: Cannot read property 'foo' of undefined",
+  "source": "main",
+  "timestamp": "2026-03-14T22:15:30.123Z"
 }
 ```
 
-Discovered by fetching `GET http://localhost:<port>/json/list` and filtering for `type: "iframe"` with URL containing `vscode-webview://`.
-
-### Execution Context
-
-```json
-{
-  "id": 2,
-  "origin": "",
-  "name": "",
-  "auxData": {
-    "isDefault": true,
-    "type": "default",
-    "frameId": "ABC123..."
-  }
-}
-```
-
-Discovered via `Runtime.executionContextCreated` events after sending `Runtime.enable`. The correct context is identified by probing or by matching the frame URL containing `/active-frame/`.
+Captured by `page.on('console')` and `page.on('pageerror')`. Written to `.webview-cdp-console.log` as JSONL (one JSON object per line).
 
 ### Usage Pattern
 
-A typical agent session:
-
 ```bash
-# Start of UI work session
-node extension/tools/webview-cdp.mjs launch 9223
+# Start VS Code with the extension
+node extension/tools/webview-cdp.mjs launch
 
-# Open a webview panel (agent uses VS Code MCP or eval)
-# ... agent implements a feature, runs npm run compile ...
+# Open a Data Explorer panel via command palette
+node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
 
-# Visual verification loop
-node extension/tools/webview-cdp.mjs screenshot before.png
-node extension/tools/webview-cdp.mjs click "#some-button"
-node extension/tools/webview-cdp.mjs screenshot after-click.png
-node extension/tools/webview-cdp.mjs eval "document.querySelector('.status').textContent"
-node extension/tools/webview-cdp.mjs key "ctrl+c"
-node extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
-node extension/tools/webview-cdp.mjs screenshot context-menu.png
+# Wait for the webview to appear
+node extension/tools/webview-cdp.mjs wait
 
-# End of session
+# Take a screenshot to see what's there
+node extension/tools/webview-cdp.mjs screenshot current-state.png
+
+# Interact with the webview
+node extension/tools/webview-cdp.mjs type "#sql-editor" "SELECT TOP 10 * FROM account"
+node extension/tools/webview-cdp.mjs click "#execute-btn"
+node extension/tools/webview-cdp.mjs screenshot after-execute.png
+
+# Test keyboard shortcut
+node extension/tools/webview-cdp.mjs key "ctrl+shift+p"
+node extension/tools/webview-cdp.mjs screenshot command-palette.png
+node extension/tools/webview-cdp.mjs key "Escape"
+
+# Check for errors
+node extension/tools/webview-cdp.mjs logs
+node extension/tools/webview-cdp.mjs logs --channel "PPDS"
+
+# Done
 node extension/tools/webview-cdp.mjs close
 ```
 
@@ -294,87 +382,82 @@ node extension/tools/webview-cdp.mjs close
 
 | Error | Condition | Recovery |
 |-------|-----------|----------|
-| No session | Session file missing or unreadable | "Run `webview-cdp launch` first" |
-| Connection refused | CDP endpoint not responding | "VS Code may have closed. Run `launch` again" |
-| No iframe targets | No webview panels open | "Open a webview panel in VS Code" |
-| Context not found | Active-frame execution context not discovered | "Webview may still be loading. Try again in a moment" |
-| Selector not found | CSS selector matches no elements | "Element not found: <selector>" |
+| No session | Session file missing | "Run `webview-cdp launch` first" |
+| Connection failed | `connectOverCDP` fails | "VS Code may have closed. Run `launch` again" |
+| No webview frames | `contentFrame()` chain finds nothing | "Open a panel first" |
+| Selector not found | Playwright's `waitForSelector` times out | "Element not found: <selector>" |
 | Eval error | JavaScript threw an exception | Forward the error message |
-| Port in use | Another process occupies the port | "Port N already in use. Pick another or run `close`" |
-| Timeout | VS Code didn't start or CDP didn't respond in time | "Timeout after N seconds" |
+| Command not found | Command palette shows no results | "Command not found: <command>" |
+| Wait timeout | Condition not met within timeout | "Timeout" with description |
+| VS Code download fail | `@vscode/test-electron` network error | Forward the download error |
 
 ### Recovery Strategies
 
-- **Connection errors**: The tool does not retry automatically. The agent should run `launch` again or wait and retry the command.
-- **Stale session**: If session file exists but VS Code is dead, any command will get a connection error. Agent runs `close` (cleans up session file) then `launch`.
+- **Connection errors**: Run `close` (cleans up stale session file) then `launch` again.
+- **Orphaned sessions**: If VS Code died but session file remains, `close` will fail to connect and clean up the session file. The agent can then `launch` fresh.
 
 ---
 
 ## Design Decisions
 
-### Why a CLI tool instead of an MCP server?
+### Why Playwright Electron instead of raw CDP? (v2 change)
 
-**Context:** We need Claude Code to interact with VS Code webviews. MCP servers are the standard way to add tools to Claude Code, but they add complexity.
+**Context:** v1 used raw CDP over WebSocket. Field testing revealed critical gaps: cannot execute VS Code commands, cannot capture console logs, keyboard shortcuts don't trigger VS Code keybindings, webview context discovery is unreliable.
 
-**Decision:** Single-file CLI script invoked via bash.
+**Decision:** Replace raw CDP with Playwright's `_electron` module.
 
-**Alternatives considered:**
-- MCP server: Persistent connection eliminates reconnection overhead, native tool integration. Rejected because: more code (~400 vs ~300 lines), MCP lifecycle management, harder to debug, the reconnection overhead (~500ms) is negligible for our usage pattern (5-10 commands per session, not 100).
-- Long-running daemon with CLI wrapper: Best of both worlds but most complex. Process management on Windows, cleanup on exit. Rejected for unnecessary complexity.
+**Test results from field testing (2026-03-14):**
 
-**Consequences:**
-- Positive: Simple to build, debug, and maintain. Single file. No framework dependencies.
-- Negative: ~500ms overhead per command for WebSocket connection/context discovery. Acceptable for interactive development use.
+| Capability | Raw CDP (v1) | Playwright Electron (v2) |
+|------------|-------------|-------------------------|
+| Command palette | Cannot trigger | `page.keyboard.press('Ctrl+Shift+P')` works |
+| Keyboard shortcuts | Webview only (not VS Code UI) | Works everywhere |
+| Console capture | Not implemented | `page.on('console')` built-in |
+| Webview frame access | Manual context probing (unreliable) | `contentFrame()` chain (reliable) |
+| Click VS Code UI | Coordinates only | CSS selectors work |
+| Process cleanup | Manual PID tracking, orphaned daemons | `browser.close()` handles process tree |
+| Screenshot | CDP `Page.captureScreenshot` with fallback | `page.screenshot()` — one line |
 
-### Why raw CDP instead of Playwright/Puppeteer?
-
-**Context:** Playwright and Puppeteer are the standard tools for browser automation via CDP.
-
-**Decision:** Direct WebSocket communication with the CDP protocol.
-
-**Test results from experiment (2026-03-14):**
-
-| Approach | Result |
-|----------|--------|
-| Playwright `connectOverCDP` | `frame.childFrames()` returned 0 for `vscode-webview://` iframes — cannot traverse into webview content |
-| agent-browser `tab` command | Only lists `page` and `webview` type targets, skips `iframe` type — cannot discover webview targets |
-| Raw CDP WebSocket to iframe target | Full DOM access via `Runtime.evaluate` with correct `contextId` — complete read/write access to webview content |
+**Why keyboard shortcuts work in Playwright but not CDP:** VS Code's keybinding system intercepts input at Electron's `before-input-event` level, before CDP's synthetic renderer-level events reach the DOM. Playwright's `page.keyboard.press()` sends input through Electron's real input pipeline (equivalent to `webContents.sendInputEvent()`), which fires before the `before-input-event` handler — so VS Code's keybinding system sees it as real keyboard input.
 
 **Alternatives considered:**
-- Playwright: Standard, well-maintained, rich API. Rejected because it cannot traverse VS Code's `vscode-webview://` protocol iframe boundary.
-- agent-browser: Purpose-built for Electron. Rejected because it excludes `iframe` type targets from its target listing.
-- Windows UI Automation API: Can see into webviews via accessibility tree. Rejected because it cannot read CSS classes, data attributes, or DOM state — only accessibility properties.
+- Keep raw CDP + add companion Playwright script: Two tools, fragmented experience.
+- Build custom IPC bridge in the extension: Maintenance burden, extension-specific.
+- Use Windows UI Automation API: Can't read CSS classes or DOM state.
 
 **Consequences:**
-- Positive: Actually works. Full DOM access inside VS Code webviews.
-- Negative: More low-level code. No high-level abstractions for common patterns. We handle CDP protocol messages directly.
+- Positive: Every v1 gap is fixed. Single tool does everything.
+- Negative: Depends on `@vscode/test-electron` which downloads a specific VS Code build (not the user's installed version). First run takes 30-60 seconds for download.
 
-### Why the tool manages VS Code lifecycle?
+### Why a daemon process?
 
-**Context:** Multiple VS Code instances can run simultaneously (user's editor, Extension Development Host, our tool's instance). Connecting to the wrong one would be confusing and error-prone.
+**Context:** Playwright's `_electron.launch()` creates VS Code as a child process of the Node.js process that called it. When the parent exits, the child is killed immediately. Empirically verified (2026-03-15): `process.exit(0)` after `_electron.launch()` kills the VS Code Electron process, and the wsEndpoint becomes invalid (`ECONNREFUSED`).
 
-**Decision:** The tool launches its own VS Code instance with `--extensionDevelopmentPath` and `--remote-debugging-port`, tracks the PID, and kills it on close.
+**Decision:** The `launch` command forks a long-lived daemon process that holds the `ElectronApplication` alive. The daemon:
+- Keeps VS Code running across multiple CLI invocations
+- Captures console logs continuously (not just during individual commands)
+- Handles clean shutdown when `close` sends `SIGTERM`
+- Writes session file with wsEndpoint for CLI commands to reconnect via `connectOverCDP`
 
 **Alternatives considered:**
-- Connect to user's existing VS Code: Ambiguous when multiple instances exist. Requires user to manually launch with debug port.
-- Auto-discover by scanning ports: Slow, unreliable, might connect to wrong instance.
+- Stateless reconnect (Option B): Save wsEndpoint, reconnect per command. Rejected because the wsEndpoint dies when the launch process exits.
+- Script-per-session: Accept a script file with multiple commands. Rejected because it breaks the CLI-per-command model agents use.
 
 **Consequences:**
-- Positive: Zero ambiguity about which instance. Clean lifecycle management. User's editor is unaffected.
-- Negative: Cannot attach to an existing debug session. No breakpoints. For visual testing this is acceptable — debugging is a separate workflow.
+- Positive: VS Code stays alive. Console capture runs continuously. Clean shutdown via signal handling.
+- Negative: Background process that could be orphaned if the calling terminal crashes. Mitigated by orphan detection in `launch` (checks for stale session files).
 
-### Why no DOM structure knowledge?
+### Why remove `attach`?
 
-**Context:** We could build targeted snapshot functions that know about the Data Explorer's specific elements (toolbar buttons, results table, selection state).
+**Context:** v1 had an `attach` command to connect CDP to the user's running VS Code. This required the user to restart VS Code with `--remote-debugging-port`.
 
-**Decision:** The tool is completely generic. No knowledge of any specific webview DOM. The AI agent brings context about the DOM because it just wrote the code.
+**Decision:** Remove `attach` from v2. The primary workflow is `launch` (self-contained). If `attach` is needed later, it can be added via `chromium.connectOverCDP()` without Electron-specific APIs.
 
-**Alternatives considered:**
-- PPDS-specific helpers (e.g., `clickCell(row, col)`, `getSelectedRange()`): More ergonomic for Data Explorer testing. Rejected because it creates a maintenance burden — two places to update every time the DOM changes (the webview and the tool).
+### Why remove `ws` dependency?
 
-**Consequences:**
-- Positive: Tool never needs updating when webview DOM changes. Works with any VS Code extension webview, not just ours.
-- Negative: Commands are more verbose — agent must construct selectors and JS expressions manually. Acceptable because the agent has full context from having just written the code.
+**Context:** v1 used the `ws` npm package for raw WebSocket communication with CDP endpoints.
+
+**Decision:** Remove `ws`. Playwright handles all WebSocket communication internally via `connectOverCDP`.
 
 ---
 
@@ -382,19 +465,19 @@ node extension/tools/webview-cdp.mjs close
 
 ### Adding a New Command
 
-1. **Add argument parsing**: New case in the command dispatch switch
-2. **Implement handler**: Function that receives the WebSocket connection + execution context ID and performs CDP calls
-3. **Update skill file**: Add command to the reference table in `.agents/skills/webview-cdp/SKILL.md`
+1. **Add to `VALID_COMMANDS`** array
+2. **Add argument parsing** in `parseArgs`
+3. **Implement handler** function that receives the Playwright `page` and/or webview `frame`
+4. **Wire into dispatch** switch statement
+5. **Update skill file** with command documentation
 
 ### Gap Protocol (Skill-Driven Evolution)
 
 The skill file instructs AI agents: if an interaction cannot be accomplished with existing commands, the agent MUST:
 
-1. Stop and describe the gap (what interaction is needed, why current commands don't cover it)
-2. Propose a concrete enhancement (new command, new flag, or new behavior)
-3. Ask the user whether to implement the enhancement now or work around it
-
-This ensures the tool evolves based on real usage needs rather than upfront speculation.
+1. Stop and describe the gap
+2. Propose a concrete enhancement
+3. Ask the user whether to implement now or defer
 
 ---
 
@@ -402,9 +485,9 @@ This ensures the tool evolves based on real usage needs rather than upfront spec
 
 | Setting | Type | Required | Default | Description |
 |---------|------|----------|---------|-------------|
-| Port | number | No | 9223 | CDP remote debugging port |
 | Workspace | string | No | cwd | VS Code workspace to open |
-| Target | number | No | 0 | Webview target index when multiple panels are open |
+| Target | number | No | 0 | Webview frame index when multiple panels are open |
+| Log level | string | No | trace | VS Code log level (`--log` flag). Set at launch time. |
 
 All configuration is via CLI arguments. No config files beyond the session file.
 
@@ -412,13 +495,13 @@ All configuration is via CLI arguments. No config files beyond the session file.
 
 ## Related Specs
 
-- [vscode-data-explorer-selection-copy.md](./vscode-data-explorer-selection-copy.md) - Selection and copy features that this tool can verify (CSS classes, keyboard shortcuts, context menus)
+- [vscode-data-explorer-selection-copy.md](./vscode-data-explorer-selection-copy.md) - Selection and copy features verifiable via this tool
 - [vscode-data-explorer-monaco-editor.md](./vscode-data-explorer-monaco-editor.md) - Monaco editor integration testable via this tool
 
 ---
 
 ## Roadmap
 
-- **Dev server integration**: If the tool proves valuable, consider also supporting connection to the Vite dev server (`localhost:5173`) for faster iteration without VS Code overhead
-- **CI smoke tests**: If the tool stabilizes, explore running headless VS Code in CI with screenshot comparison for visual regression detection
-- **Upstream contribution**: If VS Code's webview architecture stabilizes, consider contributing iframe target support to agent-browser or the official Playwright MCP
+- **`attach` command**: Reconnect to user's running VS Code via `chromium.connectOverCDP()` for debugging scenarios
+- **CI integration**: Run headless VS Code in CI with screenshot comparison for visual regression detection
+- **Log level change at runtime**: Currently set at launch. Could add a command to change VS Code's log level without relaunching.
