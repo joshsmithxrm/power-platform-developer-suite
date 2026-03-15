@@ -83,7 +83,8 @@ export type SolutionsPanelWebviewToHost =
     | { command: 'expandSolution'; uniqueName: string }
     | { command: 'collapseSolution'; uniqueName: string }
     | { command: 'copyToClipboard'; text: string }
-    | { command: 'openInMaker'; solutionId?: string };
+    | { command: 'openInMaker'; solutionId?: string }
+    | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Solutions Panel webview. */
 export type SolutionsPanelHostToWebview =

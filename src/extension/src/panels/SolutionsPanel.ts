@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import type { SolutionComponentInfoDto } from '../types.js';
-import { isAuthError } from '../utils/errorUtils.js';
+import { handleAuthError } from '../utils/errorUtils.js';
 
 import { buildMakerUrl } from '../commands/browserCommands.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -58,13 +58,13 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         this.panelId = SolutionsPanel.nextId++;
         SolutionsPanel.instances.push(this);
 
-        this.panel = vscode.window.createWebviewPanel(
+        const panel = vscode.window.createWebviewPanel(
             'ppds.solutionsPanel',
             `Solutions #${this.panelId}`,
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true,
+                retainContextWhenHidden: false,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
                     vscode.Uri.joinPath(extensionUri, 'dist'),
@@ -72,54 +72,49 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             }
         );
 
-        this.panel.webview.html = this.getHtmlContent(this.panel.webview);
-
-        this.disposables.push(
-            this.panel.webview.onDidReceiveMessage(
-                async (message: SolutionsPanelWebviewToHost) => {
-                    switch (message.command) {
-                        case 'ready':
-                            await this.initialize();
-                            break;
-                        case 'requestEnvironmentList':
-                            await this.handleEnvironmentPicker();
-                            break;
-                        case 'refresh':
-                            await this.loadSolutions();
-                            break;
-                        case 'expandSolution':
-                            await this.loadComponents(message.uniqueName);
-                            break;
-                        case 'collapseSolution':
-                            // No-op on host side; collapse is handled in webview JS
-                            break;
-                        case 'copyToClipboard':
-                            await vscode.env.clipboard.writeText(message.text);
-                            break;
-                        case 'openInMaker': {
-                            if (this.environmentId) {
-                                let url = buildMakerUrl(this.environmentId);
-                                if (message.solutionId) {
-                                    url = `${url}/${message.solutionId}`;
-                                }
-                                await vscode.env.openExternal(vscode.Uri.parse(url));
-                            } else {
-                                vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
-                            }
-                            break;
-                        }
-                        default:
-                            assertNever(message);
-                    }
-                }
-            )
-        );
-
-        this.disposables.push(
-            this.panel.onDidDispose(() => this.dispose())
-        );
-
+        panel.webview.html = this.getHtmlContent(panel.webview);
+        this.initPanel(panel);
         this.subscribeToDaemonReconnect(this.daemon);
+    }
+
+    protected async handleMessage(message: SolutionsPanelWebviewToHost): Promise<void> {
+        switch (message.command) {
+            case 'ready':
+                await this.initialize();
+                break;
+            case 'requestEnvironmentList':
+                await this.handleEnvironmentPicker();
+                break;
+            case 'refresh':
+                await this.loadSolutions();
+                break;
+            case 'expandSolution':
+                await this.loadComponents(message.uniqueName);
+                break;
+            case 'collapseSolution':
+                // No-op on host side; collapse is handled in webview JS
+                break;
+            case 'copyToClipboard':
+                await vscode.env.clipboard.writeText(message.text);
+                break;
+            case 'openInMaker': {
+                if (this.environmentId) {
+                    let url = buildMakerUrl(this.environmentId);
+                    if (message.solutionId) {
+                        url = `${url}/${message.solutionId}`;
+                    }
+                    await vscode.env.openExternal(vscode.Uri.parse(url));
+                } else {
+                    vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
+                }
+                break;
+            }
+            case 'webviewError':
+                this.logWebviewError(message.error, message.stack);
+                break;
+            default:
+                assertNever(message);
+        }
     }
 
     protected override onDaemonReconnected(): void {
@@ -216,26 +211,8 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
 
-            if (isAuthError(error) && !isRetry) {
-                const action = await vscode.window.showErrorMessage(
-                    'Session expired. Re-authenticate?',
-                    'Re-authenticate', 'Cancel'
-                );
-                if (action === 'Re-authenticate') {
-                    try {
-                        const who = await this.daemon.authWho();
-                        const profileId = who.name ?? String(who.index);
-                        await this.daemon.profilesInvalidate(profileId);
-                    } catch {
-                        // If authWho fails, proceed
-                    }
-                    try {
-                        await this.loadSolutions(true);
-                        return;
-                    } catch {
-                        // Fall through to show error
-                    }
-                }
+            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadSolutions(true))) {
+                return;
             }
 
             this.postMessage({ command: 'error', message: msg });
