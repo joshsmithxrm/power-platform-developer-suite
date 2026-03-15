@@ -13,7 +13,7 @@
 /**
  * Result of FetchXML to SQL transpilation.
  */
-export interface FetchXmlToSqlResult {
+interface FetchXmlToSqlResult {
 	readonly success: boolean;
 	readonly sql: string;
 	readonly warnings: readonly TranspilationWarning[];
@@ -23,7 +23,7 @@ export interface FetchXmlToSqlResult {
 /**
  * Warning for FetchXML features that cannot be fully represented in SQL.
  */
-export interface TranspilationWarning {
+interface TranspilationWarning {
 	readonly message: string;
 	readonly feature: string;
 }

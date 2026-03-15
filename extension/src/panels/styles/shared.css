@@ -43,7 +43,7 @@ body {
 
 .error-state {
     padding: 12px;
-    background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1));
+    background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));
     border: 1px solid var(--vscode-inputValidation-errorBorder, red);
     border-radius: 4px;
     margin: 8px 12px;

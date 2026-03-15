@@ -5,17 +5,17 @@ import type { ProfileTreeDataProvider } from '../views/profileTreeView.js';
 
 // ── Diagnostic data shapes ──────────────────────────────────────────────────
 
-export interface DaemonStatus {
+interface DaemonStatus {
     state: 'ready' | 'stopped';
     processId: number | null;
 }
 
-export interface ExtensionState {
+interface ExtensionState {
     daemonState: string;
     profileCount: number;
 }
 
-export interface TreeViewState {
+interface TreeViewState {
     children: Array<{
         label: string;
         id: string | undefined;
@@ -24,7 +24,7 @@ export interface TreeViewState {
     }>;
 }
 
-export interface PanelState {
+interface PanelState {
     queryPanels: number;
     solutionsPanels: number;
 }
