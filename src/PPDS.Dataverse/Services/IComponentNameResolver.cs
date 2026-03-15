@@ -19,6 +19,13 @@ public record ComponentNames(
 /// </summary>
 public interface IComponentNameResolver
 {
+    /// <summary>
+    /// Resolves names for a batch of components of the same type.
+    /// </summary>
+    /// <param name="componentType">The component type code.</param>
+    /// <param name="objectIds">The objectId GUIDs to resolve.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Dictionary mapping objectId to resolved names. Missing entries = unresolvable.</returns>
     Task<IReadOnlyDictionary<Guid, ComponentNames>> ResolveAsync(
         int componentType,
         IReadOnlyList<Guid> objectIds,
