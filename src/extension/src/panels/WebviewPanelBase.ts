@@ -3,8 +3,13 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 
 /**
- * Base class for webview panels with safe messaging.
- * Prevents "Webview is disposed" errors from async operations.
+ * Base class for webview panels with safe messaging and lifecycle management.
+ *
+ * Subclasses create their `WebviewPanel` and call `initPanel(panel)` to wire:
+ * - `onDidReceiveMessage` → `handleMessage()` (abstract, subclass implements)
+ * - `onDidDispose` → `dispose()`
+ *
+ * This eliminates per-panel boilerplate for lifecycle wiring.
  */
 export abstract class WebviewPanelBase<
     TIncoming extends { command: string } = { command: string },
@@ -18,6 +23,34 @@ export abstract class WebviewPanelBase<
     /** Fires when the panel is disposed. Pass to async operations so they can bail out early. */
     protected get abortSignal(): AbortSignal {
         return this._abortController.signal;
+    }
+
+    /**
+     * Wire lifecycle listeners on a newly-created webview panel.
+     * Call this from the subclass constructor after creating the panel
+     * and setting its HTML content.
+     */
+    protected initPanel(panel: vscode.WebviewPanel): void {
+        this.panel = panel;
+        this.disposables.push(
+            panel.webview.onDidReceiveMessage((msg: TIncoming) => {
+                try {
+                    const result = this.handleMessage(msg);
+                    if (result instanceof Promise) {
+                        result.catch((err: unknown) => {
+                            const errMsg = err instanceof Error ? err.message : String(err);
+                            // eslint-disable-next-line no-console -- unhandled message handler error
+                            console.error(`[PPDS] Unhandled message error: ${errMsg}`);
+                        });
+                    }
+                } catch (err) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    // eslint-disable-next-line no-console -- unhandled message handler error
+                    console.error(`[PPDS] Unhandled message error: ${errMsg}`);
+                }
+            }),
+            panel.onDidDispose(() => this.dispose()),
+        );
     }
 
     protected postMessage(message: TOutgoing): void {
@@ -46,11 +79,20 @@ export abstract class WebviewPanelBase<
         // Default: no-op
     }
 
-    /** Override in subclasses to handle incoming messages from the webview. */
-     
-    protected handleMessage(_message: TIncoming): void {
-        // Default: no-op. Subclasses override to handle typed incoming messages.
+    /**
+     * Log a webview-side error and show it to the user.
+     * Call from subclass `handleMessage` when receiving a `webviewError` message.
+     */
+    protected logWebviewError(error: string, stack?: string): void {
+        // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
+        console.error(`[PPDS Webview] ${error}`);
+        // eslint-disable-next-line no-console -- forwarding webview errors to dev console for diagnostics
+        if (stack) console.error(`[PPDS Webview Stack] ${stack}`);
+        vscode.window.showErrorMessage(`PPDS: ${error}`);
     }
+
+    /** Handle an incoming message from the webview. Subclasses implement their message switch here. */
+    protected abstract handleMessage(message: TIncoming): Promise<void> | void;
 
     abstract getHtmlContent(webview: vscode.Webview): string;
 
