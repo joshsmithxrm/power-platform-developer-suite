@@ -109,3 +109,4 @@ Number all criteria: AC-01, AC-02, etc. (Constitution I3).
 4. **Don't port code** — understand what the legacy did, then design the proper abstraction. No inheriting legacy patterns.
 5. **One panel at a time** — complete design for one panel across all surfaces before starting the next.
 6. **Cross-reference surface parity** — VS Code panel and TUI screen must expose equivalent functionality (same data, same filters, same actions). MCP tools must cover the same read/query operations for AI agent access.
+7. **Update skills after pattern-setting work** — when the first panel in a batch establishes new patterns (e.g., virtual scrolling, complex state management), update referenced skills (`@webview-panels`, TUI equivalents) with the proven patterns before implementing subsequent panels. Include this as an explicit step in the implementation plan.
