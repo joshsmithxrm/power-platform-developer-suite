@@ -17,31 +17,31 @@ Interact with extension webview panels running inside VS Code. Take screenshots 
 
 ## Setup
 
-The tool is at `extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies). First run downloads VS Code (~30-60 seconds, cached afterward).
+The tool is at `src/extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies). First run downloads VS Code (~30-60 seconds, cached afterward).
 
 ## Core Workflow
 
 ```bash
 # 1. Launch VS Code with the extension (--build compiles extension + daemon)
-node extension/tools/webview-cdp.mjs launch --build
+node src/extension/tools/webview-cdp.mjs launch --build
 
 # 2. Open a panel via command palette
-node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
 
 # 3. Take a screenshot to see what you built
-node extension/tools/webview-cdp.mjs screenshot $TEMP/current-state.png
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/current-state.png
 # IMPORTANT: Actually look at the screenshot to verify the UI
 
 # 4. Interact with webview content (use --ext to target the PPDS webview)
-node extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/after-click.png
+node src/extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-click.png
 
 # 5. Check for errors
-node extension/tools/webview-cdp.mjs logs
+node src/extension/tools/webview-cdp.mjs logs
 
 # 6. When done
-node extension/tools/webview-cdp.mjs close
+node src/extension/tools/webview-cdp.mjs close
 ```
 
 **Always use `--ext "power-platform-developer-suite"`** on `eval`, `click`, `type`, `select`, and `wait` commands. VS Code may have other webviews open (walkthrough, settings, etc.) — without `--ext`, you might interact with the wrong panel.
@@ -85,58 +85,58 @@ node extension/tools/webview-cdp.mjs close
 
 ### Open a panel and verify it loaded
 ```bash
-node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/panel.png
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/panel.png
 ```
 
 ### Test a keyboard shortcut
 ```bash
-node extension/tools/webview-cdp.mjs key "ctrl+enter"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/after-shortcut.png
+node src/extension/tools/webview-cdp.mjs key "ctrl+enter"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-shortcut.png
 ```
 
 ### Open the command palette
 ```bash
-node extension/tools/webview-cdp.mjs key "ctrl+shift+p"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/palette.png
-node extension/tools/webview-cdp.mjs key "Escape"
+node src/extension/tools/webview-cdp.mjs key "ctrl+shift+p"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/palette.png
+node src/extension/tools/webview-cdp.mjs key "Escape"
 ```
 
 ### Test a context menu
 ```bash
-node extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
-node extension/tools/webview-cdp.mjs screenshot $TEMP/context-menu.png
-node extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
+node src/extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/context-menu.png
+node src/extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
 ```
 
 ### Test drag selection
 ```bash
-node extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('td[data-row=\"2\"]').getBoundingClientRect())"
-node extension/tools/webview-cdp.mjs mouse mousedown 150 200
-node extension/tools/webview-cdp.mjs mouse mousemove 300 250
-node extension/tools/webview-cdp.mjs mouse mouseup 300 250
-node extension/tools/webview-cdp.mjs screenshot $TEMP/after-drag.png
+node src/extension/tools/webview-cdp.mjs eval "JSON.stringify(document.querySelector('td[data-row=\"2\"]').getBoundingClientRect())"
+node src/extension/tools/webview-cdp.mjs mouse mousedown 150 200
+node src/extension/tools/webview-cdp.mjs mouse mousemove 300 250
+node src/extension/tools/webview-cdp.mjs mouse mouseup 300 250
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-drag.png
 ```
 
 ### Check for errors
 ```bash
 # Console output (captured continuously by daemon)
-node extension/tools/webview-cdp.mjs logs
+node src/extension/tools/webview-cdp.mjs logs
 
 # Extension output channel logs
-node extension/tools/webview-cdp.mjs logs --channel "PPDS"
+node src/extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
 ### Execute notebook cells
 ```bash
 # Run the focused cell — clicks the run button (reliable, focus-independent)
-node extension/tools/webview-cdp.mjs notebook run
-node extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
+node src/extension/tools/webview-cdp.mjs notebook run
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
 
 # Run all cells
-node extension/tools/webview-cdp.mjs notebook run-all
-node extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
+node src/extension/tools/webview-cdp.mjs notebook run-all
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
 ```
 
 **Avoid** using `command "Notebook: Execute Cell"` — opening the command palette steals focus from the cell, causing the command to silently fail. Similarly, `key "ctrl+enter"` may trigger `executeAndInsertBelow` (creates a duplicate cell) depending on VS Code's keybinding context.
@@ -144,24 +144,24 @@ node extension/tools/webview-cdp.mjs screenshot $TEMP/all-cells.png
 ### Hide panel for notebook screenshots
 ```bash
 # The output panel takes vertical space — hide it to see cell output clearly
-node extension/tools/webview-cdp.mjs command "View: Toggle Panel Visibility"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/notebook-clean.png
+node src/extension/tools/webview-cdp.mjs command "View: Toggle Panel Visibility"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/notebook-clean.png
 ```
 
 ### Check DOM state
 ```bash
-node extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selected') !== null"
-node extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
+node src/extension/tools/webview-cdp.mjs eval "document.querySelector('.cell-selected') !== null"
+node src/extension/tools/webview-cdp.mjs eval "document.querySelector('#status-text').textContent"
 ```
 
 ### Read element text
 ```bash
 # Quick read of an element's text content
-node extension/tools/webview-cdp.mjs text "#execution-time" --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs text "#execution-time" --ext "power-platform-developer-suite"
 # Returns: "in 298ms via Dataverse"
 
 # Equivalent eval (more verbose, same result):
-node extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-time")?.textContent'
+node src/extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-time")?.textContent'
 ```
 
 ## Monaco Editor
@@ -170,10 +170,10 @@ node extension/tools/webview-cdp.mjs eval 'document.querySelector("#execution-ti
 
 ```bash
 # Set Monaco editor content
-node extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 10 * FROM account")'
+node src/extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 10 * FROM account")'
 
 # Read Monaco editor content
-node extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].getValue()'
+node src/extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].getValue()'
 ```
 
 `type` works fine on regular `<input>`, `<textarea>`, and `<select>` elements — just not Monaco.
@@ -184,10 +184,10 @@ node extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].getValu
 
 ```bash
 # Good — use command palette to trigger tree actions
-node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
 
 # Fragile — selector may not match after scroll/re-render
-node extension/tools/webview-cdp.mjs click --page ".pane-body .monaco-list-row"
+node src/extension/tools/webview-cdp.mjs click --page ".pane-body .monaco-list-row"
 ```
 
 Reserve `click --page` for stable, non-virtualized UI elements (toolbar buttons, tab headers, status bar items).
@@ -198,11 +198,11 @@ Reserve `click --page` for stable, non-virtualized UI elements (toolbar buttons,
 
 ```bash
 # Good — uses temp directory (use $TEMP on Windows, $TMPDIR on macOS/Linux)
-node extension/tools/webview-cdp.mjs screenshot $TEMP/my-screenshot.png
-node extension/tools/webview-cdp.mjs screenshot /tmp/my-screenshot.png
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/my-screenshot.png
+node src/extension/tools/webview-cdp.mjs screenshot /tmp/my-screenshot.png
 
 # BAD — creates untracked files in the repo
-node extension/tools/webview-cdp.mjs screenshot screenshot.png
+node src/extension/tools/webview-cdp.mjs screenshot screenshot.png
 ```
 
 **Windows note:** `$TMPDIR` does NOT work on Windows (expands to wrong path). Use `$TEMP` instead.
@@ -213,10 +213,10 @@ Bash expands `${}` and backticks in double-quoted strings. Use single quotes for
 
 ```bash
 # Good — single quotes prevent bash expansion
-node extension/tools/webview-cdp.mjs eval 'document.querySelector("td").textContent'
+node src/extension/tools/webview-cdp.mjs eval 'document.querySelector("td").textContent'
 
 # BAD — bash expands ${} as a variable
-node extension/tools/webview-cdp.mjs eval "document.querySelector('td[data-row=\"${row}\"]')"
+node src/extension/tools/webview-cdp.mjs eval "document.querySelector('td[data-row=\"${row}\"]')"
 ```
 
 ## Verification Before Completion
@@ -231,10 +231,10 @@ Not every change needs a screenshot. Match verification to the risk profile:
 
 ```bash
 # After implementation + tests pass, verify visually
-node extension/tools/webview-cdp.mjs launch --build
-node extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node extension/tools/webview-cdp.mjs screenshot $TEMP/verification.png
+node src/extension/tools/webview-cdp.mjs launch --build
+node src/extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/extension/tools/webview-cdp.mjs screenshot $TEMP/verification.png
 # LOOK at the screenshot — don't just take it
 ```
 
