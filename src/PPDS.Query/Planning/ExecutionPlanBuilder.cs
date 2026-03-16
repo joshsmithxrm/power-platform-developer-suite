@@ -225,6 +225,12 @@ public sealed partial class ExecutionPlanBuilder
             return PlanClientSideJoin(selectStmt, querySpec, options);
         }
 
+        // Force client-side aggregation when hint is active (-- ppds:HASH_GROUP)
+        if (options.ForceClientAggregation && HasAggregatesInQuerySpec(querySpec))
+        {
+            return PlanClientSideAggregate(querySpec, options, transpileResult, entityName);
+        }
+
         // Phase 4: Aggregate partitioning (now fully ScriptDom-based)
         if (HasAggregatesInQuerySpec(querySpec) && options.EstimatedRecordCount.HasValue)
         {
@@ -244,7 +250,8 @@ public sealed partial class ExecutionPlanBuilder
             maxRows: options.MaxRows ?? top,
             initialPageNumber: options.PageNumber,
             initialPagingCookie: options.PagingCookie,
-            includeCount: options.IncludeCount);
+            includeCount: options.IncludeCount,
+            noLock: options.NoLock);
 
         // Start with scan as root; apply client-side operators on top.
         IQueryPlanNode rootNode = scanNode;

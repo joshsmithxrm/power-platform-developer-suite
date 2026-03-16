@@ -41,6 +41,13 @@ public sealed class QueryPlanContext
     /// </summary>
     public int MaxMaterializationRows { get; }
 
+    /// <summary>
+    /// Per-query execution options (bypass plugins/flows). Null means no overrides.
+    /// Consumed by <see cref="PPDS.Dataverse.Query.Planning.Nodes.FetchXmlScanNode"/>
+    /// when calling <see cref="IQueryExecutor.ExecuteFetchXmlAsync(string, int?, string?, bool, QueryExecutionOptions?, CancellationToken)"/>.
+    /// </summary>
+    public QueryExecutionOptions? ExecutionOptions { get; }
+
     /// <summary>Initializes a new instance of the <see cref="QueryPlanContext"/> class.</summary>
     public QueryPlanContext(
         IQueryExecutor queryExecutor,
@@ -51,7 +58,8 @@ public sealed class QueryPlanContext
         IMetadataQueryExecutor? metadataQueryExecutor = null,
         IBulkOperationExecutor? bulkOperationExecutor = null,
         VariableScope? variableScope = null,
-        int maxMaterializationRows = 500_000)
+        int maxMaterializationRows = 500_000,
+        QueryExecutionOptions? executionOptions = null)
     {
         QueryExecutor = queryExecutor ?? throw new ArgumentNullException(nameof(queryExecutor));
         CancellationToken = cancellationToken;
@@ -62,5 +70,6 @@ public sealed class QueryPlanContext
         BulkOperationExecutor = bulkOperationExecutor;
         VariableScope = variableScope;
         MaxMaterializationRows = maxMaterializationRows;
+        ExecutionOptions = executionOptions;
     }
 }

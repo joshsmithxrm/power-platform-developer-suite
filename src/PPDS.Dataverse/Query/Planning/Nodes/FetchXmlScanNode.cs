@@ -48,6 +48,9 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
     /// </summary>
     public bool HasLinkedEntity { get; }
 
+    /// <summary>Whether to inject no-lock="true" into the FetchXML before execution.</summary>
+    public bool NoLock { get; }
+
     /// <summary>The prepared FetchXML for execution (top converted to count for paging compatibility).</summary>
     private readonly string _effectiveFetchXml;
 
@@ -76,7 +79,8 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         int? maxRows = null,
         int? initialPageNumber = null,
         string? initialPagingCookie = null,
-        bool includeCount = false)
+        bool includeCount = false,
+        bool noLock = false)
     {
         FetchXml = fetchXml ?? throw new ArgumentNullException(nameof(fetchXml));
         EntityLogicalName = entityLogicalName ?? throw new ArgumentNullException(nameof(entityLogicalName));
@@ -85,6 +89,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         InitialPageNumber = initialPageNumber;
         InitialPagingCookie = initialPagingCookie;
         IncludeCount = includeCount;
+        NoLock = noLock;
         HasLinkedEntity = DetectLinkedEntities(fetchXml);
         _effectiveFetchXml = PrepareFetchXmlForExecution(fetchXml);
     }
@@ -130,15 +135,30 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Inject no-lock attribute if requested and not already present
+            var effectiveFetchXml = _effectiveFetchXml;
+            if (NoLock && !effectiveFetchXml.Contains("no-lock="))
+            {
+                effectiveFetchXml = effectiveFetchXml.Replace("<fetch", "<fetch no-lock=\"true\"");
+            }
+
             QueryResult result;
             try
             {
-                result = await context.QueryExecutor.ExecuteFetchXmlAsync(
-                    _effectiveFetchXml,
-                    pageNumber,
-                    pagingCookie,
-                    includeCount: IncludeCount,
-                    cancellationToken).ConfigureAwait(false);
+                result = context.ExecutionOptions != null
+                    ? await context.QueryExecutor.ExecuteFetchXmlAsync(
+                        effectiveFetchXml,
+                        pageNumber,
+                        pagingCookie,
+                        includeCount: IncludeCount,
+                        context.ExecutionOptions,
+                        cancellationToken).ConfigureAwait(false)
+                    : await context.QueryExecutor.ExecuteFetchXmlAsync(
+                        effectiveFetchXml,
+                        pageNumber,
+                        pagingCookie,
+                        IncludeCount,
+                        cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

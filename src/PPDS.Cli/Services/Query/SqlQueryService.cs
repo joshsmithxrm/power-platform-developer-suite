@@ -130,7 +130,7 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var (fragment, planResult, safetyResult) =
+        var (fragment, planResult, safetyResult, executionOptions) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
@@ -151,7 +151,8 @@ public sealed class SqlQueryService : ISqlQueryService
             _queryExecutor,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
-            metadataQueryExecutor: _metadataQueryExecutor);
+            metadataQueryExecutor: _metadataQueryExecutor,
+            executionOptions: executionOptions);
 
         var result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
 
@@ -189,9 +190,23 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
+        // Parse query hints for EXPLAIN path too
+        var hints = QueryHintParser.Parse(fragment);
+
+        var effectivePoolCapacity = hints.MaxParallelism.HasValue
+            ? Math.Min(hints.MaxParallelism.Value, _poolCapacity)
+            : _poolCapacity;
+
         var planOptions = new QueryPlanOptions
         {
-            RemoteExecutorFactory = RemoteExecutorFactory
+            RemoteExecutorFactory = RemoteExecutorFactory,
+            PoolCapacity = effectivePoolCapacity,
+            ForceClientAggregation = hints.ForceClientAggregation == true,
+            NoLock = hints.NoLock == true,
+            UseTdsEndpoint = hints.UseTdsEndpoint == true,
+            MaxRows = hints.MaxResultRows,
+            TdsQueryExecutor = _tdsQueryExecutor,
+            OriginalSql = sql
         };
 
         QueryPlanResult planResult;
@@ -221,7 +236,7 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (chunkSize <= 0) chunkSize = 100;
 
-        var (fragment, planResult, safetyResult) =
+        var (fragment, planResult, safetyResult, executionOptions) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: yield empty completion chunk
@@ -244,7 +259,8 @@ public sealed class SqlQueryService : ISqlQueryService
             _queryExecutor,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
-            metadataQueryExecutor: _metadataQueryExecutor);
+            metadataQueryExecutor: _metadataQueryExecutor,
+            executionOptions: executionOptions);
 
         var chunkRows = new List<IReadOnlyDictionary<string, QueryValue>>(chunkSize);
         IReadOnlyList<QueryColumn>? columns = null;
@@ -307,7 +323,7 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
     /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
     /// </summary>
-    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult)>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions)>
         PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -321,6 +337,19 @@ public sealed class SqlQueryService : ISqlQueryService
         catch (QueryParseException ex)
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // Parse query hints (-- ppds:* comments and OPTION() clauses)
+        var hints = QueryHintParser.Parse(fragment);
+
+        // Apply plan-level overrides: hints win over caller settings
+        if (hints.UseTdsEndpoint == true)
+        {
+            request = request with { UseTdsEndpoint = true };
+        }
+        if (hints.MaxResultRows.HasValue)
+        {
+            request = request with { TopOverride = hints.MaxResultRows.Value };
         }
 
         // DML safety check
@@ -356,6 +385,20 @@ public sealed class SqlQueryService : ISqlQueryService
         var (estimatedRecordCount, minDate, maxDate) =
             await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
 
+        // Apply hint-level overrides to pool capacity
+        var effectivePoolCapacity = hints.MaxParallelism.HasValue
+            ? Math.Min(hints.MaxParallelism.Value, _poolCapacity)
+            : _poolCapacity;
+
+        // Build execution options from bypass hints
+        var executionOptions = (hints.BypassPlugins == true || hints.BypassFlows == true)
+            ? new QueryExecutionOptions
+            {
+                BypassPlugins = hints.BypassPlugins == true,
+                BypassFlows = hints.BypassFlows == true
+            }
+            : null;
+
         // Build execution plan
         var planOptions = new QueryPlanOptions
         {
@@ -368,11 +411,13 @@ public sealed class SqlQueryService : ISqlQueryService
             TdsQueryExecutor = _tdsQueryExecutor,
             DmlRowCap = dmlRowCap,
             EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
+            PoolCapacity = effectivePoolCapacity,
             EstimatedRecordCount = estimatedRecordCount,
             MinDate = minDate,
             MaxDate = maxDate,
-            RemoteExecutorFactory = RemoteExecutorFactory
+            RemoteExecutorFactory = RemoteExecutorFactory,
+            ForceClientAggregation = hints.ForceClientAggregation == true,
+            NoLock = hints.NoLock == true
         };
 
         QueryPlanResult planResult;
@@ -388,7 +433,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // Check cross-environment DML policy after planning
         CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
-        return (fragment, planResult, safetyResult);
+        return (fragment, planResult, safetyResult, executionOptions);
     }
 
     // ═══════════════════════════════════════════════════════════════════

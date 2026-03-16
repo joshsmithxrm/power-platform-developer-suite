@@ -108,4 +108,16 @@ public sealed class QueryPlanOptions
     /// the bound node instead of generating FetchXML.
     /// </summary>
     public Dictionary<string, IQueryPlanNode>? CteBindings { get; init; }
+
+    /// <summary>
+    /// When true, forces client-side hash grouping instead of Dataverse-side aggregation.
+    /// Set by the <c>-- ppds:HASH_GROUP</c> query hint.
+    /// </summary>
+    public bool ForceClientAggregation { get; init; }
+
+    /// <summary>
+    /// When true, signals FetchXmlScanNode to inject <c>no-lock="true"</c> into FetchXML.
+    /// Set by the <c>-- ppds:NOLOCK</c> query hint.
+    /// </summary>
+    public bool NoLock { get; init; }
 }
