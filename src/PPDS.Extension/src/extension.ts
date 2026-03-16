@@ -196,12 +196,24 @@ export function activate(context: vscode.ExtensionContext): void {
     // Sync tools tree disabled state with profile availability
     const refreshToolsState = (): void => {
         void client.authList().then(result => {
-            toolsTreeProvider.setHasActiveProfile(result.activeProfile !== null);
-        }).catch(() => {
+            toolsTreeProvider.setHasActiveProfile(
+                result.activeProfile !== null || result.activeProfileIndex !== null);
+        }).catch((err: unknown) => {
+            logChannel?.warn(`Failed to refresh tools state: ${err instanceof Error ? err.message : String(err)}`);
             toolsTreeProvider.setHasActiveProfile(false);
         });
     };
-    refreshToolsState();
+
+    // Refresh tools state when daemon becomes ready (fixes startup race where
+    // the initial call fires before the daemon is connected)
+    context.subscriptions.push(
+        client.onDidChangeState(state => {
+            if (state === 'ready') {
+                refreshToolsState();
+                profileTreeProvider.refresh();
+            }
+        }),
+    );
 
     // ── Profile Commands ────────────────────────────────────────────────
     registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });

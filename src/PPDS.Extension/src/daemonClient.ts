@@ -816,8 +816,9 @@ export class DaemonClient implements vscode.Disposable {
             // TODO: Consider a lightweight health/ping endpoint
             this.connection.sendRequest('auth/list').then(() => {
                 this._heartbeatFailures = 0;
-            }).catch(() => {
+            }).catch((err: unknown) => {
                 this._heartbeatFailures++;
+                this.log.debug(`Heartbeat error: ${err instanceof Error ? err.message : String(err)}`);
                 this.log.warn(`Heartbeat failed (${this._heartbeatFailures}/${DaemonClient.HEARTBEAT_MAX_FAILURES}) — daemon may be unresponsive`);
                 if (this._heartbeatFailures >= DaemonClient.HEARTBEAT_MAX_FAILURES) {
                     this.log.warn('Max consecutive heartbeat failures reached — killing daemon');

@@ -147,7 +147,9 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                 try {
                     const config = await this.daemon.envConfigGet(this.environmentUrl);
                     this.environmentColor = config.resolvedColor ?? null;
-                } catch {
+                } catch (err) {
+                    // eslint-disable-next-line no-console -- non-critical: color accent unavailable
+                    console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                     this.environmentColor = null;
                 }
             }
@@ -170,7 +172,9 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             try {
                 const config = await this.daemon.envConfigGet(result.url);
                 this.environmentColor = config.resolvedColor ?? null;
-            } catch {
+            } catch (err) {
+                // eslint-disable-next-line no-console -- non-critical: color accent unavailable
+                console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                 this.environmentColor = null;
             }
             this.updatePanelTitle();

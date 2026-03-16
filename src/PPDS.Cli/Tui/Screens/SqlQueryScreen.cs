@@ -89,7 +89,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Filter Results", "/", ShowFilter),
             new("", "", () => {}, null, null, Key.Null), // Separator
-            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "Ctrl+Shift+T", ToggleTdsEndpoint),
+            new(_useTdsEndpoint ? "\u2713 TDS Read Replica" : "  TDS Read Replica", "F10", ToggleTdsEndpoint),
         })
     };
 
@@ -347,7 +347,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         });
         RegisterHotkey(registry, Key.F5, "Execute query", () => _ = ExecuteQueryAsync());
         RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.F, "Show FetchXML", ShowFetchXmlDialog);
-        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.T, "Toggle TDS Endpoint", ToggleTdsEndpoint);
+        // F10 instead of Ctrl+Shift+T: terminals cannot distinguish Ctrl+T from Ctrl+Shift+T
+        // (they send the same keycode), so the global Ctrl+T (new tab) always wins. See #580.
+        RegisterHotkey(registry, Key.F10, "Toggle TDS Endpoint", ToggleTdsEndpoint);
         // F-key alternatives for Linux compatibility (Ctrl+Shift combos don't work on Linux terminals)
         RegisterHotkey(registry, Key.F7, "Show execution plan", ShowExecutionPlanDialog);
         RegisterHotkey(registry, Key.F8, "Query history", ShowHistoryDialog);
