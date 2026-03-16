@@ -112,12 +112,9 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
 });
 
 // ── Keyboard shortcuts ──
+// Note: Ctrl+R is NOT used because it conflicts with VS Code's native reload.
+// Refresh is available via the toolbar button.
 document.addEventListener('keydown', (e) => {
-    // Ctrl+R = Refresh
-    if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
-        e.preventDefault();
-        vscode.postMessage({ command: 'refresh' });
-    }
     // Escape = close detail pane
     if (e.key === 'Escape' && detailPane.style.display !== 'none') {
         detailPane.style.display = 'none';
