@@ -13,7 +13,7 @@ The daemon's RPC `query/sql` handler bypasses `SqlQueryService` entirely — it 
 
 ### Goals
 
-- **Single code path**: Daemon uses `SqlQueryService.ExecuteAsync()` like TUI and CLI — no bespoke query pipeline
+- **Single code path**: All daemon query RPC handlers (`query/sql`, `query/explain`, `query/export`) use `SqlQueryService` — no bespoke query pipelines
 - **Query hints**: Integrate `QueryHintParser` into `SqlQueryService.PrepareExecutionAsync()` so all 8 hints work across all interfaces
 - **Cross-environment queries in VS Code**: Wire `RemoteExecutorFactory` on the daemon's service instance so `[LABEL].entity` syntax works
 - **Environment color rendering**: Surface configured environment colors as a toolbar accent in VS Code webview panels
@@ -26,6 +26,8 @@ The daemon's RPC `query/sql` handler bypasses `SqlQueryService` entirely — it 
 - Changes to the TUI environment color rendering (already works)
 - IntelliSense/completions for `-- ppds:` hint prefix (tracked separately)
 - Documentation on ppds-docs site (tracked via separate GitHub issue)
+- `IProgressReporter` for `SqlQueryService` — query execution does not currently accept a progress reporter; adding one for long-running queries (large aggregates, cross-env joins) is a separate enhancement
+- `query/fetchxml` handler alignment — executes raw FetchXML directly via `IQueryExecutor`, which is appropriate since FetchXML is already the final format (no transpilation/planning needed). The only missing feature is virtual column expansion; tracked separately
 
 ---
 
@@ -84,8 +86,10 @@ SqlQueryResult (with DataSources metadata)
 | `QueryHintOverrides` | Nullable override bag — null means "use default" |
 | `QueryExecutionOptions` | Execution-level options (BypassPlugins, BypassFlows, NoLock) threaded to executor |
 | `QueryPlanOptions` | Plan-level options (UseTds, ForceClientAggregation, MaxRows, etc.) |
-| `FetchXmlScanNode` | Injects `no-lock="true"` into FetchXML string when NoLock hint is active |
-| `QueryPlanContext` | Carries `QueryExecutionOptions` through plan execution — nodes apply headers at execution time |
+| `FetchXmlScanNode` | Injects `no-lock="true"` into FetchXML string; passes `QueryExecutionOptions` to executor overload |
+| `QueryPlanContext` | Carries `QueryExecutionOptions` through plan execution |
+| `IQueryExecutor` | New default-implementation overload accepts `QueryExecutionOptions?`; existing overload unchanged |
+| `QueryExecutor` | Concrete override applies BypassPlugins/BypassFlows as OrganizationRequest headers |
 
 ### Dependencies
 
@@ -101,11 +105,13 @@ SqlQueryResult (with DataSources metadata)
 #### Core Requirements
 
 1. `RpcMethodHandler.QuerySqlAsync()` delegates ALL query execution to `SqlQueryService.ExecuteAsync()` — no inline transpilation or direct executor calls
-2. The daemon wires `RemoteExecutorFactory`, `ProfileResolver`, `EnvironmentSafetySettings`, and `EnvironmentProtectionLevel` on the `SqlQueryService` instance, using the same pattern as `InteractiveSession.GetSqlQueryServiceAsync()` (lines 321-355)
-3. The daemon's inline DML safety pre-check (lines 954-1001) is removed — `SqlQueryService.PrepareExecutionAsync()` handles DML safety
-4. The private `TranspileSqlToFetchXml()` helper in `RpcMethodHandler` is removed
-5. The `QueryResultResponse` RPC DTO contract is unchanged — `SqlQueryResult` maps to the existing fields
-6. TDS routing is controlled via `SqlQueryRequest.UseTdsEndpoint` — the service handles TDS internally
+2. `RpcMethodHandler.QueryExplainAsync()` delegates to `SqlQueryService.ExplainAsync()` — no inline parser/planner/generator instantiation
+3. `RpcMethodHandler.QueryExportAsync()` delegates transpilation to `SqlQueryService.TranspileSql()` and execution to `SqlQueryService.ExecuteAsync()` (or `ExecuteStreamingAsync()` for large exports)
+4. The daemon wires `RemoteExecutorFactory`, `ProfileResolver`, `EnvironmentSafetySettings`, and `EnvironmentProtectionLevel` on the `SqlQueryService` instance, using the same pattern as `InteractiveSession.GetSqlQueryServiceAsync()` (lines 321-355)
+5. The daemon's inline DML safety pre-check (lines 954-1001) is removed — `SqlQueryService.PrepareExecutionAsync()` handles DML safety
+6. All bespoke helper methods are deleted (see Dead Code Cleanup section)
+7. The `QueryResultResponse` RPC DTO contract is unchanged — `SqlQueryResult` maps to the existing fields
+8. TDS routing is controlled via `SqlQueryRequest.UseTdsEndpoint` — the service handles TDS internally
 
 #### Primary Flow
 
@@ -124,6 +130,43 @@ SqlQueryResult (with DataSources metadata)
 **query/sql RPC call (showFetchXml mode):**
 
 When `request.ShowFetchXml` is true, the caller wants only the transpiled FetchXML without execution. This code path uses `service.TranspileSql(request.Sql, request.Top)` instead of `ExecuteAsync()` and returns the FetchXML string in the response. No plan building, no execution, no wiring needed.
+
+#### Error Mapping
+
+When `SqlQueryService` throws exceptions, the daemon must catch and remap to existing RPC error codes to preserve the extension's error handling:
+
+| Service Exception | RPC Error Code | Mapping |
+|-------------------|---------------|---------|
+| `QueryParseException` | `ErrorCodes.Query.ParseError` | Wrap in `RpcException` with parse error details |
+| `PpdsException` with `DmlBlocked` ErrorCode | `ErrorCodes.Query.DmlBlocked` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlBlocked = true }` |
+| `PpdsException` with `DmlConfirmationRequired` ErrorCode | `ErrorCodes.Query.DmlConfirmationRequired` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlConfirmationRequired = true }` |
+| `PpdsException` (other) | `ErrorCodes.Query.ExecutionError` | Wrap in `RpcException` with error message |
+| Other exceptions | Standard StreamJsonRpc error | Let StreamJsonRpc handle (500-level equivalent) |
+
+The daemon's `QuerySqlAsync` method wraps the `service.ExecuteAsync()` call in a try/catch that performs this mapping. This replaces the current inline DML safety checks that throw `RpcException` directly.
+
+#### Dead Code Cleanup
+
+After switching to `SqlQueryService`, the following code in `RpcMethodHandler.cs` must be deleted:
+
+| Code | Lines | Reason |
+|------|-------|--------|
+| `TranspileSqlToFetchXml()` private method | 1339-1370 | Replaced by `SqlQueryService.TranspileSql()` |
+| Inline DML safety check block | 954-1002 | Handled by `SqlQueryService.PrepareExecutionAsync()` |
+| `InjectTopAttribute()` private method | 1456-1473 | Handled by `SqlQueryService.TranspileSql()` TOP injection |
+| Inline `QueryParser`/`ExecutionPlanBuilder`/`FetchXmlGeneratorService` in `QueryExplainAsync` | 1261-1266 | Replaced by `SqlQueryService.ExplainAsync()` |
+| TDS executor inline construction in `QuerySqlAsync` | 1012-1024 | Handled by `SqlQueryService` TDS routing |
+| `FormatExportContent()` private method | 1372-1427 | Move to a shared `QueryExportFormatter` utility or keep in handler if only used there — but decouple from execution |
+| `ExtractDisplayValue()` private method | 1429-1440 | Moves with `FormatExportContent` |
+| `CsvEscape()` private method | 1442-1449 | Moves with `FormatExportContent` |
+| `using Microsoft.SqlServer.TransactSql.ScriptDom` import | Line 24 | No longer needed in handler |
+| `using PPDS.Query.Transpilation` import | Line 29 | No longer needed in handler |
+
+**`MapToResponse()` (lines 1475-1502)**: Refactor, not delete. Change to accept `SqlQueryResult` instead of `QueryResult` — unwrap via `sqlQueryResult.Result` and `sqlQueryResult.TranspiledFetchXml`. Still needed for `query/fetchxml` handler which returns `QueryResult` directly.
+
+**`MapQueryValue()` (lines 1504-1532)**: Keep — pure transformation logic for `QueryValue` → RPC response objects.
+
+**`FireAndForgetHistorySave()` (lines 1299-1338)**: Keep — orthogonal to execution, still needed for all query endpoints.
 
 #### Constraints
 
@@ -187,11 +230,25 @@ When `request.ShowFetchXml` is true, the caller wants only the transpiled FetchX
 
 5. **`FetchXmlScanNode`**: When `NoLock` is true (from `QueryPlanOptions` at construction), inject `no-lock="true"` attribute into the FetchXML string before calling `IQueryExecutor.ExecuteFetchXmlAsync()`. This is string manipulation on the already-generated FetchXML — no `IQueryExecutor` interface change needed.
 
-6. **`FetchXmlScanNode` (execution headers)**: When `context.ExecutionOptions?.BypassPlugins` is true, set `BypassCustomPluginExecution` header on the `OrganizationRequest`. Same for `BypassFlows` → `SuppressCallbackRegistrationExpanderJob`. Headers are set on the request object passed to `IQueryExecutor`, not on the executor itself — no interface change needed.
+6. **`IQueryExecutor`**: Add a new overload with a default interface implementation (requires .NET 8+, which all non-plugin code targets):
+   ```csharp
+   Task<QueryResult> ExecuteFetchXmlAsync(
+       string fetchXml, int? pageNumber, string? pagingCookie,
+       bool includeCount, QueryExecutionOptions? executionOptions,
+       CancellationToken cancellationToken = default)
+   {
+       // Default: ignore options, call existing method
+       return ExecuteFetchXmlAsync(fetchXml, pageNumber, pagingCookie,
+           includeCount, cancellationToken);
+   }
+   ```
+   This is backward-compatible: existing implementations (including test fakes and `RemoteScanNode`'s executor) don't break because the default implementation delegates to the existing method. Only `QueryExecutor` (the concrete Dataverse implementation) overrides it to apply headers.
 
-7. **`ExecutionPlanBuilder.PlanSelect()`**: When `ForceClientAggregation` is true and query has aggregates, route to client-side hash group plan regardless of record count.
+7. **`QueryExecutor` (concrete implementation)**: Override the new overload. When `executionOptions?.BypassPlugins` is true, set `BypassCustomPluginExecution = true` on the `OrganizationRequest`. Same for `BypassFlows` → `SuppressCallbackRegistrationExpanderJob`.
 
-8. **`IQueryExecutor`**: No changes. Execution-level hints flow through `QueryPlanContext` and are applied by plan nodes at the request level, preserving interface stability.
+8. **`FetchXmlScanNode`**: Call the new overload, passing `context.ExecutionOptions` from `QueryPlanContext`. Existing callers that don't use hints pass `null` (or use the original overload).
+
+9. **`ExecutionPlanBuilder.PlanSelect()`**: When `ForceClientAggregation` is true and query has aggregates, route to client-side hash group plan regardless of record count.
 
 #### Precedence Rule
 
@@ -303,6 +360,13 @@ Each label is styled with its environment color (using the same CSS custom prope
 | AC-20 | Daemon no longer contains inline SQL transpilation or direct FetchXML execution code | Code review — `TranspileSqlToFetchXml` method deleted | 🔲 |
 | AC-21 | `ExplainAsync()` reflects hint-influenced plans (e.g., `-- ppds:USE_TDS` changes explain output to show TDS routing) | `SqlQueryServiceTests.Explain_ReflectsHints` | 🔲 |
 | AC-22 | `showFetchXml` mode uses `service.TranspileSql()` instead of inline transpilation | `RpcMethodHandlerTests.QuerySql_ShowFetchXml_UsesService` | 🔲 |
+| AC-23 | Daemon `query/explain` executes via `SqlQueryService.ExplainAsync()`, not inline parser/planner | `RpcMethodHandlerTests.QueryExplain_UsesSharedService` | 🔲 |
+| AC-24 | Daemon `query/export` uses `SqlQueryService` for transpilation and execution | `RpcMethodHandlerTests.QueryExport_UsesSharedService` | 🔲 |
+| AC-25 | `SqlQueryService` exceptions map to correct RPC error codes (`ParseError`, `DmlBlocked`, `DmlConfirmationRequired`) | `RpcMethodHandlerTests.QuerySql_ErrorMapping_PreservesRpcCodes` | 🔲 |
+| AC-26 | `TranspileSqlToFetchXml()` private method deleted from `RpcMethodHandler` | Code review — method no longer exists | 🔲 |
+| AC-27 | `InjectTopAttribute()` private method deleted from `RpcMethodHandler` | Code review — method no longer exists | 🔲 |
+| AC-28 | Inline DML safety check block deleted from `QuerySqlAsync` | Code review — block no longer exists | 🔲 |
+| AC-29 | Inline `QueryParser`/`ExecutionPlanBuilder`/`FetchXmlGeneratorService` deleted from `QueryExplainAsync` | Code review — instantiations no longer exist | 🔲 |
 
 ### Edge Cases
 
