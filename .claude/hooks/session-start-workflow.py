@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""
+SessionStart hook: injects workflow state into AI context.
+Outputs current workflow status so the AI knows what's been done and what's pending.
+"""
+import json
+import os
+import subprocess
+import sys
+
+
+def main():
+    # Read stdin
+    try:
+        json.load(sys.stdin)
+    except (json.JSONDecodeError, EOFError):
+        pass
+
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+    # Get current branch
+    branch = "unknown"
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Skip on main
+    if branch in ("main", "master"):
+        sys.exit(0)
+
+    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+
+    if not os.path.exists(state_path):
+        # No state file — inject workflow reminder
+        print(
+            f"WORKFLOW REMINDER for branch {branch}:\n"
+            "  No workflow state tracked yet.\n"
+            "  Required sequence: /gates → /verify → /qa → /review → /pr\n"
+            "  Steps 5-8 are enforced by hooks. PR creation will be blocked if incomplete.",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
+    try:
+        with open(state_path, "r") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        print(
+            f"WORKFLOW STATE for branch {branch}:\n"
+            "  ⚠ State file is corrupted. Delete .claude/workflow-state.json and re-run steps.",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
+    # Get current HEAD for staleness check
+    head_sha = None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            head_sha = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Build status lines
+    lines = [f"WORKFLOW STATE for branch {branch}:"]
+
+    # Gates
+    gates = state.get("gates", {})
+    gates_ref = gates.get("commit_ref")
+    gates_passed = gates.get("passed")
+    if gates_passed and gates_ref:
+        if head_sha and gates_ref == head_sha:
+            lines.append(f"  ✓ Gates passed (commit {gates_ref[:8]}, current)")
+        else:
+            lines.append(
+                f"  ⚠ Gates STALE (ran against {gates_ref[:8]}, "
+                f"HEAD is {head_sha[:8] if head_sha else 'unknown'})"
+            )
+    else:
+        lines.append("  ✗ Gates not run")
+
+    # Verify surfaces
+    verify = state.get("verify", {})
+    for surface in ("ext", "tui", "mcp", "cli"):
+        ts = verify.get(surface)
+        label = {"ext": "Extension", "tui": "TUI", "mcp": "MCP", "cli": "CLI"}[surface]
+        if ts:
+            lines.append(f"  ✓ {label} verified")
+        else:
+            lines.append(f"  ✗ {label} not verified")
+
+    # QA
+    qa = state.get("qa", {})
+    qa_surfaces = [k for k, v in qa.items() if v]
+    if qa_surfaces:
+        lines.append(f"  ✓ QA completed ({', '.join(qa_surfaces)})")
+    else:
+        lines.append("  ✗ QA not completed")
+
+    # Review
+    review = state.get("review", {})
+    if review.get("passed"):
+        findings = review.get("findings", 0)
+        lines.append(f"  ✓ Review passed ({findings} findings)")
+    else:
+        lines.append("  ✗ Review not completed")
+
+    # PR
+    pr = state.get("pr", {})
+    if pr and pr.get("url"):
+        lines.append(f"  ✓ PR created: {pr['url']}")
+    else:
+        lines.append("  ⚠ PR not created")
+
+    # Required steps
+    missing = []
+    if not gates_passed or (head_sha and gates_ref != head_sha):
+        missing.append("/gates")
+    if not any(verify.get(s) for s in ("ext", "tui", "mcp", "cli")):
+        missing.append("/verify")
+    if not qa_surfaces:
+        missing.append("/qa")
+    if not review.get("passed"):
+        missing.append("/review")
+
+    if missing:
+        lines.append(f"  Required before PR: {', '.join(missing)}")
+
+    print("\n".join(lines), file=sys.stderr)
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
