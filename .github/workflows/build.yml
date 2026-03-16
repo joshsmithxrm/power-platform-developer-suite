@@ -119,6 +119,10 @@ jobs:
         working-directory: src/PPDS.Extension
         run: npm ci
 
+      - name: Typecheck
+        working-directory: src/PPDS.Extension
+        run: npm run typecheck:all
+
       - name: Lint
         working-directory: src/PPDS.Extension
         run: npm run lint

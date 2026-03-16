@@ -61,7 +61,7 @@ def main():
             sys.exit(2)
 
         # Run extension lint if src/PPDS.Extension/ has changes or exists
-        extension_dir = os.path.join(project_dir, "src", "extension")
+        extension_dir = os.path.join(project_dir, "src", "PPDS.Extension")
         if os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
             lint_result = subprocess.run(
                 ["npm", "run", "lint"],

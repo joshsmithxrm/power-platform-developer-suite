@@ -1325,6 +1325,7 @@ public class RpcMethodHandler : IDisposable
                     FetchXml = fetchXml
                 };
             }
+            catch (OperationCanceledException) { throw; }
             catch
             {
                 // Fall back to just the transpiled FetchXML if plan building fails

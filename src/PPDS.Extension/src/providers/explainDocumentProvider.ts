@@ -44,6 +44,7 @@ export class ExplainDocumentProvider implements vscode.TextDocumentContentProvid
     }
 
     dispose(): void {
+        ExplainDocumentProvider.instance = undefined;
         this._closeListener.dispose();
         this._onDidChange.dispose();
     }

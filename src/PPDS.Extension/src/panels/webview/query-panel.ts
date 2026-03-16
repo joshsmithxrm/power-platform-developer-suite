@@ -1040,9 +1040,9 @@ document.addEventListener('contextmenu', (e) => {
         if (item.action === 'separator') {
             html += '<div style="border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); margin: 4px 0;"></div>';
         } else {
-            html += '<div class="context-menu-item" data-action="' + item.action + '" style="display:flex;align-items:center;">';
-            html += '<span>' + item.label + '</span>';
-            if (item.shortcut) html += '<span style="margin-left:auto;padding-left:24px;opacity:0.6;font-size:11px;">' + item.shortcut + '</span>';
+            html += '<div class="context-menu-item" data-action="' + escapeAttr(item.action) + '" style="display:flex;align-items:center;">';
+            html += '<span>' + escapeHtml(item.label) + '</span>';
+            if (item.shortcut) html += '<span style="margin-left:auto;padding-left:24px;opacity:0.6;font-size:11px;">' + escapeHtml(item.shortcut) + '</span>';
             html += '</div>';
         }
     }
