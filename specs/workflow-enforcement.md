@@ -157,11 +157,13 @@ WORKFLOW STATE for branch feature/import-jobs:
 
 **Trigger:** PreToolUse on `Bash(git commit:*)`.
 
-**Behavior:**
+**Relationship to existing hook:** The existing `.claude/hooks/pre-commit-validate.py` runs `dotnet build`, `dotnet test`, and `npm run lint` as a hard gate (exits code 2 on failure). That behavior is unchanged. The workflow state check below is added to the same hook file as an additional, non-blocking check that runs after the existing build/test/lint validation.
+
+**Added behavior (workflow state warning):**
 1. Check if files under `src/` are staged.
 2. If yes, read `.claude/workflow-state.json`.
 3. If `gates.commit_ref` does not match the current staging state (i.e., code has changed since gates last ran), emit a warning.
-4. **Does not block the commit.** This is a soft gate — WIP commits during implementation are expected.
+4. **The workflow state warning does not block the commit.** The existing build/test/lint validation continues to block on failure. This is a soft gate — WIP commits during implementation are expected.
 
 **Output on warn:**
 ```
@@ -178,7 +180,7 @@ WORKFLOW STATE for branch feature/import-jobs:
 3. Update `last_commit` to current HEAD.
 4. Write updated state file.
 
-**Implementation:** `.claude/hooks/post-commit-state.py`
+**Implementation:** `.claude/hooks/post-commit-state.py`, triggered via a new `PostToolUse` section in `.claude/settings.json` (see Implementation Notes below).
 
 This is the component responsible for state invalidation on commit (Core Requirement 3). Without it, stale `gates.passed` timestamps would persist across commits.
 
@@ -252,7 +254,7 @@ Each skill writes its own entry to `.claude/workflow-state.json` upon successful
 | `/panel-design` | (deleted) | Content merged into `/ext-panels`. |
 | `/implement` | `/implement` | Remove all superpowers references (currently references `superpowers:using-superpowers`, `superpowers:dispatching-parallel-agents`, `superpowers:verification-before-completion`, `superpowers:requesting-code-review`, `superpowers:systematic-debugging`). Replace with PPDS-native equivalents. Add mandatory tail (gates → verify → QA → review → converge). Add workflow state writes. |
 | `/review` | `/review` | Remove superpowers reference (currently dispatches via `subagent_type: 'superpowers:code-reviewer'`). Dispatch reviewer as a general-purpose subagent with the same isolation constraints (diff + constitution + ACs only, no implementation context). |
-| `/converge` | `/converge` | Add workflow state integration: clear `gates.passed` on cycle start, run `/gates` after final fix cycle, write fresh `gates.passed` + `gates.commit_ref` on completion. |
+| `/converge` | `/converge` | Retain all existing convergence tracking, cycle evaluation, and stall detection. Additionally: add workflow state integration — clear `gates.passed` on cycle start, run `/gates` after final fix cycle, write fresh `gates.passed` + `gates.commit_ref` on completion. |
 | `/debug` | `/debug` | Major rewrite. Absorb systematic-debugging discipline from superpowers: 4-phase process (Root Cause → Pattern Analysis → Hypothesis → Implementation), Iron Law (no fixes without investigation), 3-fix escalation rule, red flags table, root-cause tracing technique, defense-in-depth validation, condition-based waiting. Keep PPDS-specific surface detection and build commands. Remove superpowers references. |
 
 #### New Skills
@@ -465,6 +467,51 @@ When a new required step is added (e.g., security scanning):
 2. **Update PR Gate hook** to check for the new entry.
 3. **Update CLAUDE.md** workflow section.
 4. **Update SessionStart hook** output format to include the new step.
+
+---
+
+## Error Handling
+
+| Error | Condition | Recovery |
+|-------|-----------|----------|
+| Python not available | Hook script cannot execute | Graceful skip — hooks should not block the workflow if Python is missing. Emit a warning and allow the operation. |
+| JSON parse failure | `workflow-state.json` exists but is invalid JSON | Treat as "no state file." PR gate blocks (safe default). Emit warning suggesting the file may be corrupted. |
+| File system permission error | Cannot read/write `workflow-state.json` | Skills: emit warning, continue without state tracking. Hooks: treat as "no state file" (PR gate blocks). |
+| Concurrent access | Two processes write to state file simultaneously | Last-writer-wins. Acceptable for single-session state. The file is per-session, not shared across sessions. |
+| Git HEAD cannot be resolved | Detached HEAD or corrupted git state | Hooks: skip enforcement, emit warning. Skills: skip state writes, emit warning. |
+
+---
+
+## Implementation Notes
+
+### settings.json Changes Required
+
+All hook-related `settings.json` changes consolidated:
+
+1. **PostToolUse section** (new): Add `PostToolUse` matcher array to `.claude/settings.json`. Currently only `PreToolUse` exists.
+   ```json
+   "hooks": {
+     "PostToolUse": [
+       {
+         "matcher": "Bash(git commit:*)",
+         "hooks": [{ "type": "command", "command": ".claude/hooks/post-commit-state.py" }]
+       }
+     ]
+   }
+   ```
+
+2. **PreToolUse additions**: Add PR gate hook entry to existing `PreToolUse` array:
+   ```json
+   {
+     "matcher": "Bash(gh pr create:*)",
+     "hooks": [{ "type": "command", "command": ".claude/hooks/pr-gate.py" }]
+   }
+   ```
+
+3. **Superpowers disabling** (after all skills are implemented):
+   ```json
+   { "enabledPlugins": { "superpowers@claude-plugins-official": false } }
+   ```
 
 ---
 
