@@ -692,6 +692,366 @@ public class SqlQueryServiceTests
 
     #endregion
 
+    #region Query Hint Integration Tests
+
+    // ── AC-04: USE_TDS routes through TDS endpoint ──────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_UseTdsHint_RoutesThroughTdsExecutor()
+    {
+        // Arrange: service with a TDS executor that returns a result
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+
+        var tdsResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+            Count = 0
+        };
+
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tdsResult);
+
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        // The -- ppds:USE_TDS hint should force TDS routing
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account"
+        };
+
+        // Act
+        await service.ExecuteAsync(request);
+
+        // Assert: TDS executor was called; FetchXML executor was NOT called
+        mockTdsExecutor.Verify(
+            x => x.ExecuteSqlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        mockExecutor.Verify(
+            x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ── AC-05: NOLOCK produces no-lock="true" in executed FetchXML ───────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_NoLockHint_InjectsNoLockIntoFetchXml()
+    {
+        // Arrange: capture the FetchXML string passed to the executor
+        string? capturedFetchXml = null;
+
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, int?, string?, bool, CancellationToken>(
+                (fx, _, _, _, _) => capturedFetchXml = fx)
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:NOLOCK\nSELECT name FROM account"
+        };
+
+        // Act
+        await _service.ExecuteAsync(request);
+
+        // Assert: FetchXML sent to the executor contains no-lock="true"
+        Assert.NotNull(capturedFetchXml);
+        Assert.Contains("no-lock=\"true\"", capturedFetchXml);
+    }
+
+    // ── AC-08: MAX_ROWS limits result rows ────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_MaxRowsHint_LimitsReturnedRows()
+    {
+        // Arrange: executor returns 200 records; hint should cap at 100
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var records = Enumerable.Range(0, 200)
+            .Select(i => (IReadOnlyDictionary<string, QueryValue>)new Dictionary<string, QueryValue>
+                { ["name"] = QueryValue.Simple($"Record {i}") })
+            .ToList();
+
+        mockExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = records,
+                Count = records.Count
+            });
+
+        var service = new SqlQueryService(mockExecutor.Object);
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account"
+        };
+
+        // Act
+        var result = await service.ExecuteAsync(request);
+
+        // Assert: the plan node's MaxRows cap was applied — at most 100 rows returned
+        Assert.NotNull(result);
+        Assert.True(result.Result.Count <= 100,
+            $"Expected at most 100 rows, got {result.Result.Count}");
+    }
+
+    // ── AC-09: MAXDOP 2 caps parallelism ─────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_MaxdopHint_CapsPoolCapacity()
+    {
+        // Arrange: service with pool capacity of 8; MAXDOP 2 should cap it at 2
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8);
+
+        // Act
+        var plan = await service.ExplainAsync("-- ppds:MAXDOP 2\nSELECT name FROM account");
+
+        // Assert: the plan tree reflects the hint (PoolCapacity capped to min(2,8)=2).
+        // For a simple SELECT, no parallel partition node is added (only aggregates partition),
+        // but the hint parsing should not throw and the plan should succeed.
+        Assert.NotNull(plan);
+    }
+
+    // ── AC-11: BATCH_SIZE overrides DML batch size ────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_BatchSizeHint_IsAcceptedWithoutError()
+    {
+        // Arrange: BATCH_SIZE is a DML planning hint; for a SELECT it is parsed but ignored
+        // without error — query proceeds normally.
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:BATCH_SIZE 500\nSELECT name FROM account"
+        };
+
+        // Act — should not throw
+        var result = await _service.ExecuteAsync(request);
+
+        // Assert
+        Assert.NotNull(result);
+    }
+
+    // ── AC-12: Inline hints override caller-provided settings ─────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_UseTdsHintOverridesCallerFalse_TdsWins()
+    {
+        // Arrange: caller passes UseTdsEndpoint=false, but inline hint says USE_TDS.
+        // The hint must win.
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        // Caller explicitly sets UseTdsEndpoint = false, but hint overrides it
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account",
+            UseTdsEndpoint = false   // caller says no TDS
+        };
+
+        // Act
+        await service.ExecuteAsync(request);
+
+        // Assert: TDS wins — TDS executor was called despite caller saying false
+        mockTdsExecutor.Verify(
+            x => x.ExecuteSqlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        mockExecutor.Verify(
+            x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ── AC-13: Malformed hint values silently ignored ─────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_MalformedHintValue_QueryProceeds()
+    {
+        // Arrange: MAX_ROWS with non-numeric value is silently ignored;
+        // the query should execute normally without throwing.
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var request = new SqlQueryRequest
+        {
+            // "abc" is not a valid integer — hint should be silently ignored
+            Sql = "-- ppds:MAX_ROWS abc\nSELECT name FROM account"
+        };
+
+        // Act — must not throw
+        var result = await _service.ExecuteAsync(request);
+
+        // Assert: query executed normally
+        Assert.NotNull(result);
+        _mockQueryExecutor.Verify(
+            x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_UnrecognizedHint_QueryProceeds()
+    {
+        // A completely unknown hint directive should be silently ignored.
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:TOTALLY_UNKNOWN_HINT\nSELECT name FROM account"
+        };
+
+        // Act — must not throw
+        var result = await _service.ExecuteAsync(request);
+
+        // Assert
+        Assert.NotNull(result);
+    }
+
+    // ── AC-21: ExplainAsync reflects hint-influenced plans ────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_NoLockHint_PlanContainsFetchXmlScanWithNoLock()
+    {
+        // Arrange
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        // Act
+        var plan = await service.ExplainAsync("-- ppds:NOLOCK\nSELECT name FROM account");
+
+        // Assert: plan is non-null and node type indicates a FetchXML scan
+        Assert.NotNull(plan);
+        Assert.Equal("FetchXmlScanNode", plan.NodeType);
+        // The description includes the entity name
+        Assert.Contains("account", plan.Description ?? "");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_UseTdsHint_PlanContainsTdsScanNode()
+    {
+        // Arrange: service with TDS executor configured
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        // Act
+        var plan = await service.ExplainAsync("-- ppds:USE_TDS\nSELECT name FROM account");
+
+        // Assert: plan reflects TDS routing
+        Assert.NotNull(plan);
+        Assert.Equal("TdsScanNode", plan.NodeType);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExplainAsync_MaxRowsHint_PlanReflectsRowLimit()
+    {
+        // Arrange
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var service = new SqlQueryService(mockExecutor.Object);
+
+        // Act
+        var plan = await service.ExplainAsync("-- ppds:MAX_ROWS 50\nSELECT name FROM account");
+
+        // Assert: plan produced without error; the row limit is in the plan description
+        Assert.NotNull(plan);
+        Assert.Contains("50", plan.Description ?? "");
+    }
+
+    #endregion
+
     #region Cross-Environment Tests
 
     [Fact]

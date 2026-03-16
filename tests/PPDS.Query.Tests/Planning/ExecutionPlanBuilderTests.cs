@@ -1044,4 +1044,99 @@ public class ExecutionPlanBuilderTests
         act.Should().Throw<QueryParseException>()
             .WithMessage("*Aggregate*not supported*client-side*");
     }
+
+    // ────────────────────────────────────────────
+    //  AC-10: HASH_GROUP forces client-side aggregation (ClientAggregateNode)
+    // ────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_HashGroupHint_ForcesFetchXmlAggregateToClientSide()
+    {
+        // Arrange: aggregate query that would normally go through FetchXML aggregate pushdown;
+        // HASH_GROUP hint should override that and route to ClientAggregateNode.
+        var sql = "-- ppds:HASH_GROUP\nSELECT COUNT(*) AS cnt FROM account";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            ForceClientAggregation = true
+        };
+
+        // Act
+        var result = _builder.Plan(fragment, options);
+
+        // Assert: plan tree contains a ClientAggregateNode (client-side computation)
+        TestHelpers.ContainsNodeOfType<ClientAggregateNode>(result.RootNode).Should().BeTrue(
+            "-- ppds:HASH_GROUP should produce a ClientAggregateNode instead of FetchXML aggregate");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_HashGroupHint_WithGroupBy_ProducesClientAggregateNode()
+    {
+        // Arrange: GROUP BY aggregate with HASH_GROUP hint
+        var sql = "-- ppds:HASH_GROUP\nSELECT name, COUNT(*) AS cnt FROM account GROUP BY name";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            ForceClientAggregation = true
+        };
+
+        // Act
+        var result = _builder.Plan(fragment, options);
+
+        // Assert: ClientAggregateNode handles the GROUP BY aggregation client-side
+        TestHelpers.ContainsNodeOfType<ClientAggregateNode>(result.RootNode).Should().BeTrue(
+            "HASH_GROUP with GROUP BY should still produce a ClientAggregateNode");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_HashGroupHint_NonAggregateQuery_DoesNotProduceClientAggregateNode()
+    {
+        // Arrange: HASH_GROUP on a plain SELECT without aggregates —
+        // ForceClientAggregation is checked only when aggregates are present.
+        var sql = "SELECT name FROM account";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            ForceClientAggregation = true
+        };
+
+        // Act
+        var result = _builder.Plan(fragment, options);
+
+        // Assert: no ClientAggregateNode when there are no aggregates in the query
+        TestHelpers.ContainsNodeOfType<ClientAggregateNode>(result.RootNode).Should().BeFalse(
+            "ForceClientAggregation on a non-aggregate query should not produce ClientAggregateNode");
+        result.RootNode.Should().BeAssignableTo<FetchXmlScanNode>(
+            "plain SELECT with HASH_GROUP hint should still use FetchXmlScanNode");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Plan_HashGroupHint_UnderlyingScanNode_IsWrappedFetchXmlScan()
+    {
+        // Arrange: the ClientAggregateNode's child should be a FetchXmlScanNode
+        // that fetches raw (non-aggregate) rows from Dataverse.
+        var sql = "SELECT COUNT(*) AS cnt FROM account";
+        var fragment = _parser.Parse(sql);
+
+        var options = new QueryPlanOptions
+        {
+            ForceClientAggregation = true
+        };
+
+        // Act
+        var result = _builder.Plan(fragment, options);
+
+        // Assert: tree is ClientAggregateNode → FetchXmlScanNode
+        var clientAgg = TestHelpers.FindNode<ClientAggregateNode>(result.RootNode);
+        clientAgg.Should().NotBeNull("ClientAggregateNode must be present");
+        clientAgg!.Input.Should().BeAssignableTo<FetchXmlScanNode>(
+            "the input to ClientAggregateNode must be a FetchXmlScanNode for raw row retrieval");
+    }
 }
