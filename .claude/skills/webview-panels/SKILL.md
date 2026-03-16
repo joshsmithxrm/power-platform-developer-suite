@@ -322,6 +322,7 @@ Before committing panel changes:
 
 - QueryPanel: `src/panels/QueryPanel.ts` + `src/panels/webview/query-panel.ts` + `src/panels/styles/query-panel.css`
 - SolutionsPanel: `src/panels/SolutionsPanel.ts` + `src/panels/webview/solutions-panel.ts` + `src/panels/styles/solutions-panel.css`
+- ImportJobsPanel: `src/panels/ImportJobsPanel.ts` + `src/panels/webview/import-jobs-panel.ts` + `src/panels/styles/import-jobs-panel.css` — **data table panel pattern** (shared DataTable component, status badges, detail pane)
 
 ## Design Guidance
 
@@ -361,6 +362,7 @@ Before writing panel-specific CSS, check what already exists. Each pattern has a
 | Filter bar (debounced input, count badge) | `query-panel.css` `.filter-bar` | QueryPanel | Filtering loaded results |
 | Dropdown menu | `query-panel.css` `.dropdown-menu` | QueryPanel | Export, overflow actions |
 | Context menu | `query-panel.css` `.context-menu` | QueryPanel | Right-click actions |
+| Shared DataTable (sortable, status badges, row selection) | `shared/data-table.ts` `DataTable<T>` | ImportJobsPanel | All tabular data panels — shared component |
 
 **Rules:**
 - `@import './shared.css'` as your first line — every panel gets toolbar, status bar, states for free
@@ -412,3 +414,12 @@ When designing an extension panel, verify the equivalent TUI screen exposes the 
 - [ ] Environment scoping works equivalently
 
 If the TUI screen doesn't exist yet, file or reference the corresponding wave:2 issue. Panels and screens can be built in parallel but should converge on the same RPC methods and data shapes.
+
+### Detail Pane Pattern
+
+For panels that show detail when a row is selected (Import Jobs, Plugin Traces, Connection References), use the split layout:
+- Table in `.content` with `flex: 1`
+- Detail pane below with `max-height: 40vh` and `overflow: auto`
+- Close button (x) and Escape key to dismiss
+- `display: none` when no row selected
+- Reference: ImportJobsPanel's `.detail-pane` in `import-jobs-panel.css`
