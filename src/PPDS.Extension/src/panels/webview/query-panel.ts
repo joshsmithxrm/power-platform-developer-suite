@@ -725,6 +725,8 @@ function hideFilter(): void {
 // ── Message handling ──
 window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>) => {
     const msg = event.data;
+    // VS Code sends internal messages (e.g., vscodeScheduleAsyncWork) that lack 'command' — ignore them
+    if (!msg || typeof msg !== 'object' || !('command' in msg)) return;
     switch (msg.command) {
         case 'queryResult':
             handleQueryResult(msg.data);
