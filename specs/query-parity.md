@@ -155,7 +155,7 @@ After switching to `SqlQueryService`, the following code in `RpcMethodHandler.cs
 |------|-------|--------|
 | `TranspileSqlToFetchXml()` private method | 1339-1370 | Replaced by `SqlQueryService.TranspileSql()` |
 | Inline DML safety check block | 954-1002 | Handled by `SqlQueryService.PrepareExecutionAsync()` |
-| `InjectTopAttribute()` private method | 1456-1473 | Handled by `SqlQueryService.TranspileSql()` TOP injection |
+| `InjectTopAttribute()` private method | 1456-1473 | Retained — still used by `query/fetch` handler for raw FetchXML TOP injection (outside this spec's scope) |
 | Inline `QueryParser`/`ExecutionPlanBuilder`/`FetchXmlGeneratorService` in `QueryExplainAsync` | 1261-1266 | Replaced by `SqlQueryService.ExplainAsync()` |
 | TDS executor inline construction in `QuerySqlAsync` | 1012-1024 | Handled by `SqlQueryService` TDS routing |
 | `FormatExportContent()` private method | 1372-1427 | Move to a shared `QueryExportFormatter` utility or keep in handler if only used there — but decouple from execution |
