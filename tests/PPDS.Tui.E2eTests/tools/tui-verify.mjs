@@ -136,7 +136,7 @@ async function runDaemon() {
   }
 
   const terminal = await tuiTest.spawn(
-    { rows: ROWS, cols: COLS, program: { file: exe, args: ['tui'] } },
+    { rows: ROWS, cols: COLS, program: { file: exe, args: ['interactive'] } },
     false,
     traceEmitter,
   );
