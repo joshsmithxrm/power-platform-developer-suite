@@ -41,4 +41,9 @@ public sealed class SqlQueryResult
     /// Null when no hints were active. Used for debugging and UI feedback.
     /// </summary>
     public IReadOnlyList<string>? AppliedHints { get; init; }
+
+    /// <summary>
+    /// The actual execution path used. Null for transpile-only or dry-run results.
+    /// </summary>
+    public QueryExecutionMode? ExecutionMode { get; init; }
 }

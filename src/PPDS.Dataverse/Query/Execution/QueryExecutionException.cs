@@ -75,4 +75,10 @@ public static class QueryErrorCode
 
     /// <summary>Scalar subquery returned more than one row.</summary>
     public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
+
+    /// <summary>Query is incompatible with TDS Endpoint (DML, unsupported entity, unsupported feature).</summary>
+    public const string TdsIncompatible = "Query.TdsIncompatible";
+
+    /// <summary>TDS Endpoint connection failed (endpoint may be disabled on environment).</summary>
+    public const string TdsConnectionFailed = "Query.TdsConnectionFailed";
 }

@@ -57,6 +57,49 @@ public static class ServiceRegistration
                 metadataExecutor,
                 pool.GetTotalRecommendedParallelism());
         });
+
+        // TDS Endpoint executor — per-environment, uses same auth pattern as IConnectionService
+        services.AddTransient<ITdsQueryExecutor>(sp =>
+        {
+            var connectionInfo = sp.GetRequiredService<ResolvedConnectionInfo>();
+            var credentialStore = sp.GetRequiredService<ISecureCredentialStore>();
+            var profile = connectionInfo.Profile;
+
+            IPowerPlatformTokenProvider tokenProvider;
+            if (profile.AuthMethod == AuthMethod.ClientSecret)
+            {
+                if (string.IsNullOrEmpty(profile.ApplicationId))
+                    throw new InvalidOperationException(
+                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.");
+
+#pragma warning disable PPDS012
+                var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                if (storedCredential?.ClientSecret == null)
+                    throw new InvalidOperationException(
+                        $"Client secret not found for application '{profile.ApplicationId}'.");
+                tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential.ClientSecret);
+            }
+            else
+            {
+                tokenProvider = PowerPlatformTokenProvider.FromProfile(profile);
+            }
+
+            var environmentUrl = connectionInfo.EnvironmentUrl;
+
+            Func<CancellationToken, Task<string>> tdsTokenFunc = async ct =>
+            {
+                var token = await tokenProvider.GetTokenForResourceAsync(environmentUrl, ct)
+                    .ConfigureAwait(false);
+                return token.AccessToken;
+            };
+
+            return new TdsQueryExecutor(
+                environmentUrl,
+                tdsTokenFunc,
+                sp.GetService<ILogger<TdsQueryExecutor>>());
+        });
+
         services.AddSingleton<IQueryHistoryService, QueryHistoryService>();
 
         // Export services

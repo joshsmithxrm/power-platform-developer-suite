@@ -52,4 +52,9 @@ public sealed class SqlQueryStreamChunk
     /// Null when no hints were active.
     /// </summary>
     public IReadOnlyList<string>? AppliedHints { get; init; }
+
+    /// <summary>
+    /// The actual execution path used. Non-null only on the final chunk.
+    /// </summary>
+    public QueryExecutionMode? ExecutionMode { get; init; }
 }

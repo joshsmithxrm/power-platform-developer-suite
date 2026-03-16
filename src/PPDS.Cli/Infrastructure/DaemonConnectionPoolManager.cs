@@ -290,10 +290,12 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         var sources = new List<IConnectionSource>();
         try
         {
+            AuthProfile? firstProfile = null;
             foreach (var profileName in profileNames)
             {
                 var profile = collection.GetByNameOrIndex(profileName)
                     ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
+                firstProfile ??= profile;
 
                 var source = new ProfileConnectionSource(
                     profile,
@@ -307,10 +309,16 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 sources.Add(adapter);
             }
 
+            // Guard: profileNames is always non-empty (validated by caller), but be explicit
+            if (firstProfile == null)
+                throw new InvalidOperationException("No profiles provided for pool creation.");
+
             // Build service provider with pool
             var serviceProvider = CreateProviderFromSources(
                 sources.ToArray(),
-                credentialStore);
+                credentialStore,
+                firstProfile,
+                environmentUrl);
 
             var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
 
@@ -341,7 +349,9 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// </summary>
     private ServiceProvider CreateProviderFromSources(
         IConnectionSource[] sources,
-        ISecureCredentialStore credentialStore)
+        ISecureCredentialStore credentialStore,
+        AuthProfile profile,
+        string environmentUrl)
     {
         var services = new ServiceCollection();
 
@@ -366,6 +376,42 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
 
         // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, IQueryExecutor)
         services.RegisterDataverseServices();
+
+        // TDS Endpoint executor — per-environment, uses same auth as connection pool
+        services.AddSingleton<ITdsQueryExecutor>(sp =>
+        {
+            IPowerPlatformTokenProvider tokenProvider;
+            if (profile.AuthMethod == AuthMethod.ClientSecret)
+            {
+                if (string.IsNullOrEmpty(profile.ApplicationId))
+                    throw new InvalidOperationException(
+                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.");
+
+#pragma warning disable PPDS012
+                var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                if (storedCredential?.ClientSecret == null)
+                    throw new InvalidOperationException(
+                        $"Client secret not found for application '{profile.ApplicationId}'.");
+                tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential.ClientSecret);
+            }
+            else
+            {
+                tokenProvider = PowerPlatformTokenProvider.FromProfile(profile);
+            }
+
+            Func<CancellationToken, Task<string>> tdsTokenFunc = async ct =>
+            {
+                var token = await tokenProvider.GetTokenForResourceAsync(environmentUrl, ct)
+                    .ConfigureAwait(false);
+                return token.AccessToken;
+            };
+
+            return new TdsQueryExecutor(
+                environmentUrl,
+                tdsTokenFunc,
+                sp.GetService<ILogger<TdsQueryExecutor>>());
+        });
 
         // Connection pool with factory delegate
         services.AddSingleton<IDataverseConnectionPool>(sp =>

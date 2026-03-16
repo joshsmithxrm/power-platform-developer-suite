@@ -159,7 +159,24 @@ public sealed class SqlQueryService : ISqlQueryService
             metadataQueryExecutor: _metadataQueryExecutor,
             executionOptions: executionOptions);
 
-        var result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
+        QueryResult result;
+        try
+        {
+            result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
+        }
+        catch (Exception ex) when (
+            request.UseTdsEndpoint
+            && ContainsTdsScanNode(planResult.RootNode)
+            && ex is not OperationCanceledException
+            && ex is not PpdsException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.TdsConnectionFailed,
+                $"TDS Endpoint connection failed: {ex.Message}. The TDS Endpoint may be disabled " +
+                "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
+                "Platform admin to enable the TDS Endpoint.",
+                ex);
+        }
 
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
@@ -181,7 +198,8 @@ public sealed class SqlQueryService : ISqlQueryService
             TranspiledFetchXml = planResult.FetchXml,
             Result = expandedResult,
             DataSources = dataSources,
-            AppliedHints = appliedHints
+            AppliedHints = appliedHints,
+            ExecutionMode = DetectExecutionMode(planResult.RootNode)
         };
     }
 
@@ -285,36 +303,71 @@ public sealed class SqlQueryService : ISqlQueryService
         var isFirstChunk = true;
         var streamIsAggregate = HasAggregatesInFragment(fragment);
 
-        await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
+        // Wrap streaming enumeration in TDS connection failure catch.
+        // Cannot use try/catch around yield return, so we use a helper that
+        // catches during MoveNextAsync and rethrows as PpdsException.
+        var streamEnumerator = _planExecutor
+            .ExecuteStreamingAsync(planResult, context, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+
+        try
         {
-            // Infer columns from first row
-            if (columns == null)
+            while (true)
             {
-                columns = InferColumnsFromRow(row);
-            }
-
-            chunkRows.Add(row.Values);
-            totalRows++;
-
-            if (chunkRows.Count >= chunkSize)
-            {
-                // Expand virtual columns (owneridname, statuscodename, etc.)
-                var expandedChunk = ExpandStreamingChunk(
-                    chunkRows, columns!, planResult.VirtualColumns, streamIsAggregate);
-
-                yield return new SqlQueryStreamChunk
+                QueryRow row;
+                try
                 {
-                    Rows = expandedChunk.rows,
-                    Columns = isFirstChunk ? expandedChunk.columns : null,
-                    EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
-                    TotalRowsSoFar = totalRows,
-                    IsComplete = false,
-                    TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
-                };
+                    if (!await streamEnumerator.MoveNextAsync().ConfigureAwait(false))
+                        break;
+                    row = streamEnumerator.Current;
+                }
+                catch (Exception ex) when (
+                    request.UseTdsEndpoint
+                    && ContainsTdsScanNode(planResult.RootNode)
+                    && ex is not OperationCanceledException
+                    && ex is not PpdsException)
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Query.TdsConnectionFailed,
+                        $"TDS Endpoint connection failed: {ex.Message}. The TDS Endpoint may be disabled " +
+                        "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
+                        "Platform admin to enable the TDS Endpoint.",
+                        ex);
+                }
 
-                isFirstChunk = false;
-                chunkRows.Clear();
+                // Infer columns from first row
+                if (columns == null)
+                {
+                    columns = InferColumnsFromRow(row);
+                }
+
+                chunkRows.Add(row.Values);
+                totalRows++;
+
+                if (chunkRows.Count >= chunkSize)
+                {
+                    // Expand virtual columns (owneridname, statuscodename, etc.)
+                    var expandedChunk = ExpandStreamingChunk(
+                        chunkRows, columns!, planResult.VirtualColumns, streamIsAggregate);
+
+                    yield return new SqlQueryStreamChunk
+                    {
+                        Rows = expandedChunk.rows,
+                        Columns = isFirstChunk ? expandedChunk.columns : null,
+                        EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
+                        TotalRowsSoFar = totalRows,
+                        IsComplete = false,
+                        TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
+                    };
+
+                    isFirstChunk = false;
+                    chunkRows.Clear();
+                }
             }
+        }
+        finally
+        {
+            await streamEnumerator.DisposeAsync().ConfigureAwait(false);
         }
 
         // Yield final chunk with any remaining rows
@@ -330,7 +383,8 @@ public sealed class SqlQueryService : ISqlQueryService
             IsComplete = true,
             TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null,
             DataSources = streamDataSources,
-            AppliedHints = streamAppliedHints
+            AppliedHints = streamAppliedHints,
+            ExecutionMode = DetectExecutionMode(planResult.RootNode)
         };
     }
 
@@ -369,6 +423,32 @@ public sealed class SqlQueryService : ISqlQueryService
         if (hints.MaxResultRows.HasValue)
         {
             request = request with { TopOverride = hints.MaxResultRows.Value };
+        }
+
+        // TDS compatibility pre-check — fail fast before planning.
+        // When the user explicitly requests TDS, they get TDS or an error,
+        // never a silent substitution to Dataverse.
+        if (request.UseTdsEndpoint)
+        {
+            var querySpec = ExtractQuerySpecification(fragment);
+            var entityName = querySpec != null ? ExtractEntityName(querySpec) : null;
+            var tdsCompatibility = TdsCompatibilityChecker.CheckCompatibility(
+                request.Sql, entityName);
+
+            if (tdsCompatibility != TdsCompatibility.Compatible)
+            {
+                var reason = tdsCompatibility switch
+                {
+                    TdsCompatibility.IncompatibleDml =>
+                        "Cannot execute via TDS: DML statements (DELETE, UPDATE, INSERT) are not supported by the TDS Endpoint. Disable TDS mode to execute this query against Dataverse.",
+                    TdsCompatibility.IncompatibleEntity =>
+                        $"Cannot execute via TDS: The target entity is not available via the TDS Endpoint (elastic/virtual table). Disable TDS mode to query via Dataverse.",
+                    _ =>
+                        "Cannot execute via TDS: This query uses features not supported by the TDS Endpoint. Disable TDS mode to execute via Dataverse."
+                };
+
+                throw new PpdsException(ErrorCodes.Query.TdsIncompatible, reason);
+            }
         }
 
         // DML safety check
@@ -774,5 +854,27 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Detects the execution mode by walking the plan tree for TdsScanNode.
+    /// </summary>
+    private static QueryExecutionMode DetectExecutionMode(IQueryPlanNode rootNode)
+    {
+        if (ContainsTdsScanNode(rootNode))
+            return QueryExecutionMode.Tds;
+        return QueryExecutionMode.Dataverse;
+    }
+
+    private static bool ContainsTdsScanNode(IQueryPlanNode node)
+    {
+        if (node is TdsScanNode)
+            return true;
+        foreach (var child in node.Children)
+        {
+            if (ContainsTdsScanNode(child))
+                return true;
+        }
+        return false;
     }
 }
