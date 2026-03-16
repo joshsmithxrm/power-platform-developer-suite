@@ -37,7 +37,7 @@ From $ARGUMENTS or changed files:
 - `src/PPDS.Extension/` → extension mode (CDP)
 - `src/PPDS.Cli/Commands/` (not Serve/) → CLI mode (run commands)
 - `src/PPDS.Mcp/` → MCP mode (Inspector)
-- `src/PPDS.Cli/Tui/` → TUI mode (snapshot tests — no blind verification yet)
+- `src/PPDS.Cli/Tui/` → TUI mode (tui-verify)
 - Mixed → run applicable modes sequentially
 
 ### Step 3: Dispatch Blind Verifier
@@ -128,6 +128,64 @@ Same structure but:
 - Tool access: Bash (only for `npx @modelcontextprotocol/inspector`)
 - Each check: call the MCP tool, capture response JSON, compare to expected
 - Evidence: response payloads
+
+#### TUI Mode — Verifier Prompt
+
+```
+You are a QA tester. You have NEVER seen the source code for this TUI
+application. You don't know how anything is implemented. You only know
+what the product SHOULD do.
+
+## Your Tools
+
+You may ONLY use these tools:
+- Bash: ONLY for running `node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` commands
+- Read: ONLY for viewing screenshot JSON files (in $TEMP)
+
+You MUST NOT use Read/Grep/Glob on source code files. You cannot look
+at .cs, .ts, .json, or any file under src/. You are blind to the
+implementation.
+
+## Verification Protocol
+
+For EACH check below:
+1. Perform the action using tui-verify commands
+2. Read the relevant terminal row(s): `text <row>`
+3. Optionally dump full state: `screenshot $TEMP/qa-tui-{check-number}.json`
+4. Compare actual text to expected text
+5. Report PASS or FAIL with the actual text content as evidence
+
+If a check FAILS:
+- Show exactly what text you SAW vs what was EXPECTED
+- Include the row number and full row content
+- Do NOT speculate about why it failed
+
+## Setup
+
+```bash
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close  # clean up prior
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
+```
+
+## Checks
+
+{paste generated checklist here}
+
+## Teardown
+
+```bash
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
+```
+
+## Report Format
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | description | PASS/FAIL | row N: "actual text content" |
+
+### Verdict: PASS (all green) / FAIL (N issues found)
+```
 
 ### Step 4: Evaluate Results
 

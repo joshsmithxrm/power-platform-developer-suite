@@ -57,15 +57,45 @@ Verify:
 
 ### 4. TUI Mode
 
-TUI interactive verification via MCP is not yet available. Use snapshot tests:
+**Phase A: Build and Launch**
 
 ```bash
-npm run tui:test
+# Build and launch TUI in PTY
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
+
+# Wait for TUI to render
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
+
+# Read the title bar to confirm it loaded
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 0
 ```
 
-Verify:
-- All snapshot tests pass
-- No visual regressions in terminal output
+**Phase B: Interactive Verification (MANDATORY for TUI rendering/interaction changes)**
+
+If changed files touch `src/PPDS.Cli/Tui/`, Phase B is NOT optional.
+
+```bash
+# Navigate to the relevant screen
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "tab"
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
+
+# Verify status bar content
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 29
+
+# Wait for expected screen title
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
+
+# Dump terminal state for debugging if needed
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/tui-verify.json
+```
+
+**Phase C: Cleanup**
+
+```bash
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
+```
+
+See @tui-verify skill for full command reference and Terminal.Gui keyboard patterns.
 
 ### 5. Extension Mode
 

@@ -87,6 +87,10 @@ src/PPDS.Extension/test-results/
 src/PPDS.Extension/playwright-report/
 .vscode-test/
 
+# TUI verify tool session/log files
+.tui-verify-session.json
+.tui-verify-daemon.log
+
 # Git worktrees
 .worktrees/
 .muse/
