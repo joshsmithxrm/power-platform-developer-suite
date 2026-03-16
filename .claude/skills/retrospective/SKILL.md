@@ -139,6 +139,8 @@ Dispatch one agent with this scope:
 
 ### 5. Cross-Reference Memory (parallel agent)
 
+If auto-memory is disabled and no memory files exist, skip this step and note it in the output.
+
 Dispatch one agent with this scope:
 
 - Read all memory files

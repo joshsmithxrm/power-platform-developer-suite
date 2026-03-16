@@ -17,7 +17,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 | Mode | Required MCPs / Tools |
 |------|----------------------|
 | cli | None (uses Bash tool directly) |
-| tui | Not yet available — TUI snapshot tests only (`npm run tui:test`) |
+| tui | `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` (uses `@microsoft/tui-test` + `node-pty`, both dev deps) |
 | extension | `src/PPDS.Extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
 | mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
 
@@ -80,7 +80,7 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "tab"
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
 
 # Verify status bar content
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 29
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28
 
 # Wait for expected screen title
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
