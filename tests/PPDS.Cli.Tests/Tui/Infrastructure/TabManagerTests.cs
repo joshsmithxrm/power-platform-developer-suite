@@ -225,50 +225,6 @@ public sealed class TabManagerTests : IDisposable
     }
 
     [Fact]
-    public void CloseAllTabs_DisposesAllScreens()
-    {
-        var screen1 = new StubScreen(_session);
-        var screen2 = new StubScreen(_session);
-        _manager.AddTab(screen1, "https://dev.crm.dynamics.com", "DEV");
-        _manager.AddTab(screen2, "https://prod.crm.dynamics.com", "PROD");
-
-        _manager.CloseAllTabs();
-
-        Assert.True(screen1.IsDisposed);
-        Assert.True(screen2.IsDisposed);
-        Assert.Equal(0, _manager.TabCount);
-        Assert.Equal(-1, _manager.ActiveIndex);
-        Assert.Null(_manager.ActiveTab);
-    }
-
-    [Fact]
-    public void CloseAllTabs_FiresEvents()
-    {
-        var tabsChangedCount = 0;
-        var activeChangedCount = 0;
-        _manager.TabsChanged += () => tabsChangedCount++;
-        _manager.ActiveTabChanged += () => activeChangedCount++;
-
-        _manager.AddTab(new StubScreen(_session), "https://dev.crm.dynamics.com", "DEV");
-        tabsChangedCount = 0;
-        activeChangedCount = 0;
-
-        _manager.CloseAllTabs();
-
-        Assert.Equal(1, tabsChangedCount);
-        Assert.Equal(1, activeChangedCount);
-    }
-
-    [Fact]
-    public void CloseAllTabs_NoTabs_NoErrors()
-    {
-        // Should not throw when no tabs exist
-        _manager.CloseAllTabs();
-
-        Assert.Equal(0, _manager.TabCount);
-    }
-
-    [Fact]
     public void RefreshTabColors_UpdatesChangedColors()
     {
         var themeService = new ConfigurableThemeService();

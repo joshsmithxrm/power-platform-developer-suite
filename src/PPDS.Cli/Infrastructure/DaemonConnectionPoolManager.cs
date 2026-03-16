@@ -6,9 +6,14 @@ using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Query;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Resilience;
 
 namespace PPDS.Cli.Infrastructure;
@@ -359,7 +364,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService)
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, IQueryExecutor)
         services.RegisterDataverseServices();
 
         // Connection pool with factory delegate
@@ -369,6 +374,22 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 sp.GetRequiredService<IThrottleTracker>(),
                 poolOptions,
                 sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
+
+        // SQL query service — shared pipeline for all query RPC handlers (query/sql, query/explain, query/export)
+        services.AddTransient<ISqlQueryService>(sp =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
+            var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
+            var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            return new SqlQueryService(
+                queryExecutor,
+                tdsExecutor,
+                bulkExecutor,
+                metadataExecutor,
+                pool.GetTotalRecommendedParallelism());
+        });
 
         return services.BuildServiceProvider();
     }
