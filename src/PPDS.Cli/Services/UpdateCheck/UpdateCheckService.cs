@@ -84,6 +84,8 @@ public sealed class UpdateCheckService : IUpdateCheckService
 
         var current = TryParseVersion(currentVersion);
 
+        // Always populate both versions regardless of user's track (AC-19).
+        // Track-based filtering is a presentation concern (notifier/command).
         var latestStable = versions
             .Select(TryParseVersion)
             .Where(v => v is not null && !v.IsPreRelease)
@@ -96,24 +98,24 @@ public sealed class UpdateCheckService : IUpdateCheckService
             .OrderDescending()
             .FirstOrDefault();
 
+        // Honestly computed — no track filtering at the data model level
         var stableUpdateAvailable = latestStable is not null
             && (current is null || latestStable > current);
 
         var preReleaseUpdateAvailable = latestPreRelease is not null
-            && !stableUpdateAvailable
             && (current is null || latestPreRelease > current);
 
-        // Determine command: stable takes priority; fall back to pre-release only if
-        // no stable update is available and the user is already on a pre-release track.
+        // Primary command: stable if available, else pre-release
         string? command = null;
         if (stableUpdateAvailable)
-        {
             command = UpdateCommand;
-        }
         else if (preReleaseUpdateAvailable)
-        {
             command = UpdateCommandPreRelease;
-        }
+
+        // Pre-release command: populated when a pre-release update exists
+        string? preReleaseUpdateCommand = preReleaseUpdateAvailable
+            ? UpdateCommandPreRelease
+            : null;
 
         var result = new UpdateCheckResult
         {
@@ -123,6 +125,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
             StableUpdateAvailable = stableUpdateAvailable,
             PreReleaseUpdateAvailable = preReleaseUpdateAvailable,
             UpdateCommand = command,
+            PreReleaseUpdateCommand = preReleaseUpdateCommand,
             CheckedAt = DateTimeOffset.UtcNow
         };
 

@@ -411,4 +411,70 @@ public class UpdateCheckServiceTests : IDisposable
         var cached = svc2.GetCachedResult();
         Assert.NotNull(cached);
     }
+
+    // ─── Pre-release track logic tests (Task 7) ───────────────────────────────
+
+    [Fact]
+    public async Task CheckAsync_AlwaysPopulatesBothVersions()
+    {
+        // AC-19: Service always populates both versions regardless of user track
+        var handler = BuildHandler(MakeVersionsJson("0.4.0", "0.6.0", "0.7.0-alpha.1"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        var result = await svc.CheckAsync("0.4.0"); // stable user
+
+        Assert.NotNull(result);
+        Assert.Equal("0.6.0", result.LatestStableVersion);
+        Assert.Equal("0.7.0-alpha.1", result.LatestPreReleaseVersion);
+        Assert.True(result.StableUpdateAvailable);
+        Assert.True(result.PreReleaseUpdateAvailable); // honestly computed
+    }
+
+    [Fact]
+    public async Task CheckAsync_PreReleaseUser_BothUpdatesAvailable()
+    {
+        // AC-20
+        var handler = BuildHandler(MakeVersionsJson("0.5.0-beta.1", "0.6.0", "0.7.0-alpha.1"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        var result = await svc.CheckAsync("0.5.0-beta.1");
+
+        Assert.NotNull(result);
+        Assert.True(result.StableUpdateAvailable);
+        Assert.True(result.PreReleaseUpdateAvailable);
+        Assert.Equal("0.6.0", result.LatestStableVersion);
+        Assert.Equal("0.7.0-alpha.1", result.LatestPreReleaseVersion);
+        Assert.Equal("dotnet tool update PPDS.Cli -g", result.UpdateCommand);
+        Assert.Equal("dotnet tool update PPDS.Cli -g --prerelease", result.PreReleaseUpdateCommand);
+    }
+
+    [Fact]
+    public async Task CheckAsync_PreReleaseUser_OnlyPreReleaseAvailable()
+    {
+        // AC-22
+        var handler = BuildHandler(MakeVersionsJson("0.5.0-beta.1", "0.4.0", "0.7.0-alpha.1"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        var result = await svc.CheckAsync("0.5.0-beta.1");
+
+        Assert.NotNull(result);
+        Assert.False(result.StableUpdateAvailable);
+        Assert.True(result.PreReleaseUpdateAvailable);
+        Assert.Equal("0.7.0-alpha.1", result.LatestPreReleaseVersion);
+        Assert.Equal("dotnet tool update PPDS.Cli -g --prerelease", result.UpdateCommand);
+    }
+
+    [Fact]
+    public async Task CheckAsync_PreReleaseUpdateCommand_UsesPreReleaseFlag()
+    {
+        // AC-23
+        var handler = BuildHandler(MakeVersionsJson("0.5.0-beta.1", "0.6.0", "0.7.0-alpha.1"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        var result = await svc.CheckAsync("0.5.0-beta.1");
+
+        Assert.NotNull(result);
+        Assert.Contains("--prerelease", result!.PreReleaseUpdateCommand);
+        Assert.DoesNotContain("--prerelease", result.UpdateCommand!);
+    }
 }
