@@ -49,6 +49,7 @@ public static class Program
         if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
         {
             ErrorOutput.WriteVersionHeader();
+            ReadAndDeleteUpdateStatus();
 
             // Show cached update notification (guarded by --quiet)
             if (StartupUpdateNotifier.ShouldShow(args))
@@ -109,6 +110,45 @@ public static class Program
 
         var parseResult = rootCommand.Parse(args);
         return await parseResult.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Reads the post-update status file written by the detached wrapper script,
+    /// displays the result to the user, and deletes the file.
+    /// </summary>
+    private static void ReadAndDeleteUpdateStatus()
+    {
+        try
+        {
+            var statusPath = Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
+                ".ppds", "update-status.json");
+
+            if (!File.Exists(statusPath))
+                return;
+
+            var json = File.ReadAllText(statusPath);
+            File.Delete(statusPath);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var success = root.TryGetProperty("success", out var s) && s.GetBoolean();
+            var version = root.TryGetProperty("targetVersion", out var v) ? v.GetString() : null;
+
+            if (success && version is not null)
+            {
+                Console.Error.WriteLine($"Successfully updated to {version}.");
+            }
+            else
+            {
+                Console.Error.WriteLine("Update failed. Run manually: dotnet tool update PPDS.Cli -g");
+            }
+        }
+        catch
+        {
+            // Status file read/delete failure is not fatal
+        }
     }
 
     /// <summary>
