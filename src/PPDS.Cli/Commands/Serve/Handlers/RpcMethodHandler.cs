@@ -978,23 +978,36 @@ public class RpcMethodHandler : IDisposable
                 var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
                 configStore.ClearCache();
                 var configCollection = await configStore.LoadAsync(ct);
-                var profileResolution = new ProfileResolutionService(configCollection.Environments);
 
-                concrete.RemoteExecutorFactory = label =>
+                // ProfileResolutionService rejects duplicate labels — gracefully degrade
+                // to no cross-env support if the user's config has duplicates
+                try
                 {
-                    var config = profileResolution.ResolveByLabel(label);
-                    if (config?.Url == null) return null;
-#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
-                    var remoteProvider = _poolManager.GetOrCreateServiceProviderAsync(
-                        new[] { profile.Name ?? profile.DisplayIdentifier },
-                        config.Url,
-                        deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-                        cancellationToken: ct).GetAwaiter().GetResult();
-#pragma warning restore PPDS012
-                    return remoteProvider.GetRequiredService<IQueryExecutor>();
-                };
+                    var profileResolution = new ProfileResolutionService(configCollection.Environments);
 
-                concrete.ProfileResolver = profileResolution;
+                    concrete.RemoteExecutorFactory = label =>
+                    {
+                        var config = profileResolution.ResolveByLabel(label);
+                        if (config?.Url == null) return null;
+#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
+                        var remoteProvider = _poolManager.GetOrCreateServiceProviderAsync(
+                            new[] { profile.Name ?? profile.DisplayIdentifier },
+                            config.Url,
+                            deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                            cancellationToken: ct).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                        return remoteProvider.GetRequiredService<IQueryExecutor>();
+                    };
+
+                    concrete.ProfileResolver = profileResolution;
+                }
+                catch (ArgumentException)
+                {
+                    // Duplicate labels or reserved label — cross-env queries won't work
+                    // but single-env queries proceed normally
+                    _logger.LogWarning("Environment config has duplicate or reserved labels — cross-environment queries disabled");
+                }
+
                 var envConfig = await configStore.GetConfigAsync(env.Url, ct);
                 if (envConfig != null)
                 {
