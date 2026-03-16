@@ -33,7 +33,7 @@ public static class Program
     /// </summary>
     private static readonly HashSet<string> SkipVersionHeaderArgs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--help", "-h", "-?", "--version"
+        "--help", "-h", "-?", "--version", "version"
     };
 
     public static async Task<int> Main(string[] args)
@@ -48,6 +48,19 @@ public static class Program
         if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
         {
             ErrorOutput.WriteVersionHeader();
+
+            // Show cached update notification (guarded by --quiet)
+            if (StartupUpdateNotifier.ShouldShow(args))
+            {
+                var updateMessage = StartupUpdateNotifier.GetNotificationMessage();
+                if (updateMessage != null)
+                {
+                    Console.Error.WriteLine(updateMessage);
+                }
+            }
+
+            // Fire-and-forget background cache refresh for next startup
+            StartupUpdateNotifier.RefreshCacheInBackground(ErrorOutput.Version);
         }
 
         var rootCommand = new RootCommand(
@@ -75,6 +88,7 @@ public static class Program
         rootCommand.Subcommands.Add(RolesCommandGroup.Create());
         rootCommand.Subcommands.Add(ServeCommand.Create());
         rootCommand.Subcommands.Add(DocsCommand.Create());
+        rootCommand.Subcommands.Add(VersionCommand.Create());
         rootCommand.Subcommands.Add(InteractiveCommand.Create());
 
         // Internal/debug commands - only visible when PPDS_INTERNAL=1
