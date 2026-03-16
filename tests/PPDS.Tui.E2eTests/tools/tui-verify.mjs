@@ -174,15 +174,6 @@ async function runDaemon() {
       return;
     }
 
-    // ctrl+shift+letter (best effort — same as ctrl+letter)
-    if (modifiers.shift && modifiers.ctrl) {
-      const code = lk.charCodeAt(0);
-      if (code >= 97 && code <= 122) {
-        term.write(String.fromCharCode(code - 96));
-        return;
-      }
-    }
-
     // Named keys
     const namedKeys = {
       enter: () => term.submit(),
