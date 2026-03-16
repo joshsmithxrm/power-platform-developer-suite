@@ -356,4 +356,55 @@ public class RpcMethodHandlerTests
     }
 
     #endregion
+
+    #region QueryResultResponse Tests
+
+    // ── AC-38: RPC maps ExecutionMode.Tds to queryMode "tds" ─────────────
+
+    [Fact]
+    public void QueryResultResponse_QueryModeTds_SerializesCorrectly()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = "tds"
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        Assert.Contains("\"queryMode\"", json);
+        Assert.Contains("\"tds\"", json);
+    }
+
+    [Fact]
+    public void QueryResultResponse_QueryModeDataverse_SerializesCorrectly()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = "dataverse"
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        Assert.Contains("\"queryMode\"", json);
+        Assert.Contains("\"dataverse\"", json);
+    }
+
+    [Fact]
+    public void QueryResultResponse_NullQueryMode_OmittedInJson()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = null
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        // QueryMode should be omitted when null (JsonIgnoreCondition.WhenWritingNull)
+        Assert.DoesNotContain("\"queryMode\"", json);
+    }
+
+    #endregion
 }

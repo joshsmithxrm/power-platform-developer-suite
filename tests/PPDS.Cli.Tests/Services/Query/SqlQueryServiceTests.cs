@@ -1267,4 +1267,248 @@ public class SqlQueryServiceTests
     }
 
     #endregion
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  AC-38: ExecutionMode reports "Tds" when TDS Endpoint is used
+    // ═══════════════════════════════════════════════════════════════════
+
+    #region ExecutionMode Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_TdsRoute_ReturnsExecutionModeTds()
+    {
+        // Arrange: service with a TDS executor that returns a result
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+
+        var tdsResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+            Count = 0
+        };
+
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tdsResult);
+
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account"
+        };
+
+        // Act
+        var result = await service.ExecuteAsync(request);
+
+        // Assert: ExecutionMode must be Tds when TDS Endpoint was used
+        Assert.NotNull(result.ExecutionMode);
+        Assert.Equal(QueryExecutionMode.Tds, result.ExecutionMode);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_DataverseRoute_ReturnsExecutionModeDataverse()
+    {
+        // Arrange: standard Dataverse execution (no TDS)
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
+                Count = 0
+            });
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "SELECT name FROM account"
+        };
+
+        // Act
+        var result = await _service.ExecuteAsync(request);
+
+        // Assert: ExecutionMode must be Dataverse for standard queries
+        Assert.NotNull(result.ExecutionMode);
+        Assert.Equal(QueryExecutionMode.Dataverse, result.ExecutionMode);
+    }
+
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  AC-44: Streaming final chunk carries ExecutionMode
+    // ═══════════════════════════════════════════════════════════════════
+
+    #region Streaming ExecutionMode Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteStreamingAsync_FinalChunk_HasExecutionModeDataverse()
+    {
+        // Arrange: standard Dataverse execution; mock executor returns rows via FetchXML
+        _mockQueryExecutor
+            .Setup(x => x.ExecuteFetchXmlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult
+            {
+                EntityLogicalName = "account",
+                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+                Records = new List<IReadOnlyDictionary<string, QueryValue>>
+                {
+                    new Dictionary<string, QueryValue>
+                    {
+                        ["name"] = QueryValue.Simple("Contoso")
+                    }
+                },
+                Count = 1
+            });
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "SELECT name FROM account"
+        };
+
+        // Act: collect all chunks
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in _service.ExecuteStreamingAsync(request))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert: at least one chunk, and the final chunk has ExecutionMode
+        Assert.NotEmpty(chunks);
+        var finalChunk = chunks[^1];
+        Assert.True(finalChunk.IsComplete);
+        Assert.NotNull(finalChunk.ExecutionMode);
+        Assert.Equal(QueryExecutionMode.Dataverse, finalChunk.ExecutionMode);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteStreamingAsync_TdsRoute_FinalChunkHasExecutionModeTds()
+    {
+        // Arrange: TDS executor returns results
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+
+        var tdsResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+            Records = new List<IReadOnlyDictionary<string, QueryValue>>
+            {
+                new Dictionary<string, QueryValue>
+                {
+                    ["name"] = QueryValue.Simple("Contoso")
+                }
+            },
+            Count = 1
+        };
+
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tdsResult);
+
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account"
+        };
+
+        // Act: collect all chunks
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in service.ExecuteStreamingAsync(request))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert: final chunk should have ExecutionMode = Tds
+        Assert.NotEmpty(chunks);
+        var finalChunk = chunks[^1];
+        Assert.True(finalChunk.IsComplete);
+        Assert.NotNull(finalChunk.ExecutionMode);
+        Assert.Equal(QueryExecutionMode.Tds, finalChunk.ExecutionMode);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteStreamingAsync_NonFinalChunks_DoNotHaveExecutionMode()
+    {
+        // Arrange: TDS executor returns enough rows to cause multiple chunks
+        var mockExecutor = new Mock<IQueryExecutor>();
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+
+        var records = new List<IReadOnlyDictionary<string, QueryValue>>();
+        for (int i = 0; i < 5; i++)
+        {
+            records.Add(new Dictionary<string, QueryValue>
+            {
+                ["name"] = QueryValue.Simple($"Account{i}")
+            });
+        }
+
+        var tdsResult = new QueryResult
+        {
+            EntityLogicalName = "account",
+            Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
+            Records = records,
+            Count = 5
+        };
+
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tdsResult);
+
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account"
+        };
+
+        // Act: collect all chunks with small chunk size to force multiple chunks
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in service.ExecuteStreamingAsync(request, chunkSize: 2))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert: multiple chunks; non-final chunks should have null ExecutionMode
+        Assert.True(chunks.Count > 1, $"Expected multiple chunks but got {chunks.Count}");
+        for (int i = 0; i < chunks.Count - 1; i++)
+        {
+            Assert.False(chunks[i].IsComplete);
+            Assert.Null(chunks[i].ExecutionMode);
+        }
+
+        // Final chunk has ExecutionMode
+        var finalChunk = chunks[^1];
+        Assert.True(finalChunk.IsComplete);
+        Assert.Equal(QueryExecutionMode.Tds, finalChunk.ExecutionMode);
+    }
+
+    #endregion
 }
