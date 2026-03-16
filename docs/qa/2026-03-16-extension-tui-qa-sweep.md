@@ -7,7 +7,7 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 | Category | Findings | Fixed | Deferred |
 |----------|----------|-------|----------|
 | Bugs (GH issues) | 3 | 3 (#580, #581, #361) | 0 |
-| Bugs (discovered) | 2 | 2 (startup race, unnamed profile status bar) | 0 |
+| Bugs (discovered) | 3 | 3 (startup race, unnamed profile status bar, env type border) | 0 |
 | Silent errors | 7 | 7 (all logging now) | 0 |
 | Architecture | 0 violations | — | — |
 | Dead code | 1 (EnvironmentDetailsDialog unwired) | 1 (wired to Tools menu) | 0 |
@@ -104,7 +104,7 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 | Explain Query | PASS | Opens "Execution Plan" document with FetchXmlScanNode tree and FetchXML source |
 | Solutions panel | PASS | Lists 8 solutions (4 managed, 4 unmanaged), filter bar, env picker |
 | Solution drill-down | PASS | Expands to show component types with counts (Entity, Plugin Assembly, etc.) |
-| Toolbar env color | BUG | `data-env-color="green"` renders correctly, but `data-env-type` is null despite daemon returning type=Development. Root cause: panel uses `auth/who → environment.type` (null) instead of `env/config/get → resolvedType` (correct). The type-based top border doesn't render. |
+| Toolbar env color | FIXED | Both borders now render: green top border (env type = development) and green left border (custom color). Fixed by falling back to `env/config/get → resolvedType` when `auth/who → environment.type` is null. |
 | Daemon status bar | PASS | Shows checkmark + "PPDS" when ready |
 | Extension logs | CLEAN | No PPDS errors in any session. All errors from GitHub Copilot (expected in test instance). |
 
@@ -149,7 +149,6 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 - Tab title shows profile + environment context
 
 **Extension gaps:**
-- Environment type border not rendering (data source mismatch — uses auth/who instead of env/config/get)
 - No environment details command (TUI has it under Tools menu)
 
 **TUI strengths:**
@@ -252,7 +251,7 @@ TUI snapshot test infrastructure has a pre-existing dependency issue (`@microsof
 
 ## Items NOT Fixed (Future Work)
 
-- **BUG: Environment type border not rendering** — Panel toolbar `data-env-type` is null because QueryPanel/SolutionsPanel use `auth/who → environment.type` (which returns null) instead of `env/config/get → resolvedType` (which returns "Development"). Fix: use resolvedType from envConfigGet response.
+- ~~Environment type border not rendering~~ — **Fixed** in commit `35ee5be`. Panels now fall back to `env/config/get → resolvedType` when `auth/who → environment.type` is null.
 - Environment details command in Extension — low priority, TUI has it
 - webview-cdp multi-panel targeting improvements
 - TUI: Unnamed SPN profiles show raw application ID in profile selector (should use name or "Profile N" fallback)
