@@ -63,4 +63,34 @@ public record ImportJobInfo(
     DateTime? StartedOn,
     DateTime? CompletedOn,
     DateTime? CreatedOn,
-    bool IsComplete);
+    bool IsComplete,
+    string? CreatedByName = null)
+{
+    /// <summary>
+    /// Computed status: Succeeded, Failed, or In Progress.
+    /// Single code path for all surfaces (Constitution A2).
+    /// </summary>
+    public string Status => CompletedOn.HasValue
+        ? (Progress >= 100 ? "Succeeded" : "Failed")
+        : "In Progress";
+
+    /// <summary>
+    /// Computed formatted duration, or null if StartedOn is not set.
+    /// </summary>
+    public string? FormattedDuration
+    {
+        get
+        {
+            if (!StartedOn.HasValue) return null;
+            var span = (CompletedOn ?? DateTime.UtcNow) - StartedOn.Value;
+            var formatted = span.TotalHours >= 1
+                ? $"{(int)span.TotalHours}h {span.Minutes}m {span.Seconds}s"
+                : span.TotalMinutes >= 1
+                    ? $"{(int)span.TotalMinutes}m {span.Seconds}s"
+                    : span.TotalSeconds >= 1
+                        ? $"{span.Seconds}s"
+                        : "< 1s";
+            return CompletedOn.HasValue ? formatted : formatted + " (ongoing)";
+        }
+    }
+}

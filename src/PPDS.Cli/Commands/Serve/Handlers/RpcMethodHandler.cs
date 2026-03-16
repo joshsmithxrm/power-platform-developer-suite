@@ -1971,6 +1971,97 @@ public class RpcMethodHandler : IDisposable
     }
 
     #endregion
+
+    #region Import Jobs
+
+    /// <summary>
+    /// Lists import jobs for an environment.
+    /// Maps to: ppds importjobs list --json
+    /// </summary>
+    [JsonRpcMethod("importJobs/list")]
+    public async Task<ImportJobsListResponse> ImportJobsListAsync(
+        int top = 50,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var importJobService = sp.GetRequiredService<IImportJobService>();
+            var jobs = await importJobService.ListAsync(top: top, cancellationToken: ct);
+
+            return new ImportJobsListResponse
+            {
+                Jobs = jobs.Select(MapImportJobToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single import job with full detail including XML data.
+    /// Maps to: ppds importjobs get + ppds importjobs data
+    /// </summary>
+    [JsonRpcMethod("importJobs/get")]
+    public async Task<ImportJobsGetResponse> ImportJobsGetAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var importJobId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter must be a valid GUID");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var importJobService = sp.GetRequiredService<IImportJobService>();
+
+            var job = await importJobService.GetAsync(importJobId, ct)
+                ?? throw new RpcException(
+                    ErrorCodes.Operation.NotFound,
+                    $"Import job '{id}' not found");
+
+            var data = await importJobService.GetDataAsync(importJobId, ct);
+
+            var dto = MapImportJobToDto(job);
+
+            return new ImportJobsGetResponse
+            {
+                Job = new ImportJobDetailDto
+                {
+                    Id = dto.Id,
+                    SolutionName = dto.SolutionName,
+                    Status = dto.Status,
+                    Progress = dto.Progress,
+                    CreatedBy = dto.CreatedBy,
+                    CreatedOn = dto.CreatedOn,
+                    StartedOn = dto.StartedOn,
+                    CompletedOn = dto.CompletedOn,
+                    Duration = dto.Duration,
+                    Data = data
+                }
+            };
+        }, cancellationToken);
+    }
+
+    private static ImportJobInfoDto MapImportJobToDto(ImportJobInfo job)
+    {
+        return new ImportJobInfoDto
+        {
+            Id = job.Id.ToString(),
+            SolutionName = job.SolutionName,
+            Status = job.Status,
+            Progress = job.Progress,
+            CreatedBy = job.CreatedByName,
+            CreatedOn = job.CreatedOn?.ToString("o"),
+            StartedOn = job.StartedOn?.ToString("o"),
+            CompletedOn = job.CompletedOn?.ToString("o"),
+            Duration = job.FormattedDuration
+        };
+    }
+
+    #endregion
 }
 
 #region Response DTOs
@@ -2952,6 +3043,63 @@ public class QueryHistoryListRequest
 public class QueryHistoryDeleteRequest
 {
     [JsonPropertyName("id")] public string Id { get; set; } = "";
+}
+
+// ── Import Jobs DTOs ────────────────────────────────────────────────────────
+
+public class ImportJobsListResponse
+{
+    [JsonPropertyName("jobs")]
+    public List<ImportJobInfoDto> Jobs { get; set; } = [];
+}
+
+public class ImportJobsGetResponse
+{
+    [JsonPropertyName("job")]
+    public ImportJobDetailDto Job { get; set; } = null!;
+}
+
+public class ImportJobInfoDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("solutionName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SolutionName { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("progress")]
+    public double Progress { get; set; }
+
+    [JsonPropertyName("createdBy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedBy { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("startedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StartedOn { get; set; }
+
+    [JsonPropertyName("completedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompletedOn { get; set; }
+
+    [JsonPropertyName("duration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Duration { get; set; }
+}
+
+public class ImportJobDetailDto : ImportJobInfoDto
+{
+    [JsonPropertyName("data")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Data { get; set; }
 }
 
 #endregion

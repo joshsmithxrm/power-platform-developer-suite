@@ -38,6 +38,8 @@ import type {
     SolutionComponentsResponse,
     SchemaEntitiesResponse,
     SchemaAttributesResponse,
+    ImportJobsListResponse,
+    ImportJobsGetResponse,
 } from './types.js';
 
 // Re-export AuthWhoResponse for profileCommands.ts convenience
@@ -699,6 +701,35 @@ export class DaemonClient implements vscode.Disposable {
         this.log.debug(`Calling solutions/components for "${uniqueName}"...`);
         const result = await this.connection!.sendRequest<SolutionComponentsResponse>('solutions/components', params);
         this.log.debug(`Got ${result.components.length} components`);
+
+        return result;
+    }
+
+    // ── Import Jobs ─────────────────────────────────────────────────────────
+
+    async importJobsList(top?: number, environmentUrl?: string): Promise<ImportJobsListResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (top !== undefined) params.top = top;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling importJobs/list...');
+        const result = await this.connection!.sendRequest<ImportJobsListResponse>('importJobs/list', params);
+        this.log.debug(`Got ${result.jobs.length} import jobs`);
+
+        return result;
+    }
+
+    async importJobsGet(id: string, environmentUrl?: string): Promise<ImportJobsGetResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling importJobs/get for ${id}...`);
+        const result = await this.connection!.sendRequest<ImportJobsGetResponse>('importJobs/get', params);
+        this.log.debug(`Got import job detail: ${result.job.solutionName}`);
 
         return result;
     }
