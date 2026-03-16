@@ -119,7 +119,7 @@ public static class VersionCommand
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine($"Update available! Run: {result.UpdateCommand}");
-            if (result.PreReleaseUpdateCommand is not null)
+            if (result.PreReleaseUpdateCommand is not null && result.PreReleaseUpdateCommand != result.UpdateCommand)
                 Console.Error.WriteLine($"Pre-release available! Run: {result.PreReleaseUpdateCommand}");
         }
         else

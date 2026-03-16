@@ -47,9 +47,9 @@ internal static class UpdateScriptWriter
             "{{dotnetPath}}" {{updateArgs}}
             set EXIT_CODE=%ERRORLEVEL%
             if %EXIT_CODE% EQU 0 (
-                echo {"success":true,"exitCode":0,"targetVersion":"{{safeTarget}}","timestamp":"%DATE%T%TIME%"} > "{{statusPath}}"
+                echo {"success":true,"exitCode":0,"targetVersion":"{{safeTarget}}"} > "{{statusPath}}"
             ) else (
-                echo {"success":false,"exitCode":%EXIT_CODE%,"targetVersion":"{{safeTarget}}","timestamp":"%DATE%T%TIME%"} > "{{statusPath}}"
+                echo {"success":false,"exitCode":%EXIT_CODE%,"targetVersion":"{{safeTarget}}"} > "{{statusPath}}"
             )
             del "{{lockPath}}" 2>NUL
             del "%~f0" 2>NUL
