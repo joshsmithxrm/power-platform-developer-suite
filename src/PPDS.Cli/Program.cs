@@ -20,6 +20,7 @@ using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.UpdateCheck;
 
 namespace PPDS.Cli;
 
@@ -33,7 +34,7 @@ public static class Program
     /// </summary>
     private static readonly HashSet<string> SkipVersionHeaderArgs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--help", "-h", "-?", "--version"
+        "--help", "-h", "-?", "--version", "version"
     };
 
     public static async Task<int> Main(string[] args)
@@ -48,6 +49,22 @@ public static class Program
         if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
         {
             ErrorOutput.WriteVersionHeader();
+            ReadAndDeleteUpdateStatus();
+
+            // Show cached update notification (guarded by --quiet)
+            if (StartupUpdateNotifier.ShouldShow(args))
+            {
+                var updateService = new UpdateCheckService();
+                var cached = updateService.GetCachedResult();
+                var updateMessage = StartupUpdateNotifier.FormatNotification(cached);
+                if (updateMessage != null)
+                {
+                    Console.Error.WriteLine(updateMessage);
+                }
+
+                // Fire-and-forget background cache refresh for next startup
+                updateService.RefreshCacheInBackgroundIfStale(ErrorOutput.Version);
+            }
         }
 
         var rootCommand = new RootCommand(
@@ -75,6 +92,7 @@ public static class Program
         rootCommand.Subcommands.Add(RolesCommandGroup.Create());
         rootCommand.Subcommands.Add(ServeCommand.Create());
         rootCommand.Subcommands.Add(DocsCommand.Create());
+        rootCommand.Subcommands.Add(VersionCommand.Create());
         rootCommand.Subcommands.Add(InteractiveCommand.Create());
 
         // Internal/debug commands - only visible when PPDS_INTERNAL=1
@@ -92,6 +110,45 @@ public static class Program
 
         var parseResult = rootCommand.Parse(args);
         return await parseResult.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Reads the post-update status file written by the detached wrapper script,
+    /// displays the result to the user, and deletes the file.
+    /// </summary>
+    private static void ReadAndDeleteUpdateStatus()
+    {
+        try
+        {
+            var statusPath = Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
+                ".ppds", "update-status.json");
+
+            if (!File.Exists(statusPath))
+                return;
+
+            var json = File.ReadAllText(statusPath);
+            File.Delete(statusPath);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var success = root.TryGetProperty("success", out var s) && s.GetBoolean();
+            var version = root.TryGetProperty("targetVersion", out var v) ? v.GetString() : null;
+
+            if (success && version is not null)
+            {
+                Console.Error.WriteLine($"Successfully updated to {version}.");
+            }
+            else
+            {
+                Console.Error.WriteLine("Update failed. Run manually: dotnet tool update PPDS.Cli -g");
+            }
+        }
+        catch
+        {
+            // Status file read/delete failure is not fatal
+        }
     }
 
     /// <summary>
