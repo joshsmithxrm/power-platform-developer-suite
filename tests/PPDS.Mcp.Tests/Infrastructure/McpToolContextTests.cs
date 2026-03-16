@@ -19,7 +19,7 @@ public sealed class McpToolContextTests
     public void Constructor_NullPoolManager_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => new McpToolContext(null!, new ProfileStore(), new Mock<ISecureCredentialStore>().Object);
+        var act = () => new McpToolContext(null!, new ProfileStore(), new Mock<ISecureCredentialStore>().Object, new McpSessionOptions());
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -33,7 +33,8 @@ public sealed class McpToolContextTests
         var act = () => new McpToolContext(
             new Mock<IMcpConnectionPoolManager>().Object,
             null!,
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -47,7 +48,8 @@ public sealed class McpToolContextTests
         var act = () => new McpToolContext(
             new Mock<IMcpConnectionPoolManager>().Object,
             new ProfileStore(),
-            null!);
+            null!,
+            new McpSessionOptions());
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -64,7 +66,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
 
         // Assert
         context.Should().NotBeNull();
@@ -81,6 +84,7 @@ public sealed class McpToolContextTests
             mockPoolManager.Object,
             new ProfileStore(),
             new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions(),
             loggerFactory: null);
 
         // Assert
@@ -99,7 +103,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
         var environmentUrl = "https://org.crm.dynamics.com";
 
         // Act
@@ -119,7 +124,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
         var environmentUrl = "https://org.crm.dynamics.com/with/trailing/slash/";
 
         // Act
@@ -145,7 +151,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
 
         // Act
         Func<Task> act = () => context.GetActiveProfileAsync();
@@ -168,7 +175,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
 
         // Act
         Func<Task> act = () => context.GetPoolAsync();
@@ -191,7 +199,8 @@ public sealed class McpToolContextTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
 
         // Act
         Func<Task> act = () => context.CreateServiceProviderAsync();

@@ -54,6 +54,7 @@ public sealed class QueryFetchTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
+        // FetchXML is inherently read-only — no DML guard needed.
         var result = await queryExecutor.ExecuteFetchXmlAsync(
             query,
             pageNumber: null,

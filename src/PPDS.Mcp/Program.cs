@@ -10,6 +10,9 @@ using PPDS.Mcp.Infrastructure;
 // Redirect all console output to stderr before any logging occurs.
 Console.SetOut(Console.Error);
 
+// Parse session options before building the host.
+var sessionOptions = McpSessionOptions.Parse(args);
+
 var builder = Host.CreateApplicationBuilder(args);
 
 // Configure logging to stderr only (stdout is reserved for MCP protocol messages).
@@ -27,6 +30,7 @@ builder.Services.AddMcpServer()
     .WithToolsFromAssembly();
 
 // Register MCP infrastructure.
+builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton<IMcpConnectionPoolManager, McpConnectionPoolManager>();
 builder.Services.AddSingleton<McpToolContext>();
 

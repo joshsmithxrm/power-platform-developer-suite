@@ -36,6 +36,12 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 **I3.** Every spec must have numbered acceptance criteria (AC-01, AC-02, ...) before implementation begins. No ACs = no implementation.
 
+## Session Laws
+
+**SS1.** Running sessions are independent — changing the active profile or environment in one surface (CLI, TUI, Extension, MCP) does not affect other running surfaces. The persisted active profile is a default for new sessions, not a live binding.
+
+**SS2.** MCP sessions are locked at startup — the profile and environment are captured when the server starts and cannot be changed by external profile switches. Environment switching within a session is controlled by the `--allowed-env` allowlist; if no allowlist is configured, the session is locked to its initial environment.
+
 ## Security Laws
 
 **S1.** Never render untrusted data via `innerHTML` — use `textContent` or a proper escaping pipeline. Mixed escaped/unescaped data in the same structure is an architectural flaw, not a minor issue.

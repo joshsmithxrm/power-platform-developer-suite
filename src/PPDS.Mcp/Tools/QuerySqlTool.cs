@@ -62,6 +62,13 @@ public sealed class QuerySqlTool
             throw new InvalidOperationException($"SQL parse error: {ex.Message}", ex);
         }
 
+        // Block DML operations in read-only sessions.
+        if (_context.IsReadOnly && stmt is not SelectStatement)
+        {
+            throw new InvalidOperationException(
+                "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only.");
+        }
+
         // Apply row limit.
         if (stmt is SelectStatement selectStmt
             && selectStmt.QueryExpression is QuerySpecification querySpec)
