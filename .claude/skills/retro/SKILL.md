@@ -1,5 +1,5 @@
 ---
-name: retrospective
+name: retro
 description: Conduct a structured retrospective on recent work sessions. Use when the user asks to review what happened, analyze session quality, identify patterns, or do a post-mortem. Triggers include "retrospective", "retro", "what went well", "session review", "post-mortem".
 ---
 
@@ -139,6 +139,8 @@ Dispatch one agent with this scope:
 
 ### 5. Cross-Reference Memory (parallel agent)
 
+If auto-memory is disabled and no memory files exist, skip this step and note it in the output.
+
 Dispatch one agent with this scope:
 
 - Read all memory files
@@ -166,7 +168,7 @@ After ALL agents return, compile findings into:
 
 **Recommendations:**
 - Specific, actionable items ranked by priority
-- Distinguish between "superpowers already covers this" vs "needs a project-specific fix"
+- Distinguish between "existing skill covers this" vs "needs a new skill or skill update"
 
 ## Output
 

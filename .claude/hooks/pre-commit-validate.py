@@ -63,8 +63,9 @@ def main():
         # Run extension lint if src/PPDS.Extension/ has changes or exists
         extension_dir = os.path.join(project_dir, "src", "PPDS.Extension")
         if os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
+            # shell=True required on Windows where npm is a .cmd batch file
             lint_result = subprocess.run(
-                ["npm", "run", "lint"],
+                "npm run lint",
                 cwd=extension_dir,
                 capture_output=True,
                 text=True,
@@ -83,6 +84,10 @@ def main():
             print("✅ Extension lint passed", file=sys.stderr)
 
         print("✅ All validations passed", file=sys.stderr)
+
+        # Workflow state check (informational only — does not block)
+        _check_workflow_state(project_dir)
+
         sys.exit(0)
 
     except FileNotFoundError:
@@ -91,6 +96,60 @@ def main():
     except subprocess.TimeoutExpired:
         print("⚠️ Build/test timed out. Skipping validation.", file=sys.stderr)
         sys.exit(0)
+
+
+def _check_workflow_state(project_dir):
+    """Check if gates are stale and warn (does not block)."""
+    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    if not os.path.exists(state_path):
+        return
+
+    try:
+        with open(state_path, "r") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    gates = state.get("gates", {})
+    gates_ref = gates.get("commit_ref")
+    if not gates_ref:
+        return
+
+    # Check if src/ files are staged
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if staged.returncode != 0:
+            return
+
+        has_src = any(line.startswith("src/") for line in staged.stdout.strip().split("\n") if line)
+        if not has_src:
+            return
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return
+
+    # Compare gates ref to HEAD
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if head.returncode == 0 and head.stdout.strip() != gates_ref:
+            print(
+                "⚠ Warning: /gates has not been run since your last changes. "
+                "Run /gates before creating a PR.",
+                file=sys.stderr,
+            )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
 
 
 if __name__ == "__main__":

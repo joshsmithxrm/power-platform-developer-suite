@@ -1,4 +1,7 @@
 {
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": false
+  },
   "permissions": {
     "allow": [
       "Bash(ls:*)",
@@ -198,6 +201,50 @@
             "type": "command",
             "command": "python .claude/hooks/pre-commit-validate.py",
             "timeout": 120
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gh pr create:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pr-gate.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash(git commit:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/post-commit-state.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start-workflow.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-stop-workflow.py",
+            "timeout": 10
           }
         ]
       }

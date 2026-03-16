@@ -17,7 +17,7 @@ Each mode requires specific MCP servers. If a prerequisite is missing, tell the 
 | Mode | Required MCPs / Tools |
 |------|----------------------|
 | cli | None (uses Bash tool directly) |
-| tui | Not yet available — TUI snapshot tests only (`npm run tui:test`) |
+| tui | `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` (uses `@microsoft/tui-test` + `node-pty`, both dev deps) |
 | extension | `src/PPDS.Extension/tools/webview-cdp.mjs` (uses @playwright/test + @vscode/test-electron, both dev deps) |
 | mcp | MCP Inspector CLI (`npx @modelcontextprotocol/inspector`) |
 
@@ -80,7 +80,7 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "tab"
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
 
 # Verify status bar content
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 29
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28
 
 # Wait for expected screen title
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
@@ -99,7 +99,7 @@ See @tui-verify skill for full command reference and Terminal.Gui keyboard patte
 
 ### 5. Extension Mode
 
-**Phase A: Functional Verification (webview-cdp)**
+**Phase A: Functional Verification (ext-verify)**
 
 Launch VS Code with the extension and verify panels load:
 
@@ -142,7 +142,7 @@ node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/solutions.png
 node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
-See @webview-cdp skill for full command reference and common patterns.
+See @ext-verify skill for full command reference and common patterns.
 
 ### 6. MCP Mode
 
@@ -176,10 +176,20 @@ Present structured results:
 ### Verdict: PASS -- all checks green
 ```
 
+## Workflow State
+
+After verification passes for a surface (verdict is PASS), update `.claude/workflow-state.json`:
+1. Read the file (create `{}` if missing)
+2. Set `verify.{surface}` to the current ISO 8601 timestamp
+3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`
+4. Write the file back
+
+Example: after `/verify extension` passes, set `verify.ext` to the timestamp.
+
 ## Rules
 
 1. **Unit tests first** -- always. Don't waste interactive cycles on broken code.
-2. **Structured data over screenshots** -- when both are available, prefer ppds.debug.* JSON over visual inspection. For webview panels, use @webview-cdp screenshots (see Extension Mode above).
+2. **Structured data over screenshots** -- when both are available, prefer ppds.debug.* JSON over visual inspection. For webview panels, use @ext-verify screenshots (see Extension Mode above).
 3. **Report exact state** -- include actual values, not just pass/fail.
 4. **Prerequisites are hard gates** -- if MCP not configured, stop and say so.
 5. **Don't fix during verify** -- report problems, don't fix them. That's for /debug or /converge.
