@@ -44,8 +44,9 @@ def main():
         print(
             f"WORKFLOW REMINDER for branch {branch}:\n"
             "  No workflow state tracked yet.\n"
-            "  Required sequence: /gates → /verify → /qa → /review → /pr\n"
-            "  Steps 5-8 are enforced by hooks. PR creation will be blocked if incomplete.",
+            "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
+            "  For bug fixes: /gates → /verify (if UI changed) → /pr\n"
+            "  PR creation is blocked by hooks until gates, verify, QA, and review are complete.",
             file=sys.stderr,
         )
         sys.exit(0)
