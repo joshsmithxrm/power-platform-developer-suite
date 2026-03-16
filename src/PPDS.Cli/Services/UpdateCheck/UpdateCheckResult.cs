@@ -33,9 +33,16 @@ public sealed record UpdateCheckResult
     public bool PreReleaseUpdateAvailable { get; init; }
 
     /// <summary>
-    /// Gets the command to run to update the PPDS CLI, or null if already up-to-date.
+    /// Gets the primary update command (stable preferred), or null if already up-to-date.
     /// </summary>
     public string? UpdateCommand { get; init; }
+
+    /// <summary>
+    /// Gets the pre-release update command when a newer pre-release is also available
+    /// alongside a stable update. Null when no pre-release update exists or when
+    /// only a pre-release update is available (in that case <see cref="UpdateCommand"/> holds it).
+    /// </summary>
+    public string? PreReleaseUpdateCommand { get; init; }
 
     /// <summary>
     /// Gets the timestamp when this check was performed.

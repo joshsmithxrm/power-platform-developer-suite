@@ -1,219 +1,171 @@
-using System.Text.Json;
-using FluentAssertions;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Services.UpdateCheck;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Infrastructure;
 
-/// <summary>
-/// Unit tests for <see cref="StartupUpdateNotifier"/>.
-/// </summary>
-public class StartupUpdateNotifierTests : IDisposable
+public sealed class StartupUpdateNotifierTests
 {
-    private readonly string _tempPath;
-    private readonly string _cacheFile;
+    #region FormatNotification
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    [Fact]
+    public void FormatNotification_NullResult_ReturnsNull()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
-    public StartupUpdateNotifierTests()
-    {
-        _tempPath = Path.Combine(Path.GetTempPath(), $"ppds-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_tempPath);
-        _cacheFile = Path.Combine(_tempPath, "update-check.json");
+        Assert.Null(StartupUpdateNotifier.FormatNotification(null));
     }
 
-    public void Dispose()
+    [Fact]
+    public void FormatNotification_NoUpdateAvailable_ReturnsNull()
     {
-        if (Directory.Exists(_tempPath))
-        {
-            try { Directory.Delete(_tempPath, recursive: true); }
-            catch { /* ignore cleanup errors */ }
-        }
+        var result = MakeResult(stableUpdate: false, preReleaseUpdate: false);
+        Assert.Null(StartupUpdateNotifier.FormatNotification(result));
     }
 
-    #region Helpers
-
-    private void WriteCacheFile(UpdateCheckResult result)
+    [Fact]
+    public void FormatNotification_StableOnlyUpdate_ReturnsSingleLine()
     {
-        var json = JsonSerializer.Serialize(result, JsonOptions);
-        File.WriteAllText(_cacheFile, json);
+        var result = MakeResult(
+            currentVersion: "0.4.0", // stable track
+            stableUpdate: true,
+            preReleaseUpdate: false,
+            latestStable: "0.6.0",
+            updateCommand: "dotnet tool update PPDS.Cli -g");
+
+        var message = StartupUpdateNotifier.FormatNotification(result);
+
+        Assert.NotNull(message);
+        Assert.Contains("0.6.0", message);
+        Assert.Contains("dotnet tool update PPDS.Cli -g", message);
+        Assert.DoesNotContain("\n", message!.Trim());
     }
 
-    private static UpdateCheckResult MakeResult(
-        bool stableUpdateAvailable = false,
-        bool preReleaseUpdateAvailable = false,
-        string? latestStableVersion = null,
-        string? latestPreReleaseVersion = null,
-        string? updateCommand = null,
-        DateTimeOffset? checkedAt = null)
+    [Fact]
+    public void FormatNotification_StableUser_HidesPreRelease()
     {
-        return new UpdateCheckResult
-        {
-            CurrentVersion = "0.5.0",
-            LatestStableVersion = latestStableVersion,
-            LatestPreReleaseVersion = latestPreReleaseVersion,
-            StableUpdateAvailable = stableUpdateAvailable,
-            PreReleaseUpdateAvailable = preReleaseUpdateAvailable,
-            UpdateCommand = updateCommand,
-            CheckedAt = checkedAt ?? DateTimeOffset.UtcNow
-        };
+        // Stable user (even minor) should only see stable in startup notification
+        var result = MakeResult(
+            currentVersion: "0.4.0", // even minor = stable track
+            stableUpdate: true,
+            preReleaseUpdate: true,
+            latestStable: "0.6.0",
+            latestPreRelease: "0.7.0-alpha.1",
+            updateCommand: "dotnet tool update PPDS.Cli -g",
+            preReleaseUpdateCommand: "dotnet tool update PPDS.Cli -g --prerelease");
+
+        var message = StartupUpdateNotifier.FormatNotification(result);
+
+        Assert.NotNull(message);
+        Assert.Contains("0.6.0", message);
+        // Stable user should NOT see pre-release in startup notification
+        Assert.DoesNotContain("0.7.0-alpha.1", message);
+        Assert.DoesNotContain("\n", message!.Trim());
+    }
+
+    [Fact]
+    public void FormatNotification_PreReleaseUser_BothUpdatesAvailable_ReturnsTwoLines()
+    {
+        // Pre-release user (odd minor) should see both
+        var result = MakeResult(
+            currentVersion: "0.5.0-beta.1", // odd minor = pre-release track
+            stableUpdate: true,
+            preReleaseUpdate: true,
+            latestStable: "0.6.0",
+            latestPreRelease: "0.7.0-alpha.1",
+            updateCommand: "dotnet tool update PPDS.Cli -g",
+            preReleaseUpdateCommand: "dotnet tool update PPDS.Cli -g --prerelease");
+
+        var message = StartupUpdateNotifier.FormatNotification(result);
+
+        Assert.NotNull(message);
+        var lines = message!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("0.6.0", lines[0]);
+        Assert.Contains("0.7.0-alpha.1", lines[1]);
+    }
+
+    [Fact]
+    public void FormatNotification_PreReleaseOnlyUpdate_ReturnsSingleLine()
+    {
+        var result = MakeResult(
+            currentVersion: "0.5.0-beta.1",
+            stableUpdate: false,
+            preReleaseUpdate: true,
+            latestPreRelease: "0.7.0-alpha.1",
+            updateCommand: "dotnet tool update PPDS.Cli -g --prerelease");
+
+        var message = StartupUpdateNotifier.FormatNotification(result);
+
+        Assert.NotNull(message);
+        Assert.Contains("0.7.0-alpha.1", message);
+        Assert.DoesNotContain("\n", message!.Trim());
     }
 
     #endregion
 
-    // ─── GetNotificationMessage: update available ──────────────────────────────
+    #region ShouldShow
 
     [Fact]
-    public void GetNotificationMessage_StableUpdateAvailable_ReturnsMessage()
+    public void ShouldShow_EmptyArgs_ReturnsTrue()
     {
-        WriteCacheFile(MakeResult(
-            stableUpdateAvailable: true,
-            latestStableVersion: "0.6.0",
-            updateCommand: "dotnet tool update PPDS.Cli -g"));
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().NotBeNull();
-        message.Should().Contain("0.6.0");
-        message.Should().Contain("dotnet tool update PPDS.Cli -g");
-    }
-
-    [Fact]
-    public void GetNotificationMessage_PreReleaseUpdateAvailable_ReturnsMessage()
-    {
-        WriteCacheFile(MakeResult(
-            preReleaseUpdateAvailable: true,
-            latestPreReleaseVersion: "0.6.0-beta.1",
-            updateCommand: "dotnet tool update PPDS.Cli -g --prerelease"));
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().NotBeNull();
-        message.Should().Contain("0.6.0-beta.1");
-        message.Should().Contain("dotnet tool update PPDS.Cli -g --prerelease");
-    }
-
-    // ─── GetNotificationMessage: no update ────────────────────────────────────
-
-    [Fact]
-    public void GetNotificationMessage_NoUpdateAvailable_ReturnsNull()
-    {
-        WriteCacheFile(MakeResult(
-            stableUpdateAvailable: false,
-            preReleaseUpdateAvailable: false));
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().BeNull();
-    }
-
-    [Fact]
-    public void GetNotificationMessage_NoCacheFile_ReturnsNull()
-    {
-        // _cacheFile does not exist
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().BeNull();
-    }
-
-    [Fact]
-    public void GetNotificationMessage_ExpiredCache_ReturnsNull()
-    {
-        WriteCacheFile(MakeResult(
-            stableUpdateAvailable: true,
-            latestStableVersion: "0.6.0",
-            updateCommand: "dotnet tool update PPDS.Cli -g",
-            checkedAt: DateTimeOffset.UtcNow.AddHours(-25)));
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().BeNull();
-    }
-
-    [Fact]
-    public void GetNotificationMessage_CorruptCacheFile_ReturnsNull()
-    {
-        File.WriteAllText(_cacheFile, "{ not valid json {{{{");
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().BeNull();
-    }
-
-    // ─── GetNotificationMessage: never throws ─────────────────────────────────
-
-    [Fact]
-    public void GetNotificationMessage_InvalidPath_NeverThrows()
-    {
-        var act = () => StartupUpdateNotifier.GetNotificationMessage(
-            cachePath: @"Z:\nonexistent\very\deep\path\update-check.json");
-
-        act.Should().NotThrow();
-    }
-
-    [Fact]
-    public void GetNotificationMessage_NullPath_NeverThrows()
-    {
-        // With a null cachePath it will fall back to the default path which may not exist — must not throw
-        var act = () => StartupUpdateNotifier.GetNotificationMessage(cachePath: null);
-
-        act.Should().NotThrow();
-    }
-
-    // ─── ShouldShow ───────────────────────────────────────────────────────────
-
-    [Fact]
-    public void ShouldShow_NoArgs_ReturnsTrue()
-    {
-        StartupUpdateNotifier.ShouldShow(Array.Empty<string>()).Should().BeTrue();
+        Assert.True(StartupUpdateNotifier.ShouldShow(Array.Empty<string>()));
     }
 
     [Fact]
     public void ShouldShow_NormalArgs_ReturnsTrue()
     {
-        StartupUpdateNotifier.ShouldShow(new[] { "env", "list" }).Should().BeTrue();
+        Assert.True(StartupUpdateNotifier.ShouldShow(new[] { "query", "sql" }));
     }
 
     [Fact]
-    public void ShouldShow_QuietLongFlag_ReturnsFalse()
+    public void ShouldShow_QuietLong_ReturnsFalse()
     {
-        StartupUpdateNotifier.ShouldShow(new[] { "--quiet" }).Should().BeFalse();
+        Assert.False(StartupUpdateNotifier.ShouldShow(new[] { "--quiet" }));
     }
 
     [Fact]
-    public void ShouldShow_QuietShortFlag_ReturnsFalse()
+    public void ShouldShow_QuietShort_ReturnsFalse()
     {
-        StartupUpdateNotifier.ShouldShow(new[] { "-q" }).Should().BeFalse();
+        Assert.False(StartupUpdateNotifier.ShouldShow(new[] { "-q" }));
     }
 
     [Fact]
-    public void ShouldShow_QuietFlagAmongOtherArgs_ReturnsFalse()
+    public void ShouldShow_HelpFlag_ReturnsTrue()
     {
-        StartupUpdateNotifier.ShouldShow(new[] { "env", "list", "--quiet" }).Should().BeFalse();
+        // --help suppression handled by Program.cs SkipVersionHeaderArgs, not ShouldShow
+        Assert.True(StartupUpdateNotifier.ShouldShow(new[] { "--help" }));
     }
 
     [Fact]
-    public void ShouldShow_QuietShortFlagAmongOtherArgs_ReturnsFalse()
+    public void ShouldShow_QuietAmongOtherArgs_ReturnsFalse()
     {
-        StartupUpdateNotifier.ShouldShow(new[] { "env", "list", "-q" }).Should().BeFalse();
+        Assert.False(StartupUpdateNotifier.ShouldShow(new[] { "query", "sql", "--quiet" }));
     }
 
-    // ─── Message format ───────────────────────────────────────────────────────
+    #endregion
 
-    [Fact]
-    public void GetNotificationMessage_Format_ContainsUpdateAvailablePrefix()
+    #region Helpers
+
+    private static UpdateCheckResult MakeResult(
+        string currentVersion = "0.5.0-beta.1",
+        bool stableUpdate = false,
+        bool preReleaseUpdate = false,
+        string? latestStable = null,
+        string? latestPreRelease = null,
+        string? updateCommand = null,
+        string? preReleaseUpdateCommand = null)
     {
-        WriteCacheFile(MakeResult(
-            stableUpdateAvailable: true,
-            latestStableVersion: "0.6.0",
-            updateCommand: "dotnet tool update PPDS.Cli -g"));
-
-        var message = StartupUpdateNotifier.GetNotificationMessage(cachePath: _cacheFile);
-
-        message.Should().StartWith("Update available:");
+        return new UpdateCheckResult
+        {
+            CurrentVersion = currentVersion,
+            LatestStableVersion = latestStable,
+            LatestPreReleaseVersion = latestPreRelease,
+            StableUpdateAvailable = stableUpdate,
+            PreReleaseUpdateAvailable = preReleaseUpdate,
+            UpdateCommand = updateCommand,
+            PreReleaseUpdateCommand = preReleaseUpdateCommand,
+            CheckedAt = DateTimeOffset.UtcNow
+        };
     }
+
+    #endregion
 }
