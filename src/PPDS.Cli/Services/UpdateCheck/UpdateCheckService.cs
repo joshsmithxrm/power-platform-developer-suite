@@ -161,8 +161,31 @@ public sealed class UpdateCheckService : IUpdateCheckService
     /// <inheritdoc/>
     public void RefreshCacheInBackgroundIfStale(string currentVersion)
     {
-        // Implemented in Task 6
-        throw new NotImplementedException();
+        try
+        {
+            // Check cache freshness synchronously before spawning a task
+            var cached = GetCachedResult();
+            if (cached is not null)
+                return; // Cache is fresh — no refresh needed
+
+            // Fire-and-forget: no await, no CancellationToken (R2)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await CheckAsync(currentVersion, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort — never surface to caller
+                }
+            });
+        }
+        catch
+        {
+            // Swallow errors in freshness check
+        }
     }
 
     /// <inheritdoc/>

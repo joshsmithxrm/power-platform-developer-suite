@@ -62,6 +62,20 @@ public class UpdateCheckServiceTests : IDisposable
         return mock.Object;
     }
 
+    private static HttpMessageHandler BuildThrowingHandler()
+    {
+        return new ThrowingHandler();
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            throw new HttpRequestException("Simulated network error");
+        }
+    }
+
     private static string MakeVersionsJson(params string[] versions)
     {
         return JsonSerializer.Serialize(new { versions });
@@ -353,5 +367,48 @@ public class UpdateCheckServiceTests : IDisposable
         // Should not throw — cancelled network call returns null
         var result = await svc.CheckAsync("0.4.0", cts.Token);
         result.Should().BeNull();
+    }
+
+    // ─── RefreshCacheInBackgroundIfStale tests (Task 6) ──────────────────────
+
+    [Fact]
+    public async Task RefreshCacheInBackgroundIfStale_RefreshesWhenCacheExpired()
+    {
+        var oldResult = new UpdateCheckResult
+        {
+            CurrentVersion = "1.0.0",
+            LatestStableVersion = "1.0.0",
+            CheckedAt = DateTimeOffset.UtcNow.AddHours(-25)
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
+        var jsonOpts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        File.WriteAllText(_cacheFile, JsonSerializer.Serialize(oldResult, jsonOpts));
+
+        var handler = BuildHandler(MakeVersionsJson("1.0.0", "2.0.0"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        svc.RefreshCacheInBackgroundIfStale("1.0.0");
+        await Task.Delay(1000);
+
+        var cached = svc.GetCachedResult();
+        Assert.NotNull(cached);
+        Assert.True(cached.StableUpdateAvailable);
+    }
+
+    [Fact]
+    public async Task RefreshCacheInBackgroundIfStale_SkipsWhenCacheFresh()
+    {
+        var handler = BuildHandler(MakeVersionsJson("1.0.0", "2.0.0"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+        await svc.CheckAsync("1.0.0");
+
+        var throwingHandler = BuildThrowingHandler();
+        var svc2 = new UpdateCheckService(handler: throwingHandler, cachePath: _cacheFile);
+
+        svc2.RefreshCacheInBackgroundIfStale("1.0.0");
+        await Task.Delay(500);
+
+        var cached = svc2.GetCachedResult();
+        Assert.NotNull(cached);
     }
 }
