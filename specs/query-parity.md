@@ -106,7 +106,9 @@ SqlQueryResult (with DataSources metadata)
 
 1. `RpcMethodHandler.QuerySqlAsync()` delegates ALL query execution to `SqlQueryService.ExecuteAsync()` — no inline transpilation or direct executor calls
 2. `RpcMethodHandler.QueryExplainAsync()` delegates to `SqlQueryService.ExplainAsync()` — no inline parser/planner/generator instantiation
-3. `RpcMethodHandler.QueryExportAsync()` delegates transpilation to `SqlQueryService.TranspileSql()` and execution to `SqlQueryService.ExecuteAsync()` (or `ExecuteStreamingAsync()` for large exports)
+3. `RpcMethodHandler.QueryExportAsync()` has two input paths:
+   - **SQL input** (`request.Sql`): Delegates transpilation to `SqlQueryService.TranspileSql()` and execution to `SqlQueryService.ExecuteAsync()` — replaces the current `TranspileSqlToFetchXml()` call
+   - **FetchXML input** (`request.FetchXml`): Stays as-is — raw FetchXML is already the final format, no transpilation or planning needed. Same rationale as `query/fetchxml` (see Non-Goals). The direct `IQueryExecutor.ExecuteFetchXmlAsync()` call with manual paging is appropriate here.
 4. The daemon wires `RemoteExecutorFactory`, `ProfileResolver`, `EnvironmentSafetySettings`, and `EnvironmentProtectionLevel` on the `SqlQueryService` instance, using the same pattern as `InteractiveSession.GetSqlQueryServiceAsync()` (lines 321-355)
 5. The daemon's inline DML safety pre-check (lines 954-1001) is removed — `SqlQueryService.PrepareExecutionAsync()` handles DML safety
 6. All bespoke helper methods are deleted (see Dead Code Cleanup section)
