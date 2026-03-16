@@ -138,12 +138,9 @@ public sealed class NuGetVersion : IComparable<NuGetVersion>, IEquatable<NuGetVe
         if (cmp != 0) return cmp;
 
         // Same major.minor.patch: stable beats pre-release
-        var thisIsPreRelease = IsPreRelease;
-        var otherIsPreRelease = other.IsPreRelease;
-
-        if (!thisIsPreRelease && !otherIsPreRelease) return 0;  // both stable
-        if (!thisIsPreRelease && otherIsPreRelease) return 1;   // stable > pre-release
-        if (thisIsPreRelease && !otherIsPreRelease) return -1;  // pre-release < stable
+        if (!IsPreRelease && !other.IsPreRelease) return 0;   // both stable
+        if (!IsPreRelease) return 1;                           // this stable, other pre-release
+        if (!other.IsPreRelease) return -1;                    // this pre-release, other stable
 
         // Both are pre-release: compare labels segment by segment
         return ComparePreReleaseLabels(PreReleaseLabel, other.PreReleaseLabel);
