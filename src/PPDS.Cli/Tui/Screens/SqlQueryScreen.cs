@@ -1,6 +1,7 @@
 using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Credentials;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.Query;
@@ -67,6 +68,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     private QueryPlanDescription? _lastExecutionPlan;
     private long _lastExecutionTimeMs;
     private bool _useTdsEndpoint;
+    private bool _confirmedDml;
 
     /// <inheritdoc />
     public override string Title => EnvironmentUrl != null
@@ -526,6 +528,9 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             var service = await Session.GetSqlQueryServiceAsync(EnvironmentUrl, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
 
+            var isConfirmed = _confirmedDml;
+            _confirmedDml = false; // Reset after capturing — one-shot confirmation
+
             var request = new SqlQueryRequest
             {
                 Sql = sql,
@@ -535,7 +540,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 UseTdsEndpoint = _useTdsEndpoint,
                 DmlSafety = new DmlSafetyOptions
                 {
-                    IsConfirmed = false,
+                    IsConfirmed = isConfirmed,
                     IsDryRun = false
                 }
             };
@@ -695,6 +700,34 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             _statusLabel.Text = "Query cancelled.";
             _statusLabel.Visible = true;
             _isExecuting = false;
+        }
+        catch (PpdsException dmlEx) when (dmlEx.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
+        {
+            // DML requires user confirmation — show dialog and retry if confirmed
+            _statusSpinner.Stop();
+            _statusLabel.Visible = true;
+
+            var result = MessageBox.Query(
+                "Confirm DML Operation",
+                dmlEx.Message + "\n\nDo you want to proceed?",
+                "Execute", "Cancel");
+
+            if (result == 0) // "Execute" button
+            {
+                TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
+                _statusLabel.Visible = false;
+                _isExecuting = false;
+                _confirmedDml = true;
+                ErrorService.FireAndForget(ExecuteQueryAsync(), "RetryDmlConfirmed");
+                return;
+            }
+            else
+            {
+                TuiDebugLog.Log("User cancelled DML operation");
+                _statusText = "DML operation cancelled.";
+                _statusLabel.Text = _statusText;
+                _isExecuting = false;
+            }
         }
         catch (Exception ex)
         {
