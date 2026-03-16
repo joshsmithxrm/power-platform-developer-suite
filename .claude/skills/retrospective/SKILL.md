@@ -24,10 +24,27 @@ If your subagents return analysis based only on commit subjects and bodies, **re
 
 ### 1. Gather Raw Data
 
+**Determine the scope** from $ARGUMENTS:
+
+- `/retro latest` or `/retro` (no args) → find the latest session (most recent 30+ minute gap)
+- `/retro 6h` or `/retro 2d` → explicit time window (hours or days)
+- `/retro abc123..def456` → explicit commit range
+- `/retro "2 days"` → explicit since-style window
+
+**Default behavior (no args):** Find the latest session, NOT "2 days ago". This prevents accidentally pulling in multiple sessions when the user wants to review just the most recent one.
+
 ```bash
-# Get commits for the time period (default: 2 days)
-git log --since="2 days ago" --format="COMMIT:%H%nDATE:%ai%nSUBJECT:%s%nBODY:%b%n---" --no-merges
+# Step 1: Get recent commits to find session boundaries
+git log --since="2 days ago" --format="%H %ai" --no-merges
+
+# Step 2: Identify the most recent 30+ minute gap
+# Everything after that gap = the latest session
+
+# Step 3: Fetch full details for ONLY the scoped commits
+git log {start}..{end} --format="COMMIT:%H%nDATE:%ai%nSUBJECT:%s%nBODY:%b%n---" --no-merges
 ```
+
+**Commit count guard:** If the scope contains more than 25 commits, warn the user and suggest narrowing. High-volume retros produce shallow analysis.
 
 Identify session boundaries: gaps of 30+ minutes between commits = new session.
 

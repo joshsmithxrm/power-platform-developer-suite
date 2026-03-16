@@ -126,6 +126,17 @@ Read `specs/README.md` to map changed files to specs. For each relevant spec wit
 ### Verdict: FAIL — 2 issues must be resolved before proceeding
 ```
 
+## Post-Gate Reminder
+
+Gates are necessary but NOT sufficient. After gates pass:
+
+- **If changed files include webview TS/CSS/HTML** (`src/PPDS.Extension/src/panels/`): You MUST also run `/verify extension` and/or `/qa extension` for visual verification. Gates prove code compiles and tests pass — they do NOT prove it renders correctly or works as the user would experience.
+- **If changed files include CLI commands** (`src/PPDS.Cli/Commands/`, not `Serve/`): Run the command and verify the output.
+- **If changed files include MCP tools** (`src/PPDS.Mcp/`): Call the tool and verify the response.
+- **If changed files include TUI** (`src/PPDS.Cli/Tui/`): Run `npm run tui:test` for snapshot verification.
+
+**Do not commit UI/CLI/MCP changes with only gates passing.** That is how bugs ship undetected.
+
 ## Rules
 
 1. **Mechanical only** — no subjective judgments, no code review, no style opinions

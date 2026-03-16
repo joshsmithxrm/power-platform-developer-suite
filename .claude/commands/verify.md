@@ -90,7 +90,9 @@ node src/PPDS.Extension/tools/webview-cdp.mjs logs
 node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 ```
 
-**Phase B: Interaction Verification (if testing interactive features)**
+**Phase B: Interaction Verification (MANDATORY for query/data-display/panel-interaction changes)**
+
+If changed files touch query execution (`SqlQueryService`, `RpcMethodHandler`, `QueryPanel`, `query-panel.ts`), data rendering, or panel interactions, Phase B is NOT optional — you must execute at least one query and verify the results.
 
 ```bash
 # Test query execution

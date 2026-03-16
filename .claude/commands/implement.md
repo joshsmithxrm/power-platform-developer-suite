@@ -105,11 +105,15 @@ For EACH phase in the plan, repeat this cycle:
   for each AC referenced by this phase's tasks
 - If the phase touches extension code (`src/PPDS.Extension/` directory):
   Invoke `/verify extension` to check daemon status, tree views, and panel state.
+  Then invoke `/qa extension` to dispatch a blind verifier agent that tests the UI without seeing source code.
 - If the phase touches TUI code (`src/PPDS.Cli/Tui/`):
   Invoke `/verify tui` to check TUI rendering.
 - If the phase touches MCP code (`src/PPDS.Mcp/`):
   Invoke `/verify mcp` to check tool responses.
-- Re-run verification after fixes. Do NOT proceed until gate passes.
+  Then invoke `/qa mcp` to dispatch a blind verifier for tool responses.
+- If the phase touches CLI commands (`src/PPDS.Cli/Commands/`, not `Serve/`):
+  Invoke `/qa cli` to verify command output matches expectations.
+- Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
 
 **D. Review**
 - Use `superpowers:requesting-code-review` agent to review the phase's work against the plan

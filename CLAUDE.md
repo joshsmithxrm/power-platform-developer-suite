@@ -63,6 +63,8 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 - Review: /review → /converge
 - Skills: @webview-panels (panel dev), @webview-cdp (visual verification)
 - Execution: commit after every task, verify with /gates before proceeding — don't ask, just do it
+- Verification: after ANY change that affects what a user sees or experiences (extension webview, TUI, CLI output, MCP tool response), you MUST verify it works by using the product yourself before committing. Extension: use @webview-cdp — open it, look at it, interact with it. TUI: snapshot tests. CLI: run the command. MCP: call the tool. A passing test suite is not verification. Seeing the actual result is. No exceptions.
+- QA gate: for non-trivial features, run /qa to dispatch a blind verifier agent that tests the product without seeing source code. Required by /implement at phase gates. Available anytime via /qa.
 
 ## Git Hooks
 

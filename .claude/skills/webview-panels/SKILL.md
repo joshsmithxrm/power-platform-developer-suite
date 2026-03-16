@@ -33,7 +33,9 @@ src/panels/
     shared/
       message-types.ts             ← discriminated unions for ALL panel messages
       dom-utils.ts                 ← escapeHtml, escapeAttr, cssEscape, formatDate, sanitizeValue
+      error-handler.ts             ← centralized webview error handler (onerror, unhandledrejection)
       filter-bar.ts                ← generic FilterBar<T> — debounced text filtering with count
+      selection-utils.ts           ← getSelectionRect, isSingleCell, sanitizeValue, buildTsv
       vscode-api.ts                ← typed getVsCodeApi<T>() wrapper
       assert-never.ts              ← exhaustive switch helper
 
@@ -313,6 +315,8 @@ Before committing panel changes:
 - `npm run lint:css` — Stylelint for CSS files
 - `npm run typecheck:all` — both host and webview tsconfigs
 - `npm run test` — Vitest unit tests
+- **Visual verification (MANDATORY for UI changes):** After any CSS, layout, HTML template, or message wiring change, use @webview-cdp to take a screenshot and verify rendering. A passing typecheck is not proof of correct rendering. See @webview-cdp skill for the verification protocol.
+- **Blind QA (recommended):** For non-trivial features, run `/qa extension` to dispatch a fresh agent that tests the panel without seeing source code.
 
 ## Reference Implementations
 
@@ -368,13 +372,19 @@ Before writing panel-specific CSS, check what already exists. Each pattern has a
 
 ### Environment Theming
 
-Panels display a colored top-border accent on the toolbar based on environment type. This maps to the TUI's `StatusBar_Production/Sandbox/Development/Test/Trial` color schemes.
+Panels display two color accents based on the active environment:
 
-The CSS rules are in `shared.css` using `[data-env-type]` attribute selectors:
+**1. Type-based top border** (`data-env-type` attribute on `.toolbar`):
 - Production → red, Sandbox → yellow, Development → green, Test → yellow, Trial → blue
-- Unknown/null → no attribute, no accent (natural default)
+- CSS rules in `shared.css` using `[data-env-type]` selectors
+- Maps to TUI's `StatusBar_Production/Sandbox/Development/Test/Trial` color schemes
 
-**Implementation:** When the environment is selected (via picker or `authWho` on init), the host panel sends `envType` in the `updateEnvironment` message. The webview script sets `data-env-type` on the `.toolbar` element. See QueryPanel and SolutionsPanel for reference.
+**2. Color-based left border** (`data-env-color` attribute on `.toolbar`):
+- Uses the environment's configured hex color (from `environments.json`)
+- CSS rule: `[data-env-color] { border-left: 4px solid attr(data-env-color); }` in `shared.css`
+- Provides environment-specific branding beyond the type-based palette
+
+**Implementation:** When the environment is selected (via picker or `authWho` on init), the host panel sends both `envType` and `envColor` in the `updateEnvironment` message. The webview script sets `data-env-type` and `data-env-color` on the `.toolbar` element. See QueryPanel and SolutionsPanel for reference.
 
 ### Keyboard Shortcuts
 
