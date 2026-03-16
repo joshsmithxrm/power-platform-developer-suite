@@ -20,6 +20,7 @@ using PPDS.Cli.Commands.Users;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.UpdateCheck;
 
 namespace PPDS.Cli;
 
@@ -52,15 +53,17 @@ public static class Program
             // Show cached update notification (guarded by --quiet)
             if (StartupUpdateNotifier.ShouldShow(args))
             {
-                var updateMessage = StartupUpdateNotifier.GetNotificationMessage();
+                var updateService = new UpdateCheckService();
+                var cached = updateService.GetCachedResult();
+                var updateMessage = StartupUpdateNotifier.FormatNotification(cached);
                 if (updateMessage != null)
                 {
                     Console.Error.WriteLine(updateMessage);
                 }
-            }
 
-            // Fire-and-forget background cache refresh for next startup
-            StartupUpdateNotifier.RefreshCacheInBackground(ErrorOutput.Version);
+                // Fire-and-forget background cache refresh for next startup
+                updateService.RefreshCacheInBackgroundIfStale(ErrorOutput.Version);
+            }
         }
 
         var rootCommand = new RootCommand(
