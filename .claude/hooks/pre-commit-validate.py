@@ -63,8 +63,9 @@ def main():
         # Run extension lint if src/PPDS.Extension/ has changes or exists
         extension_dir = os.path.join(project_dir, "src", "PPDS.Extension")
         if os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
+            # shell=True required on Windows where npm is a .cmd batch file
             lint_result = subprocess.run(
-                ["npm", "run", "lint"],
+                "npm run lint",
                 cwd=extension_dir,
                 capture_output=True,
                 text=True,

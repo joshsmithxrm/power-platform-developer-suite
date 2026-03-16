@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 
 
 def main():
@@ -32,7 +31,7 @@ def main():
         sys.exit(0)
 
     # Clear gates (codebase changed)
-    if "gates" in state:
+    if isinstance(state.get("gates"), dict):
         state["gates"]["passed"] = None
 
     # Update last_commit to current HEAD

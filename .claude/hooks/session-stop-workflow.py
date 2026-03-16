@@ -58,7 +58,7 @@ def main():
             timeout=10,
         )
         if result.returncode == 0:
-            uncommitted = len([l for l in result.stdout.strip().split("\n") if l.strip()])
+            uncommitted = len([line for line in result.stdout.strip().split("\n") if line.strip()])
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 

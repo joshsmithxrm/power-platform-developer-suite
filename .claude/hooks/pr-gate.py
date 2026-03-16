@@ -73,6 +73,14 @@ def main():
         )
         sys.exit(2)
 
+    # If HEAD could not be resolved, block PR creation
+    if head_sha is None:
+        print(
+            "PR blocked. Cannot resolve git HEAD — cannot verify gates.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # Check each requirement
     missing = []
 
@@ -82,7 +90,7 @@ def main():
     gates_passed = gates.get("passed")
     if not gates_passed or not gates_ref:
         missing.append("/gates not run")
-    elif head_sha and gates_ref != head_sha:
+    elif gates_ref != head_sha:
         missing.append(
             f"/gates not run against current HEAD "
             f"(last ran against {gates_ref[:8]}, HEAD is {head_sha[:8]})"
