@@ -142,6 +142,8 @@ When `SqlQueryService` throws exceptions, the daemon must catch and remap to exi
 | `QueryParseException` | `ErrorCodes.Query.ParseError` | Wrap in `RpcException` with parse error details |
 | `PpdsException` with `DmlBlocked` ErrorCode | `ErrorCodes.Query.DmlBlocked` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlBlocked = true }` |
 | `PpdsException` with `DmlConfirmationRequired` ErrorCode | `ErrorCodes.Query.DmlConfirmationRequired` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlConfirmationRequired = true }` |
+| `PpdsException` with `TdsIncompatible` ErrorCode | `ErrorCodes.Query.TdsIncompatible` | Wrap in `RpcException` with error message (Phase 5) |
+| `PpdsException` with `TdsConnectionFailed` ErrorCode | `ErrorCodes.Query.TdsConnectionFailed` | Wrap in `RpcException` with error message (Phase 5) |
 | `PpdsException` (other) | `ErrorCodes.Query.ExecutionFailed` | Wrap in `RpcException` with error message |
 | Other exceptions | Standard StreamJsonRpc error | Let StreamJsonRpc handle (500-level equivalent) |
 
@@ -525,7 +527,7 @@ Already defined in `src/PPDS.Query/Planning/QueryHintParser.cs:124-142`. All nul
 | 2 | Query hints integration in `SqlQueryService` | Phase 1 (daemon benefits immediately) |
 | 3 | VS Code environment colors | None (can parallel with Phase 2) |
 | 4 | Cross-environment query attribution | Phase 1 (needs data source collection from plan) |
-| 5 | TDS Endpoint wiring (DI, reporting, UI, fallback) | Phase 1 (needs `SqlQueryService` integration) |
+| 5 | TDS Endpoint wiring (DI, reporting, UI, error handling) | Phase 1 (needs `SqlQueryService` integration) |
 
 ---
 
@@ -545,13 +547,13 @@ Already defined in `src/PPDS.Query/Planning/QueryHintParser.cs:124-142`. All nul
 
 The TDS (Tabular Data Stream) endpoint implementation is 95% complete — `TdsQueryExecutor`, `TdsScanNode`, `TdsCompatibilityChecker`, and `ExecutionPlanBuilder` routing logic all exist. But `ITdsQueryExecutor` is never registered in DI, so it resolves to `null` everywhere, TDS routing silently falls through to Dataverse, and all UIs hardcode `queryMode = "dataverse"`.
 
-This phase completes the last mile: DI registration, honest execution mode reporting, UI toggle re-enablement, and graceful fallback behavior.
+This phase completes the last mile: DI registration, honest execution mode reporting, UI toggle re-enablement, and clear error handling when TDS can't be used.
 
 ### Goals
 
 - **TDS works end-to-end**: Queries actually execute via TDS Endpoint when the user requests it
-- **Honest reporting**: UI shows the actual execution path (TDS, Dataverse, or fallback) — never lies
-- **Graceful degradation**: TDS incompatibility or connection failure falls back to Dataverse with clear user notification
+- **Honest reporting**: UI shows the actual execution path (TDS or Dataverse) — never lies
+- **Fail, don't fall back**: When TDS is requested but can't be used, fail with a clear error — never silently substitute Dataverse
 
 ### Non-Goals
 
@@ -565,8 +567,8 @@ This phase completes the last mile: DI registration, honest execution mode repor
 2. `TdsQueryExecutor` is per-environment — when the daemon switches environments, the TDS executor must target the new environment's org URL and auth tokens
 3. `SqlQueryResult` carries a `QueryExecutionMode` property set by the execution pipeline, not guessed by the RPC handler
 4. `RpcMethodHandler` maps `SqlQueryResult.ExecutionMode` to the existing `queryMode` RPC response field instead of hardcoding `"dataverse"`
-5. When TDS is requested but the query is incompatible, execution falls back to Dataverse with an honest `queryMode` and fallback reason
-6. When TDS connection fails (endpoint disabled on environment), execution falls back to Dataverse with an honest `queryMode` and failure reason
+5. When TDS is requested but the query is incompatible, execution **fails with a clear error** — never silently runs against Dataverse
+6. When TDS connection fails (endpoint disabled on environment), execution **fails with a clear error** — never silently falls back
 7. The VS Code extension's TDS Read Replica menu item is re-enabled (currently commented out in `query-panel.ts:511-512`)
 8. The TUI status label reflects the actual execution mode from query results, not the toggle state
 
@@ -574,7 +576,11 @@ This phase completes the last mile: DI registration, honest execution mode repor
 
 #### Token Provider Pattern
 
-`TdsQueryExecutor` needs `Func<CancellationToken, Task<string>>` — a function returning a Dataverse-scoped access token. Both registration sites create this by wrapping `IPowerPlatformTokenProvider.GetTokenForResourceAsync()`:
+`TdsQueryExecutor` needs `Func<CancellationToken, Task<string>>` — a function returning a Dataverse-scoped access token. Both registration sites create this by wrapping `IPowerPlatformTokenProvider.GetTokenForResourceAsync()`.
+
+**Token scope note:** `GetTokenForResourceAsync(orgUrl)` acquires a token with scope `{orgUrl}/.default`, which resolves to the Dataverse resource's Azure AD app registration. The TDS Endpoint (port 5558) and the Web API are the same Azure AD resource — they share the same application ID and accept the same bearer token. `SqlConnection.AccessToken` receives this token directly. If the audience is wrong (e.g., token is scoped to a different resource), `SqlConnection.OpenAsync` will fail with a SQL-level authentication error. This is caught by the TDS connection failure handler and surfaced clearly to the user.
+
+Pattern:
 
 ```csharp
 // Create token provider from profile (same pattern as ConnectionService registration)
@@ -627,13 +633,7 @@ public enum QueryExecutionMode
     Dataverse,
 
     /// <summary>Query executed via TDS Endpoint (SQL Server wire protocol).</summary>
-    Tds,
-
-    /// <summary>
-    /// TDS was requested but query fell back to Dataverse.
-    /// Check FallbackReason for details.
-    /// </summary>
-    DataverseFallback
+    Tds
 }
 ```
 
@@ -641,19 +641,24 @@ public enum QueryExecutionMode
 
 #### SqlQueryResult Changes
 
-Add two properties:
+Add one property:
 
 ```csharp
 /// <summary>
 /// The actual execution path used. Null for transpile-only or dry-run results.
 /// </summary>
 public QueryExecutionMode? ExecutionMode { get; init; }
+```
 
+#### SqlQueryStreamChunk Changes
+
+The TUI uses `ExecuteStreamingAsync()` which yields `SqlQueryStreamChunk`, not `SqlQueryResult`. Add execution mode to the final chunk:
+
+```csharp
 /// <summary>
-/// When ExecutionMode is DataverseFallback, explains why TDS could not be used.
-/// Null when TDS was not requested or was used successfully.
+/// The actual execution path used. Non-null only on the final chunk.
 /// </summary>
-public string? TdsFallbackReason { get; init; }
+public QueryExecutionMode? ExecutionMode { get; init; }
 ```
 
 #### Setting ExecutionMode in SqlQueryService
@@ -664,11 +669,11 @@ After plan execution in `SqlQueryService.ExecuteAsync()` and the streaming path:
 2. If any node is `TdsScanNode` → `QueryExecutionMode.Tds`
 3. Otherwise → `QueryExecutionMode.Dataverse`
 
-For fallback cases (TDS requested but incompatible), the `ExecutionPlanBuilder` already falls through from the TDS routing block (lines 174-185) to FetchXML. To detect this, `SqlQueryService.PrepareExecutionAsync()` checks: if `request.UseTdsEndpoint == true` but the plan contains no `TdsScanNode`, it's a fallback. The compatibility reason comes from calling `TdsCompatibilityChecker.CheckCompatibility()` on the original SQL.
+TDS failures (incompatible query, connection failure) never reach this point — they throw `PpdsException` during preparation or execution (see TDS Failure Behavior).
 
 #### RPC Response Mapping
 
-`RpcMethodHandler` maps the new properties:
+`RpcMethodHandler` maps the new property:
 
 ```csharp
 // Replace hardcoded "dataverse"
@@ -676,38 +681,40 @@ mapped.QueryMode = result.ExecutionMode switch
 {
     QueryExecutionMode.Tds => "tds",
     QueryExecutionMode.Dataverse => "dataverse",
-    QueryExecutionMode.DataverseFallback => "dataverse",
     _ => "dataverse"
 };
-
-// New optional field for fallback messaging
-mapped.TdsFallbackReason = result.TdsFallbackReason;
 ```
 
-### TDS Fallback Behavior
+### TDS Failure Behavior
+
+**Design principle:** When the user explicitly requests TDS, they get TDS or an error — never a silent substitution. Running a query against Dataverse when the user intended TDS violates user intent. TDS reads from a read replica with slight delay; the user may be relying on that distinction. Worse, silently falling back on DML means a DELETE the user thought was safe (because TDS is read-only) would execute against live Dataverse.
 
 #### Incompatible Query
 
-When `UseTdsEndpoint = true` and `TdsCompatibilityChecker` returns non-Compatible:
+When `UseTdsEndpoint = true` and the query is incompatible with TDS:
 
-1. `ExecutionPlanBuilder` skips TDS routing (existing behavior — lines 174-185)
-2. Query proceeds via FetchXML (no user-visible error)
-3. `SqlQueryService` detects the fallback and sets:
-   - `ExecutionMode = QueryExecutionMode.DataverseFallback`
-   - `TdsFallbackReason = "Query is incompatible with TDS Endpoint: {reason}"` where reason is `IncompatibleDml`, `IncompatibleEntity`, or `IncompatibleFeature`
-4. Logs: `"TDS requested but query is incompatible ({reason}), falling back to Dataverse"`
+1. `SqlQueryService.PrepareExecutionAsync()` checks compatibility **before planning** in two phases:
+   - **Phase A (string-level):** Call `TdsCompatibilityChecker.IsDmlStatement(sql)`. This is a raw string check — no parsing needed. If DML, throw immediately.
+   - **Phase B (AST-level, SELECT only):** After parsing, extract entity name via `ExtractEntityName(querySpec)` (same pattern as line 482 in `SqlQueryService`), then call `TdsCompatibilityChecker.IsIncompatibleEntity(entityName)`. This only applies to SELECT statements because DML was already caught in Phase A.
+   - The combined check uses `TdsCompatibilityChecker.CheckCompatibility(sql, entityName)` which encapsulates both phases — `entityName` can be null for DML (the DML check short-circuits before entity check).
+2. If incompatible, throws `PpdsException` with `ErrorCode = ErrorCodes.Query.TdsIncompatible`:
+   - `IncompatibleDml` → "Cannot execute via TDS: DML statements (DELETE, UPDATE, INSERT) are not supported by the TDS Endpoint. Disable TDS mode to execute this query against Dataverse."
+   - `IncompatibleEntity` → "Cannot execute via TDS: Entity '{name}' is not available via the TDS Endpoint (elastic/virtual table). Disable TDS mode to query this entity via Dataverse."
+   - `IncompatibleFeature` → "Cannot execute via TDS: This query uses features not supported by the TDS Endpoint. Disable TDS mode to execute via Dataverse."
+3. The `ExecutionPlanBuilder` TDS routing block (lines 174-185) is never reached for incompatible queries — the pre-check in the service catches them first
+
+**New error code:** Add `TdsIncompatible` to `ErrorCodes.Query` (e.g., `"QUERY_TDS_INCOMPATIBLE"`).
 
 #### Connection Failure
 
-When `TdsScanNode` executes but `SqlConnection.OpenAsync` throws:
+When `TdsScanNode` executes but `SqlConnection.OpenAsync` throws (TDS endpoint disabled, network error, etc.):
 
-1. `TdsQueryExecutor.ExecuteSqlAsync()` currently throws `InvalidOperationException` for incompatible queries, and lets `SqlException` propagate for connection failures
-2. **Change:** `TdsScanNode.ExecuteAsync()` catches `SqlException` / `InvalidOperationException` from the TDS executor
-3. Falls back to Dataverse: re-plan without TDS and execute via FetchXML
-4. Sets `ExecutionMode = DataverseFallback` and `TdsFallbackReason = "TDS connection failed: {message}"`
-5. Logs the failure at Warning level
+1. `TdsScanNode.ExecuteAsync()` lets the `SqlException` propagate (no catch — nodes don't orchestrate)
+2. `SqlQueryService` catches the exception and wraps it in `PpdsException` with `ErrorCode = ErrorCodes.Query.TdsConnectionFailed`:
+   - Message: "TDS Endpoint connection failed: {originalMessage}. The TDS Endpoint may be disabled on this environment. Disable TDS mode to query via Dataverse, or ask your Power Platform admin to enable the TDS Endpoint."
+3. Logs the failure at Warning level for debugging
 
-**Implementation note:** The fallback re-plan happens in `TdsScanNode.ExecuteAsync()` or in `SqlQueryService` with a retry. The cleaner approach is in `SqlQueryService`: wrap `_planExecutor.ExecuteAsync()` in a try/catch, and on TDS failure, re-plan with `UseTdsEndpoint = false` and re-execute.
+**New error code:** Add `TdsConnectionFailed` to `ErrorCodes.Query` (e.g., `"QUERY_TDS_CONNECTION_FAILED"`).
 
 ### VS Code Extension Changes
 
@@ -724,61 +731,41 @@ Remove the TODO comment on line 510.
 
 The existing `toggleTds` case handler (line 544-545) and `useTds` state variable (line 115) are already correct.
 
-#### Show Fallback Reason
+#### TDS Errors Display as Normal Errors
 
-When `queryMode === 'dataverse'` and `tdsFallbackReason` is present in the response, the status text should show:
-
-```
-5 rows in 42ms via Dataverse (TDS incompatible)
-```
-
-Instead of just:
-
-```
-5 rows in 42ms via Dataverse
-```
-
-This requires:
-1. Adding `tdsFallbackReason?: string` to the `QueryResult` TypeScript type (`types.ts:114`)
-2. Updating `query-panel.ts:878` mode text logic to include fallback reason
-3. Updating `notebookResultRenderer.ts:44` mode label logic similarly
-
-#### RPC Response DTO
-
-Add to `QueryResultResponse`:
-
-```csharp
-[JsonPropertyName("tdsFallbackReason")]
-[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-public string? TdsFallbackReason { get; set; }
-```
+When TDS fails (incompatible query or connection failure), `SqlQueryService` throws `PpdsException`. The daemon's existing error handling in `QuerySqlAsync` catches this and returns an RPC error. The extension's existing error display (red error banner in the query panel) shows the message. No special TDS-specific error UI is needed — the error messages (see TDS Failure Behavior) are self-explanatory and tell the user how to recover.
 
 ### TUI Changes
 
 #### Status Label After Execution (`SqlQueryScreen.cs`)
 
-The current `ToggleTdsEndpoint()` method (lines 812-818) sets the status label based on toggle state. After query execution, update the label to reflect the actual result:
+The current `ToggleTdsEndpoint()` method (lines 812-818) sets the status label based on toggle state. After query execution completes (streaming final chunk), update the label to reflect the actual execution mode:
 
 ```csharp
-// After query execution, update status to reflect actual mode
-var modeText = result.ExecutionMode switch
+// After streaming completes, update status to reflect actual mode
+if (finalChunk.ExecutionMode == QueryExecutionMode.Tds)
 {
-    QueryExecutionMode.Tds => "Mode: TDS Read Replica (active)",
-    QueryExecutionMode.DataverseFallback =>
-        $"Mode: Dataverse (TDS fallback: {result.TdsFallbackReason ?? "unknown"})",
-    _ => "Mode: Dataverse (real-time)"
-};
-_statusLabel.Text = modeText;
+    _statusLabel.Text = $"Returned {totalRows:N0} rows in {elapsedMs}ms via TDS";
+}
+else
+{
+    _statusLabel.Text = $"Returned {totalRows:N0} rows in {elapsedMs}ms via Dataverse";
+}
 ```
 
-This requires `SqlQueryResult` to be accessible in the query result handler. The `ExecuteQueryAsync` method in `SqlQueryScreen.cs` already has access to the result.
+The TUI uses `ExecuteStreamingAsync()` which yields `SqlQueryStreamChunk`. The final chunk (where `IsComplete = true`) carries the `ExecutionMode` property.
+
+TDS errors (incompatible query, connection failure) are caught by the TUI's existing error handling and displayed via `ErrorService.ReportError()` — no special TDS error UI needed.
 
 ### Constraints
 
 - `TdsQueryExecutor` is per-environment — must not be registered as a global singleton in the daemon
 - The `Func<CancellationToken, Task<string>>` token provider must use the same MSAL token cache as the connection pool to avoid extra auth prompts
-- `QueryExecutionMode` flows through `SqlQueryResult` only — it is not a property of `QueryResult` (which is the raw Dataverse result type)
-- The existing `queryMode` RPC field type (`'tds' | 'dataverse' | null`) is unchanged — `DataverseFallback` maps to `"dataverse"` in the RPC response; the fallback detail comes via the separate `tdsFallbackReason` field
+- `IPowerPlatformTokenProvider` created for TDS must be registered in the per-environment `ServiceProvider` so it is disposed when the provider is disposed (R1 compliance)
+- `QueryExecutionMode` flows through `SqlQueryResult` and `SqlQueryStreamChunk` — it is not a property of `QueryResult` (which is the raw Dataverse result type)
+- The existing `queryMode` RPC field type (`'tds' | 'dataverse' | null`) is unchanged
+- TDS failures are `PpdsException` with specific error codes — they flow through the standard error handling path in RPC handler, extension, and TUI (D4 compliance)
+- `TdsQueryExecutor` itself currently throws raw `InvalidOperationException` for incompatible queries. The pre-check in `SqlQueryService` prevents this from being reached, but as defense-in-depth, `TdsQueryExecutor.ExecuteSqlAsync()` should also wrap its `InvalidOperationException` in `PpdsException` (D4 compliance)
 
 ---
 
@@ -788,35 +775,37 @@ This requires `SqlQueryResult` to be accessible in the query result handler. The
 |----|-----------|------|--------|
 | AC-30 | `ITdsQueryExecutor` resolves to a non-null instance in daemon `ServiceProvider` when environment is connected | `DaemonConnectionPoolManagerTests.CreateProvider_RegistersTdsQueryExecutor` | 🔲 |
 | AC-31 | `ITdsQueryExecutor` resolves to a non-null instance in CLI `ServiceProvider` when profile has environment | `ServiceRegistrationTests.AddCliServices_RegistersTdsQueryExecutor` | 🔲 |
-| AC-32 | TDS executor targets the correct org URL (hostname extracted from environment URL) | `TdsQueryExecutorTests.Constructor_NormalizesOrgUrl` | ✅ |
-| AC-33 | TDS executor uses fresh tokens (calls token provider per execution, not cached) | `TdsQueryExecutorTests.ExecuteSqlAsync_CallsTokenProvider` | 🔲 |
+| AC-32 | TDS executor targets the correct org URL (hostname extracted from environment URL) | `TdsQueryExecutorTests.Constructor_NormalizesOrgUrlFromFullUri` | 🔲 |
+| AC-33 | TDS executor uses fresh tokens per execution and token is accepted by TDS endpoint (same Azure AD resource as Web API) | `TdsQueryExecutorTests.ExecuteSqlAsync_CallsTokenProvider` + integration test against live TDS endpoint | 🔲 |
 | AC-34 | `SqlQueryResult.ExecutionMode` is `Tds` when plan contains `TdsScanNode` | `SqlQueryServiceTests.Execute_TdsPlan_SetsExecutionModeTds` | 🔲 |
 | AC-35 | `SqlQueryResult.ExecutionMode` is `Dataverse` when plan contains `FetchXmlScanNode` | `SqlQueryServiceTests.Execute_FetchXmlPlan_SetsExecutionModeDataverse` | 🔲 |
-| AC-36 | `SqlQueryResult.ExecutionMode` is `DataverseFallback` when TDS requested but query is incompatible | `SqlQueryServiceTests.Execute_TdsIncompatible_SetsDataverseFallback` | 🔲 |
-| AC-37 | `SqlQueryResult.TdsFallbackReason` contains compatibility reason when TDS falls back | `SqlQueryServiceTests.Execute_TdsIncompatible_SetsFallbackReason` | 🔲 |
+| AC-36 | TDS requested + DML query → throws `PpdsException` with `TdsIncompatible` error code, does NOT execute | `SqlQueryServiceTests.Execute_TdsWithDml_ThrowsTdsIncompatible` | 🔲 |
+| AC-37 | TDS requested + incompatible entity → throws `PpdsException` with `TdsIncompatible` error code | `SqlQueryServiceTests.Execute_TdsWithIncompatibleEntity_ThrowsTdsIncompatible` | 🔲 |
 | AC-38 | `RpcMethodHandler` maps `ExecutionMode.Tds` to `queryMode = "tds"` | `RpcMethodHandlerTests.QuerySql_TdsMode_ReportsQueryModeTds` | 🔲 |
-| AC-39 | `RpcMethodHandler` maps `ExecutionMode.DataverseFallback` to `queryMode = "dataverse"` with `tdsFallbackReason` | `RpcMethodHandlerTests.QuerySql_TdsFallback_ReportsDataverseWithReason` | 🔲 |
+| AC-39 | TDS connection failure (SqlException) → throws `PpdsException` with `TdsConnectionFailed` error code | `SqlQueryServiceTests.Execute_TdsConnectionFails_ThrowsTdsConnectionFailed` | 🔲 |
 | AC-40 | VS Code extension TDS Read Replica menu item is visible and functional | Visual verification via `@webview-cdp` | 🔲 |
 | AC-41 | VS Code status text shows "via TDS" when TDS executes successfully | Visual verification via `@webview-cdp` | 🔲 |
-| AC-42 | VS Code status text shows "via Dataverse (TDS incompatible)" on TDS fallback | Visual verification via `@webview-cdp` | 🔲 |
+| AC-42 | VS Code shows error message (not silent fallback) when TDS is on and query is incompatible | Visual verification via `@webview-cdp` | 🔲 |
 | AC-43 | TUI status label reflects actual execution mode after query, not toggle state | Manual verification | 🔲 |
-| AC-44 | TDS connection failure falls back to Dataverse with logged warning and honest `queryMode` | `SqlQueryServiceTests.Execute_TdsConnectionFails_FallsBackToDataverse` | 🔲 |
+| AC-44 | `SqlQueryStreamChunk.ExecutionMode` is set on final chunk for TUI streaming path | `SqlQueryServiceTests.ExecuteStreaming_SetsExecutionModeOnFinalChunk` | 🔲 |
 | AC-45 | Daemon TDS executor updates when environment switches (per-environment isolation) | `DaemonConnectionPoolManagerTests.SwitchEnvironment_CreatesFreshTdsExecutor` | 🔲 |
-| AC-46 | `tdsFallbackReason` field present in RPC response DTO | `RpcMethodHandlerTests.QuerySql_Response_IncludesTdsFallbackReason` | 🔲 |
+| AC-46 | `ErrorCodes.Query.TdsIncompatible` and `ErrorCodes.Query.TdsConnectionFailed` error codes exist | Code review | 🔲 |
 | AC-47 | Notebook renderer shows "via TDS" when `queryMode` is `"tds"` | `notebookResultRenderer.test.ts` (existing, already passes) | ✅ |
+| AC-48 | `TdsQueryExecutor.ExecuteSqlAsync()` wraps `InvalidOperationException` in `PpdsException` (D4 compliance) | `TdsQueryExecutorTests.ExecuteSqlAsync_IncompatibleQuery_ThrowsPpdsException` | 🔲 |
 
 ### Phase 5 Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
 | TDS requested, compatible query, endpoint enabled | `SELECT TOP 5 name FROM account` with `useTds=true` | Executes via TDS, `queryMode="tds"`, results returned |
-| TDS requested, DML query | `DELETE FROM account WHERE ...` with `useTds=true` | Falls back to Dataverse, `queryMode="dataverse"`, `tdsFallbackReason="Query is incompatible with TDS Endpoint: IncompatibleDml"` |
-| TDS requested, incompatible entity | `SELECT * FROM activityparty` with `useTds=true` | Falls back to Dataverse with `IncompatibleEntity` reason |
-| TDS requested, endpoint disabled on env | `SELECT TOP 5 name FROM account` with `useTds=true`, TDS port 5558 not listening | Falls back to Dataverse, `tdsFallbackReason="TDS connection failed: ..."` |
-| TDS not requested | Any query with `useTds=false` | Standard Dataverse execution, `queryMode="dataverse"`, no fallback reason |
+| TDS requested, DML query | `DELETE FROM account WHERE ...` with `useTds=true` | **Error**: "Cannot execute via TDS: DML statements are not supported..." Query does NOT execute. |
+| TDS requested, incompatible entity | `SELECT * FROM activityparty` with `useTds=true` | **Error**: "Cannot execute via TDS: Entity 'activityparty' is not available..." Query does NOT execute. |
+| TDS requested, endpoint disabled on env | `SELECT TOP 5 name FROM account` with `useTds=true`, TDS port 5558 not listening | **Error**: "TDS Endpoint connection failed: ..." Query does NOT execute. |
+| TDS not requested | Any query with `useTds=false` | Standard Dataverse execution, `queryMode="dataverse"` |
 | TDS via hint | `-- ppds:USE_TDS\nSELECT TOP 5 name FROM account` | TDS routing activated by hint (Phase 2 integration), `queryMode="tds"` |
 | TDS toggle + environment switch | Toggle TDS on, switch environment | New environment gets fresh TDS executor with correct org URL and tokens |
 | SPN auth profile | ClientSecret auth with `useTds=true` | TDS token acquired via client credentials flow, query succeeds |
+| TDS on + DML in TUI | Toggle TDS, run `DELETE FROM account` | Error displayed via TUI error handler, no silent Dataverse execution |
 
 ---
 
@@ -830,8 +819,7 @@ Identifies the actual execution path used for a query. Set by `SqlQueryService` 
 public enum QueryExecutionMode
 {
     Dataverse,
-    Tds,
-    DataverseFallback
+    Tds
 }
 ```
 
@@ -841,35 +829,37 @@ public enum QueryExecutionMode
 
 ## Phase 5 Design Decisions
 
-### Why Fallback in SqlQueryService, Not TdsScanNode?
+### Why Fail Instead of Falling Back to Dataverse?
 
-**Context:** When TDS connection fails at execution time, where should the fallback logic live?
+**Context:** When TDS is requested but can't be used (incompatible query or connection failure), should the system silently fall back to Dataverse or fail with an error?
 
-**Decision:** `SqlQueryService` wraps plan execution in a try/catch. On TDS failure, it re-plans with `UseTdsEndpoint = false` and re-executes.
-
-**Alternatives considered:**
-- `TdsScanNode.ExecuteAsync()` catches and falls back internally: Rejected — a plan node shouldn't re-plan. Nodes execute; the service orchestrates.
-- `PlanExecutor` handles fallback: Rejected — executor is a generic tree walker, shouldn't know about TDS specifics.
-
-**Consequences:**
-- Positive: Clean separation — planning is idempotent, retry is explicit
-- Positive: Fallback reason can be set on `SqlQueryResult` naturally
-- Negative: The query is parsed and planned twice on failure — acceptable because TDS failures are exceptional, not the hot path
-
-### Why DataverseFallback Instead of Just Dataverse?
-
-**Context:** When TDS falls back, should `ExecutionMode` be `Dataverse` or a distinct `DataverseFallback`?
-
-**Decision:** Distinct `DataverseFallback` value.
+**Decision:** Fail with a clear error. Never silently substitute Dataverse for TDS.
 
 **Alternatives considered:**
-- Use `Dataverse` with a separate `TdsFallbackReason` property only: Rejected — callers would need to check both fields to know if fallback happened. An enum value makes pattern matching clean.
-- Use a string like `"dataverse-fallback"` in the RPC response: Rejected — extension TypeScript type is `'tds' | 'dataverse' | null`. Adding a new value breaks existing code. The RPC maps `DataverseFallback` → `"dataverse"` and carries the reason in a separate field.
+- Silent fallback with honest `queryMode` reporting: Rejected — violates user intent. The user explicitly chose TDS. If they wanted Dataverse, they would have left TDS off. Silently running against a different data source is dangerous, especially for DML: a user might think TDS's read-only nature protects them from accidental DELETEs, but a silent fallback would execute the DELETE against live Dataverse.
+- Fallback with a confirmation prompt: Rejected — adds complexity. The error message already tells the user how to recover ("Disable TDS mode to execute via Dataverse").
 
 **Consequences:**
-- Positive: C# callers can switch on enum cleanly
-- Positive: RPC contract backward compatible (existing `queryMode` values unchanged)
-- Positive: Fallback reason is surfaced separately for UI display
+- Positive: User intent is always respected — no surprise data source substitution
+- Positive: Simpler implementation — no fallback/retry logic, no `DataverseFallback` enum value, no `TdsFallbackReason` field
+- Positive: Errors are actionable — messages tell the user exactly what to do
+- Negative: User must manually toggle TDS off if they want Dataverse — acceptable because this is a conscious data source choice
+
+### Why Pre-Check Compatibility in SqlQueryService, Not Just in ExecutionPlanBuilder?
+
+**Context:** The `ExecutionPlanBuilder` already has a TDS compatibility check (lines 174-185) that falls through to FetchXML when incompatible. Should we rely on that?
+
+**Decision:** Add an explicit pre-check in `SqlQueryService.PrepareExecutionAsync()` before planning.
+
+**Alternatives considered:**
+- Rely on planner fallthrough: Rejected — the planner silently falls through to FetchXML, which is exactly the silent-substitution behavior we're eliminating. Modifying the planner to throw would break its role as a pure planning component.
+- Check after planning (compare plan tree to request intent): Viable but wasteful — why plan a FetchXML query if we know TDS was requested and can't work?
+
+**Consequences:**
+- Positive: Fast fail — no unnecessary planning work
+- Positive: Clear error messages with specific incompatibility reasons
+- Positive: Planner stays pure — it plans whatever it's asked to plan
+- Negative: Double compatibility check exists (service pre-check + executor internal check + planner check). Defense in depth — the executor's check is the last line of defense if someone calls `ITdsQueryExecutor` directly.
 
 ### Why Pass Profile and EnvironmentUrl to CreateProviderFromSources?
 
