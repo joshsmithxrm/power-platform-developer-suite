@@ -48,6 +48,7 @@ Thumbs.db
 # Claude Code settings (local)
 .claude/settings.local.json
 *.local.json
+.claude/workflow-state.json
 
 # Temporary artifacts (testing, exports, logs)
 tmp/
