@@ -345,7 +345,7 @@ public sealed class SqlQueryService : ISqlQueryService
             if (safetyResult.RequiresConfirmation)
             {
                 throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
+                    ErrorCodes.Query.DmlConfirmationRequired,
                     "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
             }
 

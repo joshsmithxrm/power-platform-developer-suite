@@ -1036,23 +1036,20 @@ public class RpcMethodHandler : IDisposable
             {
                 throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
             }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
+            {
+                throw new RpcException(
+                    ErrorCodes.Query.DmlConfirmationRequired,
+                    ex.Message,
+                    new DmlSafetyErrorData
+                    {
+                        Code = ErrorCodes.Query.DmlConfirmationRequired,
+                        Message = ex.Message,
+                        DmlConfirmationRequired = true,
+                    });
+            }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlBlocked)
             {
-                // SqlQueryService uses DmlBlocked for both blocked and confirmation-required.
-                // Distinguish by message content to map to the correct RPC error code.
-                if (ex.Message.Contains("--confirm", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new RpcException(
-                        ErrorCodes.Query.DmlConfirmationRequired,
-                        ex.Message,
-                        new DmlSafetyErrorData
-                        {
-                            Code = ErrorCodes.Query.DmlConfirmationRequired,
-                            Message = ex.Message,
-                            DmlConfirmationRequired = true,
-                        });
-                }
-
                 throw new RpcException(
                     ErrorCodes.Query.DmlBlocked,
                     ex.Message,
@@ -1062,6 +1059,10 @@ public class RpcMethodHandler : IDisposable
                         Message = ex.Message,
                         DmlBlocked = true,
                     });
+            }
+            catch (PpdsException ex)
+            {
+                throw new RpcException(ErrorCodes.Query.ExecutionFailed, ex.Message);
             }
         }, cancellationToken);
 
