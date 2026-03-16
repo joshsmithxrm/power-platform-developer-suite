@@ -94,7 +94,9 @@ export class DaemonClient implements vscode.Disposable {
     private _disposed = false;
     private _state: DaemonState = 'stopped';
     private _heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    private _heartbeatFailures = 0;
     private static readonly HEARTBEAT_INTERVAL_MS = 30_000;
+    private static readonly HEARTBEAT_MAX_FAILURES = 3;
 
     private readonly _onDidChangeState = new vscode.EventEmitter<DaemonState>();
     readonly onDidChangeState = this._onDidChangeState.event;
@@ -812,14 +814,20 @@ export class DaemonClient implements vscode.Disposable {
             }
             // Use auth/list as heartbeat ping
             // TODO: Consider a lightweight health/ping endpoint
-            this.connection.sendRequest('auth/list').catch(() => {
-                this.log.warn('Heartbeat failed — daemon may be unresponsive');
-                this.connection?.dispose();
-                this.connection = null;
-                this.process?.kill();
-                this.process = null;
-                this.stopHeartbeat();
-                this.setState('error');
+            this.connection.sendRequest('auth/list').then(() => {
+                this._heartbeatFailures = 0;
+            }).catch(() => {
+                this._heartbeatFailures++;
+                this.log.warn(`Heartbeat failed (${this._heartbeatFailures}/${DaemonClient.HEARTBEAT_MAX_FAILURES}) — daemon may be unresponsive`);
+                if (this._heartbeatFailures >= DaemonClient.HEARTBEAT_MAX_FAILURES) {
+                    this.log.warn('Max consecutive heartbeat failures reached — killing daemon');
+                    this.connection?.dispose();
+                    this.connection = null;
+                    this.process?.kill();
+                    this.process = null;
+                    this.stopHeartbeat();
+                    this.setState('error');
+                }
             });
         }, DaemonClient.HEARTBEAT_INTERVAL_MS);
     }
@@ -829,6 +837,7 @@ export class DaemonClient implements vscode.Disposable {
             clearInterval(this._heartbeatTimer);
             this._heartbeatTimer = undefined;
         }
+        this._heartbeatFailures = 0;
     }
 
     async restart(): Promise<void> {

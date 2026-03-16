@@ -23,6 +23,7 @@ using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
 using PPDS.Query.Intellisense;
+using System.Threading;
 using StreamJsonRpc;
 
 // Aliases to disambiguate from local DTOs
@@ -43,9 +44,11 @@ public class RpcMethodHandler : IDisposable
     private readonly CancellationTokenSource _daemonCts = new();
     private JsonRpc? _rpc;
 
-    // Discovery cache for env/list
+    // Discovery cache for env/list — uses Volatile.Read/Write for lock-free thread safety.
+    // The list is written BEFORE the expiry so a concurrent reader never sees a new expiry with
+    // a stale/null list.
     private List<EnvironmentInfo>? _discoveredEnvCache;
-    private DateTime _discoveredEnvCacheExpiry = DateTime.MinValue;
+    private long _discoveredEnvCacheExpiry = DateTime.MinValue.Ticks;
     private static readonly TimeSpan DiscoveryCacheTtl = TimeSpan.FromMinutes(5);
 
     /// <summary>
@@ -285,9 +288,13 @@ public class RpcMethodHandler : IDisposable
 
         // 1. Get discovered environments (cached, unless forceRefresh)
         List<EnvironmentInfo> discovered;
-        if (!forceRefresh && _discoveredEnvCache != null && DateTime.UtcNow < _discoveredEnvCacheExpiry)
+        // Read expiry first, then list — mirrors the write order (list before expiry)
+        // so if we see a non-expired expiry the list is guaranteed to be the matching value.
+        var cachedExpiry = Volatile.Read(ref _discoveredEnvCacheExpiry);
+        var cachedList = Volatile.Read(ref _discoveredEnvCache);
+        if (!forceRefresh && cachedList != null && DateTime.UtcNow.Ticks < cachedExpiry)
         {
-            discovered = _discoveredEnvCache;
+            discovered = cachedList;
         }
         else
         {
@@ -318,8 +325,10 @@ public class RpcMethodHandler : IDisposable
                 // Discovery may fail for SPNs or when offline — continue with configured only
                 _logger.LogDebug(ex, "Environment discovery failed, using configured environments only");
             }
-            _discoveredEnvCache = discovered;
-            _discoveredEnvCacheExpiry = DateTime.UtcNow + DiscoveryCacheTtl;
+            // Write list BEFORE expiry — a concurrent reader checks expiry first,
+            // so it will never see a fresh expiry paired with a stale/null list.
+            Volatile.Write(ref _discoveredEnvCache, discovered);
+            Volatile.Write(ref _discoveredEnvCacheExpiry, (DateTime.UtcNow + DiscoveryCacheTtl).Ticks);
         }
 
         // 2. Get configured environments from environments.json and tag discovered envs with profile
@@ -436,7 +445,7 @@ public class RpcMethodHandler : IDisposable
         profile.Environment = resolved;
         await store.SaveAsync(collection, cancellationToken);
 
-        _discoveredEnvCache = null; // Invalidate env list cache
+        Volatile.Write(ref _discoveredEnvCache, (List<EnvironmentInfo>?)null); // Invalidate env list cache
 
         return new EnvSelectResponse
         {
@@ -989,12 +998,17 @@ public class RpcMethodHandler : IDisposable
                     {
                         var config = profileResolution.ResolveByLabel(label);
                         if (config?.Url == null) return null;
-#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
-                        var remoteProvider = _poolManager.GetOrCreateServiceProviderAsync(
+#pragma warning disable PPDS012
+                        // Planner calls this factory synchronously; on cache hit the task is
+                        // already completed so .GetResult() is free.  On first cache miss the
+                        // pool creation performs async I/O (auth / device-code).  Wrapping in
+                        // Task.Run avoids blocking the RPC handler's async context thread,
+                        // which would be a thread-pool starvation risk under concurrent requests.
+                        var remoteProvider = Task.Run(() => _poolManager.GetOrCreateServiceProviderAsync(
                             new[] { profile.Name ?? profile.DisplayIdentifier },
                             config.Url,
                             deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
-                            cancellationToken: ct).GetAwaiter().GetResult();
+                            cancellationToken: ct)).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
                         return remoteProvider.GetRequiredService<IQueryExecutor>();
                     };

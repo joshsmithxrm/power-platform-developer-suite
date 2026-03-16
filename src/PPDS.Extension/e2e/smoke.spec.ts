@@ -35,10 +35,9 @@ test.describe('PPDS Extension Tests', () => {
     });
 
     test('PPDS tree view is registered', async ({ page }) => {
-        const ppdsIcon = page.locator('[id="workbench.view.extension.ppds-explorer"]');
-        if (await ppdsIcon.isVisible()) {
-            await ppdsIcon.click();
-            await expect(page.locator('text=Profiles')).toBeVisible({ timeout: 10000 });
-        }
+        const ppdsIcon = page.locator('[id="workbench.view.extension.ppds"]');
+        await expect(ppdsIcon).toBeVisible({ timeout: 30000 });
+        await ppdsIcon.click();
+        await expect(page.locator('text=Profiles')).toBeVisible({ timeout: 10000 });
     });
 });
