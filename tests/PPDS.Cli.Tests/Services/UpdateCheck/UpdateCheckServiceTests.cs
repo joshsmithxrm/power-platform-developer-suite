@@ -152,16 +152,16 @@ public class UpdateCheckServiceTests : IDisposable
         result.UpdateCommand.Should().Be("dotnet tool update PPDS.Cli -g");
     }
 
-    // ─── Scenario 6: CheckAsync caches result; GetCachedResultAsync returns it ─
+    // ─── Scenario 6: CheckAsync caches result; GetCachedResult returns it ──────
 
     [Fact]
-    public async Task CheckAsync_CachesResult_GetCachedResultAsyncReturnsIt()
+    public async Task CheckAsync_CachesResult_GetCachedResultReturnsIt()
     {
         var handler = BuildHandler(MakeVersionsJson("0.4.0", "0.5.0"));
         var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
 
         var checkResult = await svc.CheckAsync("0.4.0");
-        var cachedResult = await svc.GetCachedResultAsync();
+        var cachedResult = svc.GetCachedResult();
 
         cachedResult.Should().NotBeNull();
         cachedResult!.CurrentVersion.Should().Be(checkResult!.CurrentVersion);
@@ -172,7 +172,7 @@ public class UpdateCheckServiceTests : IDisposable
     // ─── Scenario 7: Expired cache returns null ────────────────────────────────
 
     [Fact]
-    public async Task GetCachedResultAsync_ExpiredCache_ReturnsNull()
+    public void GetCachedResult_ExpiredCache_ReturnsNull()
     {
         // Write a cache file with a timestamp > 24 hours ago
         var staleResult = new UpdateCheckResult
@@ -187,11 +187,11 @@ public class UpdateCheckServiceTests : IDisposable
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
-        await File.WriteAllTextAsync(_cacheFile, json);
+        File.WriteAllText(_cacheFile, json);
 
         var svc = new UpdateCheckService(cachePath: _cacheFile);
 
-        var result = await svc.GetCachedResultAsync();
+        var result = svc.GetCachedResult();
 
         result.Should().BeNull();
     }
@@ -225,13 +225,13 @@ public class UpdateCheckServiceTests : IDisposable
     // ─── Scenario 10: Corrupt cache file returns null (no throw) ──────────────
 
     [Fact]
-    public async Task GetCachedResultAsync_CorruptCache_ReturnsNull()
+    public void GetCachedResult_CorruptCache_ReturnsNull()
     {
-        await File.WriteAllTextAsync(_cacheFile, "this is not valid json {{{{");
+        File.WriteAllText(_cacheFile, "this is not valid json {{{{");
 
         var svc = new UpdateCheckService(cachePath: _cacheFile);
 
-        var result = await svc.GetCachedResultAsync();
+        var result = svc.GetCachedResult();
 
         result.Should().BeNull();
     }
@@ -239,13 +239,46 @@ public class UpdateCheckServiceTests : IDisposable
     // ─── Additional edge-case coverage ────────────────────────────────────────
 
     [Fact]
-    public async Task GetCachedResultAsync_NoCacheFile_ReturnsNull()
+    public void GetCachedResult_NoCacheFile_ReturnsNull()
     {
         var svc = new UpdateCheckService(cachePath: _cacheFile);
 
-        var result = await svc.GetCachedResultAsync();
+        var result = svc.GetCachedResult();
 
         result.Should().BeNull();
+    }
+
+    // ─── New GetCachedResult tests (Task 5) ───────────────────────────────────
+
+    [Fact]
+    public async Task GetCachedResult_ReturnsCachedResult_WhenCacheIsFresh()
+    {
+        var handler = BuildHandler(MakeVersionsJson("1.0.0", "2.0.0"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+        await svc.CheckAsync("1.0.0");
+
+        var cached = svc.GetCachedResult();
+
+        Assert.NotNull(cached);
+        Assert.Equal("1.0.0", cached.CurrentVersion);
+    }
+
+    [Fact]
+    public void GetCachedResult_ReturnsNull_WhenNoCacheFile()
+    {
+        var svc = new UpdateCheckService(cachePath: _cacheFile);
+        var cached = svc.GetCachedResult();
+        Assert.Null(cached);
+    }
+
+    [Fact]
+    public void GetCachedResult_ReturnsNull_WhenCacheCorrupt()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
+        File.WriteAllText(_cacheFile, "not json");
+        var svc = new UpdateCheckService(cachePath: _cacheFile);
+        var cached = svc.GetCachedResult();
+        Assert.Null(cached);
     }
 
     [Fact]

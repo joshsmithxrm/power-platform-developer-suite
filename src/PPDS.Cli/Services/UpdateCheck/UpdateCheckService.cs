@@ -132,17 +132,14 @@ public sealed class UpdateCheckService : IUpdateCheckService
     }
 
     /// <inheritdoc/>
-    public async Task<UpdateCheckResult?> GetCachedResultAsync(
-        CancellationToken cancellationToken = default)
+    public UpdateCheckResult? GetCachedResult()
     {
         try
         {
             if (!File.Exists(_cachePath))
                 return null;
 
-            var json = await File.ReadAllTextAsync(_cachePath, cancellationToken)
-                .ConfigureAwait(false);
-
+            var json = File.ReadAllText(_cachePath);
             var result = JsonSerializer.Deserialize<UpdateCheckResult>(json, JsonOptions);
 
             if (result is null)
@@ -159,6 +156,20 @@ public sealed class UpdateCheckService : IUpdateCheckService
             // Corrupt, missing, or inaccessible cache is not an error condition
             return null;
         }
+    }
+
+    /// <inheritdoc/>
+    public void RefreshCacheInBackgroundIfStale(string currentVersion)
+    {
+        // Implemented in Task 6
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc/>
+    public Task<UpdateResult> UpdateAsync(UpdateChannel channel, CancellationToken cancellationToken = default)
+    {
+        // Implemented in Task 10
+        throw new NotImplementedException();
     }
 
     #region Private Helpers
