@@ -2024,23 +2024,9 @@ public class RpcMethodHandler : IDisposable
 
             var data = await importJobService.GetDataAsync(importJobId, ct);
 
-            var dto = MapImportJobToDto(job);
-
             return new ImportJobsGetResponse
             {
-                Job = new ImportJobDetailDto
-                {
-                    Id = dto.Id,
-                    SolutionName = dto.SolutionName,
-                    Status = dto.Status,
-                    Progress = dto.Progress,
-                    CreatedBy = dto.CreatedBy,
-                    CreatedOn = dto.CreatedOn,
-                    StartedOn = dto.StartedOn,
-                    CompletedOn = dto.CompletedOn,
-                    Duration = dto.Duration,
-                    Data = data
-                }
+                Job = MapImportJobToDetailDto(job, data)
             };
         }, cancellationToken);
     }
@@ -2058,6 +2044,23 @@ public class RpcMethodHandler : IDisposable
             StartedOn = job.StartedOn?.ToString("o"),
             CompletedOn = job.CompletedOn?.ToString("o"),
             Duration = job.FormattedDuration
+        };
+    }
+
+    private static ImportJobDetailDto MapImportJobToDetailDto(ImportJobInfo job, string? data)
+    {
+        return new ImportJobDetailDto
+        {
+            Id = job.Id.ToString(),
+            SolutionName = job.SolutionName,
+            Status = job.Status,
+            Progress = job.Progress,
+            CreatedBy = job.CreatedByName,
+            CreatedOn = job.CreatedOn?.ToString("o"),
+            StartedOn = job.StartedOn?.ToString("o"),
+            CompletedOn = job.CompletedOn?.ToString("o"),
+            Duration = job.FormattedDuration,
+            Data = data
         };
     }
 

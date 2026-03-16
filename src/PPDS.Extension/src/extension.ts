@@ -361,6 +361,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerDebugCommands(context, client, profileTreeProvider, extensionState, {
         queryPanels: () => QueryPanel.instanceCount,
         solutionsPanels: () => SolutionsPanel.instanceCount,
+        importJobsPanels: () => ImportJobsPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks

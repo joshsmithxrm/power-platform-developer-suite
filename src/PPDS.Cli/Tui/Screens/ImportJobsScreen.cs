@@ -49,6 +49,10 @@ internal sealed class ImportJobsScreen : TuiScreenBase
         {
             ErrorService.FireAndForget(LoadDataAsync(), "ImportJobs.InitialLoad");
         }
+        else
+        {
+            _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+        }
     }
 
     protected override void RegisterHotkeys(IHotkeyRegistry registry)
