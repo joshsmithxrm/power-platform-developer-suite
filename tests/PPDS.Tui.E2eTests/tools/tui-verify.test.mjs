@@ -45,15 +45,15 @@ describe('parseArgs', () => {
   });
 
   it('text with out-of-range row throws', () => {
-    assert.throws(() => parseArgs(['text', '30']), /Row 30 out of range/);
+    assert.throws(() => parseArgs(['text', '30']), /Row must be 0-29/);
   });
 
   it('text with negative row throws', () => {
-    assert.throws(() => parseArgs(['text', '-1']), /Row -1 out of range/);
+    assert.throws(() => parseArgs(['text', '-1']), /Row must be 0-29/);
   });
 
   it('text with missing row throws', () => {
-    assert.throws(() => parseArgs(['text']), /text requires a row number/);
+    assert.throws(() => parseArgs(['text']), /Usage: text <row>/);
   });
 
   // key
@@ -63,7 +63,7 @@ describe('parseArgs', () => {
   });
 
   it('key with missing combo throws', () => {
-    assert.throws(() => parseArgs(['key']), /key requires a key combo/);
+    assert.throws(() => parseArgs(['key']), /Usage: key <combo>/);
   });
 
   // type
@@ -73,7 +73,7 @@ describe('parseArgs', () => {
   });
 
   it('type with missing text throws', () => {
-    assert.throws(() => parseArgs(['type']), /type requires text/);
+    assert.throws(() => parseArgs(['type']), /Usage: type <text>/);
   });
 
   // wait
@@ -96,7 +96,7 @@ describe('parseArgs', () => {
   });
 
   it('wait with missing text throws', () => {
-    assert.throws(() => parseArgs(['wait']), /wait requires text/);
+    assert.throws(() => parseArgs(['wait']), /Usage: wait <text> \[timeout\]/);
   });
 
   // screenshot
@@ -106,7 +106,7 @@ describe('parseArgs', () => {
   });
 
   it('screenshot with missing file throws', () => {
-    assert.throws(() => parseArgs(['screenshot']), /screenshot requires a file path/);
+    assert.throws(() => parseArgs(['screenshot']), /Usage: screenshot <file>/);
   });
 
   // errors

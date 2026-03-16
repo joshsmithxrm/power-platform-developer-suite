@@ -37,27 +37,27 @@ export function parseArgs(argv) {
 
   if (command === 'text') {
     const rowStr = argv[1];
-    if (rowStr === undefined) throw new Error('text requires a row number');
+    if (rowStr === undefined) throw new Error('Usage: text <row>');
     const row = parseInt(rowStr, 10);
-    if (isNaN(row) || row < 0 || row >= ROWS) throw new Error(`Row ${rowStr} out of range (0-${ROWS - 1})`);
+    if (isNaN(row) || row < 0 || row >= ROWS) throw new Error(`Row must be 0-${ROWS - 1} (terminal has ${ROWS} rows)`);
     return { command, row };
   }
 
   if (command === 'key') {
     const combo = argv[1];
-    if (!combo) throw new Error('key requires a key combo');
+    if (!combo) throw new Error('Usage: key <combo>');
     return { command, combo };
   }
 
   if (command === 'type') {
     const text = argv[1];
-    if (text === undefined) throw new Error('type requires text');
+    if (text === undefined) throw new Error('Usage: type <text>');
     return { command, text };
   }
 
   if (command === 'wait') {
     const text = argv[1];
-    if (text === undefined) throw new Error('wait requires text');
+    if (text === undefined) throw new Error('Usage: wait <text> [timeout]');
     const timeout = argv[2] !== undefined ? parseInt(argv[2], 10) : 10000;
     if (timeout <= 0) throw new Error('Invalid timeout');
     return { command, text, timeout };
@@ -65,7 +65,7 @@ export function parseArgs(argv) {
 
   if (command === 'screenshot') {
     const file = argv[1];
-    if (!file) throw new Error('screenshot requires a file path');
+    if (!file) throw new Error('Usage: screenshot <file>');
     return { command, file };
   }
 
@@ -129,6 +129,12 @@ async function runDaemon() {
   const repoRoot = resolve(__dirname, '..', '..', '..');
   const exe = resolve(repoRoot, 'src/PPDS.Cli/bin/Debug/net10.0/ppds.exe');
 
+  if (!existsSync(exe)) {
+    console.error(`Binary not found: ${exe}`);
+    console.error('Run with --build or build manually first.');
+    process.exit(1);
+  }
+
   const terminal = await tuiTest.spawn(
     { rows: ROWS, cols: COLS, program: { file: exe, args: ['tui'] } },
     false,
@@ -145,37 +151,30 @@ async function runDaemon() {
   // Wait for terminal to render (poll for non-empty content, 30s timeout)
   const renderStart = Date.now();
   while (Date.now() - renderStart < 30000) {
-    const buf = terminal.getViewableBuffer();
-    const hasContent = buf.some(row => row.some(cell => cell.trim() !== ''));
-    if (hasContent) break;
+    try {
+      const buf = terminal.getViewableBuffer();
+      const hasContent = buf.some(row => row.some(cell => cell.trim() !== ''));
+      if (hasContent) break;
+    } catch { /* buffer not ready */ }
     await new Promise(r => setTimeout(r, 250));
   }
 
   // ── sendKey helper ───────────────────────────────────────────────
 
+  const FN_KEYS = {
+    F1: '\x1bOP', F2: '\x1bOQ', F3: '\x1bOR', F4: '\x1bOS',
+    F5: '\x1b[15~', F6: '\x1b[17~', F7: '\x1b[18~', F8: '\x1b[19~',
+    F9: '\x1b[20~', F10: '\x1b[21~', F11: '\x1b[23~', F12: '\x1b[24~',
+  };
+
   function sendKey(term, parsed) {
     const { key, modifiers } = parsed;
     const lk = key.toLowerCase();
+    const hasCtrl = modifiers.ctrl;
+    const hasAlt = modifiers.alt;
 
-    // ctrl combos
-    if (modifiers.ctrl) {
-      if (lk === 'c') { term.keyCtrlC(); return; }
-      if (lk === 'd') { term.keyCtrlD(); return; }
-      // ctrl+letter → write control character
-      const code = lk.charCodeAt(0);
-      if (code >= 97 && code <= 122) {
-        term.write(String.fromCharCode(code - 96));
-        return;
-      }
-    }
-
-    // alt combos
-    if (modifiers.alt) {
-      term.write('\x1b' + key);
-      return;
-    }
-
-    // Named keys
+    // Named keys — handle first, regardless of modifiers
+    // (Terminal.Gui receives the modifier state separately for named keys)
     const namedKeys = {
       enter: () => term.submit(),
       tab: () => term.write('\t'),
@@ -195,21 +194,28 @@ async function runDaemon() {
     }
 
     // Function keys F1-F12 (VT220 escape sequences)
-    const fMatch = key.match(/^[Ff](\d+)$/);
-    if (fMatch) {
-      const fNum = parseInt(fMatch[1], 10);
-      const fSeqs = {
-        1: '\x1bOP', 2: '\x1bOQ', 3: '\x1bOR', 4: '\x1bOS',
-        5: '\x1b[15~', 6: '\x1b[17~', 7: '\x1b[18~', 8: '\x1b[19~',
-        9: '\x1b[20~', 10: '\x1b[21~', 11: '\x1b[23~', 12: '\x1b[24~',
-      };
-      if (fSeqs[fNum]) {
-        term.write(fSeqs[fNum]);
+    if (FN_KEYS[key] || FN_KEYS[key.toUpperCase()]) {
+      term.write(FN_KEYS[key] || FN_KEYS[key.toUpperCase()]);
+      return;
+    }
+
+    // Single character with modifiers
+    if (hasCtrl && key.length === 1) {
+      if (lk === 'c') { term.keyCtrlC(); return; }
+      if (lk === 'd') { term.keyCtrlD(); return; }
+      const code = key.toUpperCase().charCodeAt(0);
+      if (code >= 65 && code <= 90) {
+        term.write(String.fromCharCode(code - 64));
         return;
       }
     }
 
-    // Single character fallback
+    if (hasAlt && key.length === 1) {
+      term.write('\x1b' + key);
+      return;
+    }
+
+    // Single character, no modifiers
     term.write(key);
   }
 
@@ -251,7 +257,7 @@ async function runDaemon() {
           }
           await new Promise(r => setTimeout(r, 250));
         }
-        throw new Error(`Timeout: '${params.text}' not found within ${(params.timeout ?? 10000) / 1000}s`);
+        throw new Error(`Timeout: '${params.text}' not found within ${timeout}ms`);
       }
       case 'screenshot': {
         const snapshot = terminal.serialize();
@@ -438,7 +444,7 @@ async function cmdType(parsed) {
 async function cmdWait(parsed) {
   const session = readSession();
   await sendToDaemon(session, 'wait', { text: parsed.text, timeout: parsed.timeout });
-  console.log('Found');
+  console.log('Found: ' + parsed.text);
 }
 
 async function cmdScreenshot(parsed) {
