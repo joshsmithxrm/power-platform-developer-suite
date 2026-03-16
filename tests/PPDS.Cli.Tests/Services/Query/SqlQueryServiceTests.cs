@@ -1348,6 +1348,116 @@ public class SqlQueryServiceTests
     #endregion
 
     // ═══════════════════════════════════════════════════════════════════
+    //  TDS Pre-Check: incompatible queries throw PpdsException
+    // ═══════════════════════════════════════════════════════════════════
+
+    #region TDS Pre-Check Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_TdsWithDml_ThrowsTdsIncompatible()
+    {
+        // Arrange: service with a TDS executor, but DML query
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'test'",
+            UseTdsEndpoint = true,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        };
+
+        // Act & Assert: TDS pre-check should throw before DML safety check
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        Assert.Equal(ErrorCodes.Query.TdsIncompatible, ex.ErrorCode);
+        Assert.Contains("DML", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_TdsWithIncompatibleEntity_ThrowsTdsIncompatible()
+    {
+        // Arrange: service with TDS executor, query targets incompatible entity
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "SELECT * FROM activityparty",
+            UseTdsEndpoint = true
+        };
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        Assert.Equal(ErrorCodes.Query.TdsIncompatible, ex.ErrorCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_NoTds_DmlDoesNotThrowTdsIncompatible()
+    {
+        // Arrange: DML query WITHOUT TDS enabled — should NOT trigger TDS pre-check
+        var request = new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'test'",
+            UseTdsEndpoint = false,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        };
+
+        // Act: may throw for other reasons (no real Dataverse), but NOT TdsIncompatible
+        try
+        {
+            await _service.ExecuteAsync(request);
+        }
+        catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
+        {
+            Assert.Fail("TDS pre-check should not run when UseTdsEndpoint is false");
+        }
+        catch
+        {
+            // Other exceptions are expected (no Dataverse connection) — that's fine
+        }
+    }
+
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  TDS Connection Failure: wraps in PpdsException(TdsConnectionFailed)
+    // ═══════════════════════════════════════════════════════════════════
+
+    #region TDS Connection Failure Tests
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExecuteAsync_TdsConnectionFails_ThrowsTdsConnectionFailed()
+    {
+        // Arrange: TDS executor that throws on execute (simulating connection failure)
+        var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
+        mockTdsExecutor
+            .Setup(x => x.ExecuteSqlAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Connection refused on port 5558"));
+
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object);
+
+        var request = new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\nSELECT name FROM account",
+            UseTdsEndpoint = true
+        };
+
+        // Act & Assert: connection failure should be wrapped as TdsConnectionFailed
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        Assert.Equal(ErrorCodes.Query.TdsConnectionFailed, ex.ErrorCode);
+        Assert.Contains("TDS Endpoint connection failed", ex.Message);
+    }
+
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════════
     //  AC-44: Streaming final chunk carries ExecutionMode
     // ═══════════════════════════════════════════════════════════════════
 
