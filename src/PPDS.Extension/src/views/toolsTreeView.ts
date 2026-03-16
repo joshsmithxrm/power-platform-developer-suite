@@ -37,6 +37,7 @@ export class ToolsTreeDataProvider
         { label: 'Data Explorer', commandId: 'ppds.dataExplorer', icon: 'database' },
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
+        { label: 'Import Jobs', commandId: 'ppds.openImportJobs', icon: 'history' },
         { label: 'Show Logs', commandId: 'ppds.showLogs', icon: 'output', alwaysEnabled: true },
     ];
 

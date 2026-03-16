@@ -220,6 +220,17 @@
         "icon": "$(package)"
       },
       {
+        "command": "ppds.openImportJobs",
+        "title": "Open Import Jobs",
+        "category": "PPDS",
+        "icon": "$(history)"
+      },
+      {
+        "command": "ppds.openImportJobsForEnv",
+        "title": "Open Import Jobs",
+        "icon": "$(history)"
+      },
+      {
         "command": "ppds.copyEnvironmentUrl",
         "title": "Copy URL",
         "icon": "$(copy)"
@@ -343,6 +354,11 @@
           "command": "ppds.openSolutionsForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@2"
+        },
+        {
+          "command": "ppds.openImportJobsForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@3"
         },
         {
           "command": "ppds.openInMaker",

@@ -95,3 +95,37 @@ export type SolutionsPanelHostToWebview =
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
+
+// ── Import Jobs Panel ─────────────────────────────────────────────────────
+
+/** Import job info as sent to the webview for table display. */
+export interface ImportJobViewDto {
+    id: string;
+    solutionName: string | null;
+    status: string;
+    progress: number;
+    createdBy: string | null;
+    createdOn: string | null;
+    startedOn: string | null;
+    completedOn: string | null;
+    duration: string | null;
+}
+
+/** Messages the Import Jobs Panel webview sends to the extension host. */
+export type ImportJobsPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'selectJob'; id: string }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'openInMaker' }
+    | { command: 'copyToClipboard'; text: string }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Import Jobs Panel webview. */
+export type ImportJobsPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'importJobsLoaded'; jobs: ImportJobViewDto[] }
+    | { command: 'importJobDetailLoaded'; id: string; data: string | null }
+    | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
