@@ -17,10 +17,12 @@
  * - No risk of accidentally publishing a dev version
  */
 
-const { execSync } = require('child_process');
-const { readFileSync, writeFileSync, copyFileSync, unlinkSync } = require('fs');
-const { join } = require('path');
+import { execSync } from 'child_process';
+import { readFileSync, writeFileSync, copyFileSync, unlinkSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, '..');
 const PACKAGE_JSON_PATH = join(ROOT_DIR, 'package.json');
 const PACKAGE_JSON_BACKUP_PATH = join(ROOT_DIR, 'package.json.backup');
@@ -79,7 +81,7 @@ function runCommand(command, description) {
 	}
 }
 
-async function main() {
+function main() {
 	let restored = false;
 
 	try {

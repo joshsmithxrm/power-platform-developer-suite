@@ -122,7 +122,7 @@ power-platform-developer-suite/
 │   ├── PPDS.Mcp/            # MCP server
 │   └── PPDS.Extension/       # VS Code extension
 ├── tests/                   # Test projects
-├── docs/specs/             # Feature specifications
+├── specs/                  # Feature specifications
 └── templates/claude/       # Claude Code integration
 ```
 
@@ -130,7 +130,7 @@ power-platform-developer-suite/
 
 - **Questions**: Open a [Discussion](https://github.com/joshsmithxrm/power-platform-developer-suite/discussions)
 - **Bugs**: Open an [Issue](https://github.com/joshsmithxrm/power-platform-developer-suite/issues)
-- **Architecture**: Check `docs/specs/` for design decisions
+- **Architecture**: Check `specs/` for design decisions
 
 ## License
 

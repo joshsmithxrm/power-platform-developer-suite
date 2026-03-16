@@ -3,10 +3,10 @@ import * as os from 'os';
 
 /**
  * Gets the path to the PPDS CLI executable.
- * Uses process.cwd() which is the tui-e2e directory, then navigates to repo root.
+ * Uses process.cwd() which is the PPDS.Tui.E2eTests directory, then navigates to repo root.
  */
 export function getPpdsPath(): string {
-  // tui-test runs from the tui-e2e directory, go up to repo root
+  // tui-test runs from the PPDS.Tui.E2eTests directory, go up to repo root
   const repoRoot = path.resolve(process.cwd(), '../..');
   const targetFramework = 'net10.0';
 

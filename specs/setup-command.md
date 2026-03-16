@@ -97,7 +97,7 @@ Summary ────────────────────── Summa
 3. **Choose base path**: Ask user via AskUserQuestion. Suggest common paths.
 4. **Select repositories**: Multi-select from ppds, ppds-docs, ppds-alm, ppds-tools, ppds-demo, vault. Show descriptions.
 5. **Clone/update repos**: For each selected repo — clone if missing, pull if exists and is git repo, warn and skip if exists but not git repo.
-6. **Install dependencies** (if ppds selected): `dotnet restore PPDS.sln`, `npm install --prefix src/PPDS.Extension`, `npm install --prefix tests/tui-e2e`
+6. **Install dependencies** (if ppds selected): `dotnet restore PPDS.sln`, `npm install --prefix src/PPDS.Extension`, `npm install --prefix tests/PPDS.Tui.E2eTests`
 7. **Build verification** (if ppds selected): `dotnet build PPDS.sln -v q`, `npm run ext:compile`. Stop if either fails.
 8. **Install tools** (if ppds selected): Run `pwsh scripts/Install-LocalCli.ps1` for CLI. On Windows, run `npm run ext:local --prefix src/PPDS.Extension` for extension VSIX.
 9. **AI tooling check**: Check if superpowers is installed by looking for `~/.claude/plugins/cache/claude-plugins-official/superpowers/` directory. If not found, print install commands (do not auto-install):
@@ -118,7 +118,7 @@ Operates on the repo at the current working directory. Non-interactive — no qu
 1. **Platform detection**: Same as above
 2. **Prerequisites (light)**: Verify git, node, dotnet, pwsh are on PATH (same checks as wizard, same stop-and-report behavior). This catches scenarios where a tool was removed or downgraded between sessions.
 3. **git pull**: Pull the repo at the current working directory
-4. **Install dependencies**: `dotnet restore PPDS.sln`, `npm install --prefix src/PPDS.Extension`, `npm install --prefix tests/tui-e2e`
+4. **Install dependencies**: `dotnet restore PPDS.sln`, `npm install --prefix src/PPDS.Extension`, `npm install --prefix tests/PPDS.Tui.E2eTests`
 5. **Build**: `dotnet build PPDS.sln -v q`, `npm run ext:compile`
 6. **Install tools**: CLI global tool. Extension VSIX on Windows.
 7. **Verification**: `ppds --version`, `npm run ext:test`, `dotnet test PPDS.sln --filter "Category!=Integration" -v q`

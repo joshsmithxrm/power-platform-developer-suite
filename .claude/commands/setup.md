@@ -99,7 +99,7 @@ git clone https://github.com/joshsmithxrm/ppds-demo.git {base}/ppds-demo
 ```bash
 dotnet restore PPDS.sln
 npm install --prefix src/PPDS.Extension
-npm install --prefix tests/tui-e2e
+npm install --prefix tests/PPDS.Tui.E2eTests
 ```
 
 ### Step 6: Build Verification (if ppds selected/present)

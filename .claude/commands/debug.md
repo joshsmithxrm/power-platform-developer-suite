@@ -47,12 +47,12 @@ Run TUI tests and optionally launch interactive:
 dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj --filter "Category=TuiUnit" --no-build
 
 # Run TUI visual snapshots (if Node.js available)
-npm test --prefix tests/tui-e2e
+npm test --prefix tests/PPDS.Tui.E2eTests
 ```
 
 If visual issues, update snapshots:
 ```bash
-npm test --prefix tests/tui-e2e -- --update-snapshots
+npm test --prefix tests/PPDS.Tui.E2eTests -- --update-snapshots
 ```
 
 ### 4. Extension Mode

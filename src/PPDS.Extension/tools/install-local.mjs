@@ -5,10 +5,12 @@
  * Finds the newest .vsix file in the extension root.
  */
 
-const { execSync } = require('child_process');
-const { readdirSync, statSync } = require('fs');
-const { join } = require('path');
+import { execSync } from 'child_process';
+import { readdirSync, statSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, '..');
 
 /**
