@@ -79,7 +79,7 @@ describe('parseArgs', () => {
   // wait
   it('wait with text and default timeout', () => {
     const result = parseArgs(['wait', 'Loading']);
-    assert.deepStrictEqual(result, { command: 'wait', text: 'Loading', timeout: 30000 });
+    assert.deepStrictEqual(result, { command: 'wait', text: 'Loading', timeout: 10000 });
   });
 
   it('wait with text and custom timeout', () => {
@@ -87,9 +87,12 @@ describe('parseArgs', () => {
     assert.deepStrictEqual(result, { command: 'wait', text: 'Loading', timeout: 5000 });
   });
 
-  it('wait with zero timeout', () => {
-    const result = parseArgs(['wait', 'Loading', '0']);
-    assert.deepStrictEqual(result, { command: 'wait', text: 'Loading', timeout: 0 });
+  it('wait with zero timeout throws', () => {
+    assert.throws(() => parseArgs(['wait', 'Loading', '0']), /Invalid timeout/);
+  });
+
+  it('wait with negative timeout throws', () => {
+    assert.throws(() => parseArgs(['wait', 'Loading', '-1']), /Invalid timeout/);
   });
 
   it('wait with missing text throws', () => {

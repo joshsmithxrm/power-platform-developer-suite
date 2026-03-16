@@ -58,7 +58,8 @@ export function parseArgs(argv) {
   if (command === 'wait') {
     const text = argv[1];
     if (text === undefined) throw new Error('wait requires text');
-    const timeout = argv[2] !== undefined ? parseInt(argv[2], 10) : 30000;
+    const timeout = argv[2] !== undefined ? parseInt(argv[2], 10) : 10000;
+    if (timeout <= 0) throw new Error('Invalid timeout');
     return { command, text, timeout };
   }
 
@@ -222,8 +223,8 @@ async function runDaemon() {
         const row = params.row;
         const buf = terminal.getViewableBuffer();
         if (row < 0 || row >= buf.length) throw new Error(`Row ${row} out of range`);
-        const line = buf[row].join('').trimEnd();
-        return { line };
+        const text = buf[row].join('').trimEnd();
+        return { text };
       }
       case 'key': {
         const parsed = parseKeyCombo(params.combo);
@@ -240,7 +241,7 @@ async function runDaemon() {
         return {};
       }
       case 'wait': {
-        const timeout = params.timeout ?? 30000;
+        const timeout = params.timeout ?? 10000;
         const start = Date.now();
         while (Date.now() - start < timeout) {
           const buf = terminal.getViewableBuffer();
@@ -250,7 +251,7 @@ async function runDaemon() {
           }
           await new Promise(r => setTimeout(r, 250));
         }
-        throw new Error(`Timeout: '${params.text}' not found within ${(params.timeout ?? 30000) / 1000}s`);
+        throw new Error(`Timeout: '${params.text}' not found within ${(params.timeout ?? 10000) / 1000}s`);
       }
       case 'screenshot': {
         const snapshot = terminal.serialize();
@@ -268,7 +269,7 @@ async function runDaemon() {
         return { path: resolve(params.file) };
       }
       case 'rows': {
-        return { size: `${COLS}x${ROWS}` };
+        return { dimensions: `${COLS}x${ROWS}` };
       }
       default:
         throw new Error(`Unknown action: ${action}`);
@@ -333,16 +334,16 @@ async function runDaemon() {
 async function cmdLaunch(parsed) {
   if (parsed.build) {
     const repoRoot = resolve(__dirname, '..', '..', '..');
-    console.log('Building PPDS CLI...');
+    console.error('Building PPDS CLI...');
     try {
-      execFileSync('dotnet', ['build', 'src/PPDS.Cli/PPDS.Cli.csproj', '-c', 'Debug', '-v', 'q'], {
+      execFileSync('dotnet', ['build', 'src/PPDS.Cli/PPDS.Cli.csproj', '-f', 'net10.0', '-v', 'q'], {
         cwd: repoRoot,
         stdio: 'inherit',
       });
     } catch {
       throw new Error('Build failed — fix compilation errors above');
     }
-    console.log('Build complete');
+    console.error('Build complete');
   }
 
   // Check for stale session
@@ -350,7 +351,7 @@ async function cmdLaunch(parsed) {
     const session = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
     try {
       await fetch(`http://localhost:${session.daemonPort}/health`);
-      console.log('TUI is already running. Run `close` first.');
+      console.error('TUI is already running. Run `close` first.');
       return;
     } catch {
       // Stale session — clean up
@@ -372,7 +373,7 @@ async function cmdLaunch(parsed) {
   while (Date.now() - start < 30000) {
     if (existsSync(SESSION_FILE)) {
       const session = readSession();
-      console.log(`TUI launched (daemon PID ${session.daemonPid}, port ${session.daemonPort})`);
+      console.error(`TUI launched (daemon PID ${session.daemonPid}, port ${session.daemonPort})`);
       return;
     }
     await new Promise(r => setTimeout(r, 500));
@@ -390,7 +391,7 @@ async function cmdLaunch(parsed) {
 
 async function cmdClose() {
   if (!existsSync(SESSION_FILE)) {
-    console.log('Nothing to close');
+    console.error('No session found. Nothing to close.');
     return;
   }
 
@@ -405,7 +406,7 @@ async function cmdClose() {
   const start = Date.now();
   while (Date.now() - start < 10000) {
     if (!existsSync(SESSION_FILE)) {
-      console.log('TUI closed');
+      console.error('TUI closed');
       return;
     }
     await new Promise(r => setTimeout(r, 200));
@@ -415,13 +416,13 @@ async function cmdClose() {
   try { process.kill(session.daemonPid); } catch {}
   deleteSession();
   if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
-  console.log('TUI closed (forced)');
+  console.error('TUI closed (forced)');
 }
 
 async function cmdText(parsed) {
   const session = readSession();
   const result = await sendToDaemon(session, 'text', { row: parsed.row });
-  console.log(result.line);
+  console.log(result.text);
 }
 
 async function cmdKey(parsed) {
@@ -449,7 +450,7 @@ async function cmdScreenshot(parsed) {
 async function cmdRows() {
   const session = readSession();
   const result = await sendToDaemon(session, 'rows', {});
-  console.log(result.size);
+  console.log(result.dimensions);
 }
 
 // ── Main dispatch ────────────────────────────────────────────────────
