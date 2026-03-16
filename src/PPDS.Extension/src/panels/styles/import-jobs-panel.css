@@ -1,0 +1,140 @@
+@import './shared.css';
+
+/* ── Import Jobs Panel specific styles ──────────────────────────────────── */
+
+.content {
+    flex: 1;
+    overflow: auto;
+}
+
+/* ── DataTable ──────────────────────────────────────────────────────────── */
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.data-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--vscode-editor-background);
+}
+
+.data-table th {
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.data-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.data-table th.sortable:hover {
+    color: var(--vscode-foreground);
+}
+
+.data-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-table-row {
+    cursor: pointer;
+}
+
+.data-table-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.data-table-row:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+.data-table-row.selected {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* ── Status badges ──────────────────────────────────────────────────────── */
+
+.status-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-size: 11px;
+}
+
+.status-succeeded {
+    background: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 20%, transparent);
+    color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.status-failed {
+    background: color-mix(in srgb, var(--vscode-testing-iconFailed, #f14c4c) 20%, transparent);
+    color: var(--vscode-testing-iconFailed, #f14c4c);
+}
+
+.status-inprogress {
+    background: color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 20%, transparent);
+    color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+/* ── Detail pane ────────────────────────────────────────────────────────── */
+
+.detail-pane {
+    border-top: 1px solid var(--vscode-panel-border);
+    max-height: 40vh;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-editor-background);
+}
+
+.detail-close-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.detail-close-btn:hover {
+    color: var(--vscode-textLink-foreground);
+}
+
+.detail-content {
+    flex: 1;
+    overflow: auto;
+    padding: 8px 12px;
+    margin: 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+}

@@ -27,6 +27,7 @@
     transition: background 0.15s;
     flex-shrink: 0;
 }
+
 .resize-handle:hover,
 .resize-handle.dragging {
     background: var(--vscode-focusBorder);

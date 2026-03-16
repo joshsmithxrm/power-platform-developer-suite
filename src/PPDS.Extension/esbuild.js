@@ -66,6 +66,18 @@ const builds = [
         outfile: 'dist/solutions-panel.js',
         logLevel: 'warning',
     },
+    // Import Jobs panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/import-jobs-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/import-jobs-panel.js',
+        logLevel: 'warning',
+    },
     // ── Panel CSS bundles ────────────────────────────────────────────────────
     {
         entryPoints: ['src/panels/styles/query-panel.css'],
@@ -79,6 +91,14 @@ const builds = [
         bundle: true,
         minify: production,
         outfile: 'dist/solutions-panel.css',
+        logLevel: 'warning',
+    },
+    // Import Jobs panel CSS
+    {
+        entryPoints: ['src/panels/styles/import-jobs-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/import-jobs-panel.css',
         logLevel: 'warning',
     },
 ];

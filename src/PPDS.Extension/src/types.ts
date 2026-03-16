@@ -291,3 +291,29 @@ export interface AttributeSummaryDto {
     dataType: string;
     isCustom: boolean;
 }
+
+// ── Import Jobs ──────────────────────────────────────────────────────────────
+
+export interface ImportJobsListResponse {
+    jobs: ImportJobInfoDto[];
+}
+
+export interface ImportJobsGetResponse {
+    job: ImportJobDetailDto;
+}
+
+export interface ImportJobInfoDto {
+    id: string;
+    solutionName: string | null;
+    status: string;
+    progress: number;
+    createdBy: string | null;
+    createdOn: string | null;
+    startedOn: string | null;
+    completedOn: string | null;
+    duration: string | null;
+}
+
+export interface ImportJobDetailDto extends ImportJobInfoDto {
+    data: string | null;
+}

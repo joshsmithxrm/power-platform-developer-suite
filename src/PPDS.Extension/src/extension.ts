@@ -17,6 +17,7 @@ import {
 import { DataverseCompletionProvider } from './providers/completionProvider.js';
 import { QueryPanel } from './panels/QueryPanel.js';
 import { SolutionsPanel } from './panels/SolutionsPanel.js';
+import { ImportJobsPanel } from './panels/ImportJobsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
@@ -61,6 +62,9 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openSolutions', () => {
             SolutionsPanel.show(context.extensionUri, client);
+        }),
+        vscode.commands.registerCommand('ppds.openImportJobs', () => {
+            ImportJobsPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -251,6 +255,12 @@ export function activate(context: vscode.ExtensionContext): void {
             SolutionsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
         })),
 
+        // Open Import Jobs targeting this environment
+        vscode.commands.registerCommand('ppds.openImportJobsForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            ImportJobsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        })),
+
         // Copy environment URL to clipboard
         vscode.commands.registerCommand('ppds.copyEnvironmentUrl', async (item: { envUrl: string }) => {
             if (!item?.envUrl) return;
@@ -351,6 +361,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerDebugCommands(context, client, profileTreeProvider, extensionState, {
         queryPanels: () => QueryPanel.instanceCount,
         solutionsPanels: () => SolutionsPanel.instanceCount,
+        importJobsPanels: () => ImportJobsPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks

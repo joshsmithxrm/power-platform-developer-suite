@@ -52,7 +52,8 @@ public class ImportJobService : IImportJobService
                 ImportJob.Fields.Progress,
                 ImportJob.Fields.StartedOn,
                 ImportJob.Fields.CompletedOn,
-                ImportJob.Fields.CreatedOn),
+                ImportJob.Fields.CreatedOn,
+                ImportJob.Fields.CreatedBy),
             TopCount = top,
             Orders = { new OrderExpression(ImportJob.Fields.CreatedOn, OrderType.Descending) }
         };
@@ -84,7 +85,8 @@ public class ImportJobService : IImportJobService
                 ImportJob.Fields.Progress,
                 ImportJob.Fields.StartedOn,
                 ImportJob.Fields.CompletedOn,
-                ImportJob.Fields.CreatedOn),
+                ImportJob.Fields.CreatedOn,
+                ImportJob.Fields.CreatedBy),
             TopCount = 1
         };
 
@@ -165,6 +167,7 @@ public class ImportJobService : IImportJobService
     {
         var completedOn = entity.GetAttributeValue<DateTime?>(ImportJob.Fields.CompletedOn);
         var progress = entity.GetAttributeValue<double?>(ImportJob.Fields.Progress) ?? 0;
+        var createdByRef = entity.GetAttributeValue<EntityReference>(ImportJob.Fields.CreatedBy);
 
         return new ImportJobInfo(
             entity.Id,
@@ -175,6 +178,7 @@ public class ImportJobService : IImportJobService
             entity.GetAttributeValue<DateTime?>(ImportJob.Fields.StartedOn),
             completedOn,
             entity.GetAttributeValue<DateTime?>(ImportJob.Fields.CreatedOn),
-            completedOn.HasValue);
+            completedOn.HasValue,
+            createdByRef?.Name);
     }
 }
