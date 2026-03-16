@@ -221,6 +221,16 @@ Mode: extension | Checks: 8 | Pass: 7 | Fail: 1
 Screenshot: $TEMP/qa-4.png
 ```
 
+## Workflow State
+
+After QA passes for a surface (verdict is PASS — all checks green), update `.claude/workflow-state.json`:
+1. Read the file (create `{}` if missing)
+2. Set `qa.{surface}` to the current ISO 8601 timestamp
+3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`
+4. Write the file back
+
+Example: after `/qa extension` passes, set `qa.ext` to the timestamp.
+
 ## Rules
 
 1. **Blind verifier** — the QA agent never sees source code. Period.

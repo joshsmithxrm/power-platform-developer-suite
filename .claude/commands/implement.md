@@ -4,11 +4,13 @@ Execute a checked-in implementation plan end-to-end using parallel agents for ma
 
 ## Prerequisites
 
-Before starting, invoke `superpowers:using-superpowers` to load all available skills. Key skills used throughout:
-- `superpowers:dispatching-parallel-agents` for parallel agent orchestration
-- `superpowers:verification-before-completion` before declaring any phase done
-- `superpowers:requesting-code-review` at phase gates via code-reviewer agent
-- `superpowers:systematic-debugging` when tests fail
+Key tools and skills used throughout:
+- `Agent` tool for parallel subagent dispatch
+- `/review` for impartial code review at phase gates
+- `/verify` and `/qa` for verification before declaring any phase done
+- `/debug` for systematic debugging when tests fail
+- `/gates` for mechanical pass/fail checks
+- `/converge` for review-fix convergence loops
 
 ## Input
 $ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3-design.md`)
@@ -67,6 +69,16 @@ to the orchestrator — do not silently deviate.
 - Determine what has already been implemented vs what remains
 - Check git log to see if prior phases were already committed
 
+### Step 3.5: Initialize Workflow State
+
+Update `.claude/workflow-state.json` to record that implementation has started:
+1. Read the file (create `{}` if missing)
+2. Set `branch` to the current branch name
+3. Set `spec` to the path of the primary spec associated with the plan
+4. Set `plan` to the plan file path ($ARGUMENTS)
+5. Set `started` to the current ISO 8601 timestamp
+6. Write the file back
+
 ### Step 4: Create Task Tracking
 - Use TaskCreate to build a task list from the plan phases
 - Set up dependencies between tasks using addBlockedBy/addBlocks
@@ -116,9 +128,9 @@ For EACH phase in the plan, repeat this cycle:
 - Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
 
 **D. Review**
-- Use `superpowers:requesting-code-review` agent to review the phase's work against the plan
+- Invoke `/review` to dispatch an impartial reviewer for the phase's work
+- The reviewer receives ONLY the diff, constitution, and ACs — NO implementation context (no plan, no task descriptions). It reviews code against specs, not against the plan.
 - If the review identifies issues, dispatch fix agents before committing
-- The code-reviewer agent MUST also receive the spec context block (constitution + ACs) but NO implementation context (no plan, no task descriptions) — it reviews code against specs, not against the plan
 - Only proceed to commit when review passes
 
 **E. Commit the Phase**
@@ -139,11 +151,37 @@ For EACH phase in the plan, repeat this cycle:
 - Update task tracking
 - Continue until all phases are complete
 
-### Step 6: Final Verification
-- Full solution build
-- Full test suite run (all categories except Integration)
+### Step 6: Mandatory Tail — Full Verification Pipeline
+
+After ALL phases are committed, you MUST run the complete verification pipeline. This is not optional. The whole point of /implement is that it does not declare victory after just running the phases — it proves the work is done.
+
+**A. Gates**
+Invoke `/gates` — full mechanical checks.
+
+**B. Verify**
+For each affected surface (detected from changed files across all phases):
+- Extension changes → `/verify extension`
+- TUI changes → `/verify tui`
+- CLI changes → `/verify cli`
+- MCP changes → `/verify mcp`
+
+**C. QA**
+For each affected surface:
+- Extension → `/qa extension`
+- CLI → `/qa cli`
+- MCP → `/qa mcp`
+- TUI → `/qa tui`
+
+**D. Review**
+Invoke `/review` for final comprehensive impartial review across all phases.
+
+**E. Converge (if needed)**
+If `/review` finds critical or important issues, invoke `/converge` to run the fix-review loop until clean.
+
+**F. Final State Check**
 - Verify git log shows clean commit history with one commit per phase
-- Use `superpowers:requesting-code-review` for final comprehensive review
+- Verify `.claude/workflow-state.json` shows fresh timestamps for gates, verify, qa, and review
+- All timestamps must be more recent than the `started` timestamp
 
 ## Rules
 

@@ -27,23 +27,32 @@ Cycle | Gate | Review Critical | Review Important | Regressions | Verdict
 
 ### Step 2: Run Cycle
 
-**A. Quality Gates**
+**A. Clear Stale State**
+Before running gates, clear the previous gate result in `.claude/workflow-state.json`:
+1. Read the file (create `{}` if missing)
+2. Set `gates.passed` to `null`
+3. Set `gates.commit_ref` to `null`
+4. Write the file back
+
+This ensures that a fix cycle cannot accidentally rely on a stale gate pass.
+
+**B. Quality Gates**
 Invoke `/gates` (use the skill).
 - If gates FAIL: fix the failures first (dispatch fix agent), re-run gates
-- Gates must PASS before proceeding to review
+- Gates must PASS before proceeding to review — `/gates` writes fresh state on pass
 - Record: did fixes introduce any new gate failures? (= regression)
 
-**B. Impartial Code Review**
+**C. Impartial Code Review**
 Invoke `/review` (use the skill).
 - Record: count of CRITICAL and IMPORTANT findings
 
-**C. Evaluate Convergence**
+**D. Evaluate Convergence**
 Update the tracking table. Check:
 - Are critical findings decreasing or zero?
 - Are important findings decreasing?
 - Were regressions introduced by the previous fix cycle?
 
-**D. Fix or Finish**
+**E. Fix or Finish**
 
 **If 0 CRITICAL and 0 IMPORTANT:**
 Done. CONVERGED. Report final tracking table. Ready for PR.

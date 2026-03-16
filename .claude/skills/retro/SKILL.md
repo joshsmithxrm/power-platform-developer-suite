@@ -1,5 +1,5 @@
 ---
-name: retrospective
+name: retro
 description: Conduct a structured retrospective on recent work sessions. Use when the user asks to review what happened, analyze session quality, identify patterns, or do a post-mortem. Triggers include "retrospective", "retro", "what went well", "session review", "post-mortem".
 ---
 
@@ -168,7 +168,7 @@ After ALL agents return, compile findings into:
 
 **Recommendations:**
 - Specific, actionable items ranked by priority
-- Distinguish between "superpowers already covers this" vs "needs a project-specific fix"
+- Distinguish between "existing skill covers this" vs "needs a new skill or skill update"
 
 ## Output
 

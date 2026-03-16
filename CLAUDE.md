@@ -56,15 +56,39 @@ Odd/even minor convention: odd minor = pre-release, even minor = stable. See `do
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
 
-## Workflow
+## Workflow (REQUIRED SEQUENCE)
 
-- Spec: /spec → /spec-audit
-- Implement: /implement → dispatches subagents, runs /gates and /verify at phase gates
-- Review: /review → /converge
-- Skills: @webview-panels (panel dev), @webview-cdp (visual verification)
-- Execution: commit after every task, verify with /gates before proceeding — don't ask, just do it
-- Verification: after ANY change that affects what a user sees or experiences (extension webview, TUI, CLI output, MCP tool response), you MUST verify it works by using the product yourself before committing. Extension: use @webview-cdp — open it, look at it, interact with it. TUI: snapshot tests. CLI: run the command. MCP: call the tool. A passing test suite is not verification. Seeing the actual result is. No exceptions.
-- QA gate: for non-trivial features, run /qa to dispatch a blind verifier agent that tests the product without seeing source code. Required by /implement at phase gates. Available anytime via /qa.
+### New feature or non-trivial change
+1. /spec (or verify spec exists with numbered ACs)
+2. /spec-audit (verify spec matches codebase reality)
+3. Write implementation plan → user approves
+4. /implement <plan-path>
+5. /gates — STOP on failure, fix before proceeding
+6. /verify for EVERY affected surface — you MUST use the product:
+   - Extension changed → /ext-verify (screenshots required)
+   - TUI changed → /tui-verify (PTY interaction required)
+   - MCP changed → /mcp-verify (tool invocation required)
+   - CLI changed → /cli-verify (run the command)
+7. /qa for at least one affected surface (blind verification)
+8. /review → /converge until 0 critical, 0 important
+9. /pr (rebase, create PR, monitor CI + reviews)
+
+### Bug fix or small change
+1. /gates before committing
+2. If UI/output changed → /verify for affected surface
+3. /pr when ready
+
+### Enforcement
+Steps 5-8 are enforced by hooks. The PR gate hook will block `gh pr create` if incomplete. Run /status to check.
+
+### STOP conditions
+- DO NOT skip steps 5-8 because "tests pass." Tests are necessary, not sufficient.
+- DO NOT declare work complete without visual verification of affected surfaces.
+
+### Autonomy scope
+"Don't ask, just do it" applies to: committing, running gates, verification, QA, review, triaging external review comments (fix valid, dismiss invalid with rationale).
+"Don't ask, just do it" does NOT apply to: skipping workflow steps, filing/closing issues, creating PRs without passing gates.
+After external review: respond to EACH comment individually on the PR with action taken. Include summary in PR status report.
 
 ## Git Hooks
 

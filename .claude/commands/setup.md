@@ -131,24 +131,15 @@ Skip on Linux — not meaningful in dev containers.
 
 ### Step 8: AI Tooling Check (wizard only)
 
-Check if superpowers plugin is installed:
+Verify workflow enforcement hooks are configured:
 
 ```bash
-ls ~/.claude/plugins/cache/claude-plugins-official/superpowers/
+python .claude/hooks/pr-gate.py < /dev/null
 ```
 
-If the directory does not exist, print:
+If Python is not available, warn that workflow hooks require Python 3. The hooks enforce workflow compliance (gates, verification, QA, review) before PR creation.
 
-```
-Superpowers plugin not installed. The PPDS workflow depends on it.
-Install with:
-  /plugin marketplace add obra/superpowers-marketplace
-  /plugin install superpowers@superpowers-marketplace
-```
-
-Do NOT auto-install — the marketplace has known recognition issues. Let the user run the commands manually.
-
-If the directory exists, skip silently.
+Check that `.claude/settings.json` contains the hook configuration (SessionStart, PreToolUse, PostToolUse, Stop hooks).
 
 ### Step 9: Developer Experience Options (wizard only)
 

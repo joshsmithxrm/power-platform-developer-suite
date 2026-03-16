@@ -34,7 +34,9 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 
 ### Step 3: Dispatch Impartial Reviewer
 
-Dispatch a subagent (use `Agent` tool with `subagent_type: "superpowers:code-reviewer"`) with this prompt:
+Dispatch a subagent using the `Agent` tool. The subagent MUST NOT have implementation context — give it ONLY the diff, constitution, and ACs. This is the bias prevention mechanism: the reviewer sees code, not intent.
+
+Subagent prompt:
 
 ```
 You are reviewing code changes for defects. You have NO context about what
@@ -101,6 +103,14 @@ Include total counts and a clear verdict:
 - **PASS**: 0 critical, 0 important
 - **PASS WITH FINDINGS**: 0 critical, N important (reviewer judgment)
 - **FAIL**: any critical findings
+
+## Workflow State
+
+After review completes (all findings evaluated and verdict rendered), update `.claude/workflow-state.json`:
+1. Read the file (create `{}` if missing)
+2. Set `review.passed` to the current ISO 8601 timestamp
+3. Set `review.findings` to the total count of findings (critical + important + suggestion)
+4. Write the file back
 
 ## Rules
 

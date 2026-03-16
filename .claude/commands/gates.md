@@ -38,7 +38,7 @@ dotnet build src/PPDS.Cli/PPDS.Cli.csproj -v q
 dotnet build src/PPDS.Query/PPDS.Query.csproj -v q
 # etc. — only the projects with changed files
 ```
-This is expected when webview-cdp has VS Code open. The daemon runs from shadow-copied binaries but the solution build may still contend with other processes.
+This is expected when ext-verify has VS Code open. The daemon runs from shadow-copied binaries but the solution build may still contend with other processes.
 
 **Gate 2: .NET Tests** (if C# files changed)
 
@@ -144,6 +144,14 @@ Gates are necessary but NOT sufficient. After gates pass:
 - **If changed files include TUI** (`src/PPDS.Cli/Tui/`): Run `npm run tui:test` for snapshot verification.
 
 **Do not commit UI/CLI/MCP changes with only gates passing.** That is how bugs ship undetected.
+
+## Workflow State
+
+After all gates pass (verdict is PASS), update `.claude/workflow-state.json`:
+1. Read the file (create `{}` if missing)
+2. Set `gates.passed` to the current ISO 8601 timestamp
+3. Set `gates.commit_ref` to current HEAD SHA (from `git rev-parse HEAD`)
+4. Write the file back
 
 ## Rules
 

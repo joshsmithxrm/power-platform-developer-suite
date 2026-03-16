@@ -1,6 +1,6 @@
 ---
-name: webview-cdp
-description: Visual verification of VS Code extension webview panels via Playwright Electron — screenshots, clicks, typing, keyboard shortcuts, VS Code commands, console logs. Use after implementing or modifying any UI-affecting change (CSS, layout, HTML templates, message wiring). For non-visual changes (string constants, config, internal refactors), compile + test is sufficient.
+name: ext-verify
+description: How to interact with VS Code extension webview panels for verification — Playwright Electron, screenshots, clicks, keyboard. Use when testing extension UI changes, verifying panel rendering, or checking webview behavior.
 allowed-tools: Bash(node *webview-cdp*), Bash(cd * && node *webview-cdp*), Bash(npm run * --prefix src/PPDS.Extension)
 ---
 
