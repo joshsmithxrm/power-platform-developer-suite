@@ -130,7 +130,7 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var (fragment, planResult, safetyResult, executionOptions) =
+        var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
@@ -167,11 +167,16 @@ public sealed class SqlQueryService : ISqlQueryService
             planResult.VirtualColumns,
             isAggregate);
 
+        var dataSources = CollectDataSources(planResult.RootNode, "Local");
+        var appliedHints = CollectAppliedHints(hints);
+
         return new SqlQueryResult
         {
             OriginalSql = request.Sql,
             TranspiledFetchXml = planResult.FetchXml,
-            Result = expandedResult
+            Result = expandedResult,
+            DataSources = dataSources,
+            AppliedHints = appliedHints
         };
     }
 
@@ -236,8 +241,11 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (chunkSize <= 0) chunkSize = 100;
 
-        var (fragment, planResult, safetyResult, executionOptions) =
+        var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
+
+        var streamDataSources = CollectDataSources(planResult.RootNode, "Local");
+        var streamAppliedHints = CollectAppliedHints(hints);
 
         // Dry-run: yield empty completion chunk
         if (safetyResult?.IsDryRun == true)
@@ -311,7 +319,9 @@ public sealed class SqlQueryService : ISqlQueryService
             EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
             TotalRowsSoFar = totalRows,
             IsComplete = true,
-            TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
+            TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null,
+            DataSources = streamDataSources,
+            AppliedHints = streamAppliedHints
         };
     }
 
@@ -323,7 +333,7 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
     /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
     /// </summary>
-    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions)>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions, QueryHintOverrides hints)>
         PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -433,7 +443,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // Check cross-environment DML policy after planning
         CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
-        return (fragment, planResult, safetyResult, executionOptions);
+        return (fragment, planResult, safetyResult, executionOptions, hints);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -615,6 +625,50 @@ public sealed class SqlQueryService : ISqlQueryService
             chunkResult, virtualColumns, isAggregate);
 
         return (expanded.Records.ToList(), expanded.Columns);
+    }
+
+    /// <summary>
+    /// Collects all data sources (local + remote) that participated in the query.
+    /// </summary>
+    private static List<QueryDataSource> CollectDataSources(
+        IQueryPlanNode rootNode,
+        string localLabel)
+    {
+        var sources = new List<QueryDataSource>
+        {
+            new() { Label = localLabel, IsRemote = false }
+        };
+        CollectRemoteLabels(rootNode, sources);
+        return sources;
+    }
+
+    private static void CollectRemoteLabels(IQueryPlanNode node, List<QueryDataSource> sources)
+    {
+        if (node is RemoteScanNode remote)
+        {
+            if (!sources.Any(s => s.Label == remote.RemoteLabel))
+                sources.Add(new QueryDataSource { Label = remote.RemoteLabel, IsRemote = true });
+        }
+        foreach (var child in node.Children)
+            CollectRemoteLabels(child, sources);
+    }
+
+    /// <summary>
+    /// Collects the names of query hints that were actively applied.
+    /// Returns null when no hints were active.
+    /// </summary>
+    private static List<string>? CollectAppliedHints(QueryHintOverrides hints)
+    {
+        var applied = new List<string>();
+        if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
+        if (hints.NoLock == true) applied.Add("NOLOCK");
+        if (hints.BypassPlugins == true) applied.Add("BYPASS_PLUGINS");
+        if (hints.BypassFlows == true) applied.Add("BYPASS_FLOWS");
+        if (hints.MaxResultRows.HasValue) applied.Add("MAX_ROWS");
+        if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
+        if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
+        if (hints.DmlBatchSize.HasValue) applied.Add("BATCH_SIZE");
+        return applied.Count > 0 ? applied : null;
     }
 
     /// <summary>
