@@ -57,4 +57,32 @@ public class VersionCommandTests
         // The command should have a handler set
         Assert.NotNull(_command.Action);
     }
+
+    [Fact]
+    public void VersionCommand_HasUpdateOption()
+    {
+        var command = VersionCommand.Create();
+        Assert.Contains(command.Options, o => o.Name == "--update");
+    }
+
+    [Fact]
+    public void VersionCommand_HasStableOption()
+    {
+        var command = VersionCommand.Create();
+        Assert.Contains(command.Options, o => o.Name == "--stable");
+    }
+
+    [Fact]
+    public void VersionCommand_HasPreReleaseOption()
+    {
+        var command = VersionCommand.Create();
+        Assert.Contains(command.Options, o => o.Name == "--prerelease");
+    }
+
+    [Fact]
+    public void VersionCommand_HasYesOption()
+    {
+        var command = VersionCommand.Create();
+        Assert.Contains(command.Options, o => o.Name == "--yes");
+    }
 }
