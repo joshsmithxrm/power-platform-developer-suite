@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 
@@ -102,6 +103,8 @@ export class DaemonClient implements vscode.Disposable {
     readonly onDidReconnect = this._onDidReconnect.event;
 
     private extensionPath: string;
+    /** Temp directory holding shadow-copied daemon binaries (debug mode only). */
+    private shadowCopyDir: string | null = null;
 
     constructor(extensionPath: string, private readonly log: vscode.LogOutputChannel) {
         this.extensionPath = extensionPath;
@@ -133,17 +136,63 @@ export class DaemonClient implements vscode.Disposable {
         } catch { /* not bundled */ }
 
         // 2. Debug build output (F5 development — extensionPath is src/PPDS.Extension/)
-        const debugPath = path.join(
-            this.extensionPath, '..', 'PPDS.Cli', 'bin', 'Debug', 'net8.0', `ppds${ext}`
+        //    Shadow-copy to a temp directory so dotnet build can overwrite the originals
+        //    while the daemon holds locks on the copies.
+        const debugDir = path.join(
+            this.extensionPath, '..', 'PPDS.Cli', 'bin', 'Debug', 'net8.0'
         );
+        const debugBinary = path.join(debugDir, `ppds${ext}`);
         try {
-            fs.accessSync(debugPath, fs.constants.X_OK);
-            this.log.info(`Using debug build: ${debugPath}`);
-            return debugPath;
+            fs.accessSync(debugBinary, fs.constants.X_OK);
+            const shadowDir = this.shadowCopyDebugBuild(debugDir);
+            const shadowBinary = path.join(shadowDir, `ppds${ext}`);
+            this.log.info(`Using shadow-copied debug build: ${shadowBinary} (source: ${debugDir})`);
+            return shadowBinary;
         } catch { /* no debug build */ }
 
         // 3. PATH fallback
         return 'ppds';
+    }
+
+    /**
+     * Copies the debug build output to a temp directory so the daemon runs from
+     * copies while dotnet build can freely overwrite the originals.
+     */
+    private shadowCopyDebugBuild(sourceDir: string): string {
+        // Reuse existing shadow copy if it still exists
+        if (this.shadowCopyDir && fs.existsSync(this.shadowCopyDir)) {
+            fs.rmSync(this.shadowCopyDir, { recursive: true, force: true });
+        }
+
+        const tempDir = path.join(os.tmpdir(), `ppds-daemon-${Date.now()}`);
+        fs.mkdirSync(tempDir, { recursive: true });
+
+        // Copy all files from the build output (shallow — no subdirectories needed)
+        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+            if (entry.isFile()) {
+                fs.copyFileSync(
+                    path.join(sourceDir, entry.name),
+                    path.join(tempDir, entry.name)
+                );
+            }
+        }
+
+        this.shadowCopyDir = tempDir;
+        return tempDir;
+    }
+
+    /**
+     * Removes the shadow-copy temp directory if it exists.
+     */
+    private cleanupShadowCopy(): void {
+        if (this.shadowCopyDir) {
+            try {
+                fs.rmSync(this.shadowCopyDir, { recursive: true, force: true });
+            } catch {
+                // Best-effort cleanup — temp dir will be reclaimed by OS eventually
+            }
+            this.shadowCopyDir = null;
+        }
     }
 
     /**
@@ -814,6 +863,8 @@ export class DaemonClient implements vscode.Disposable {
             this.process.kill();
             this.process = null;
         }
+
+        this.cleanupShadowCopy();
 
         // Dispose EventEmitters LAST
         this.setState('stopped');

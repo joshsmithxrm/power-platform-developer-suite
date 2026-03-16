@@ -32,6 +32,14 @@ dotnet build PPDS.sln -v q
 Pass: 0 errors, 0 warnings treated as errors
 Fail: any error — report exact error messages with file:line
 
+**File-locking recovery:** If `dotnet build PPDS.sln` fails with "used by another process" errors (common when the daemon is running from debug output), retry by building only the changed projects individually:
+```bash
+dotnet build src/PPDS.Cli/PPDS.Cli.csproj -v q
+dotnet build src/PPDS.Query/PPDS.Query.csproj -v q
+# etc. — only the projects with changed files
+```
+This is expected when webview-cdp has VS Code open. The daemon runs from shadow-copied binaries but the solution build may still contend with other processes.
+
 **Gate 2: .NET Tests** (if C# files changed)
 
 ```bash
