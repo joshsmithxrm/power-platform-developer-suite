@@ -1042,7 +1042,8 @@ public class RpcMethodHandler : IDisposable
             {
                 var result = await service.ExecuteAsync(sqlRequest, ct);
                 var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
-                mapped.QueryMode = request.UseTds ? "tds" : "dataverse";
+                // Always "dataverse" — ITdsQueryExecutor is not registered in DI, so TDS never activates
+                mapped.QueryMode = "dataverse";
 
                 if (result.DataSources is { Count: > 1 })
                 {

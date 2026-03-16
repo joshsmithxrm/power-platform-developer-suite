@@ -207,6 +207,10 @@ public sealed class SqlQueryService : ISqlQueryService
             ? Math.Min(hints.MaxParallelism.Value, _poolCapacity)
             : _poolCapacity;
 
+        // Don't override explicit TOP with hints.MaxResultRows (same guard as PrepareExecutionAsync)
+        var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
+        var effectiveMaxRows = sqlHasExplicitTop ? null : hints.MaxResultRows;
+
         var planOptions = new QueryPlanOptions
         {
             RemoteExecutorFactory = RemoteExecutorFactory,
@@ -214,7 +218,7 @@ public sealed class SqlQueryService : ISqlQueryService
             ForceClientAggregation = hints.ForceClientAggregation == true,
             NoLock = hints.NoLock == true,
             UseTdsEndpoint = hints.UseTdsEndpoint == true,
-            MaxRows = hints.MaxResultRows,
+            MaxRows = effectiveMaxRows,
             TdsQueryExecutor = _tdsQueryExecutor,
             OriginalSql = sql
         };
