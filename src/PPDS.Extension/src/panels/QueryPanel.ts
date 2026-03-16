@@ -151,7 +151,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         language: message.language,
                     });
                     this.postMessage({ command: 'completionResult', requestId, items: result.items });
-                } catch {
+                } catch (err) {
+                    // eslint-disable-next-line no-console -- non-critical: IntelliSense unavailable
+                    console.warn(`[PPDS] IntelliSense error: ${err instanceof Error ? err.message : String(err)}`);
                     this.postMessage({ command: 'completionResult', requestId, items: [] });
                 }
                 break;
@@ -220,10 +222,15 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     try {
                         const config = await this.daemon.envConfigGet(env.url);
                         this.environmentColor = config.resolvedColor ?? null;
-                    } catch {
+                        if (!this.environmentType && config.resolvedType) {
+                            this.environmentType = config.resolvedType;
+                        }
+                    } catch (err) {
+                        // eslint-disable-next-line no-console -- non-critical: color accent unavailable
+                        console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                         this.environmentColor = null;
                     }
-                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: env.type, envColor: this.environmentColor });
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: this.environmentType, envColor: this.environmentColor });
                     this.updateTitle();
                 }
                 break;
@@ -259,14 +266,20 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 this.environmentDisplayName = who.environment.displayName;
             }
             this.environmentType = who.environment?.type ?? null;
-        } catch {
-            // No active profile or environment
+        } catch (err) {
+            // eslint-disable-next-line no-console -- expected when no profile is active
+            console.debug(`[PPDS] initEnvironment: ${err instanceof Error ? err.message : String(err)}`);
         }
         if (this.environmentUrl) {
             try {
                 const config = await this.daemon.envConfigGet(this.environmentUrl);
                 this.environmentColor = config.resolvedColor ?? null;
-            } catch {
+                if (!this.environmentType && config.resolvedType) {
+                    this.environmentType = config.resolvedType;
+                }
+            } catch (err) {
+                // eslint-disable-next-line no-console -- non-critical: color accent unavailable
+                console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                 this.environmentColor = null;
             }
         }

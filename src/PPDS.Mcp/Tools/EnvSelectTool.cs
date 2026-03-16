@@ -60,6 +60,9 @@ public sealed class EnvSelectTool
 
         var resolved = result.Environment!;
 
+        // Validate environment switch against session allowlist
+        _context.ValidateEnvironmentSwitch(resolved.Url);
+
         // Invalidate cached pool for the old environment.
         if (profile.Environment != null)
         {

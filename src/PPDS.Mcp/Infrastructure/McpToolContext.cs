@@ -27,6 +27,9 @@ public sealed class McpToolContext
     private readonly ProfileStore _profileStore;
     private readonly ISecureCredentialStore _credentialStore;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly McpSessionOptions _sessionOptions;
+    private AuthProfile? _lockedProfile;
+    private readonly SemaphoreSlim _lockGate = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="McpToolContext"/> class.
@@ -34,17 +37,41 @@ public sealed class McpToolContext
     /// <param name="poolManager">The connection pool manager.</param>
     /// <param name="profileStore">The profile store for loading/saving auth profiles.</param>
     /// <param name="credentialStore">The secure credential store.</param>
+    /// <param name="sessionOptions">Session configuration options.</param>
     /// <param name="loggerFactory">Optional logger factory.</param>
     public McpToolContext(
         IMcpConnectionPoolManager poolManager,
         ProfileStore profileStore,
         ISecureCredentialStore credentialStore,
+        McpSessionOptions sessionOptions,
         ILoggerFactory? loggerFactory = null)
     {
         _poolManager = poolManager ?? throw new ArgumentNullException(nameof(poolManager));
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
+        _sessionOptions = sessionOptions ?? throw new ArgumentNullException(nameof(sessionOptions));
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+    }
+
+    /// <summary>Whether DML operations are disabled for this session.</summary>
+    public bool IsReadOnly => _sessionOptions.ReadOnly;
+
+    /// <summary>The overridden environment URL, if specified via --environment.</summary>
+    public string? EnvironmentUrlOverride => _sessionOptions.Environment;
+
+    /// <summary>
+    /// Validates whether switching to the given environment URL is allowed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">If the environment is not in the allowlist.</exception>
+    public void ValidateEnvironmentSwitch(string environmentUrl)
+    {
+        if (!_sessionOptions.IsEnvironmentAllowed(environmentUrl))
+        {
+            var msg = _sessionOptions.AllowedEnvironments.Count == 0
+                ? "Environment switching is disabled for this MCP session. The session is locked to the initial environment."
+                : $"Environment '{environmentUrl}' is not in the allowed list. Allowed: {string.Join(", ", _sessionOptions.AllowedEnvironments)}";
+            throw new InvalidOperationException(msg);
+        }
     }
 
     /// <summary>
@@ -55,14 +82,39 @@ public sealed class McpToolContext
     /// <exception cref="InvalidOperationException">Thrown if no profile is active.</exception>
     public async Task<AuthProfile> GetActiveProfileAsync(CancellationToken cancellationToken = default)
     {
-        var store = _profileStore;
-        var collection = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
+        // Session locking: resolve the profile once, then reuse for the session
+        if (_lockedProfile != null)
+            return _lockedProfile;
 
-        var profile = collection.ActiveProfile
-            ?? throw new InvalidOperationException(
-                "No active profile configured. Run 'ppds auth create' to create a profile.");
+        await _lockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_lockedProfile != null)
+                return _lockedProfile;
 
-        return profile;
+            var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+
+            AuthProfile? profile;
+            if (_sessionOptions.Profile != null)
+            {
+                profile = collection.GetByNameOrIndex(_sessionOptions.Profile)
+                    ?? throw new InvalidOperationException(
+                        $"Profile '{_sessionOptions.Profile}' not found. Available profiles: {string.Join(", ", collection.All.Select(p => p.Name ?? $"Profile {p.Index}"))}");
+            }
+            else
+            {
+                profile = collection.ActiveProfile
+                    ?? throw new InvalidOperationException(
+                        "No active profile configured. Run 'ppds auth create' to create a profile.");
+            }
+
+            _lockedProfile = profile;
+            return profile;
+        }
+        finally
+        {
+            _lockGate.Release();
+        }
     }
 
     /// <summary>
@@ -88,16 +140,14 @@ public sealed class McpToolContext
     {
         var profile = await GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
-        if (profile.Environment == null)
-        {
-            throw new InvalidOperationException(
+        var environmentUrl = _sessionOptions.Environment ?? profile.Environment?.Url
+            ?? throw new InvalidOperationException(
                 "No environment selected. Run 'ppds env select <url>' to select an environment.");
-        }
 
         var profileName = profile.Name ?? profile.DisplayIdentifier;
         return await _poolManager.GetOrCreatePoolAsync(
             new[] { profileName },
-            profile.Environment.Url,
+            environmentUrl,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
@@ -118,11 +168,13 @@ public sealed class McpToolContext
     {
         var profile = await GetActiveProfileAsync(cancellationToken).ConfigureAwait(false);
 
-        if (profile.Environment == null)
-        {
-            throw new InvalidOperationException(
+        var environmentUrl = _sessionOptions.Environment ?? profile.Environment?.Url
+            ?? throw new InvalidOperationException(
                 "No environment selected. Run 'ppds env select <url>' to select an environment.");
-        }
+
+        var environmentDisplayName = _sessionOptions.Environment != null
+            ? _sessionOptions.Environment
+            : profile.Environment?.DisplayName;
 
         var sources = new List<IConnectionSource>();
 
@@ -130,10 +182,10 @@ public sealed class McpToolContext
         {
             var source = new ProfileConnectionSource(
                 profile,
-                profile.Environment.Url,
+                environmentUrl,
                 maxPoolSize: 52,
                 deviceCodeCallback: null,
-                environmentDisplayName: profile.Environment.DisplayName,
+                environmentDisplayName: environmentDisplayName,
                 credentialStore: _credentialStore);
 
             var adapter = new ProfileConnectionSourceAdapter(source);

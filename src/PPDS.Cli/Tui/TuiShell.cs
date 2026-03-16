@@ -279,6 +279,9 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
+            new("", "", () => {}, null, null, Key.Null), // Separator
+            new("Environment Details...", "View organization and connection info",
+                hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
             new("Configure Environment...", "Configure label, type, and color",
                 hasEnvironment ? () => ShowEnvironmentConfig() : (Action?)null),
         }));
@@ -527,6 +530,20 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         {
             _session.NotifyConfigChanged();
         }
+    }
+
+    private void ShowEnvironmentDetails()
+    {
+        var url = _session.CurrentEnvironmentUrl;
+        if (string.IsNullOrEmpty(url))
+        {
+            MessageBox.ErrorQuery("No Environment", "Please connect to an environment first.", "OK");
+            return;
+        }
+
+        var displayName = _session.CurrentEnvironmentDisplayName;
+        using var dialog = new EnvironmentDetailsDialog(_session, url, displayName);
+        Application.Run(dialog);
     }
 
     /// <summary>

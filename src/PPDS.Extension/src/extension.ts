@@ -20,6 +20,7 @@ import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
+import { ProfileStatusBar } from './profileStatusBar.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
@@ -114,6 +115,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const statusBar = new DaemonStatusBar(client);
     context.subscriptions.push(statusBar);
 
+    // ── Profile Status Bar ───────────────────────────────────────────
+    const profileStatusBar = new ProfileStatusBar(client);
+    context.subscriptions.push(profileStatusBar);
+
     // ── Virtual Document Provider (EXPLAIN output) ────────────────────
     const explainProvider = new ExplainDocumentProvider();
     context.subscriptions.push(
@@ -196,15 +201,27 @@ export function activate(context: vscode.ExtensionContext): void {
     // Sync tools tree disabled state with profile availability
     const refreshToolsState = (): void => {
         void client.authList().then(result => {
-            toolsTreeProvider.setHasActiveProfile(result.activeProfile !== null);
-        }).catch(() => {
+            toolsTreeProvider.setHasActiveProfile(
+                result.activeProfile !== null || result.activeProfileIndex !== null);
+        }).catch((err: unknown) => {
+            logChannel?.warn(`Failed to refresh tools state: ${err instanceof Error ? err.message : String(err)}`);
             toolsTreeProvider.setHasActiveProfile(false);
         });
     };
-    refreshToolsState();
+
+    // Refresh tools state when daemon becomes ready (fixes startup race where
+    // the initial call fires before the daemon is connected)
+    context.subscriptions.push(
+        client.onDidChangeState(state => {
+            if (state === 'ready') {
+                refreshToolsState();
+                profileTreeProvider.refresh();
+            }
+        }),
+    );
 
     // ── Profile Commands ────────────────────────────────────────────────
-    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
+    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); profileStatusBar.refresh(); });
 
     // ── Environment Commands (tree context menu) ────────────────────────
     context.subscriptions.push(

@@ -84,6 +84,70 @@ The MCP (Model Context Protocol) server exposes Power Platform/Dataverse capabil
 
 ---
 
+## Session Configuration
+
+### Command-Line Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--profile <name>` | Lock to a specific profile (default: current active) |
+| `--environment <url>` | Lock to a specific environment (default: profile's default) |
+| `--read-only` | Disable all DML operations |
+| `--allowed-env <url>` | Repeatable. Restrict environment switching to these URLs only |
+
+### Session Isolation Model
+
+- Profile and environment are resolved once at first tool invocation
+- External profile changes (CLI, TUI, Extension) do not affect the MCP session
+- `ppds_env_select` is restricted to the `--allowed-env` allowlist (or disabled if no allowlist)
+
+See also: [CONSTITUTION.md — Session Laws](./CONSTITUTION.md#session-laws)
+
+### Example Configurations
+
+**Development (permissive):**
+
+```json
+{
+  "command": "ppds-mcp-server",
+  "args": ["--profile", "Dev"]
+}
+```
+
+**Multi-environment (restricted):**
+
+```json
+{
+  "command": "ppds-mcp-server",
+  "args": [
+    "--profile", "Dev",
+    "--environment", "https://contoso-dev.crm.dynamics.com",
+    "--allowed-env", "https://contoso-dev.crm.dynamics.com",
+    "--allowed-env", "https://contoso-test.crm.dynamics.com"
+  ]
+}
+```
+
+**Production read-only:**
+
+```json
+{
+  "command": "ppds-mcp-server",
+  "args": [
+    "--profile", "Prod",
+    "--read-only"
+  ]
+}
+```
+
+### Security Model
+
+- Configuration is set by the user at MCP client configuration time
+- The AI agent cannot modify the allowlist or read-only flag
+- If no args are provided, the safest defaults apply: current active profile, its default environment, no switching, DML allowed
+
+---
+
 ## Specification
 
 ### Core Requirements

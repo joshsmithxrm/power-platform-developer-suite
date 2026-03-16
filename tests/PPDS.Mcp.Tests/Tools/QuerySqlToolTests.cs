@@ -38,7 +38,8 @@ public sealed class QuerySqlToolTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
         var tool = new QuerySqlTool(context);
 
         // Act
@@ -58,7 +59,8 @@ public sealed class QuerySqlToolTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
         var tool = new QuerySqlTool(context);
 
         // Act
@@ -77,7 +79,8 @@ public sealed class QuerySqlToolTests
         var context = new McpToolContext(
             mockPoolManager.Object,
             new ProfileStore(),
-            new Mock<ISecureCredentialStore>().Object);
+            new Mock<ISecureCredentialStore>().Object,
+            new McpSessionOptions());
         var tool = new QuerySqlTool(context);
 
         // Act
