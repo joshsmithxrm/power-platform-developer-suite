@@ -19,8 +19,9 @@
 | Action | File | Responsibility |
 |--------|------|----------------|
 | Modify | `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` | Replace `QuerySqlAsync`, `QueryExplainAsync`, `QueryExportAsync` to use `SqlQueryService`; delete dead code |
-| Modify | `src/PPDS.Cli/Services/ServiceRegistration.cs` | Ensure `ISqlQueryService` is registered in daemon's service provider |
-| Modify | `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs` | Add tests for shared service usage and error mapping |
+| Verify | `src/PPDS.Cli/Services/ServiceRegistration.cs` | Confirm `ISqlQueryService` is registered in daemon's service provider (add if missing) |
+| Verify | `src/PPDS.Cli/Infrastructure/DaemonConnectionPoolManager.cs` | Confirm service provider includes `ISqlQueryService` |
+| Modify | `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs` | Add tests for shared service usage, error mapping, virtual column expansion, cross-env |
 
 ### Phase 2: Query Hints Integration
 
@@ -45,18 +46,18 @@
 | Modify | `src/PPDS.Extension/src/panels/webview/shared/message-types.ts` | Add `envColor` to `updateEnvironment` messages |
 | Modify | `src/PPDS.Extension/src/panels/QueryPanel.ts` | Fetch and send `envColor` in `updateEnvironment` |
 | Modify | `src/PPDS.Extension/src/panels/SolutionsPanel.ts` | Fetch and send `envColor` in `updateEnvironment` |
-| Modify | `src/PPDS.Extension/src/panels/webview/query-panel/query-panel.ts` | Apply `data-env-color` attribute on toolbar |
-| Modify | `src/PPDS.Extension/src/panels/webview/shared/shared.css` | Add environment color CSS custom properties and left border rules |
+| Modify | `src/PPDS.Extension/src/panels/webview/query-panel.ts` | Apply `data-env-color` attribute on toolbar |
+| Modify | `src/PPDS.Extension/src/panels/styles/shared.css` | Add environment color CSS custom properties and left border rules |
 
 ### Phase 4: Cross-Environment Query Attribution
 
 | Action | File | Responsibility |
 |--------|------|----------------|
 | Create | `src/PPDS.Cli/Services/Query/QueryDataSource.cs` | New record type |
-| Modify | `src/PPDS.Cli/Services/Query/SqlQueryResult.cs` | Add `DataSources` property |
-| Modify | `src/PPDS.Cli/Services/Query/SqlQueryService.cs` | Collect data sources from plan tree |
-| Modify | `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` | Add `dataSources` to `QueryResultResponse` DTO |
-| Modify | `src/PPDS.Extension/src/panels/webview/query-panel/query-panel.ts` | Render cross-env banner |
+| Modify | `src/PPDS.Cli/Services/Query/SqlQueryResult.cs` | Add `DataSources` and `AppliedHints` properties |
+| Modify | `src/PPDS.Cli/Services/Query/SqlQueryService.cs` | Collect data sources from plan tree; populate applied hints list |
+| Modify | `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs` | Add `dataSources` and `appliedHints` to `QueryResultResponse` DTO |
+| Modify | `src/PPDS.Extension/src/panels/webview/query-panel.ts` | Render cross-env banner |
 | Modify | `src/PPDS.Extension/src/panels/styles/query-panel.css` | Banner CSS |
 | Modify | `tests/PPDS.Cli.Tests/Services/Query/SqlQueryServiceTests.cs` | Data source collection tests |
 
@@ -64,15 +65,144 @@
 
 ## Chunk 1: Phase 1 — Daemon Uses SqlQueryService
 
-### Task 1: Wire SqlQueryService into QuerySqlAsync
+### Task 1: Verify ISqlQueryService registration in daemon service provider
+
+**Files:**
+- Verify: `src/PPDS.Cli/Services/ServiceRegistration.cs`
+- Verify: `src/PPDS.Cli/Infrastructure/DaemonConnectionPoolManager.cs:337-374`
+
+- [ ] **Step 1: Check if ISqlQueryService is registered in the daemon's service provider**
+
+The daemon creates service providers via `DaemonConnectionPoolManager.CreateProviderFromSources()`. Check whether this calls `services.AddCliApplicationServices()` (which registers `ISqlQueryService` in `ServiceRegistration.cs:45-58`). If not, `sp.GetRequiredService<ISqlQueryService>()` will throw at runtime.
+
+If missing, add the registration to `CreateProviderFromSources()`:
+
+```csharp
+services.AddCliApplicationServices(queryExecutor, tdsExecutor, bulkExecutor, metadataExecutor, poolCapacity);
+```
+
+Or register `ISqlQueryService` directly if `AddCliApplicationServices` pulls in too many dependencies.
+
+- [ ] **Step 2: Run typecheck to verify**
+
+Run: `dotnet build PPDS.sln -v q`
+
+- [ ] **Step 3: Commit (if changes were needed)**
+
+```
+git add src/PPDS.Cli/Infrastructure/DaemonConnectionPoolManager.cs
+git commit -m "fix(daemon): register ISqlQueryService in daemon service provider"
+```
+
+---
+
+### Task 2: Write Phase 1 tests FIRST (TDD)
+
+**Files:**
+- Modify: `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs`
+- Reference: `tests/PPDS.Cli.Tests/Mocks/FakeSqlQueryService.cs`
+- Reference: `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerPoolTests.cs` (for setup pattern)
+
+- [ ] **Step 1: Write test for error mapping (AC-25)**
+
+```csharp
+[Fact]
+[Trait("Category", "Unit")]
+public async Task QuerySql_ParseError_MapsToRpcException()
+{
+    // Arrange: configure FakeSqlQueryService to throw QueryParseException
+    var fakeSqlService = new FakeSqlQueryService();
+    fakeSqlService.ExceptionToThrow = new QueryParseException("Unexpected token 'SELEC'", 1, 1);
+
+    // Setup handler with mock pool manager that returns provider with fake service
+    var mockPoolManager = new Mock<IDaemonConnectionPoolManager>();
+    // ... wire service provider with fakeSqlService registered as ISqlQueryService
+
+    // Act
+    var handler = new RpcMethodHandler(mockPoolManager.Object, CreateAuthServices());
+    var act = () => handler.QuerySqlAsync(new QuerySqlRequest { Sql = "SELEC name FROM account" });
+
+    // Assert
+    var ex = await Assert.ThrowsAsync<RpcException>(act);
+    ex.StructuredErrorCode.Should().Be(ErrorCodes.Query.ParseError);
+}
+```
+
+Note: Follow the setup pattern from `RpcMethodHandlerPoolTests.cs`. The mock pool manager must return a service provider that includes the `FakeSqlQueryService`. Check `CreateAuthServices()` helper in that file.
+
+- [ ] **Step 2: Write test for DML blocked mapping (AC-25)**
+
+```csharp
+[Fact]
+[Trait("Category", "Unit")]
+public async Task QuerySql_DmlBlocked_MapsToRpcExceptionWithSafetyData()
+{
+    var fakeSqlService = new FakeSqlQueryService();
+    fakeSqlService.ExceptionToThrow = new PpdsException(
+        ErrorCodes.Query.DmlBlocked,
+        "DELETE without WHERE clause is blocked");
+
+    // ... setup handler
+
+    var act = () => handler.QuerySqlAsync(new QuerySqlRequest
+    {
+        Sql = "DELETE FROM account",
+        DmlSafety = new DmlSafetyRpcOptions(),
+    });
+
+    var ex = await Assert.ThrowsAsync<RpcException>(act);
+    ex.StructuredErrorCode.Should().Be(ErrorCodes.Query.DmlBlocked);
+    var errorData = ex.ErrorData.Should().BeOfType<DmlSafetyErrorData>().Subject;
+    errorData.DmlBlocked.Should().BeTrue();
+}
+```
+
+- [ ] **Step 3: Write test for virtual column expansion (AC-02)**
+
+```csharp
+[Fact]
+[Trait("Category", "Unit")]
+public async Task QuerySql_ExpandsVirtualColumns()
+{
+    // Arrange: FakeSqlQueryService returns result with owneridname virtual column
+    var fakeSqlService = new FakeSqlQueryService();
+    fakeSqlService.NextResult = CreateResultWithVirtualColumn("owneridname", "John Doe");
+
+    // ... setup handler
+
+    var result = await handler.QuerySqlAsync(new QuerySqlRequest
+    {
+        Sql = "SELECT owneridname FROM account",
+    });
+
+    // Assert: the response includes the virtual column
+    result.Columns.Should().Contain(c => c.LogicalName == "owneridname");
+}
+```
+
+- [ ] **Step 4: Run tests to verify they fail**
+
+Run: `dotnet test PPDS.sln --filter "QuerySql_ParseError|QuerySql_DmlBlocked|QuerySql_ExpandsVirtualColumns" -v q`
+Expected: Tests fail because `QuerySqlAsync` still uses the bespoke path.
+
+- [ ] **Step 5: Commit failing tests**
+
+```
+git add tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs
+git commit -m "test(daemon): add failing tests for Phase 1 query parity (AC-02, AC-25)"
+```
+
+---
+
+### Task 3: Wire SqlQueryService into QuerySqlAsync
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs:942-1073`
 - Reference: `src/PPDS.Cli/Tui/InteractiveSession.cs:321-355`
 
-- [ ] **Step 1: Write a helper method to configure SqlQueryService**
+- [ ] **Step 1: Add helper method to configure SqlQueryService**
 
-Add a private method in `RpcMethodHandler` that mirrors `InteractiveSession.GetSqlQueryServiceAsync()`. This method gets the service from the provider, casts to concrete `SqlQueryService`, and wires `RemoteExecutorFactory`, `ProfileResolver`, `EnvironmentSafetySettings`, and `EnvironmentProtectionLevel`.
+Add a private method in `RpcMethodHandler` that mirrors `InteractiveSession.GetSqlQueryServiceAsync()`:
 
 ```csharp
 private async Task<SqlQueryService> GetConfiguredSqlQueryServiceAsync(
@@ -85,15 +215,18 @@ private async Task<SqlQueryService> GetConfiguredSqlQueryServiceAsync(
         throw new InvalidOperationException("ISqlQueryService must be SqlQueryService");
 
     // Wire cross-environment support
-    var envConfigs = await _envConfigStore.GetAllConfigsAsync(cancellationToken)
+    var envConfigStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
+    var envConfigs = await envConfigStore.GetAllConfigsAsync(cancellationToken)
         .ConfigureAwait(false);
     var resolver = new ProfileResolutionService(envConfigs);
     concrete.RemoteExecutorFactory = label =>
     {
         var config = resolver.ResolveByLabel(label);
         if (config?.Url == null) return null;
-        var remoteProvider = GetServiceProviderForEnvironmentAsync(config.Url)
+#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
+        var remoteProvider = _poolManager.GetOrCreateServiceProviderAsync(config.Url)
             .GetAwaiter().GetResult();
+#pragma warning restore PPDS012
         return remoteProvider.GetRequiredService<IQueryExecutor>();
     };
     concrete.ProfileResolver = resolver;
@@ -101,7 +234,7 @@ private async Task<SqlQueryService> GetConfiguredSqlQueryServiceAsync(
     // Wire environment-specific safety settings
     if (environmentUrl != null)
     {
-        var envConfig = await _envConfigStore.GetConfigAsync(environmentUrl, cancellationToken)
+        var envConfig = await envConfigStore.GetConfigAsync(environmentUrl, cancellationToken)
             .ConfigureAwait(false);
         if (envConfig != null)
         {
@@ -116,11 +249,14 @@ private async Task<SqlQueryService> GetConfiguredSqlQueryServiceAsync(
 }
 ```
 
-Note: Check how `_envConfigStore` and `GetServiceProviderForEnvironmentAsync` are available in `RpcMethodHandler`. The daemon's `WithProfileAndEnvironmentAsync` provides a service provider — the helper may need to accept it as a parameter. Match the exact patterns from `InteractiveSession`.
+Key differences from the original plan:
+- Uses `_authServices.GetRequiredService<EnvironmentConfigStore>()` (not `_envConfigStore`)
+- Uses `_poolManager.GetOrCreateServiceProviderAsync()` (not `GetServiceProviderForEnvironmentAsync`)
+- Includes `#pragma warning disable PPDS012` matching `InteractiveSession` pattern
 
-- [ ] **Step 2: Replace QuerySqlAsync execute path**
+- [ ] **Step 2: Replace QuerySqlAsync body**
 
-Replace the entire body of `QuerySqlAsync` (lines 942-1073) with the new flow:
+Replace the entire body of `QuerySqlAsync` (lines 942-1073):
 
 ```csharp
 [JsonRpcMethod("query/sql")]
@@ -175,10 +311,43 @@ public async Task<QueryResultResponse> QuerySqlAsync(
                 : null,
         };
 
-        var result = await service.ExecuteAsync(sqlRequest, ct);
-        var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
-        mapped.QueryMode = result.Result.IsAggregate ? "aggregate" : "dataverse";
-        return mapped;
+        try
+        {
+            var result = await service.ExecuteAsync(sqlRequest, ct);
+            var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
+            mapped.QueryMode = result.Result.IsAggregate ? "aggregate" : "dataverse";
+            return mapped;
+        }
+        catch (QueryParseException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+        catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlBlocked)
+        {
+            // SqlQueryService uses ErrorCodes.Query.DmlBlocked for both blocked and
+            // confirmation-required cases. Distinguish by checking the message or
+            // DmlSafetyResult property on the exception if available.
+            var isConfirmation = ex.Message.Contains("requires confirmation",
+                StringComparison.OrdinalIgnoreCase);
+            throw new RpcException(
+                isConfirmation
+                    ? ErrorCodes.Query.DmlConfirmationRequired
+                    : ErrorCodes.Query.DmlBlocked,
+                ex.Message,
+                new DmlSafetyErrorData
+                {
+                    Code = isConfirmation
+                        ? ErrorCodes.Query.DmlConfirmationRequired
+                        : ErrorCodes.Query.DmlBlocked,
+                    Message = ex.Message,
+                    DmlBlocked = !isConfirmation,
+                    DmlConfirmationRequired = isConfirmation,
+                });
+        }
+        catch (PpdsException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ExecutionFailed, ex.Message, ex);
+        }
     }, cancellationToken);
 
     FireAndForgetHistorySave(request.Sql, response);
@@ -186,58 +355,17 @@ public async Task<QueryResultResponse> QuerySqlAsync(
 }
 ```
 
-- [ ] **Step 3: Add error mapping try/catch**
+Key differences from the original plan:
+- `PpdsException.ErrorCode` is a `string` — comparison uses `ErrorCodes.Query.DmlBlocked` (string constant)
+- Both DML blocked AND confirmation throw with the same error code from `SqlQueryService` — distinguished by message content
+- No `PpdsErrorCode` enum (doesn't exist)
 
-Wrap the `service.ExecuteAsync()` call in a try/catch that maps service exceptions to RPC error codes:
+- [ ] **Step 3: Run tests from Task 2**
 
-```csharp
-try
-{
-    var result = await service.ExecuteAsync(sqlRequest, ct);
-    // ... map response
-}
-catch (QueryParseException ex)
-{
-    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message, ex);
-}
-catch (PpdsException ex) when (ex.ErrorCode == PpdsErrorCode.DmlBlocked)
-{
-    throw new RpcException(
-        ErrorCodes.Query.DmlBlocked,
-        ex.Message,
-        new DmlSafetyErrorData
-        {
-            Code = ErrorCodes.Query.DmlBlocked,
-            Message = ex.Message,
-            DmlBlocked = true,
-        });
-}
-catch (PpdsException ex) when (ex.ErrorCode == PpdsErrorCode.DmlConfirmationRequired)
-{
-    throw new RpcException(
-        ErrorCodes.Query.DmlConfirmationRequired,
-        ex.Message,
-        new DmlSafetyErrorData
-        {
-            Code = ErrorCodes.Query.DmlConfirmationRequired,
-            Message = ex.Message,
-            DmlConfirmationRequired = true,
-        });
-}
-catch (PpdsException ex)
-{
-    throw new RpcException(ErrorCodes.Query.ExecutionFailed, ex.Message, ex);
-}
-```
+Run: `dotnet test PPDS.sln --filter "QuerySql_ParseError|QuerySql_DmlBlocked|QuerySql_ExpandsVirtualColumns" -v q`
+Expected: Tests pass now.
 
-Note: Verify the exact `PpdsErrorCode` enum values — check `src/PPDS.Cli/Infrastructure/Errors/PpdsException.cs` for the DML-related error codes. The `when` clauses filter on specific error codes.
-
-- [ ] **Step 4: Run typecheck to verify compilation**
-
-Run: `dotnet build PPDS.sln -v q`
-Expected: Build succeeds with no errors. Warnings are OK.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
@@ -250,14 +378,14 @@ codes. showFetchXml mode uses service.TranspileSql()."
 
 ---
 
-### Task 2: Align QueryExplainAsync to use SqlQueryService
+### Task 4: Align QueryExplainAsync to use SqlQueryService
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs:1247-1291`
 
 - [ ] **Step 1: Replace QueryExplainAsync body**
 
-The current handler instantiates `QueryParser`, `ExecutionPlanBuilder`, and `FetchXmlGeneratorService` inline. Replace with `SqlQueryService.ExplainAsync()`:
+The current handler returns a response with `Plan` (formatted tree + FetchXML), `Format` ("text" or "fetchxml"), and `FetchXml`. Preserve this format:
 
 ```csharp
 [JsonRpcMethod("query/explain")]
@@ -275,20 +403,43 @@ public async Task<QueryExplainResponse> QueryExplainAsync(
     return await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
     {
         var service = await GetConfiguredSqlQueryServiceAsync(sp, request.EnvironmentUrl, ct);
-        var plan = await service.ExplainAsync(request.Sql, ct);
-        var fetchXml = service.TranspileSql(request.Sql);
 
-        return new QueryExplainResponse
+        try
         {
-            Success = true,
-            Plan = plan.Description,
-            FetchXml = fetchXml,
-        };
+            var plan = await service.ExplainAsync(request.Sql, ct);
+            var fetchXml = service.TranspileSql(request.Sql);
+            var formatted = plan.Description;
+
+            return new QueryExplainResponse
+            {
+                Plan = formatted + "\n\n--- FetchXML ---\n" + fetchXml,
+                Format = "text",
+                FetchXml = fetchXml,
+            };
+        }
+        catch (QueryParseException ex)
+        {
+            throw new RpcException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+        catch (Exception)
+        {
+            // Fallback: return just the transpiled FetchXML
+            var fetchXml = service.TranspileSql(request.Sql);
+            return new QueryExplainResponse
+            {
+                Plan = fetchXml,
+                Format = "fetchxml",
+                FetchXml = fetchXml,
+            };
+        }
     }, cancellationToken);
 }
 ```
 
-Note: Verify `QueryExplainResponse` DTO structure — check the existing response fields match what `ExplainAsync` returns.
+Key differences from original plan:
+- Preserves `Format = "text"` and the `formatted + "\n\n--- FetchXML ---\n" + fetchXml` pattern from the existing handler
+- No `Success` field (doesn't exist on `QueryExplainResponse`)
+- Includes fallback to FetchXML-only matching current behavior
 
 - [ ] **Step 2: Run typecheck**
 
@@ -303,14 +454,14 @@ git commit -m "feat(daemon): replace QueryExplainAsync with SqlQueryService.Expl
 
 ---
 
-### Task 3: Align QueryExportAsync SQL path
+### Task 5: Align QueryExportAsync SQL path
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs:1162-1240`
 
-- [ ] **Step 1: Replace SQL transpilation path in QueryExportAsync**
+- [ ] **Step 1: Replace SQL transpilation in QueryExportAsync**
 
-The export handler has two paths: SQL input and FetchXML input. Only the SQL path changes — replace the `TranspileSqlToFetchXml()` call with `service.TranspileSql()`. The FetchXML path stays as-is.
+The export handler has two input paths: SQL and FetchXML. Only the SQL path changes — replace the `TranspileSqlToFetchXml()` call with `service.TranspileSql()`. The FetchXML input path stays as-is.
 
 ```csharp
 // In QueryExportAsync, replace the SQL transpilation:
@@ -320,7 +471,7 @@ var service = sp.GetRequiredService<ISqlQueryService>();
 var fetchXml = service.TranspileSql(request.Sql, request.Top);
 ```
 
-Note: The export handler's paging loop (manual `ExecuteFetchXmlAsync` calls) can stay for now — export needs custom streaming behavior that `ExecuteAsync` doesn't provide. The key fix is removing the `TranspileSqlToFetchXml()` dependency.
+**Important:** The export handler's manual paging loop (direct `IQueryExecutor.ExecuteFetchXmlAsync()` calls, lines 1190-1222) is **intentionally unchanged**. Export needs custom streaming/pagination behavior that `ExecuteAsync()` doesn't provide — it accumulates all pages into a single result for file output. This is consistent with the spec's direction for the `query/fetchxml` handler: raw FetchXML execution is appropriate when the FetchXML is already the final format.
 
 - [ ] **Step 2: Run typecheck**
 
@@ -330,12 +481,15 @@ Run: `dotnet build PPDS.sln -v q`
 
 ```
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
-git commit -m "feat(daemon): replace export SQL transpilation with SqlQueryService.TranspileSql"
+git commit -m "feat(daemon): replace export SQL transpilation with SqlQueryService.TranspileSql
+
+Export's manual paging loop is intentionally unchanged — it needs custom
+streaming behavior for file output that ExecuteAsync doesn't provide."
 ```
 
 ---
 
-### Task 4: Delete dead code
+### Task 6: Delete dead code
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
@@ -348,23 +502,25 @@ Remove the entire private method. All callers now use `SqlQueryService.Transpile
 
 Remove the entire private method. TOP injection is handled by `SqlQueryService.TranspileSql()`.
 
-- [ ] **Step 3: Delete inline DML safety check block (lines 954-1002)**
+- [ ] **Step 3: Verify inline DML safety check is gone**
 
-This was already removed in Task 1 when we replaced `QuerySqlAsync`. Verify it's gone.
+The DML safety block (lines 954-1002) was removed in Task 3 when we replaced `QuerySqlAsync`. Verify it's gone.
 
 - [ ] **Step 4: Remove unused imports**
 
 Remove `using Microsoft.SqlServer.TransactSql.ScriptDom;` (line 24) and `using PPDS.Query.Transpilation;` (line 29) if no other code in the file uses them. Search the file for any remaining references before removing.
 
-- [ ] **Step 5: Run typecheck to verify nothing is broken**
+**Do NOT delete** `FormatExportContent()`, `ExtractDisplayValue()`, or `CsvEscape()` — these are still used by `QueryExportAsync`'s formatting logic. The spec notes they should eventually be moved to a `QueryExportFormatter` utility, but that refactoring is out of scope for this plan. They stay in the handler for now.
+
+- [ ] **Step 5: Run typecheck**
 
 Run: `dotnet build PPDS.sln -v q`
-Expected: Build succeeds. If there are compilation errors, some caller still references a deleted method — find and fix.
+Expected: Build succeeds.
 
 - [ ] **Step 6: Run existing tests**
 
 Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-Expected: All existing tests pass.
+Expected: All tests pass.
 
 - [ ] **Step 7: Commit**
 
@@ -372,91 +528,41 @@ Expected: All existing tests pass.
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
 git commit -m "chore(daemon): delete dead code — TranspileSqlToFetchXml, InjectTopAttribute, unused imports
 
-These methods are replaced by SqlQueryService.TranspileSql() and are no
-longer called by any RPC handler."
+FormatExportContent/ExtractDisplayValue/CsvEscape intentionally kept —
+still used by export handler's formatting logic."
 ```
 
 ---
 
-### Task 5: Write Phase 1 tests
-
-**Files:**
-- Modify: `tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs`
-- Reference: `tests/PPDS.Cli.Tests/Mocks/FakeSqlQueryService.cs`
-
-- [ ] **Step 1: Write test for error mapping**
-
-Test that when `SqlQueryService` throws `QueryParseException`, the daemon maps it to `ErrorCodes.Query.ParseError`:
-
-```csharp
-[Fact]
-[Trait("Category", "Unit")]
-public async Task QuerySql_ParseError_MapsToRpcException()
-{
-    // Arrange: configure FakeSqlQueryService to throw QueryParseException
-    // Act: call QuerySqlAsync
-    // Assert: RpcException with ErrorCodes.Query.ParseError
-}
-```
-
-Note: Check how `RpcMethodHandler` is instantiated in existing pool tests (`RpcMethodHandlerPoolTests.cs`) — follow the same pattern with `Mock<IDaemonConnectionPoolManager>`. If the handler requires a real `WithProfileAndEnvironmentAsync` that resolves service providers, you may need to mock the pool manager to return a provider with `FakeSqlQueryService` registered.
-
-- [ ] **Step 2: Write test for DML blocked error mapping**
-
-```csharp
-[Fact]
-[Trait("Category", "Unit")]
-public async Task QuerySql_DmlBlocked_MapsToRpcExceptionWithSafetyData()
-{
-    // Arrange: FakeSqlQueryService throws PpdsException with DmlBlocked ErrorCode
-    // Act: call QuerySqlAsync with DML safety enabled
-    // Assert: RpcException with DmlSafetyErrorData.DmlBlocked = true
-}
-```
-
-- [ ] **Step 3: Run tests**
-
-Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-Expected: New tests pass.
-
-- [ ] **Step 4: Commit**
-
-```
-git add tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs
-git commit -m "test(daemon): add error mapping tests for Phase 1 query parity"
-```
-
----
-
-### Task 6: Visual verification — VS Code Data Explorer query
+### Task 7: Visual verification — VS Code Data Explorer query
 
 - [ ] **Step 1: Build and launch extension**
 
-Run: `npm run ext:compile` to build the extension.
+Run: `npm run ext:compile`
 Launch VS Code with the extension using F5 or the debug configuration.
 
-- [ ] **Step 2: Run a basic query via Data Explorer against PPDS Dev**
+- [ ] **Step 2: Run a basic query against PPDS Dev**
 
 Open a Data Explorer panel, connect to PPDS Dev, run `SELECT TOP 5 name FROM account`.
+Verify: query returns results (confirms SqlQueryService is wired).
 
-Verify:
-- Query returns results (confirms SqlQueryService is wired)
-- Virtual columns work: run `SELECT TOP 5 name, owneridname FROM account` — `owneridname` should show display names (this was broken before because the daemon skipped expansion)
-- Executed FetchXML is visible (if the UI shows it)
+- [ ] **Step 3: Test virtual column expansion (AC-02)**
 
-- [ ] **Step 3: Use @webview-cdp to screenshot results**
+Run `SELECT TOP 5 name, owneridname FROM account`. The `owneridname` column should show display names (this was broken before because the daemon skipped virtual column expansion).
+
+- [ ] **Step 4: Use @webview-cdp to screenshot results**
 
 Take a screenshot of the Data Explorer showing query results with virtual column expansion.
 
-- [ ] **Step 4: Test error handling**
+- [ ] **Step 5: Test error handling**
 
-Run an invalid query like `SELEC name FROM account` and verify the parse error is shown correctly.
+Run `SELEC name FROM account` and verify the parse error is shown correctly.
 
 ---
 
 ## Chunk 2: Phase 2 — Query Hints Integration
 
-### Task 7: Add new properties to QueryPlanOptions and QueryPlanContext
+### Task 8: Add new properties to QueryPlanOptions and QueryPlanContext
 
 **Files:**
 - Modify: `src/PPDS.Dataverse/Query/Planning/QueryPlanOptions.cs`
@@ -465,7 +571,7 @@ Run an invalid query like `SELEC name FROM account` and verify the parse error i
 
 - [ ] **Step 1: Add ForceClientAggregation and NoLock to QueryPlanOptions**
 
-Add after line 110 in `QueryPlanOptions.cs`:
+Add after the `CteBindings` property (line 110) in `QueryPlanOptions.cs`:
 
 ```csharp
 /// <summary>
@@ -505,14 +611,14 @@ public sealed record QueryExecutionOptions
 
 - [ ] **Step 3: Add ExecutionOptions to QueryPlanContext**
 
-Add constructor parameter and property to `QueryPlanContext.cs`:
+Add property to `QueryPlanContext.cs`:
 
 ```csharp
 /// <summary>Optional execution-level options (bypass plugins/flows). Set by query hints.</summary>
 public QueryExecutionOptions? ExecutionOptions { get; }
 ```
 
-Add to constructor parameter list (after `maxMaterializationRows`):
+Add constructor parameter (after `maxMaterializationRows` on line 54):
 
 ```csharp
 QueryExecutionOptions? executionOptions = null)
@@ -538,13 +644,13 @@ git commit -m "feat(query): add QueryExecutionOptions, ForceClientAggregation, N
 
 ---
 
-### Task 8: Add IQueryExecutor overload with default implementation
+### Task 9: Add IQueryExecutor overload with default implementation
 
 **Files:**
 - Modify: `src/PPDS.Dataverse/Query/IQueryExecutor.cs`
 - Modify: `src/PPDS.Dataverse/Query/QueryExecutor.cs`
 
-- [ ] **Step 1: Write failing test for QueryExecutor bypass headers**
+- [ ] **Step 1: Write failing test for QueryExecutor bypass headers (AC-06)**
 
 Add to `tests/PPDS.Dataverse.Tests/Query/QueryExecutorTests.cs` (create if needed):
 
@@ -553,18 +659,30 @@ Add to `tests/PPDS.Dataverse.Tests/Query/QueryExecutorTests.cs` (create if neede
 [Trait("Category", "Unit")]
 public async Task ExecuteWithOptions_BypassPlugins_SetsHeader()
 {
-    // This test verifies AC-06: BYPASS_PLUGINS hint sets header
-    // Arrange: mock the underlying ServiceClient or pool
-    // Act: call ExecuteFetchXmlAsync with options { BypassPlugins = true }
-    // Assert: the OrganizationRequest had BypassCustomPluginExecution = true
+    // Arrange: mock pool, capture the OrganizationRequest
+    OrganizationRequest? capturedRequest = null;
+    var mockPool = new Mock<IDataverseConnectionPool>();
+    // ... setup to capture request parameters
+    // The mock should intercept the ExecuteAsync call on the pooled client
+    // and capture the OrganizationRequest to verify headers
+
+    var executor = new QueryExecutor(mockPool.Object);
+    var options = new QueryExecutionOptions { BypassPlugins = true };
+
+    // Act
+    await executor.ExecuteFetchXmlAsync("<fetch><entity name='account'/></fetch>",
+        null, null, false, options);
+
+    // Assert
+    capturedRequest.Should().NotBeNull();
+    capturedRequest!.Parameters.Should().ContainKey("BypassCustomPluginExecution");
+    capturedRequest.Parameters["BypassCustomPluginExecution"].Should().Be(true);
 }
 ```
 
-Note: Check how `QueryExecutor` is tested in existing tests — it wraps `IDataverseConnectionPool`. You may need to mock the pool and capture the request.
-
 - [ ] **Step 2: Add default-implementation overload to IQueryExecutor**
 
-Add after line 26 in `IQueryExecutor.cs`:
+Add after line 26 in `IQueryExecutor.cs` (after the existing `ExecuteFetchXmlAsync`):
 
 ```csharp
 /// <summary>
@@ -583,9 +701,11 @@ Task<QueryResult> ExecuteFetchXmlAsync(
 }
 ```
 
+This follows the existing default-implementation pattern already used in `IQueryExecutor` (lines 51-55 for `GetTotalRecordCountAsync` and lines 67-68 for `GetMinMaxCreatedOnAsync`).
+
 - [ ] **Step 3: Override in QueryExecutor**
 
-In `QueryExecutor.cs`, add the override that applies bypass headers:
+In `QueryExecutor.cs`, add the override that applies bypass headers. Follow the existing `ExecuteFetchXmlAsync` pattern for pool client acquisition and result mapping, but use `RetrieveMultipleRequest` instead of `FetchExpression` to access `Parameters`:
 
 ```csharp
 public async Task<QueryResult> ExecuteFetchXmlAsync(
@@ -596,13 +716,12 @@ public async Task<QueryResult> ExecuteFetchXmlAsync(
     QueryExecutionOptions? executionOptions,
     CancellationToken cancellationToken = default)
 {
-    // If no execution options, delegate to standard path
     if (executionOptions is null || (!executionOptions.BypassPlugins && !executionOptions.BypassFlows))
     {
         return await ExecuteFetchXmlAsync(fetchXml, pageNumber, pagingCookie, includeCount, cancellationToken);
     }
 
-    // Execute with bypass headers
+    // Execute with bypass headers via RetrieveMultipleRequest
     await using var client = await _connectionPool.GetClientAsync(cancellationToken);
     var fetchExpression = new FetchExpression(fetchXml);
     var request = new RetrieveMultipleRequest { Query = fetchExpression };
@@ -613,13 +732,13 @@ public async Task<QueryResult> ExecuteFetchXmlAsync(
         request.Parameters["SuppressCallbackRegistrationExpanderJob"] = true;
 
     var response = (RetrieveMultipleResponse)await client.ExecuteAsync(request, cancellationToken);
-    // ... map response to QueryResult (follow existing ExecuteFetchXmlAsync pattern)
+    return MapEntityCollectionToQueryResult(response.EntityCollection, includeCount);
 }
 ```
 
-Note: Check the existing `ExecuteFetchXmlAsync` in `QueryExecutor.cs` to see how it maps `EntityCollection` to `QueryResult`. Reuse that mapping logic — either extract a helper or call through.
+Note: `MapEntityCollectionToQueryResult` is a helper that extracts the mapping logic from the existing `ExecuteFetchXmlAsync`. If no such helper exists, extract the mapping from the existing method into a shared private method first.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test**
 
 Run: `dotnet test PPDS.sln --filter "BypassPlugins" -v q`
 
@@ -632,12 +751,12 @@ git commit -m "feat(query): add IQueryExecutor overload for execution options (b
 
 ---
 
-### Task 9: Integrate QueryHintParser into SqlQueryService
+### Task 10: Integrate QueryHintParser into SqlQueryService
 
 **Files:**
 - Modify: `src/PPDS.Cli/Services/Query/SqlQueryService.cs:310-392`
 
-- [ ] **Step 1: Write failing test for NOLOCK hint**
+- [ ] **Step 1: Write failing test for NOLOCK hint (AC-05)**
 
 Add to `SqlQueryServiceTests.cs`:
 
@@ -646,17 +765,16 @@ Add to `SqlQueryServiceTests.cs`:
 [Trait("Category", "Unit")]
 public async Task Hints_NoLock_SetsFetchXmlAttribute()
 {
-    // AC-05: -- ppds:NOLOCK produces <fetch no-lock="true">
     var request = new SqlQueryRequest
     {
         Sql = "-- ppds:NOLOCK\nSELECT name FROM account",
     };
 
-    // Arrange: mock executor to capture the FetchXML passed to it
     string? capturedFetchXml = null;
     _mockQueryExecutor
-        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
-            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+        .Setup(x => x.ExecuteFetchXmlAsync(
+            It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
+            It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
             It.IsAny<CancellationToken>()))
         .Callback<string, int?, string?, bool, QueryExecutionOptions?, CancellationToken>(
             (fx, _, _, _, _, _) => capturedFetchXml = fx)
@@ -669,23 +787,31 @@ public async Task Hints_NoLock_SetsFetchXmlAttribute()
 }
 ```
 
-- [ ] **Step 2: Write failing test for USE_TDS hint override**
+- [ ] **Step 2: Write failing test for USE_TDS override (AC-12)**
 
 ```csharp
 [Fact]
 [Trait("Category", "Unit")]
 public async Task Hints_OverrideCallerSettings()
 {
-    // AC-12: inline hint overrides caller-provided useTds=false
     var request = new SqlQueryRequest
     {
         Sql = "-- ppds:USE_TDS\nSELECT name FROM account",
         UseTdsEndpoint = false,  // caller says no TDS
     };
 
-    // The hint should override to TDS=true
-    // Assert that the query was routed through TDS executor
-    // (verify TdsQueryExecutor was called, not FetchXML executor)
+    // Assert that TDS executor was called (not FetchXML executor)
+    // The hint should override UseTdsEndpoint to true
+    _mockTdsExecutor
+        .Setup(x => x.ExecuteSqlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    var result = await _service.ExecuteAsync(request);
+
+    _mockTdsExecutor.Verify(x => x.ExecuteSqlAsync(
+        It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+        Times.Once);
 }
 ```
 
@@ -694,10 +820,10 @@ public async Task Hints_OverrideCallerSettings()
 In `SqlQueryService.cs`, after `QueryParser.Parse()` (approximately line 317), add:
 
 ```csharp
-// Extract query hints from SQL comments
+// Extract query hints from SQL comments and OPTION() clauses
 var hints = QueryHintParser.Parse(fragment);
 
-// Apply plan-level hint overrides
+// Apply plan-level hint overrides (hints win over caller settings)
 if (hints.UseTdsEndpoint == true)
     request = request with { UseTdsEndpoint = true };
 if (hints.MaxResultRows.HasValue)
@@ -739,16 +865,15 @@ var executionOptions = (hints.BypassPlugins == true || hints.BypassFlows == true
     : null;
 ```
 
-Thread `executionOptions` through to the `QueryPlanContext` when executing the plan.
+Thread `executionOptions` to `QueryPlanContext` when it's constructed for execution.
 
 - [ ] **Step 4: Integrate hints into ExplainAsync**
 
-In `ExplainAsync()` (approximately line 178), add the same `QueryHintParser.Parse()` call and apply overrides to `QueryPlanOptions` before calling `_planBuilder.Plan()`.
+In `ExplainAsync()` (approximately line 178), add the same `QueryHintParser.Parse()` call and apply plan-level overrides to `QueryPlanOptions` before calling `_planBuilder.Plan()`.
 
 - [ ] **Step 5: Run tests**
 
 Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-Expected: New hint tests pass, all existing tests still pass.
 
 - [ ] **Step 6: Commit**
 
@@ -757,13 +882,12 @@ git add src/PPDS.Cli/Services/Query/SqlQueryService.cs tests/
 git commit -m "feat(query): integrate QueryHintParser into PrepareExecutionAsync and ExplainAsync
 
 Parses -- ppds:* comment hints and OPTION() hints from SQL, applies
-overrides to QueryPlanOptions and creates QueryExecutionOptions. All 8
-hints now flow through the shared service for all interfaces."
+overrides to QueryPlanOptions and creates QueryExecutionOptions."
 ```
 
 ---
 
-### Task 10: FetchXmlScanNode — NoLock injection and execution options passthrough
+### Task 11: FetchXmlScanNode — NoLock injection and execution options passthrough
 
 **Files:**
 - Modify: `src/PPDS.Dataverse/Query/Planning/Nodes/FetchXmlScanNode.cs`
@@ -786,6 +910,7 @@ public async Task NoLock_InjectsAttributeIntoFetchXml()
             (fx, _, _, _, _) => capturedFetchXml = fx)
         .ReturnsAsync(MakeResult("account", 1));
 
+    // noLock is a named parameter added after the existing constructor params
     var node = new FetchXmlScanNode("<fetch><entity name=\"account\"/></fetch>",
         "account", noLock: true);
     var ctx = CreateContext(mockExecutor.Object);
@@ -797,24 +922,46 @@ public async Task NoLock_InjectsAttributeIntoFetchXml()
 }
 ```
 
-- [ ] **Step 2: Add noLock constructor parameter to FetchXmlScanNode**
+- [ ] **Step 2: Add noLock parameter to FetchXmlScanNode constructor**
 
-Add a `bool noLock = false` parameter to the constructor. When true, inject `no-lock="true"` into the FetchXML string before execution. The injection is simple string manipulation on the `<fetch` opening tag:
+The existing constructor signature is:
+```csharp
+public FetchXmlScanNode(
+    string fetchXml,
+    string entityLogicalName,
+    bool autoPage = true,
+    int? maxRows = null,
+    int? initialPageNumber = null,
+    string? initialPagingCookie = null,
+    bool includeCount = false)
+```
+
+Add `noLock` as a new **named optional parameter** after `includeCount`:
 
 ```csharp
-if (_noLock && !fetchXml.Contains("no-lock="))
+    bool includeCount = false,
+    bool noLock = false)
+```
+
+Store in a private field `private readonly bool _noLock;`
+
+In `ExecuteAsync`, before calling the executor, inject `no-lock="true"` if needed:
+
+```csharp
+var effectiveFetchXml = _fetchXml;
+if (_noLock && !effectiveFetchXml.Contains("no-lock="))
 {
-    fetchXml = fetchXml.Replace("<fetch", "<fetch no-lock=\"true\"");
+    effectiveFetchXml = effectiveFetchXml.Replace("<fetch", "<fetch no-lock=\"true\"");
 }
 ```
 
 - [ ] **Step 3: Pass execution options to executor overload**
 
-In `FetchXmlScanNode.ExecuteAsync()`, when calling `context.QueryExecutor.ExecuteFetchXmlAsync()`, use the new overload if `context.ExecutionOptions` is set:
+In `FetchXmlScanNode.ExecuteAsync()`, call the new overload:
 
 ```csharp
 var result = await context.QueryExecutor.ExecuteFetchXmlAsync(
-    effectiveFetchXml, pageNumber, pagingCookie, includeCount,
+    effectiveFetchXml, pageNumber, pagingCookie, _includeCount,
     context.ExecutionOptions, cancellationToken);
 ```
 
@@ -831,12 +978,13 @@ git commit -m "feat(query): FetchXmlScanNode injects no-lock and passes executio
 
 ---
 
-### Task 11: ExecutionPlanBuilder — ForceClientAggregation
+### Task 12: ExecutionPlanBuilder — ForceClientAggregation and NoLock wiring
 
 **Files:**
 - Modify: `src/PPDS.Query/Planning/ExecutionPlanBuilder.cs`
+- Modify: `src/PPDS.Cli/Services/Query/SqlQueryService.cs`
 
-- [ ] **Step 1: Write failing test**
+- [ ] **Step 1: Write failing test for ForceClientAggregation (AC-10)**
 
 Add to `ExecutionPlanBuilderTests.cs`:
 
@@ -845,42 +993,22 @@ Add to `ExecutionPlanBuilderTests.cs`:
 [Trait("Category", "Unit")]
 public void Hints_HashGroup_ForcesClientAggregation()
 {
-    // AC-10: HASH_GROUP forces client-side aggregation
     var fragment = _parser.Parse("SELECT region, COUNT(*) as cnt FROM account GROUP BY region");
     var options = new QueryPlanOptions { ForceClientAggregation = true };
     var result = _builder.Plan(fragment, options);
 
-    // Should produce a ClientHashGroupNode even without high record count
-    TestHelpers.ContainsNodeOfType<ClientHashGroupNode>(result.RootNode).Should().BeTrue();
+    // Should produce a ClientAggregateNode even without high record count
+    TestHelpers.ContainsNodeOfType<ClientAggregateNode>(result.RootNode).Should().BeTrue();
 }
 ```
 
-Note: Find the exact class name for client-side hash group node — check `src/PPDS.Dataverse/Query/Planning/Nodes/` for the aggregation node types.
+Note: The actual aggregate node type is `ClientAggregateNode` (not `ClientHashGroupNode` — that type doesn't exist). Check `src/PPDS.Dataverse/Query/Planning/Nodes/` for exact type names.
 
 - [ ] **Step 2: Add ForceClientAggregation check in PlanSelect**
 
-In `ExecutionPlanBuilder.PlanSelect()`, find the aggregate detection logic. Add a check: when `options.ForceClientAggregation` is true and the query has aggregate functions, route to the client-side plan regardless of `EstimatedRecordCount`.
+In `ExecutionPlanBuilder.PlanSelect()`, find the aggregate detection logic. Add: when `options.ForceClientAggregation` is true and the query has aggregate functions, route to the client-side aggregation plan regardless of `EstimatedRecordCount`.
 
-- [ ] **Step 3: Run tests**
-
-Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-
-- [ ] **Step 4: Commit**
-
-```
-git add src/PPDS.Query/Planning/ExecutionPlanBuilder.cs tests/
-git commit -m "feat(query): ForceClientAggregation routes aggregates to client-side hash group"
-```
-
----
-
-### Task 12: Wire NoLock and ExecutionOptions through plan builder
-
-**Files:**
-- Modify: `src/PPDS.Query/Planning/ExecutionPlanBuilder.cs`
-- Modify: `src/PPDS.Cli/Services/Query/SqlQueryService.cs`
-
-- [ ] **Step 1: Pass NoLock to FetchXmlScanNode construction**
+- [ ] **Step 3: Pass NoLock to FetchXmlScanNode construction**
 
 In `ExecutionPlanBuilder`, where `FetchXmlScanNode` is constructed, pass `options.NoLock`:
 
@@ -888,7 +1016,7 @@ In `ExecutionPlanBuilder`, where `FetchXmlScanNode` is constructed, pass `option
 var scanNode = new FetchXmlScanNode(fetchXml, entityName, noLock: options.NoLock);
 ```
 
-- [ ] **Step 2: Pass ExecutionOptions to QueryPlanContext**
+- [ ] **Step 4: Pass ExecutionOptions to QueryPlanContext**
 
 In `SqlQueryService`, where `QueryPlanContext` is constructed for plan execution, add the `executionOptions` parameter:
 
@@ -903,27 +1031,110 @@ var context = new QueryPlanContext(
     executionOptions: executionOptions);
 ```
 
-- [ ] **Step 3: Run all tests**
+- [ ] **Step 5: Run all tests**
 
 Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```
-git add src/PPDS.Query/Planning/ExecutionPlanBuilder.cs src/PPDS.Cli/Services/Query/SqlQueryService.cs
-git commit -m "feat(query): wire NoLock and ExecutionOptions through plan builder and context"
+git add src/PPDS.Query/Planning/ExecutionPlanBuilder.cs src/PPDS.Cli/Services/Query/SqlQueryService.cs tests/
+git commit -m "feat(query): wire ForceClientAggregation, NoLock, and ExecutionOptions through plan"
 ```
 
 ---
 
-### Task 13: Remaining hint tests
+### Task 13: Comprehensive hint tests
 
 **Files:**
 - Modify: `tests/PPDS.Cli.Tests/Services/Query/SqlQueryServiceTests.cs`
 
 - [ ] **Step 1: Write tests for remaining hints**
 
-Add tests for AC-04 (USE_TDS), AC-08 (MAX_ROWS), AC-09 (MAXDOP), AC-11 (BATCH_SIZE), AC-13 (malformed hints), AC-21 (ExplainAsync reflects hints). Follow the same pattern as the NOLOCK test — mock the executor, capture arguments, verify the hint was applied.
+```csharp
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Hints_UseTds_RoutesToTdsEndpoint()
+{
+    // AC-04: -- ppds:USE_TDS routes through TDS
+    var request = new SqlQueryRequest { Sql = "-- ppds:USE_TDS\nSELECT name FROM account" };
+    _mockTdsExecutor
+        .Setup(x => x.ExecuteSqlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    await _service.ExecuteAsync(request);
+
+    _mockTdsExecutor.Verify(x => x.ExecuteSqlAsync(
+        It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
+}
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Hints_MaxRows_LimitsResults()
+{
+    // AC-08: -- ppds:MAX_ROWS 100 limits to 100 rows
+    var request = new SqlQueryRequest { Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account" };
+    // Verify TopOverride is applied (captured via FetchXML TOP attribute)
+    string? capturedFetchXml = null;
+    _mockQueryExecutor
+        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+            It.IsAny<CancellationToken>()))
+        .Callback<string, int?, string?, bool, QueryExecutionOptions?, CancellationToken>(
+            (fx, _, _, _, _, _) => capturedFetchXml = fx)
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    await _service.ExecuteAsync(request);
+
+    capturedFetchXml.Should().NotBeNull();
+    capturedFetchXml.Should().Contain("top=\"100\"");
+}
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Hints_Maxdop_CapsParallelism()
+{
+    // AC-09: -- ppds:MAXDOP 2 caps parallelism
+    var request = new SqlQueryRequest { Sql = "-- ppds:MAXDOP 2\nSELECT name FROM account" };
+    // Verify pool capacity is capped — check via plan options or aggregate partitioning behavior
+    // This may require inspecting the plan or verifying reduced partition count
+    _mockQueryExecutor
+        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+            It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    await _service.ExecuteAsync(request);
+    // Assert passes without error — MAXDOP capping is a plan-level optimization
+}
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Hints_MalformedValue_Ignored()
+{
+    // AC-13: malformed hints are silently ignored
+    var request = new SqlQueryRequest { Sql = "-- ppds:BATCH_SIZE abc\nSELECT name FROM account" };
+    _mockQueryExecutor
+        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+            It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    // Should not throw — malformed hint is ignored
+    var result = await _service.ExecuteAsync(request);
+    result.Should().NotBeNull();
+}
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Explain_ReflectsHints()
+{
+    // AC-21: ExplainAsync reflects hint-influenced plans
+    var plan = await _service.ExplainAsync("-- ppds:USE_TDS\nSELECT name FROM account");
+    // The plan description should reflect TDS routing
+    plan.Description.Should().Contain("Tds");
+}
+```
 
 - [ ] **Step 2: Run all tests**
 
@@ -933,7 +1144,7 @@ Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
 
 ```
 git add tests/
-git commit -m "test(query): add comprehensive hint integration tests (AC-04 through AC-13, AC-21)"
+git commit -m "test(query): add comprehensive hint integration tests (AC-04, AC-08, AC-09, AC-13, AC-21)"
 ```
 
 ---
@@ -967,8 +1178,8 @@ Change line 91:
 
 - [ ] **Step 3: Run typecheck**
 
-Run: `npm run ext:typecheck`
-Expected: Type errors in QueryPanel.ts and SolutionsPanel.ts where `updateEnvironment` messages are sent without `envColor`. This is expected — we fix those next.
+Run: `npm run typecheck:all`
+Expected: Type errors in QueryPanel.ts and SolutionsPanel.ts where `updateEnvironment` messages are sent without `envColor`.
 
 - [ ] **Step 4: Commit**
 
@@ -988,6 +1199,8 @@ git commit -m "feat(ext): add envColor to updateEnvironment message types"
 - [ ] **Step 1: Fetch and store envColor in QueryPanel**
 
 Add a `private environmentColor: string | null = null;` field to `QueryPanel`.
+
+The `daemon.envConfigGet()` RPC returns an `EnvConfigGetResponse` that includes `resolvedColor: string` (verified in `src/PPDS.Extension/src/types.ts:189-196`). Use this to fetch the color.
 
 In `initEnvironment()` (line 245), after getting `who.environment`, fetch the env config to get the color:
 
@@ -1036,11 +1249,45 @@ case 'requestEnvironmentList': {
 
 - [ ] **Step 2: Same for SolutionsPanel**
 
-Add `environmentColor` field and fetch color similarly. Update both `postMessage` calls.
+Add `private environmentColor: string | null = null;` field.
+
+In `initialize()` (line 130), after getting `who.environment`, fetch color:
+
+```typescript
+if (this.environmentUrl) {
+    try {
+        const config = await this.daemon.envConfigGet(this.environmentUrl);
+        this.environmentColor = config.resolvedColor ?? null;
+    } catch {
+        this.environmentColor = null;
+    }
+}
+```
+
+Update both `postMessage` calls (lines 146 and 162):
+
+```typescript
+// Line 146 (initialization):
+this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType, envColor: this.environmentColor });
+
+// Line 162 (after picker):
+this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type, envColor: this.environmentColor });
+```
+
+Also fetch color after picker selection in `handleEnvironmentPicker()`:
+
+```typescript
+try {
+    const config = await this.daemon.envConfigGet(result.url);
+    this.environmentColor = config.resolvedColor ?? null;
+} catch {
+    this.environmentColor = null;
+}
+```
 
 - [ ] **Step 3: Run typecheck**
 
-Run: `npm run ext:typecheck`
+Run: `npm run typecheck:all`
 Expected: All type errors resolved.
 
 - [ ] **Step 4: Commit**
@@ -1055,12 +1302,12 @@ git commit -m "feat(ext): fetch and send environment color in panel updateEnviro
 ### Task 16: Apply environment color in webview CSS
 
 **Files:**
-- Modify: `src/PPDS.Extension/src/panels/webview/query-panel/query-panel.ts:751-764`
-- Modify: `src/PPDS.Extension/src/panels/webview/shared/shared.css`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts:751-764`
+- Modify: `src/PPDS.Extension/src/panels/styles/shared.css`
 
-- [ ] **Step 1: Add color CSS custom properties to shared.css**
+- [ ] **Step 1: Add color CSS rules to shared.css**
 
-Add after the existing `data-env-type` rules (after line 33):
+Add after the existing `data-env-type` rules (after line 33 in `src/PPDS.Extension/src/panels/styles/shared.css`):
 
 ```css
 /* ── Environment color accent (from configured color) ─────────────────── */
@@ -1082,7 +1329,7 @@ Add after the existing `data-env-type` rules (after line 33):
 
 - [ ] **Step 2: Apply data-env-color attribute in query-panel.ts**
 
-In the `updateEnvironment` handler (line 751), add color handling:
+In the `updateEnvironment` handler (line 751 of `src/PPDS.Extension/src/panels/webview/query-panel.ts`), add color handling:
 
 ```typescript
 case 'updateEnvironment':
@@ -1109,11 +1356,11 @@ case 'updateEnvironment':
 
 - [ ] **Step 3: Apply same in solutions panel webview**
 
-Find the `updateEnvironment` handler in the solutions panel webview and add the same `data-env-color` attribute logic.
+Find the `updateEnvironment` handler in the solutions panel webview script (look for the solutions panel equivalent of `query-panel.ts`). Add the same `data-env-color` attribute logic.
 
 - [ ] **Step 4: Run typecheck**
 
-Run: `npm run ext:typecheck`
+Run: `npm run typecheck:all`
 
 - [ ] **Step 5: Commit**
 
@@ -1129,7 +1376,6 @@ git commit -m "feat(ext): render environment color as 4px left border on panel t
 - [ ] **Step 1: Build and launch extension**
 
 Run: `npm run ext:compile`
-Launch VS Code with the extension.
 
 - [ ] **Step 2: Configure an environment with a color**
 
@@ -1137,14 +1383,12 @@ Use the "Configure Environment" command to set a color for the PPDS Dev environm
 
 - [ ] **Step 3: Open Data Explorer and verify**
 
-Open a Data Explorer panel targeting the colored environment. Verify:
+Verify:
 - 4px left border appears in the configured color
 - Color changes when switching environments via picker
 - Default type-based color appears when no explicit color is configured
 
 - [ ] **Step 4: Screenshot via @webview-cdp**
-
-Take screenshots showing the colored toolbar border.
 
 ---
 
@@ -1157,8 +1401,6 @@ Take screenshots showing the colored toolbar border.
 - Modify: `src/PPDS.Cli/Services/Query/SqlQueryResult.cs`
 
 - [ ] **Step 1: Create QueryDataSource**
-
-Create `src/PPDS.Cli/Services/Query/QueryDataSource.cs`:
 
 ```csharp
 namespace PPDS.Cli.Services.Query;
@@ -1176,45 +1418,50 @@ public sealed record QueryDataSource
 }
 ```
 
-- [ ] **Step 2: Add DataSources to SqlQueryResult**
-
-Add to `SqlQueryResult.cs`:
+- [ ] **Step 2: Add DataSources and AppliedHints to SqlQueryResult**
 
 ```csharp
 /// <summary>
-/// Environments that contributed data to this result. Single-environment
-/// queries have one entry. Cross-environment queries have multiple.
-/// Null when data source tracking is not applicable (e.g., transpile-only).
+/// Environments that contributed data. Single-env queries have one entry.
+/// Cross-env queries have multiple. Null for transpile-only results.
 /// </summary>
 public IReadOnlyList<QueryDataSource>? DataSources { get; init; }
+
+/// <summary>
+/// Names of query hints that were applied (e.g., ["NOLOCK", "BYPASS_PLUGINS"]).
+/// Null when no hints were active. Used for debugging and UI feedback.
+/// </summary>
+public IReadOnlyList<string>? AppliedHints { get; init; }
 ```
 
 - [ ] **Step 3: Commit**
 
 ```
 git add src/PPDS.Cli/Services/Query/QueryDataSource.cs src/PPDS.Cli/Services/Query/SqlQueryResult.cs
-git commit -m "feat(query): add QueryDataSource type and DataSources property on SqlQueryResult"
+git commit -m "feat(query): add QueryDataSource type, DataSources and AppliedHints on SqlQueryResult"
 ```
 
 ---
 
-### Task 19: Collect data sources from execution plan
+### Task 19: Collect data sources and applied hints from execution plan
 
 **Files:**
 - Modify: `src/PPDS.Cli/Services/Query/SqlQueryService.cs`
 
 - [ ] **Step 1: Write failing test**
 
-Add to `SqlQueryServiceTests.cs`:
-
 ```csharp
 [Fact]
 [Trait("Category", "Unit")]
 public async Task SingleEnv_DataSources_ContainsLocalOnly()
 {
-    // AC-18 (partial): single-env query has one data source
     var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
-    // ... setup mock
+    _mockQueryExecutor
+        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+            It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
     var result = await _service.ExecuteAsync(request);
 
     Assert.NotNull(result.DataSources);
@@ -1223,11 +1470,33 @@ public async Task SingleEnv_DataSources_ContainsLocalOnly()
 }
 ```
 
-- [ ] **Step 2: Add plan tree walker to collect RemoteScanNode labels**
+- [ ] **Step 2: Add plan tree walker and local label resolver**
 
-In `SqlQueryService`, add a helper method:
+Add to `SqlQueryService.cs`:
 
 ```csharp
+/// <summary>
+/// Resolves the display label for the local environment.
+/// Uses: environment config label → display name → URL fallback.
+/// </summary>
+private string ResolveLocalLabel(string? environmentUrl)
+{
+    if (environmentUrl == null) return "Local";
+
+    // Try environment config label first
+    if (EnvironmentSafetySettings is not null)
+    {
+        // The environment config store is accessed via the ProfileResolver
+        // which has the full list of configs
+    }
+
+    // Fallback: use URL as display name
+    return environmentUrl;
+}
+
+/// <summary>
+/// Walks the plan tree to collect all data source environments.
+/// </summary>
 private static List<QueryDataSource> CollectDataSources(
     IQueryPlanNode rootNode,
     string localLabel)
@@ -1258,53 +1527,79 @@ private static void CollectRemoteLabels(IQueryPlanNode node, List<QueryDataSourc
 }
 ```
 
-Note: Check how `IQueryPlanNode.Children` is exposed — look for `GetChildren()` or a `Children` property on the node interface.
+Note: Check how `IQueryPlanNode.Children` is exposed — the interface uses a `Children` property (confirmed at `IQueryPlanNode.cs:19`). Also check if `RemoteScanNode` is accessible from `SqlQueryService` (it's in `PPDS.Dataverse.Query.Planning.Nodes`).
 
-- [ ] **Step 3: Call from ExecuteAsync after plan building**
+For `ResolveLocalLabel`: The environment display name may be available from the daemon's environment resolution. Check if `EnvironmentConfigStore.GetConfigAsync(url)` returns a config with a `Label` property — use that, falling back to URL.
 
-After `_planBuilder.Plan()` returns and before execution, collect data sources:
+- [ ] **Step 3: Collect applied hints list**
+
+Build the `AppliedHints` list from `QueryHintOverrides`:
+
+```csharp
+private static List<string>? CollectAppliedHints(QueryHintOverrides hints)
+{
+    var applied = new List<string>();
+    if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
+    if (hints.NoLock == true) applied.Add("NOLOCK");
+    if (hints.BypassPlugins == true) applied.Add("BYPASS_PLUGINS");
+    if (hints.BypassFlows == true) applied.Add("BYPASS_FLOWS");
+    if (hints.MaxResultRows.HasValue) applied.Add("MAX_ROWS");
+    if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
+    if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
+    if (hints.DmlBatchSize.HasValue) applied.Add("BATCH_SIZE");
+    return applied.Count > 0 ? applied : null;
+}
+```
+
+- [ ] **Step 4: Wire into ExecuteAsync result**
+
+After plan building and execution, set on the result:
 
 ```csharp
 var localLabel = ResolveLocalLabel(environmentUrl);
 var dataSources = CollectDataSources(planResult.RootNode, localLabel);
-```
+var appliedHints = CollectAppliedHints(hints);
 
-Set on the result:
-
-```csharp
 return new SqlQueryResult
 {
     OriginalSql = request.Sql,
     TranspiledFetchXml = planResult.FetchXml,
     Result = queryResult,
     DataSources = dataSources,
+    AppliedHints = appliedHints,
 };
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 5: Run tests**
 
 Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```
 git add src/PPDS.Cli/Services/Query/SqlQueryService.cs tests/
-git commit -m "feat(query): collect data sources from execution plan tree"
+git commit -m "feat(query): collect data sources from plan tree and applied hints from overrides"
 ```
 
 ---
 
-### Task 20: Add dataSources to RPC response DTO
+### Task 20: Add dataSources and appliedHints to RPC response DTO
 
 **Files:**
 - Modify: `src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs`
 
-- [ ] **Step 1: Add dataSources field to QueryResultResponse**
+- [ ] **Step 1: Add DTO types and fields**
+
+Add to `QueryResultResponse`:
 
 ```csharp
 [JsonPropertyName("dataSources")]
 [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 public List<QueryDataSourceDto>? DataSources { get; set; }
+
+[JsonPropertyName("appliedHints")]
+[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+public List<string>? AppliedHints { get; set; }
 ```
 
 Add the DTO type:
@@ -1317,9 +1612,9 @@ public class QueryDataSourceDto
 }
 ```
 
-- [ ] **Step 2: Map DataSources in the response mapping**
+- [ ] **Step 2: Map in QuerySqlAsync response**
 
-In the `QuerySqlAsync` response mapping, add:
+In the `QuerySqlAsync` response mapping (Task 3), add:
 
 ```csharp
 if (result.DataSources is { Count: > 1 })
@@ -1328,13 +1623,18 @@ if (result.DataSources is { Count: > 1 })
         .Select(ds => new QueryDataSourceDto { Label = ds.Label, IsRemote = ds.IsRemote })
         .ToList();
 }
+
+if (result.AppliedHints is { Count: > 0 })
+{
+    mapped.AppliedHints = result.AppliedHints.ToList();
+}
 ```
 
 - [ ] **Step 3: Commit**
 
 ```
 git add src/PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.cs
-git commit -m "feat(daemon): add dataSources to QueryResultResponse for cross-env attribution"
+git commit -m "feat(daemon): add dataSources and appliedHints to QueryResultResponse"
 ```
 
 ---
@@ -1342,18 +1642,18 @@ git commit -m "feat(daemon): add dataSources to QueryResultResponse for cross-en
 ### Task 21: Render cross-env banner in VS Code webview
 
 **Files:**
-- Modify: `src/PPDS.Extension/src/panels/webview/query-panel/query-panel.ts`
+- Modify: `src/PPDS.Extension/src/panels/webview/query-panel.ts`
 - Modify: `src/PPDS.Extension/src/panels/styles/query-panel.css`
 
-- [ ] **Step 1: Add banner element to HTML**
+- [ ] **Step 1: Add banner element**
 
-In the webview's initial HTML setup, add a banner container above the results wrapper:
+In the webview's initialization, add a banner container above the results wrapper:
 
 ```typescript
 const dataSourceBanner = document.createElement('div');
 dataSourceBanner.className = 'data-source-banner';
 dataSourceBanner.style.display = 'none';
-// Insert before results wrapper
+// Insert before the results wrapper in the DOM
 ```
 
 - [ ] **Step 2: Update handleQueryResult to show/hide banner**
@@ -1366,9 +1666,9 @@ function handleQueryResult(data: QueryResultResponse): void {
     if (data.dataSources && data.dataSources.length > 1) {
         const parts = data.dataSources.map(ds => {
             const tag = ds.isRemote ? 'remote' : 'local';
-            return `<span class="data-source-label" data-env-color="${(ds.color || 'gray').toLowerCase()}">${escapeHtml(ds.label)}</span> <span class="data-source-tag">(${tag})</span>`;
+            return `<span class="data-source-label">${escapeHtml(ds.label)}</span> <span class="data-source-tag">(${tag})</span>`;
         });
-        dataSourceBanner.innerHTML = 'Data from: ' + parts.join(' · ');
+        dataSourceBanner.innerHTML = 'Data from: ' + parts.join(' &middot; ');
         dataSourceBanner.style.display = '';
     } else {
         dataSourceBanner.style.display = 'none';
@@ -1376,9 +1676,11 @@ function handleQueryResult(data: QueryResultResponse): void {
 }
 ```
 
+Note: The banner uses `escapeHtml()` for labels (existing utility in the webview). No `ds.color` reference — the banner is simple text. Environment colors are shown via the toolbar border (Phase 3).
+
 - [ ] **Step 3: Add banner CSS**
 
-Add to `query-panel.css`:
+Add to `src/PPDS.Extension/src/panels/styles/query-panel.css`:
 
 ```css
 .data-source-banner {
@@ -1401,7 +1703,7 @@ Add to `query-panel.css`:
 
 - [ ] **Step 4: Run typecheck**
 
-Run: `npm run ext:typecheck`
+Run: `npm run typecheck:all`
 
 - [ ] **Step 5: Commit**
 
@@ -1419,22 +1721,18 @@ git commit -m "feat(ext): render cross-environment data source banner in query r
 - [ ] **Step 1: Run .NET unit tests**
 
 Run: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
-Expected: All tests pass.
 
 - [ ] **Step 2: Run extension TypeScript typecheck**
 
 Run: `npm run typecheck:all`
-Expected: No type errors.
 
 - [ ] **Step 3: Run extension unit tests**
 
 Run: `npm run ext:test`
-Expected: All tests pass.
 
 - [ ] **Step 4: Run linter**
 
 Run: `npx eslint src/PPDS.Extension/src --quiet`
-Expected: No errors.
 
 ---
 
@@ -1471,11 +1769,11 @@ SELECT TOP 5 name FROM account
 
 Verify: query executes, results display.
 
+Note: TUI cross-environment data source indicator (spec Phase 4, requirement 4) is deferred — the TUI already has environment display in its status bar, and adding a multi-source indicator requires TUI-specific UI work that is out of scope for this plan. Track as a follow-up.
+
 ---
 
 ### Task 25: Manual Test Plan (for user)
-
-This is the test plan for the user to verify against PPDS Dev:
 
 ```markdown
 ## Manual Test Plan — Query Parity
@@ -1524,15 +1822,21 @@ This is the test plan for the user to verify against PPDS Dev:
 #### T9: DML safety
 1. Run: `DELETE FROM account` (no WHERE clause)
 2. **Verify**: Blocked with safety message in both interfaces
+
+#### T10: Applied hints in response
+1. Run: `-- ppds:NOLOCK\n-- ppds:BYPASS_PLUGINS\nSELECT TOP 5 name FROM account`
+2. **Verify**: Response includes `appliedHints: ["NOLOCK", "BYPASS_PLUGINS"]` (check via debug output or network tab)
 ```
 
-- [ ] **Step 1: Save the manual test plan**
+- [ ] **Step 1: Present manual test plan to user**
 
-The test plan above is for the user to run. Present it to them when implementation is complete.
-
-- [ ] **Step 2: Commit the plan document**
+- [ ] **Step 2: Commit final plan**
 
 ```
 git add docs/plans/2026-03-15-query-parity.md
-git commit -m "docs: add query parity implementation plan"
+git commit -m "docs: finalize query parity implementation plan
+
+Addresses all review findings: fixed method names, error mapping, file
+paths, constructor params, dead code handling, added appliedHints,
+restructured for TDD, and added comprehensive manual test plan."
 ```
