@@ -160,8 +160,11 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 
 **TUI gaps:**
 - No solutions browser (planned in panel-parity spec)
-- Single query screen (vs Extension's unlimited panels)
+- Single query screen type (vs Extension's unlimited panels)
 - Tab-based multi-env is less flexible than Extension's per-panel model
+- Unnamed SPN profiles show raw application ID in selectors (Extension shows "Profile N" fallback)
+- Keyboard shortcuts dialog doesn't scroll to show screen-specific bindings
+- "Background operation failed" error on splash before profile selection
 
 ### Recommendation
 
@@ -198,21 +201,45 @@ When multiple webview panels from the same extension are open, `--ext` targets t
 
 Total MCP tests: 58 passed, 3 skipped (pre-existing).
 
-## TUI Verification
+## TUI Interactive Verification (via tui-verify)
 
-Code audit confirmed all fixes compile and integrate correctly:
-- F10 keybinding registered in SqlQueryScreen (replaces Ctrl+Shift+T)
-- SetNeedsDisplay added to ToggleTdsEndpoint
-- EnvironmentDetailsDialog wired in TuiShell Tools menu
-- KeyboardShortcutsDialog reads bindings dynamically (auto-shows F10)
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Splash screen | PASS | Title, menu bar, status bar all render correctly |
+| Profile selector (Alt+P) | PASS | Shows all profiles with identity, select works |
+| Environment auto-populate | PASS | Environment loads from profile default |
+| Status bar | PASS | Shows "Profile: [2] ... Environment: PPDS Demo - Dev [DEV]" with clickable selectors |
+| SQL Query screen | PASS | Opens via Tools menu, tab bar shows env name |
+| Query execution (F5) | PASS | "Returned 100 rows in 552ms via Dataverse" |
+| Results table | PASS | Virtual table with accountid, name columns, row count footer |
+| **F10 TDS toggle** | **PASS** | Status changes to "Mode: TDS Read Replica (read-only, slight delay)", toggles back to "Mode: Dataverse (real-time)" |
+| **Query menu TDS toggle** | **PASS** | Menu selection updates status label immediately (#581 fix verified) |
+| Query menu items | PASS | All items present with correct shortcuts — F10 shown for TDS (not Ctrl+Shift+T) |
+| Tab management (Ctrl+T/W) | PASS | New tab opens, close tab works, tab bar updates |
+| **Environment Details dialog** | **PASS** | Shows URL, unique name, version, org ID, user ID, business unit ID, connected as — all loaded via connection pool |
+| Tools menu | PASS | SQL Query, Environment Details, Configure Environment — all present with descriptions |
+| FetchXML preview (F9) | PASS | Shows transpiled XML with proper formatting |
+| History (F8) | PASS | Search box, timestamped queries with row counts |
+| Keyboard shortcuts (F1) | PASS | Shows global bindings dynamically. Note: screen-specific bindings (F5-F10) may not be visible without scrolling — minor UX issue |
+| About dialog | PASS | Version, tagline, docs URL, GitHub URL |
+| Help menu | PASS | About, Keyboard Shortcuts items present |
 
-TUI snapshot test infrastructure has a pre-existing dependency issue (`@microsoft/tui-test` package resolution error). Not from our changes — needs separate investigation.
+### TUI UX Notes
+
+- Profile selector shows application ID for unnamed SPN profiles (e.g., `[2] (3b039cb2-...)`) — functional but not pretty. Extension shows "Profile 2" via index fallback, which is cleaner.
+- Keyboard shortcuts dialog doesn't scroll well — global bindings fill the visible area, screen-specific bindings (F5, F7, F8, F9, F10) require scrolling that doesn't seem to work with the current dialog layout.
+- "Background operation failed" error on splash screen before profile selection — appears to be an update check that runs before auth is configured. Non-blocking but noisy.
+
+TUI snapshot test infrastructure has a pre-existing dependency issue (`@microsoft/tui-test` not installed in worktree `node_modules`). Fixed by running `npm install` in the test directory. The engine warning (Node 22 vs required <21) is a known compatibility gap.
 
 ## Items NOT Fixed (Future Work)
 
 - **BUG: Environment type border not rendering** — Panel toolbar `data-env-type` is null because QueryPanel/SolutionsPanel use `auth/who → environment.type` (which returns null) instead of `env/config/get → resolvedType` (which returns "Development"). Fix: use resolvedType from envConfigGet response.
 - Environment details command in Extension — low priority, TUI has it
 - webview-cdp multi-panel targeting improvements
-- TUI snapshot test infrastructure dependency fix
+- TUI: Unnamed SPN profiles show raw application ID in profile selector (should use name or "Profile N" fallback)
+- TUI: Keyboard shortcuts dialog doesn't scroll to screen-specific bindings
+- TUI: "Background operation failed" error on splash before profile selection (update check without auth)
+- TUI snapshot test infrastructure — works after `npm install` but has Node engine warning
 - Per-environment DML permissions in MCP — deferred
 - MCP audit logging — deferred
