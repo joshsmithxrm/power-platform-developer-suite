@@ -97,6 +97,7 @@ const langToggle = document.getElementById('lang-toggle') as HTMLElement;
 const filterBar = document.getElementById('filter-bar') as HTMLElement;
 const filterInput = document.getElementById('filter-input') as HTMLInputElement;
 const filterCount = document.getElementById('filter-count') as HTMLElement;
+const dataSourceBanner = document.getElementById('data-source-banner') as HTMLElement;
 const resultsWrapper = document.getElementById('results-wrapper') as HTMLElement;
 const loadMoreBar = document.getElementById('load-more-bar') as HTMLElement;
 const loadMoreBtn = document.getElementById('load-more-btn') as HTMLElement;
@@ -835,6 +836,17 @@ function handleQueryResult(data: QueryResultResponse): void {
     updateStatus(data);
     loadMoreBar.style.display = moreRecords ? '' : 'none';
     filterBar.classList.add('visible');
+
+    if (data.dataSources && data.dataSources.length > 1) {
+        const parts = data.dataSources.map(ds => {
+            const tag = ds.isRemote ? 'remote' : 'local';
+            return `<span class="data-source-label">${escapeHtml(ds.label)}</span> <span class="data-source-tag">(${tag})</span>`;
+        });
+        dataSourceBanner.innerHTML = 'Data from: ' + parts.join(' &middot; ');
+        dataSourceBanner.style.display = '';
+    } else {
+        dataSourceBanner.style.display = 'none';
+    }
 }
 
 function handleAppendResults(data: QueryResultResponse): void {

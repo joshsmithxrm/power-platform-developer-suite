@@ -1030,6 +1030,19 @@ public class RpcMethodHandler : IDisposable
                 var result = await service.ExecuteAsync(sqlRequest, ct);
                 var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
                 mapped.QueryMode = request.UseTds ? "tds" : "dataverse";
+
+                if (result.DataSources is { Count: > 1 })
+                {
+                    mapped.DataSources = result.DataSources
+                        .Select(ds => new QueryDataSourceDto { Label = ds.Label, IsRemote = ds.IsRemote })
+                        .ToList();
+                }
+
+                if (result.AppliedHints is { Count: > 0 })
+                {
+                    mapped.AppliedHints = result.AppliedHints.ToList();
+                }
+
                 return mapped;
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
@@ -2423,6 +2436,23 @@ public class QueryResultResponse
     [JsonPropertyName("queryMode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? QueryMode { get; set; }
+
+    [JsonPropertyName("dataSources")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<QueryDataSourceDto>? DataSources { get; set; }
+
+    [JsonPropertyName("appliedHints")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? AppliedHints { get; set; }
+}
+
+/// <summary>
+/// Data source information in query results (for cross-env queries).
+/// </summary>
+public class QueryDataSourceDto
+{
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("isRemote")] public bool IsRemote { get; set; }
 }
 
 /// <summary>

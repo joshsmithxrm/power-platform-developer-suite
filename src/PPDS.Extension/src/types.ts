@@ -112,6 +112,8 @@ export interface QueryResultResponse {
     executedFetchXml: string | null;
     executionTimeMs: number;
     queryMode: 'tds' | 'dataverse' | null;
+    dataSources?: { label: string; isRemote: boolean }[];
+    appliedHints?: string[];
 }
 
 export interface QueryColumnInfo {

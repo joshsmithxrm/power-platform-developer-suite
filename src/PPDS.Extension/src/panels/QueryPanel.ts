@@ -622,6 +622,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     <span id="filter-count"></span>
 </div>
 
+<div class="data-source-banner" id="data-source-banner" style="display:none"></div>
+
 <div class="results-wrapper" id="results-wrapper">
     <div class="empty-state" id="empty-state">Run a query to see results</div>
 </div>

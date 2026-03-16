@@ -110,6 +110,25 @@
     margin: 4px 0;
 }
 
+/* ── Cross-env data source banner ───────────────────────────────────────── */
+
+.data-source-banner {
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-editor-background);
+}
+
+.data-source-label {
+    font-weight: 600;
+}
+
+.data-source-tag {
+    font-style: italic;
+    opacity: 0.7;
+}
+
 /* ── Results table ──────────────────────────────────────────────────────── */
 
 .results-wrapper {
