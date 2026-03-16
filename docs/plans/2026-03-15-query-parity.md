@@ -180,16 +180,40 @@ public async Task QuerySql_ExpandsVirtualColumns()
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [ ] **Step 4: Write test for cross-environment label resolution (AC-03)**
 
-Run: `dotnet test PPDS.sln --filter "QuerySql_ParseError|QuerySql_DmlBlocked|QuerySql_ExpandsVirtualColumns" -v q`
+```csharp
+[Fact]
+[Trait("Category", "Unit")]
+public async Task QuerySql_CrossEnvironment_ResolvesLabel()
+{
+    // AC-03: [LABEL].entity syntax works when label is configured
+    var fakeSqlService = new FakeSqlQueryService();
+    // Configure RemoteExecutorFactory to be called
+    // The service should attempt to resolve label "QA" via ProfileResolutionService
+
+    // ... setup handler with environment configs containing label "QA"
+
+    var result = await handler.QuerySqlAsync(new QuerySqlRequest
+    {
+        Sql = "SELECT name FROM [QA].account",
+    });
+
+    // Assert: RemoteExecutorFactory was invoked with label "QA"
+    // (or assert the query succeeds with cross-env data)
+}
+```
+
+- [ ] **Step 5: Run tests to verify they fail**
+
+Run: `dotnet test PPDS.sln --filter "QuerySql_ParseError|QuerySql_DmlBlocked|QuerySql_ExpandsVirtualColumns|QuerySql_CrossEnvironment" -v q`
 Expected: Tests fail because `QuerySqlAsync` still uses the bespoke path.
 
-- [ ] **Step 5: Commit failing tests**
+- [ ] **Step 6: Commit failing tests**
 
 ```
 git add tests/PPDS.Cli.Tests/Commands/Serve/Handlers/RpcMethodHandlerTests.cs
-git commit -m "test(daemon): add failing tests for Phase 1 query parity (AC-02, AC-25)"
+git commit -m "test(daemon): add failing tests for Phase 1 query parity (AC-02, AC-03, AC-25)"
 ```
 
 ---
@@ -678,6 +702,26 @@ public async Task ExecuteWithOptions_BypassPlugins_SetsHeader()
     capturedRequest!.Parameters.Should().ContainKey("BypassCustomPluginExecution");
     capturedRequest.Parameters["BypassCustomPluginExecution"].Should().Be(true);
 }
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task ExecuteWithOptions_BypassFlows_SetsHeader()
+{
+    // AC-07: BYPASS_FLOWS sets SuppressCallbackRegistrationExpanderJob header
+    OrganizationRequest? capturedRequest = null;
+    var mockPool = new Mock<IDataverseConnectionPool>();
+    // ... same setup as above
+
+    var executor = new QueryExecutor(mockPool.Object);
+    var options = new QueryExecutionOptions { BypassFlows = true };
+
+    await executor.ExecuteFetchXmlAsync("<fetch><entity name='account'/></fetch>",
+        null, null, false, options);
+
+    capturedRequest.Should().NotBeNull();
+    capturedRequest!.Parameters.Should().ContainKey("SuppressCallbackRegistrationExpanderJob");
+    capturedRequest.Parameters["SuppressCallbackRegistrationExpanderJob"].Should().Be(true);
+}
 ```
 
 - [ ] **Step 2: Add default-implementation overload to IQueryExecutor**
@@ -1133,6 +1177,29 @@ public async Task Explain_ReflectsHints()
     var plan = await _service.ExplainAsync("-- ppds:USE_TDS\nSELECT name FROM account");
     // The plan description should reflect TDS routing
     plan.Description.Should().Contain("Tds");
+}
+
+[Fact]
+[Trait("Category", "Unit")]
+public async Task Hints_BatchSize_OverridesDmlBatch()
+{
+    // AC-11: -- ppds:BATCH_SIZE 500 overrides DML batch size
+    var request = new SqlQueryRequest
+    {
+        Sql = "-- ppds:BATCH_SIZE 500\nDELETE FROM account WHERE name = 'test'",
+        DmlSafety = new DmlSafetyOptions { IsConfirmed = true },
+    };
+
+    // Verify batch size override is applied — check via bulk executor mock
+    // or verify the DmlBatchSize flows through to execution options
+    _mockQueryExecutor
+        .Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(),
+            It.IsAny<CancellationToken>()))
+        .ReturnsAsync(CreateEmptyQueryResult());
+
+    var result = await _service.ExecuteAsync(request);
+    // Assert: batch size of 500 was applied (verify via mock callback or plan options)
 }
 ```
 
