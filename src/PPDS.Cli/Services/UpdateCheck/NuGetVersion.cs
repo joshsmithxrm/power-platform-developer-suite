@@ -115,6 +115,10 @@ public sealed class NuGetVersion : IComparable<NuGetVersion>, IEquatable<NuGetVe
             !int.TryParse(parts[2], out var patch))
             return false;
 
+        // SemVer requires non-negative integers
+        if (major < 0 || minor < 0 || patch < 0)
+            return false;
+
         result = new NuGetVersion(major, minor, patch, preRelease);
         return true;
     }

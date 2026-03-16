@@ -43,7 +43,7 @@ public class UpdateCheckServiceTests : IDisposable
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(statusCode)
+            .ReturnsAsync(() => new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
             });

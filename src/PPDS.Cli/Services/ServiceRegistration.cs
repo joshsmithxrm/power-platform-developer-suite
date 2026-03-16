@@ -10,6 +10,7 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Services.UpdateCheck;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Metadata;
@@ -138,6 +139,9 @@ public static class ServiceRegistration
                 connectionInfo.EnvironmentId,
                 logger);
         });
+
+        // Update check service — singleton, manages its own cache file
+        services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
 
         return services;
     }

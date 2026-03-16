@@ -1,5 +1,7 @@
 using System.CommandLine;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.UpdateCheck;
 
@@ -40,7 +42,8 @@ public static class VersionCommand
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("Checking for updates...");
 
-                var service = new UpdateCheckService();
+                await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
+                var service = localProvider.GetRequiredService<IUpdateCheckService>();
                 var result = await service.CheckAsync(ErrorOutput.Version, cancellationToken)
                     .ConfigureAwait(false);
 
