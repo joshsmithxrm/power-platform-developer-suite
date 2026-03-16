@@ -231,8 +231,9 @@ if ($branch) {
 ```bash
 #!/bin/bash
 read -r json
-dir=$(echo "$json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(require('path').basename(d.workspace.current_dir))")
-branch=$(cd "$(echo "$json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.workspace.current_dir)")" && git branch --show-current 2>/dev/null || true)
+cwd=$(echo "$json" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.workspace.current_dir)")
+dir=$(basename "$cwd")
+branch=$(cd "$cwd" && git branch --show-current 2>/dev/null || true)
 if [ -n "$branch" ]; then
     echo -e "\033[96m${dir}\033[0m \033[95m(${branch})\033[0m"
 else
