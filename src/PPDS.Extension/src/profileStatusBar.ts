@@ -43,7 +43,13 @@ export class ProfileStatusBar implements vscode.Disposable {
      */
     refresh(): void {
         void this.client.authList().then(result => {
-            const name = result.activeProfile;
+            // activeProfile is the Name field which may be null for unnamed profiles.
+            // Fall back to finding the active profile in the list by isActive flag.
+            let name = result.activeProfile;
+            if (!name && result.activeProfileIndex !== null) {
+                const active = result.profiles.find(p => p.isActive);
+                name = active?.name ?? (active ? `Profile ${active.index}` : null);
+            }
             this.statusBarItem.text = name
                 ? `$(account) ${name}`
                 : '$(account) No profile';
