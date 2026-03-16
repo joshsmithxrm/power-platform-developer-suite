@@ -19,14 +19,10 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Security;
 using PPDS.Dataverse.Services;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
-using Microsoft.SqlServer.TransactSql.ScriptDom;
-using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Intellisense;
-using PPDS.Query.Parsing;
-using PPDS.Query.Planning;
-using PPDS.Query.Transpilation;
 using StreamJsonRpc;
 
 // Aliases to disambiguate from local DTOs
@@ -937,6 +933,7 @@ public class RpcMethodHandler : IDisposable
 
     /// <summary>
     /// Executes a SQL query against Dataverse by transpiling to FetchXML.
+    /// Delegates to <see cref="SqlQueryService"/> for the shared transpile-and-execute pipeline.
     /// Maps to: ppds query sql --json
     /// </summary>
     [JsonRpcMethod("query/sql")]
@@ -951,125 +948,127 @@ public class RpcMethodHandler : IDisposable
                 "The 'sql' parameter is required");
         }
 
-        // DML safety check: parse SQL and validate BEFORE any execution path (TDS or FetchXML)
-        var methodStopwatch = Stopwatch.StartNew();
-        if (request.DmlSafety != null)
+        // Execute (or transpile-only) via SqlQueryService from the environment's service provider
+        var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
         {
-            var parser = new TSql160Parser(initialQuotedIdentifiers: false);
-            using var reader = new StringReader(request.Sql);
-            var fragment = parser.Parse(reader, out _);
+            var service = sp.GetRequiredService<ISqlQueryService>();
 
-            if (fragment is TSqlScript script && script.Batches.Count > 0
-                && script.Batches[0].Statements.Count > 0)
+            // ShowFetchXml mode: transpile only, no execution needed
+            if (request.ShowFetchXml)
             {
-                var guard = new DmlSafetyGuard();
-                var opts = new DmlSafetyOptions
+                try
                 {
-                    IsConfirmed = request.DmlSafety.IsConfirmed,
-                    IsDryRun = request.DmlSafety.IsDryRun,
-                    NoLimit = request.DmlSafety.NoLimit,
-                    RowCap = request.DmlSafety.RowCap,
-                };
-                var result = guard.Check(script.Batches[0].Statements[0], opts);
-
-                if (result.IsBlocked)
-                {
-                    throw new RpcException(
-                        ErrorCodes.Query.DmlBlocked,
-                        result.BlockReason ?? "DML operation blocked",
-                        new DmlSafetyErrorData
-                        {
-                            Code = ErrorCodes.Query.DmlBlocked,
-                            Message = result.BlockReason ?? "DML operation blocked",
-                            DmlBlocked = true,
-                        });
+                    var fetchXml = service.TranspileSql(request.Sql, request.Top);
+                    return new QueryResultResponse
+                    {
+                        Success = true,
+                        ExecutedFetchXml = fetchXml,
+                        QueryMode = "dataverse"
+                    };
                 }
+                catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+                {
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                }
+            }
 
-                if (result.RequiresConfirmation && !request.DmlSafety.IsConfirmed)
+            // Wire cross-environment support and DML safety (mirrors InteractiveSession pattern)
+            if (service is SqlQueryService concrete)
+            {
+                var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
+                configStore.ClearCache();
+                var configCollection = await configStore.LoadAsync(ct);
+                var profileResolution = new ProfileResolutionService(configCollection.Environments);
+
+                concrete.RemoteExecutorFactory = label =>
+                {
+                    var config = profileResolution.ResolveByLabel(label);
+                    if (config?.Url == null) return null;
+#pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
+                    var remoteProvider = _poolManager.GetOrCreateServiceProviderAsync(
+                        new[] { profile.Name ?? profile.DisplayIdentifier },
+                        config.Url,
+                        deviceCodeCallback: DaemonDeviceCodeHandler.CreateCallback(_rpc),
+                        cancellationToken: ct).GetAwaiter().GetResult();
+#pragma warning restore PPDS012
+                    return remoteProvider.GetRequiredService<IQueryExecutor>();
+                };
+
+                concrete.ProfileResolver = profileResolution;
+                var envConfig = await configStore.GetConfigAsync(env.Url, ct);
+                if (envConfig != null)
+                {
+                    concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
+                    var envType = envConfig.Type ?? PPDS.Auth.Profiles.EnvironmentType.Unknown;
+                    concrete.EnvironmentProtectionLevel = envConfig.Protection
+                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                }
+            }
+
+            // Build the shared request
+            var sqlRequest = new SqlQueryRequest
+            {
+                Sql = request.Sql,
+                TopOverride = request.Top,
+                PageNumber = request.Page,
+                PagingCookie = request.PagingCookie,
+                IncludeCount = request.Count,
+                UseTdsEndpoint = request.UseTds,
+                DmlSafety = request.DmlSafety != null
+                    ? new DmlSafetyOptions
+                    {
+                        IsConfirmed = request.DmlSafety.IsConfirmed,
+                        IsDryRun = request.DmlSafety.IsDryRun,
+                        NoLimit = request.DmlSafety.NoLimit,
+                        RowCap = request.DmlSafety.RowCap,
+                    }
+                    : null,
+            };
+
+            try
+            {
+                var result = await service.ExecuteAsync(sqlRequest, ct);
+                var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
+                mapped.QueryMode = request.UseTds ? "tds" : "dataverse";
+                return mapped;
+            }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+            {
+                throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+            }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlBlocked)
+            {
+                // SqlQueryService uses DmlBlocked for both blocked and confirmation-required.
+                // Distinguish by message content to map to the correct RPC error code.
+                if (ex.Message.Contains("--confirm", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new RpcException(
                         ErrorCodes.Query.DmlConfirmationRequired,
-                        result.ConfirmationMessage ?? "DML operation requires confirmation",
+                        ex.Message,
                         new DmlSafetyErrorData
                         {
                             Code = ErrorCodes.Query.DmlConfirmationRequired,
-                            Message = result.ConfirmationMessage ?? "DML operation requires confirmation",
+                            Message = ex.Message,
                             DmlConfirmationRequired = true,
                         });
                 }
-            }
-        }
-        _logger.LogDebug("query/sql: DML safety check completed in {ElapsedMs}ms", methodStopwatch.ElapsedMilliseconds);
 
-        if (request.UseTds)
-        {
-            var response = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, profile, env, ct) =>
-            {
-                using var credentialProvider = CredentialProviderFactory.Create(
-                    profile,
-                    DaemonDeviceCodeHandler.CreateCallback(_rpc));
-
-                var tdsExecutor = new TdsQueryExecutor(
-                    env.Url,
-                    async token =>
+                throw new RpcException(
+                    ErrorCodes.Query.DmlBlocked,
+                    ex.Message,
+                    new DmlSafetyErrorData
                     {
-                        // Create a ServiceClient to trigger MSAL token acquisition,
-                        // then grab the cached access token from the credential provider.
-                        var client = await credentialProvider.CreateServiceClientAsync(env.Url, token)
-                            .ConfigureAwait(false);
-                        client.Dispose();
-                        return credentialProvider.AccessToken
-                            ?? throw new InvalidOperationException("Failed to acquire access token for TDS endpoint");
-                    },
-                    sp.GetService<ILogger<TdsQueryExecutor>>());
-
-                var result = await tdsExecutor.ExecuteSqlAsync(request.Sql, request.Top, ct);
-                var mapped = MapToResponse(result, null);
-                mapped.QueryMode = "tds";
-                return mapped;
-            }, cancellationToken);
-
-            // Auto-save to history (fire-and-forget)
-            FireAndForgetHistorySave(request.Sql, response);
-
-            return response;
-        }
-
-        var transpileStopwatch = Stopwatch.StartNew();
-        var fetchXml = TranspileSqlToFetchXml(request.Sql, request.Top);
-        transpileStopwatch.Stop();
-        _logger.LogDebug("query/sql: transpiled SQL to FetchXML in {ElapsedMs}ms", transpileStopwatch.ElapsedMilliseconds);
-
-        // If showFetchXml is true, just return the transpiled FetchXML
-        if (request.ShowFetchXml)
-        {
-            return new QueryResultResponse
-            {
-                Success = true,
-                ExecutedFetchXml = fetchXml,
-                QueryMode = "dataverse"
-            };
-        }
-
-        var fetchResponse = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
-        {
-            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
-            var result = await queryExecutor.ExecuteFetchXmlAsync(
-                fetchXml,
-                request.Page,
-                request.PagingCookie,
-                request.Count,
-                ct);
-
-            var mapped = MapToResponse(result, fetchXml);
-            mapped.QueryMode = "dataverse";
-            return mapped;
+                        Code = ErrorCodes.Query.DmlBlocked,
+                        Message = ex.Message,
+                        DmlBlocked = true,
+                    });
+            }
         }, cancellationToken);
 
         // Auto-save to history (fire-and-forget)
-        FireAndForgetHistorySave(request.Sql, fetchResponse);
+        FireAndForgetHistorySave(request.Sql, response);
 
-        return fetchResponse;
+        return response;
     }
 
     /// <summary>
@@ -1179,16 +1178,30 @@ public class RpcMethodHandler : IDisposable
                 $"Invalid format '{format}'. Valid values: csv, tsv, json");
         }
 
-        // Use FetchXML directly if provided, otherwise transpile SQL
-        var fetchXml = !string.IsNullOrWhiteSpace(request.FetchXml)
-            ? request.FetchXml
-            : TranspileSqlToFetchXml(request.Sql, request.Top);
-
         // Execute the query
         const int MaxExportRecords = 100_000;
 
         var queryResponse = await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
         {
+            // Use FetchXML directly if provided, otherwise transpile SQL via SqlQueryService
+            string fetchXml;
+            if (!string.IsNullOrWhiteSpace(request.FetchXml))
+            {
+                fetchXml = request.FetchXml;
+            }
+            else
+            {
+                var sqlService = sp.GetRequiredService<ISqlQueryService>();
+                try
+                {
+                    fetchXml = sqlService.TranspileSql(request.Sql, request.Top);
+                }
+                catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+                {
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                }
+            }
+
             var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
 
             // Fetch all pages to export complete results
@@ -1245,7 +1258,7 @@ public class RpcMethodHandler : IDisposable
     /// Falls back to transpiled FetchXML if plan building fails.
     /// </summary>
     [JsonRpcMethod("query/explain")]
-    public Task<QueryExplainResponse> QueryExplainAsync(
+    public async Task<QueryExplainResponse> QueryExplainAsync(
         QueryExplainRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -1256,38 +1269,42 @@ public class RpcMethodHandler : IDisposable
                 "The 'sql' parameter is required");
         }
 
-        try
+        return await WithProfileAndEnvironmentAsync(request.EnvironmentUrl, async (sp, ct) =>
         {
-            var parser = new QueryParser();
-            var fragment = parser.Parse(request.Sql);
+            var service = sp.GetRequiredService<ISqlQueryService>();
 
-            var fetchXmlGen = new FetchXmlGeneratorService();
-            var planBuilder = new ExecutionPlanBuilder(fetchXmlGen);
-            var planResult = planBuilder.Plan(fragment, new QueryPlanOptions());
-            var description = QueryPlanDescription.FromNode(planResult.RootNode);
-            var formatted = Tui.Components.QueryPlanView.FormatPlanTree(description);
-
-            // Also include the transpiled FetchXML for reference
-            var fetchXml = TranspileSqlToFetchXml(request.Sql);
-
-            return Task.FromResult(new QueryExplainResponse
+            try
             {
-                Plan = formatted + "\n\n--- FetchXML ---\n" + fetchXml,
-                Format = "text",
-                FetchXml = fetchXml
-            });
-        }
-        catch
-        {
-            // Fall back to just the transpiled FetchXML if plan building fails
-            var fetchXml = TranspileSqlToFetchXml(request.Sql);
-            return Task.FromResult(new QueryExplainResponse
+                var description = await service.ExplainAsync(request.Sql, ct);
+                var formatted = Tui.Components.QueryPlanView.FormatPlanTree(description);
+                var fetchXml = service.TranspileSql(request.Sql);
+
+                return new QueryExplainResponse
+                {
+                    Plan = formatted + "\n\n--- FetchXML ---\n" + fetchXml,
+                    Format = "text",
+                    FetchXml = fetchXml
+                };
+            }
+            catch
             {
-                Plan = fetchXml,
-                Format = "fetchxml",
-                FetchXml = fetchXml
-            });
-        }
+                // Fall back to just the transpiled FetchXML if plan building fails
+                try
+                {
+                    var fetchXml = service.TranspileSql(request.Sql);
+                    return new QueryExplainResponse
+                    {
+                        Plan = fetchXml,
+                        Format = "fetchxml",
+                        FetchXml = fetchXml
+                    };
+                }
+                catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+                {
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                }
+            }
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -1330,43 +1347,6 @@ public class RpcMethodHandler : IDisposable
                 _logger.LogDebug(ex, "Failed to save query history entry");
             }
         }, daemonToken);
-    }
-
-    /// <summary>
-    /// Parses a SQL statement and transpiles it to FetchXML.
-    /// Optionally injects a TOP clause for row-limiting.
-    /// </summary>
-    private static string TranspileSqlToFetchXml(string sql, int? top = null)
-    {
-        TSqlStatement stmt;
-        try
-        {
-            var parser = new QueryParser();
-            stmt = parser.ParseStatement(sql);
-        }
-        catch (QueryParseException ex)
-        {
-            throw new RpcException(ErrorCodes.Query.ParseError, ex);
-        }
-
-        if (top.HasValue && stmt is SelectStatement selectStmt
-            && selectStmt.QueryExpression is QuerySpecification querySpec
-            && querySpec.TopRowFilter == null)
-        {
-            querySpec.TopRowFilter = new TopRowFilter
-            {
-                Expression = new IntegerLiteral { Value = top.Value.ToString() }
-            };
-        }
-
-        try
-        {
-            return new FetchXmlGenerator().Generate(stmt);
-        }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or ArgumentException)
-        {
-            throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
-        }
     }
 
     private static string FormatExportContent(
