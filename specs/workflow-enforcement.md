@@ -121,9 +121,10 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 1. Created when any skill first writes to it (e.g., `/implement` sets `branch`, `spec`, `plan`).
 2. `gates.commit_ref` stores the commit SHA that gates were verified against. Hooks compare this to HEAD.
-3. When a new commit is made, `gates.passed` is cleared (set to `null`) because the codebase has changed since gates last ran. `verify`, `qa`, and `review` timestamps are NOT automatically cleared on commit — they track cumulative coverage across the session.
+3. **State invalidation on commit:** The Post-Commit Hook (see below) clears `gates.passed` (sets to `null`) after every successful commit because the codebase has changed since gates last ran. `verify`, `qa`, and `review` timestamps are NOT automatically cleared on commit — they track cumulative coverage across the session.
 4. Skills are responsible for writing their own entries. No central coordinator.
 5. File is gitignored — it is per-session state, not committed.
+6. **Converge cycle handling:** `/converge` clears `gates.passed` before starting its fix cycle. After the final fix cycle completes and all fixes are committed, `/converge` runs `/gates` one final time. The Post-Commit Hook clears `gates.passed` on each fix commit, but `/converge`'s final `/gates` run writes a fresh `gates.passed` + `gates.commit_ref` matching the final HEAD. This prevents deadlock: the sequence is always fix → commit → (gates cleared) → final gates → (gates fresh against HEAD).
 
 ### Hook Specifications
 
@@ -167,6 +168,20 @@ WORKFLOW STATE for branch feature/import-jobs:
 ⚠ Warning: /gates has not been run since your last changes. Run /gates before creating a PR.
 ```
 
+#### Post-Commit Hook
+
+**Trigger:** PostToolUse on `Bash(git commit:*)`.
+
+**Behavior:**
+1. Read `.claude/workflow-state.json` if it exists.
+2. Clear `gates.passed` (set to `null`) — the codebase has changed since gates last ran.
+3. Update `last_commit` to current HEAD.
+4. Write updated state file.
+
+**Implementation:** `.claude/hooks/post-commit-state.py`
+
+This is the component responsible for state invalidation on commit (Core Requirement 3). Without it, stale `gates.passed` timestamps would persist across commits.
+
 #### PR Gate Hook
 
 **Trigger:** PreToolUse on `Bash(gh pr create:*)`.
@@ -180,6 +195,8 @@ WORKFLOW STATE for branch feature/import-jobs:
    - `review.passed` has a timestamp (code review completed).
 3. If any check fails, exit code 2 with a specific message listing missing steps.
 4. **This is a hard gate.** PR creation is blocked until all checks pass.
+
+**Implementation:** `.claude/hooks/pr-gate.py`, triggered via `.claude/settings.json` PreToolUse matcher on `Bash(gh pr create:*)`.
 
 **Output on block:**
 ```
@@ -233,6 +250,9 @@ Each skill writes its own entry to `.claude/workflow-state.json` upon successful
 | `/webview-cdp` | `/ext-verify` | Rename. Update description for discoverability: "How to interact with VS Code extension webview panels for verification — Playwright Electron, screenshots, clicks, keyboard." |
 | `/webview-panels` | `/ext-panels` | Rename. Absorb content from `/panel-design`. |
 | `/panel-design` | (deleted) | Content merged into `/ext-panels`. |
+| `/implement` | `/implement` | Remove all superpowers references (currently references `superpowers:using-superpowers`, `superpowers:dispatching-parallel-agents`, `superpowers:verification-before-completion`, `superpowers:requesting-code-review`, `superpowers:systematic-debugging`). Replace with PPDS-native equivalents. Add mandatory tail (gates → verify → QA → review → converge). Add workflow state writes. |
+| `/review` | `/review` | Remove superpowers reference (currently dispatches via `subagent_type: 'superpowers:code-reviewer'`). Dispatch reviewer as a general-purpose subagent with the same isolation constraints (diff + constitution + ACs only, no implementation context). |
+| `/converge` | `/converge` | Add workflow state integration: clear `gates.passed` on cycle start, run `/gates` after final fix cycle, write fresh `gates.passed` + `gates.commit_ref` on completion. |
 | `/debug` | `/debug` | Major rewrite. Absorb systematic-debugging discipline from superpowers: 4-phase process (Root Cause → Pattern Analysis → Hypothesis → Implementation), Iron Law (no fixes without investigation), 3-fix escalation rule, red flags table, root-cause tracing technique, defense-in-depth validation, condition-based waiting. Keep PPDS-specific surface detection and build commands. Remove superpowers references. |
 
 #### New Skills
@@ -240,11 +260,12 @@ Each skill writes its own entry to `.claude/workflow-state.json` upon successful
 | Skill | Purpose | Key Behavior |
 |-------|---------|-------------|
 | `/design` | Brainstorm → spec. Replaces `superpowers:brainstorming`. | Enters plan mode for design thinking. Auto-loads constitution and spec template into context. Uses `specs/` for output location. Creates worktree when ready to commit spec. Outputs a committed spec file. |
-| `/pr` | Rebase → PR → monitor → summarize. | Rebases on main. Creates PR with structured body. Polls CI status and Gemini reviews (every 30s for 2 min, then every 2 min). When complete: triages Gemini comments (fix valid ones, dismiss invalid with rationale), replies to EACH comment individually on the PR with action taken, presents summary to user. Writes `pr.url` and `pr.created` to workflow state. |
+| `/pr` | Rebase → PR → monitor → summarize. | Rebases on main. Creates PR with structured body. Polls CI status and Gemini reviews (every 30s for 2 min, then every 2 min, max 15 min total). When complete: triages Gemini comments (fix valid ones, dismiss invalid with rationale), replies to EACH comment individually on the PR with action taken, presents summary to user. On timeout: reports current status and what's still pending. Writes `pr.url` and `pr.created` to workflow state. |
 | `/shakedown` | Multi-surface product validation. | Structured phases: scope declaration → test matrix creation → interactive verification per surface → parity comparison → architecture audit → findings document. Requires explicit test matrix before testing begins. Collaborative (user + AI). Outputs findings to `docs/qa/`. |
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
+| `/status` | Display current workflow state. | Reads `.claude/workflow-state.json` and displays the same summary as SessionStart hook. On-demand visibility into what's been done and what's pending. No state writes. |
 
 ### CLAUDE.md Workflow Section Rewrite
 
@@ -272,6 +293,10 @@ Replace the current workflow bullet list with:
 1. /gates before committing
 2. If UI/output changed → /verify for affected surface
 3. /pr when ready
+
+### Enforcement
+Steps 5-8 are enforced by hooks. The PR gate hook will block `gh pr create`
+if these steps are incomplete. Run `/status` to check current workflow state.
 
 ### STOP conditions
 - DO NOT skip steps 5-8 because "tests pass." Tests are necessary, not sufficient.
@@ -329,6 +354,16 @@ After all skills in this spec are implemented:
 | AC-21 | All renamed skills (`/ext-verify`, `/ext-panels`, `/retro`) are discoverable by AI via natural language | Manual: say "test the extension", verify `/ext-verify` is loaded | 🔲 |
 | AC-22 | `/shakedown` requires explicit test matrix before testing begins | Manual: run `/shakedown`, verify matrix creation step | 🔲 |
 | AC-23 | `/write-skill` encodes naming convention and outputs skills in correct directory structure | Manual: use `/write-skill` to create a skill, verify output | 🔲 |
+| AC-24 | Post-Commit Hook clears `gates.passed` after a successful commit | Manual: run `/gates`, commit, verify `gates.passed` is null in state file | 🔲 |
+| AC-25 | `/converge` clears `gates.passed` on fix cycle start | Manual: run `/converge` with findings, verify state cleared before fixes | 🔲 |
+| AC-26 | `/converge` writes fresh `gates.passed` and `gates.commit_ref` after final cycle passes | Manual: complete `/converge`, verify state file has fresh gates matching HEAD | 🔲 |
+| AC-27 | `.claude/workflow-state.json` is listed in `.gitignore` and not tracked by git | Verify `.gitignore` contains entry, `git status` does not show state file | 🔲 |
+| AC-28 | `/implement` contains no superpowers references after rewrite | Read `/implement` skill content, grep for "superpowers" — zero matches | 🔲 |
+| AC-29 | `/review` dispatches reviewer without superpowers dependency | Run `/review`, verify subagent launches as general-purpose with isolation constraints | 🔲 |
+| AC-30 | `/pr` stops polling after 15 minutes with graceful timeout message | Manual: create PR with slow CI, verify timeout behavior | 🔲 |
+| AC-31 | `/status` displays current workflow state summary on demand | Manual: run `/status` mid-session, verify output matches state file | 🔲 |
+| AC-32 | `/shakedown` outputs findings document to `docs/qa/` | Manual: complete `/shakedown`, verify findings file created | 🔲 |
+| AC-33 | `/shakedown` includes parity comparison across tested surfaces | Manual: run `/shakedown` on 2+ surfaces, verify parity matrix in output | 🔲 |
 
 ### Edge Cases
 
@@ -340,7 +375,9 @@ After all skills in this spec are implemented:
 | Multiple surfaces verified but one is missing | PR gate: passes — requires "at least one" verified surface, not all. The user chose which surfaces to test. |
 | User runs `/gates` but doesn't commit — runs `/gates` again | Second run overwrites the first timestamp. No accumulation issues. |
 | WIP commit during implementation | Pre-commit warns (soft gate). PR gate is not triggered. Workflow continues. |
-| `/converge` fix cycle introduces new commits | `/converge` clears `gates.passed` on start. Re-runs gates at end of cycle. Final state has fresh gates. |
+| `/converge` fix cycle introduces new commits | `/converge` clears `gates.passed` on start. Post-Commit Hook clears on each fix commit. `/converge` runs final `/gates` after last fix, writing fresh state. No deadlock. |
+| Multiple worktrees active simultaneously | Each worktree has its own `.claude/workflow-state.json`. State files are independent — no cross-worktree interference. |
+| `/pr` CI or Gemini review takes longer than 15 minutes | `/pr` stops polling, reports current status and what's still pending. User can re-check later with natural language. |
 
 ---
 
