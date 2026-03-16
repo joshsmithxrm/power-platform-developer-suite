@@ -20,6 +20,7 @@ import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
+import { ProfileStatusBar } from './profileStatusBar.js';
 
 let daemonClient: DaemonClient | undefined;
 let logChannel: vscode.LogOutputChannel | undefined;
@@ -113,6 +114,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // ── Daemon Status Bar ────────────────────────────────────────────
     const statusBar = new DaemonStatusBar(client);
     context.subscriptions.push(statusBar);
+
+    // ── Profile Status Bar ───────────────────────────────────────────
+    const profileStatusBar = new ProfileStatusBar(client);
+    context.subscriptions.push(profileStatusBar);
 
     // ── Virtual Document Provider (EXPLAIN output) ────────────────────
     const explainProvider = new ExplainDocumentProvider();
@@ -216,7 +221,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // ── Profile Commands ────────────────────────────────────────────────
-    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); });
+    registerProfileCommands(context, client, () => { profileTreeProvider.refresh(); refreshToolsState(); profileStatusBar.refresh(); });
 
     // ── Environment Commands (tree context menu) ────────────────────────
     context.subscriptions.push(

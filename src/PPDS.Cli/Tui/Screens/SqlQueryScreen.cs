@@ -858,6 +858,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         _statusLabel.Text = _useTdsEndpoint
             ? "Mode: TDS Read Replica (read-only, slight delay)"
             : "Mode: Dataverse (real-time)";
+        _statusLabel.SetNeedsDisplay();
         NotifyMenuChanged();
     }
 
