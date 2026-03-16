@@ -166,6 +166,24 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 - Keyboard shortcuts dialog doesn't scroll to show screen-specific bindings
 - "Background operation failed" error on splash before profile selection
 
+### Profile Management Comparison
+
+| Feature | TUI | Extension |
+|---------|-----|-----------|
+| Profile selector | Dialog with list + 7 action buttons (Select, Create, Rename, Delete, Details, Clear All, Cancel) | Tree view + context menu items |
+| Profile creation | Single-screen form: auth method radios, env URL field, Start Authentication button | 3-step wizard: method → name → authenticate |
+| Profile naming | Not available during creation | Step 2 of wizard (optional for user auth, required for SPN) |
+| Device code display | Inline dialog with code and verification URL | VS Code notification with "Open Browser" and "Copy Code" buttons |
+| Environment selector | Dialog with discovered list, details preview, manual URL entry, 4 buttons | Tree view under each profile + "Enter URL manually" item |
+| Env discovery | Shows helpful message for SPN profiles ("not supported for ClientSecret") | Only shows discovered envs for active profile |
+| Context menus | Profile: 7 dialog buttons; Environment: 4 dialog buttons | Profile: 7 context menu items; Environment: 9 context menu items |
+
+**Key differences:**
+- TUI profile creation has **no name field** — profiles can only be named via Rename after creation. Extension has naming in the wizard. This explains the unnamed profile issue we've been seeing.
+- Extension's 3-step wizard is more guided; TUI's single-screen form is faster for experienced users.
+- Extension has more environment context menu actions (Open in Maker, Open in Dynamics, Test Connection, Copy URL) that TUI doesn't have.
+- TUI's environment selector has a **Details preview pane** inline — you can see env details without opening a separate dialog. Extension requires expanding the tree.
+
 ### Recommendation
 
 The two UIs are appropriately different. The Extension leverages VS Code's visual paradigm (panels, toolbars, sidebars). The TUI leverages terminal efficiency (hotkeys, menus, status bar). Don't try to make them identical — make them each excellent in their paradigm.
@@ -240,6 +258,9 @@ TUI snapshot test infrastructure has a pre-existing dependency issue (`@microsof
 - TUI: Unnamed SPN profiles show raw application ID in profile selector (should use name or "Profile N" fallback)
 - TUI: Keyboard shortcuts dialog doesn't scroll to screen-specific bindings
 - TUI: "Background operation failed" error on splash before profile selection (update check without auth)
+- TUI: Profile creation dialog has no name field — profiles must be renamed after creation
+- TUI: Environment selector could add "Open in Maker" / "Open in Dynamics" actions (Extension has them)
+- Extension: Environment context menu could add "Details" action (TUI has it inline)
 - TUI snapshot test infrastructure — works after `npm install` but has Node engine warning
 - Per-environment DML permissions in MCP — deferred
 - MCP audit logging — deferred
