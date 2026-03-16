@@ -69,14 +69,16 @@ public class SqlQueryServiceTests
     }
 
     [Fact]
-    public void TranspileSql_WithTopOverrideAndTopInSql_OverridesTop()
+    public void TranspileSql_WithTopOverrideAndTopInSql_PreservesOriginalTop()
     {
+        // When SQL already has an explicit TOP, the override does NOT clobber it.
+        // The user's explicit TOP takes precedence over the extension's default.
         var sql = "SELECT TOP 10 name FROM account";
 
         var fetchXml = _service.TranspileSql(sql, topOverride: 5);
 
-        Assert.Contains("top=\"5\"", fetchXml);
-        Assert.DoesNotContain("top=\"10\"", fetchXml);
+        Assert.Contains("top=\"10\"", fetchXml);
+        Assert.DoesNotContain("top=\"5\"", fetchXml);
     }
 
     [Fact]

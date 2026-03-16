@@ -88,8 +88,13 @@ public sealed class SqlQueryService : ISqlQueryService
 
             if (topOverride.HasValue)
             {
-                // Inject TOP override into the ScriptDom AST before transpilation
-                InjectTopOverride(fragment, topOverride.Value);
+                // Only inject TOP override if the SQL doesn't already have one —
+                // don't clobber the user's explicit TOP with the extension's default
+                var querySpec = ExtractQuerySpecification(fragment);
+                if (querySpec?.TopRowFilter == null)
+                {
+                    InjectTopOverride(fragment, topOverride.Value);
+                }
             }
 
             // Extract the first statement from the TSqlScript wrapper.
@@ -409,10 +414,16 @@ public sealed class SqlQueryService : ISqlQueryService
             }
             : null;
 
+        // Only apply TopOverride as MaxRows if the SQL itself does not contain a TOP clause.
+        // The extension sends a default top (100) on every query — we must not clobber the
+        // user's explicit TOP 5 with the default 100.
+        var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
+        var effectiveMaxRows = sqlHasExplicitTop ? null : request.TopOverride;
+
         // Build execution plan
         var planOptions = new QueryPlanOptions
         {
-            MaxRows = request.TopOverride,
+            MaxRows = effectiveMaxRows,
             PageNumber = request.PageNumber,
             PagingCookie = request.PagingCookie,
             IncludeCount = request.IncludeCount,
