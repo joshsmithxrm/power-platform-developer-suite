@@ -279,8 +279,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
-            new("Import Jobs", "View solution import jobs",
-                hasEnvironment ? () => NavigateToImportJobs() : (Action?)null),
+            new("Import Jobs", "View solution import jobs", () => NavigateToImportJobs()),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Environment Details...", "View organization and connection info",
                 hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
