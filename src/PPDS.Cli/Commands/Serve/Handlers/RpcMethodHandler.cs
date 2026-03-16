@@ -1042,8 +1042,11 @@ public class RpcMethodHandler : IDisposable
             {
                 var result = await service.ExecuteAsync(sqlRequest, ct);
                 var mapped = MapToResponse(result.Result, result.TranspiledFetchXml);
-                // Always "dataverse" — ITdsQueryExecutor is not registered in DI, so TDS never activates
-                mapped.QueryMode = "dataverse";
+                mapped.QueryMode = result.ExecutionMode switch
+                {
+                    QueryExecutionMode.Tds => "tds",
+                    _ => "dataverse"
+                };
 
                 if (result.DataSources is { Count: > 1 })
                 {
@@ -1086,6 +1089,14 @@ public class RpcMethodHandler : IDisposable
                         Message = ex.Message,
                         DmlBlocked = true,
                     });
+            }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
+            {
+                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.Message);
+            }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsConnectionFailed)
+            {
+                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.Message);
             }
             catch (PpdsException ex)
             {

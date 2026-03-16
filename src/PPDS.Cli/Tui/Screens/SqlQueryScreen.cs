@@ -544,6 +544,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
             var totalRows = 0;
             var isFirstChunk = true;
 
+            QueryExecutionMode? executionMode = null;
+
             await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, queryCt))
             {
                 // Capture column metadata from first chunk
@@ -582,6 +584,11 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                         {
                             _statusSpinner.Message = $"Loading... {chunkCapture.TotalRowsSoFar:N0} rows ({stopwatch.Elapsed.TotalSeconds:F1}s)";
                         }
+
+                        if (chunkCapture.IsComplete && chunkCapture.ExecutionMode.HasValue)
+                        {
+                            executionMode = chunkCapture.ExecutionMode;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -607,7 +614,8 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                     _lastPagingCookie = null;
                     _lastExecutionTimeMs = elapsedMs;
 
-                    _statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms";
+                    var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
+                    _statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
                 }
                 catch (Exception ex)
                 {

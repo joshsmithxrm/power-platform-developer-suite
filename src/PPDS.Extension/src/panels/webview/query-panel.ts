@@ -507,9 +507,8 @@ moreBtn.addEventListener('click', (e) => {
         { label: 'Open in Notebook', action: 'openInNotebook' },
         { label: '', action: 'separator' },
         { label: 'Explain Query', action: 'explain' },
-        // TODO: Re-enable when ITdsQueryExecutor is registered in DI (see ServiceCollectionExtensions.cs)
-        // { label: '', action: 'separator' },
-        // { label: 'TDS Read Replica', action: 'toggleTds', checked: useTds },
+        { label: '', action: 'separator' },
+        { label: 'TDS Read Replica', action: 'toggleTds', checked: useTds },
     ]);
 });
 
