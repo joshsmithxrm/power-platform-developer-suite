@@ -31,7 +31,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
 - `specs/` - Feature specifications
 - `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
-- `docs/plans/` - Implementation plans (save all plans here, NOT docs/superpowers/plans/)
+- `docs/plans/` - Implementation plans
 
 ## Testing
 

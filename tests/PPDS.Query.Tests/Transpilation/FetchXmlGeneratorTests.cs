@@ -492,7 +492,7 @@ public class FetchXmlGeneratorTests
     [InlineData("STDEV", "stdev")]
     [InlineData("VARP", "varp")]
     [InlineData("COUNT_BIG", "count")]
-    public void Generate_ExtendedAggregate_RecognizedAsAggregate(string sqlFunc, string expectedAttr)
+    public void Generate_ExtendedAggregate_RecognizedAsAggregate(string sqlFunc, string _)
     {
         var fetchXml = GenerateFetchXml(
             $"SELECT {sqlFunc}(revenue) AS agg_result FROM account");

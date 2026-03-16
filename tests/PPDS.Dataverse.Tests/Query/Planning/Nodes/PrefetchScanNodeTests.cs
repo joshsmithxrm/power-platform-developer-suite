@@ -228,7 +228,7 @@ public class PrefetchScanNodeTests
             // Simulate slow consumer on first few rows
             if (results.Count <= 5)
             {
-                await Task.Delay(20).ConfigureAwait(false);
+                await Task.Delay(20);
             }
         }
 
@@ -423,7 +423,7 @@ public class PrefetchScanNodeTests
             // Slow down consumer every 10 rows to let producer potentially fill buffer
             if (consumed % 10 == 0)
             {
-                await Task.Delay(5).ConfigureAwait(false);
+                await Task.Delay(5);
             }
         }
 

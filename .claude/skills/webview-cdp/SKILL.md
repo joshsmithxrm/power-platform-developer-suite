@@ -310,5 +310,5 @@ This ensures the tool evolves based on real needs.
 - **Drop `--page` for webview content** — buttons, inputs, tables inside extension panels
 - **Save screenshots to temp dirs** — never create files in the repo working tree
 - **Check logs when debugging** — `logs` for console output, `logs --channel "PPDS"` for extension logs
-- **Do NOT use agent-browser for VS Code webviews** — it cannot reach webview iframe targets
+- **Use this tool for VS Code webview testing** — generic browser automation tools cannot reach webview iframe targets
 - **Do NOT use Playwright MCP for webview testing** — it doesn't support Electron

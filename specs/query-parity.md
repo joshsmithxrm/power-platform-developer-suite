@@ -366,7 +366,7 @@ Each label is styled with its environment color (using the same CSS custom prope
 | AC-24 | Daemon `query/export` uses `SqlQueryService` for transpilation and execution | `RpcMethodHandlerTests.QueryExport_UsesSharedService` | 🔲 |
 | AC-25 | `SqlQueryService` exceptions map to correct RPC error codes (`ParseError`, `DmlBlocked`, `DmlConfirmationRequired`) | `RpcMethodHandlerTests.QuerySql_ErrorMapping_PreservesRpcCodes` | 🔲 |
 | AC-26 | `TranspileSqlToFetchXml()` private method deleted from `RpcMethodHandler` | Code review — method no longer exists | 🔲 |
-| AC-27 | `InjectTopAttribute()` private method deleted from `RpcMethodHandler` | Code review — method no longer exists | 🔲 |
+| AC-27 | `InjectTopAttribute()` private method retained in `RpcMethodHandler` — still used by `query/fetch` handler | Code review — method still exists | 🔲 |
 | AC-28 | Inline DML safety check block deleted from `QuerySqlAsync` | Code review — block no longer exists | 🔲 |
 | AC-29 | Inline `QueryParser`/`ExecutionPlanBuilder`/`FetchXmlGeneratorService` deleted from `QueryExplainAsync` | Code review — instantiations no longer exist | 🔲 |
 
