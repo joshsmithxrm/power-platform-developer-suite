@@ -98,8 +98,15 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 | "..." overflow menu | PASS | Shows Load Query, Open in Notebook, Explain Query, TDS Read Replica |
 | Error handling | PASS | Bad table name shows red error banner with Dataverse error message, status = "Error" |
 | Multi-panel | PASS | Multiple Data Explorer panels open simultaneously with independent state |
-| Toolbar env color | PARTIAL | `data-env-color="green"` set but `data-env-type` is null (type not configured for this environment) |
+| FetchXML toggle | PASS | SQL→FetchXML converts query correctly, FetchXML→SQL round-trips cleanly with reformatting |
+| Export dropdown | PASS | Shows CSV, TSV, JSON, Copy to Clipboard, Save Query |
+| Copy to Clipboard | PASS | Shows "Copied 5 rows to clipboard" notification |
+| Explain Query | PASS | Opens "Execution Plan" document with FetchXmlScanNode tree and FetchXML source |
+| Solutions panel | PASS | Lists 8 solutions (4 managed, 4 unmanaged), filter bar, env picker |
+| Solution drill-down | PASS | Expands to show component types with counts (Entity, Plugin Assembly, etc.) |
+| Toolbar env color | BUG | `data-env-color="green"` renders correctly, but `data-env-type` is null despite daemon returning type=Development. Root cause: panel uses `auth/who → environment.type` (null) instead of `env/config/get → resolvedType` (correct). The type-based top border doesn't render. |
 | Daemon status bar | PASS | Shows checkmark + "PPDS" when ready |
+| Extension logs | CLEAN | No PPDS errors in any session. All errors from GitHub Copilot (expected in test instance). |
 
 ### TUI (code audit — interactive testing deferred to user)
 
@@ -142,10 +149,8 @@ Comprehensive QA pass before scaling out panel implementation. Covers code integ
 - Tab title shows profile + environment context
 
 **Extension gaps:**
-- No TDS toggle (planned for query parity)
-- No environment details command
-- No execution plan viewer in toolbar (may be under "..." menu)
-- Environment type detection not working for all environments (`data-env-type` was null)
+- Environment type border not rendering (data source mismatch — uses auth/who instead of env/config/get)
+- No environment details command (TUI has it under Tools menu)
 
 **TUI strengths:**
 - Rich interactive status bar (click to switch profile/env)
@@ -182,11 +187,32 @@ When multiple webview panels from the same extension are open, `--ext` targets t
 
 **Proposed fix:** `connect` should show panel titles; `--ext` should prefer the focused webview; consider `--target active` flag.
 
+## MCP Guardrail Verification
+
+18 new unit tests covering:
+- **McpSessionOptions.Parse:** All CLI arg combinations (--profile, --environment, --read-only, --allowed-env)
+- **McpSessionOptions.IsEnvironmentAllowed:** Empty list, matching URL, non-matching, trailing slash normalization, case insensitivity
+- **McpToolContext.IsReadOnly:** Default false, true when configured
+- **McpToolContext.ValidateEnvironmentSwitch:** Throws on no allowlist, throws on non-allowed URL, succeeds on allowed
+- **McpToolContext.EnvironmentUrlOverride:** Default null, returns configured value
+
+Total MCP tests: 58 passed, 3 skipped (pre-existing).
+
+## TUI Verification
+
+Code audit confirmed all fixes compile and integrate correctly:
+- F10 keybinding registered in SqlQueryScreen (replaces Ctrl+Shift+T)
+- SetNeedsDisplay added to ToggleTdsEndpoint
+- EnvironmentDetailsDialog wired in TuiShell Tools menu
+- KeyboardShortcutsDialog reads bindings dynamically (auto-shows F10)
+
+TUI snapshot test infrastructure has a pre-existing dependency issue (`@microsoft/tui-test` package resolution error). Not from our changes — needs separate investigation.
+
 ## Items NOT Fixed (Future Work)
 
-- Environment type detection for toolbar color borders — needs investigation into why `data-env-type` is null when environment has a configured type
-- TDS toggle in Extension Data Explorer — already accessible via "..." > TDS Read Replica menu
-- Environment details command in Extension — low priority, could be added as a command
+- **BUG: Environment type border not rendering** — Panel toolbar `data-env-type` is null because QueryPanel/SolutionsPanel use `auth/who → environment.type` (which returns null) instead of `env/config/get → resolvedType` (which returns "Development"). Fix: use resolvedType from envConfigGet response.
+- Environment details command in Extension — low priority, TUI has it
 - webview-cdp multi-panel targeting improvements
-- Per-environment DML permissions in MCP — deferred to future iteration
+- TUI snapshot test infrastructure dependency fix
+- Per-environment DML permissions in MCP — deferred
 - MCP audit logging — deferred
