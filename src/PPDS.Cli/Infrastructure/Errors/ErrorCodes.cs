@@ -223,4 +223,22 @@ public static class ErrorCodes
         /// <summary>Specified user for impersonation was not found.</summary>
         public const string UserNotFound = "Plugin.UserNotFound";
     }
+
+    /// <summary>
+    /// Update check and self-update errors.
+    /// </summary>
+    public static class UpdateCheck
+    {
+        /// <summary>NuGet API query failed (network, timeout, non-2xx).</summary>
+        public const string NetworkError = "UpdateCheck.NetworkError";
+
+        /// <summary>Cache file is corrupt or unreadable.</summary>
+        public const string CacheCorrupt = "UpdateCheck.CacheCorrupt";
+
+        /// <summary>Cannot locate the dotnet runtime executable.</summary>
+        public const string DotnetNotFound = "UpdateCheck.DotnetNotFound";
+
+        /// <summary>The dotnet tool update process exited with non-zero.</summary>
+        public const string UpdateFailed = "UpdateCheck.UpdateFailed";
+    }
 }
