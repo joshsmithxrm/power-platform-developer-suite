@@ -63,6 +63,13 @@ public static class VersionCommand
             var yes = parseResult.GetValue(yesOption);
             var check = parseResult.GetValue(checkOption);
 
+            // Validate: --stable and --prerelease require --update
+            if ((stable || preRelease) && !update)
+            {
+                Console.Error.WriteLine("Error: --stable and --prerelease require --update.");
+                return ExitCodes.InvalidArguments;
+            }
+
             // Validate mutual exclusivity (AC-49)
             if (stable && preRelease)
             {
@@ -70,7 +77,7 @@ public static class VersionCommand
                 return ExitCodes.InvalidArguments;
             }
 
-            if (update || stable || preRelease)
+            if (update)
             {
                 return await HandleUpdateAsync(stable, preRelease, yes, cancellationToken);
             }
@@ -141,6 +148,51 @@ public static class VersionCommand
         {
             await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
             var service = localProvider.GetRequiredService<IUpdateCheckService>();
+
+            // First check what's available (no side effects)
+            var checkResult = await service.CheckAsync(ErrorOutput.Version, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (checkResult is null)
+            {
+                Console.Error.WriteLine("Unable to check for updates (network unavailable or check failed).");
+                return ExitCodes.Failure;
+            }
+
+            if (!checkResult.StableUpdateAvailable && !checkResult.PreReleaseUpdateAvailable)
+            {
+                Console.Error.WriteLine("You are already up to date.");
+                return ExitCodes.Success;
+            }
+
+            // Determine target version based on channel
+            var usePreRelease = channel switch
+            {
+                UpdateChannel.Stable => false,
+                UpdateChannel.PreRelease => true,
+                UpdateChannel.Current => NuGetVersion.TryParse(
+                    checkResult.CurrentVersion, out var cv) && cv!.IsOddMinor,
+                _ => false
+            };
+
+            var targetVersion = usePreRelease
+                ? checkResult.LatestPreReleaseVersion
+                : checkResult.LatestStableVersion;
+
+            // Confirm BEFORE spawning (the fix)
+            if (!skipConfirmation && targetVersion is not null)
+            {
+                Console.Error.Write($"Update to {targetVersion}? [Y/n] ");
+                var response = Console.ReadLine();
+                if (!string.IsNullOrEmpty(response) &&
+                    !response.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("Update cancelled.");
+                    return ExitCodes.Success;
+                }
+            }
+
+            // NOW spawn the update (after confirmation)
             var result = await service.UpdateAsync(channel, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -150,25 +202,6 @@ public static class VersionCommand
                 if (result.ManualCommand is not null)
                     Console.Error.WriteLine($"  Run: {result.ManualCommand}");
                 return ExitCodes.Success;
-            }
-
-            if (result.Success && result.ErrorMessage?.Contains("up to date",
-                StringComparison.OrdinalIgnoreCase) == true)
-            {
-                Console.Error.WriteLine("You are already up to date.");
-                return ExitCodes.Success;
-            }
-
-            if (!skipConfirmation && result.InstalledVersion is not null)
-            {
-                Console.Error.Write($"Update to {result.InstalledVersion}? [Y/n] ");
-                var response = Console.ReadLine();
-                if (!string.IsNullOrEmpty(response) &&
-                    !response.StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.Error.WriteLine("Update cancelled.");
-                    return ExitCodes.Success;
-                }
             }
 
             Console.Error.WriteLine($"Updating to {result.InstalledVersion}...");
