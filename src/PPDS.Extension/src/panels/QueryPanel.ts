@@ -222,12 +222,15 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     try {
                         const config = await this.daemon.envConfigGet(env.url);
                         this.environmentColor = config.resolvedColor ?? null;
+                        if (!this.environmentType && config.resolvedType) {
+                            this.environmentType = config.resolvedType;
+                        }
                     } catch (err) {
                         // eslint-disable-next-line no-console -- non-critical: color accent unavailable
                         console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
                         this.environmentColor = null;
                     }
-                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: env.type, envColor: this.environmentColor });
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: this.environmentType, envColor: this.environmentColor });
                     this.updateTitle();
                 }
                 break;
@@ -271,6 +274,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             try {
                 const config = await this.daemon.envConfigGet(this.environmentUrl);
                 this.environmentColor = config.resolvedColor ?? null;
+                if (!this.environmentType && config.resolvedType) {
+                    this.environmentType = config.resolvedType;
+                }
             } catch (err) {
                 // eslint-disable-next-line no-console -- non-critical: color accent unavailable
                 console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
