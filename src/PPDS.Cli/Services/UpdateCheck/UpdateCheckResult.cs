@@ -38,9 +38,7 @@ public sealed record UpdateCheckResult
     public string? UpdateCommand { get; init; }
 
     /// <summary>
-    /// Gets the pre-release update command when a newer pre-release is also available
-    /// alongside a stable update. Null when no pre-release update exists or when
-    /// only a pre-release update is available (in that case <see cref="UpdateCommand"/> holds it).
+    /// Gets the pre-release update command when a pre-release update is available, or null when no pre-release update exists.
     /// </summary>
     public string? PreReleaseUpdateCommand { get; init; }
 

@@ -449,6 +449,22 @@ public class UpdateCheckServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckAsync_PreReleaseUser_OnlyStableAvailable()
+    {
+        // AC-21: Pre-release user, newer stable only, no newer pre-release
+        var handler = BuildHandler(MakeVersionsJson("0.6.0"));
+        var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile);
+
+        var result = await svc.CheckAsync("0.5.0-beta.1");
+
+        Assert.NotNull(result);
+        Assert.True(result.StableUpdateAvailable);
+        Assert.False(result.PreReleaseUpdateAvailable);
+        Assert.Equal("0.6.0", result.LatestStableVersion);
+        Assert.Null(result.LatestPreReleaseVersion); // No pre-release versions exist on NuGet
+    }
+
+    [Fact]
     public async Task CheckAsync_PreReleaseUser_OnlyPreReleaseAvailable()
     {
         // AC-22
