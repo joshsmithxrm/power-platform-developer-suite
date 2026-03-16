@@ -1132,11 +1132,18 @@ Add a `statusPath` constructor parameter alongside `cachePath`. Add the `UpdateA
             };
         }
 
-        // Step 2: Check if already up to date
-        var hasStableUpdate = cached.StableUpdateAvailable;
-        var hasPreReleaseUpdate = cached.PreReleaseUpdateAvailable;
+        // Step 2: Determine if an update is actually needed for the selected channel
+        var updateNeeded = channel switch
+        {
+            UpdateChannel.Stable => cached.StableUpdateAvailable,
+            UpdateChannel.PreRelease => cached.PreReleaseUpdateAvailable,
+            UpdateChannel.Current => (NuGetVersion.TryParse(cached.CurrentVersion, out var cv) && cv!.IsOddMinor)
+                                     ? cached.PreReleaseUpdateAvailable
+                                     : cached.StableUpdateAvailable,
+            _ => false
+        };
 
-        if (!hasStableUpdate && !hasPreReleaseUpdate)
+        if (!updateNeeded)
         {
             return new UpdateResult
             {
@@ -1450,7 +1457,7 @@ git add src/PPDS.Cli/Services/UpdateCheck/UpdateCheckService.cs \
         tests/PPDS.Cli.Tests/Services/UpdateCheck/SelfUpdateTests.cs
 git commit -m "feat(update-check): implement self-update via detached process
 
-Add UpdateAsync with dotnet path resolution via Process.MainModule
+Add UpdateAsync with dotnet path resolution via RuntimeEnvironment
 (fallback to DOTNET_ROOT + platform defaults). Global install
 detection via AppContext.BaseDirectory. Detached process spawn with
 shell: false per S2. Status file feedback for next run.
@@ -1650,6 +1657,49 @@ public static class VersionCommand
         {
             await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
             var service = localProvider.GetRequiredService<IUpdateCheckService>();
+
+            // Step 1: Check what's available BEFORE prompting or updating
+            var currentVersion = ErrorOutput.Version;
+            var checkResult = await service.CheckAsync(currentVersion, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (checkResult is null)
+            {
+                Console.Error.WriteLine("Cannot determine latest version. Check your network connection.");
+                Console.Error.WriteLine($"  Run manually: dotnet tool update PPDS.Cli -g");
+                return ExitCodes.Failure;
+            }
+
+            var targetVersion = channel switch
+            {
+                UpdateChannel.Stable => checkResult.StableUpdateAvailable ? checkResult.LatestStableVersion : null,
+                UpdateChannel.PreRelease => checkResult.PreReleaseUpdateAvailable ? checkResult.LatestPreReleaseVersion : null,
+                UpdateChannel.Current => (NuGetVersion.TryParse(currentVersion, out var cv) && cv!.IsOddMinor)
+                    ? (checkResult.PreReleaseUpdateAvailable ? checkResult.LatestPreReleaseVersion : null)
+                    : (checkResult.StableUpdateAvailable ? checkResult.LatestStableVersion : null),
+                _ => null
+            };
+
+            if (targetVersion is null)
+            {
+                Console.Error.WriteLine("You are already up to date.");
+                return ExitCodes.Success;
+            }
+
+            // Step 2: Confirm with user BEFORE spawning update
+            if (!skipConfirmation)
+            {
+                Console.Error.Write($"Update to {targetVersion}? [Y/n] ");
+                var response = Console.ReadLine();
+                if (!string.IsNullOrEmpty(response) &&
+                    !response.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("Update cancelled.");
+                    return ExitCodes.Success;
+                }
+            }
+
+            // Step 3: Now actually perform the update
             var result = await service.UpdateAsync(channel, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -1660,26 +1710,7 @@ public static class VersionCommand
                 return ExitCodes.Success;
             }
 
-            if (result.Success && result.ErrorMessage?.Contains("up to date",
-                StringComparison.OrdinalIgnoreCase) == true)
-            {
-                Console.Error.WriteLine("You are already up to date.");
-                return ExitCodes.Success;
-            }
-
-            if (!skipConfirmation)
-            {
-                Console.Error.Write($"Update to {result.InstalledVersion}? [Y/n] ");
-                var response = Console.ReadLine();
-                if (!string.IsNullOrEmpty(response) &&
-                    !response.StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.Error.WriteLine("Update cancelled.");
-                    return ExitCodes.Success;
-                }
-            }
-
-            Console.Error.WriteLine($"Updating to {result.InstalledVersion}...");
+            Console.Error.WriteLine($"Updating to {targetVersion}...");
             Console.Error.WriteLine("The update will complete in the background.");
             return ExitCodes.Success;
         }
