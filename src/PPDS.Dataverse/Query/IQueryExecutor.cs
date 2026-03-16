@@ -26,6 +26,22 @@ public interface IQueryExecutor
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Executes a FetchXML query with optional execution options (bypass plugins/flows).
+    /// Default implementation ignores execution options and delegates to the base overload.
+    /// Override in concrete classes to apply <see cref="QueryExecutionOptions"/>.
+    /// </summary>
+    Task<QueryResult> ExecuteFetchXmlAsync(
+        string fetchXml,
+        int? pageNumber,
+        string? pagingCookie,
+        bool includeCount,
+        QueryExecutionOptions? executionOptions,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteFetchXmlAsync(fetchXml, pageNumber, pagingCookie, includeCount, cancellationToken);
+    }
+
+    /// <summary>
     /// Executes a FetchXML query with automatic paging, returning all results.
     /// Use with caution for large result sets.
     /// </summary>

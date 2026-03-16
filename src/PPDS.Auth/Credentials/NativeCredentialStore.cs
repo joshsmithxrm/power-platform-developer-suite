@@ -29,7 +29,7 @@ public sealed class NativeCredentialStore : ISecureCredentialStore, IDisposable
     /// <summary>
     /// Service name used for credential storage namespace.
     /// </summary>
-    private const string ServiceName = "ppds.credentials";
+    private const string ServiceName = "https://ppds.credentials";
 
     /// <summary>
     /// Special key used to store the manifest of all applicationIds.

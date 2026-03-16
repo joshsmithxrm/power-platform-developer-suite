@@ -308,46 +308,6 @@ public class RpcMethodHandlerTests
 
     #endregion
 
-    #region SchemaListResponse Tests
-
-    [Fact]
-    public void SchemaListResponse_WithAttributes_SerializesCorrectly()
-    {
-        var response = new SchemaListResponse
-        {
-            Entity = "account",
-            Attributes =
-            [
-                new AttributeInfo
-                {
-                    LogicalName = "accountid",
-                    DisplayName = "Account ID",
-                    AttributeType = "Uniqueidentifier",
-                    IsCustomAttribute = false,
-                    IsPrimaryId = true,
-                    IsPrimaryName = false
-                },
-                new AttributeInfo
-                {
-                    LogicalName = "name",
-                    DisplayName = "Account Name",
-                    AttributeType = "String",
-                    IsCustomAttribute = false,
-                    IsPrimaryId = false,
-                    IsPrimaryName = true
-                }
-            ]
-        };
-
-        var json = JsonSerializer.Serialize(response, JsonOptions);
-
-        Assert.Contains("account", json);
-        Assert.Contains("accountid", json);
-        Assert.Contains("Uniqueidentifier", json);
-    }
-
-    #endregion
-
     #region Null Handling Tests
 
     [Fact]
@@ -393,6 +353,57 @@ public class RpcMethodHandlerTests
         Assert.DoesNotContain("\"filteringAttributes\"", json);
         Assert.DoesNotContain("\"description\"", json);
         Assert.DoesNotContain("\"runAsUser\"", json);
+    }
+
+    #endregion
+
+    #region QueryResultResponse Tests
+
+    // ── AC-38: RPC maps ExecutionMode.Tds to queryMode "tds" ─────────────
+
+    [Fact]
+    public void QueryResultResponse_QueryModeTds_SerializesCorrectly()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = "tds"
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        Assert.Contains("\"queryMode\"", json);
+        Assert.Contains("\"tds\"", json);
+    }
+
+    [Fact]
+    public void QueryResultResponse_QueryModeDataverse_SerializesCorrectly()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = "dataverse"
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        Assert.Contains("\"queryMode\"", json);
+        Assert.Contains("\"dataverse\"", json);
+    }
+
+    [Fact]
+    public void QueryResultResponse_NullQueryMode_OmittedInJson()
+    {
+        var response = new QueryResultResponse
+        {
+            Success = true,
+            QueryMode = null
+        };
+
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+
+        // QueryMode should be omitted when null (JsonIgnoreCondition.WhenWritingNull)
+        Assert.DoesNotContain("\"queryMode\"", json);
     }
 
     #endregion

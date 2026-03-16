@@ -31,36 +31,46 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
 - `specs/` - Feature specifications
 - `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
-
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `ppds --help` | Full CLI reference |
-| `ppds serve` | RPC server for IDE integration |
-| `/implement` | Execute implementation plan with spec-aware subagents |
-| `/spec` | Create or update a specification |
-| `/spec-audit` | Audit specs against code reality |
-| `/debug` | Interactive feedback loop for CLI/TUI/MCP |
-| `/automated-quality-gates` | Mechanical pass/fail build/test/lint checks |
-| `/impartial-code-review` | Bias-free code review against specs |
-| `/review-fix-converge` | Gates, review, fix loop with convergence tracking |
-
-## Spec Workflow
-
-- Constitution: `specs/CONSTITUTION.md` — non-negotiable principles
-- Template: `specs/SPEC-TEMPLATE.md` — required structure for all specs
-- New spec: `/spec {name}` — guided creation with cross-referencing
-- Audit: `/spec-audit` — compare all specs against code
-- Implement: `/implement` — loads constitution + relevant specs into subagent context
-- Review: `/review-fix-converge` — gates, impartial review, fix until converged
+- `docs/plans/` - Implementation plans
 
 ## Testing
 
-- Unit (default): `--filter Category!=Integration`
-- Integration (live): `--filter Category=Integration`
-- TUI: `--filter Category=TuiUnit`
+- .NET unit: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`
+- .NET integration: `dotnet test PPDS.sln --filter "Category=Integration" -v q`
+- .NET TUI: `dotnet test --filter "Category=TuiUnit"`
+- Extension unit: `npm run ext:test`
+- Extension E2E: `npm run ext:test:e2e`
+- TUI snapshots: `npm run tui:test`
+
+## Specs
+
+- Constitution: `specs/CONSTITUTION.md` — read before any work
+- Template: `specs/SPEC-TEMPLATE.md`
+- Index: `specs/README.md`
+
+## Extension Versioning
+
+Odd/even minor convention: odd minor = pre-release, even minor = stable. See `docs/plans/2026-03-03-vscode-extension-prerelease-design.md`.
 
 ## Architecture
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
+
+## Workflow
+
+- Spec: /spec → /spec-audit
+- Implement: /implement → dispatches subagents, runs /gates and /verify at phase gates
+- Review: /review → /converge
+- Skills: @webview-panels (panel dev), @webview-cdp (visual verification)
+- Execution: commit after every task, verify with /gates before proceeding — don't ask, just do it
+- Verification: after ANY change that affects what a user sees or experiences (extension webview, TUI, CLI output, MCP tool response), you MUST verify it works by using the product yourself before committing. Extension: use @webview-cdp — open it, look at it, interact with it. TUI: snapshot tests. CLI: run the command. MCP: call the tool. A passing test suite is not verification. Seeing the actual result is. No exceptions.
+- QA gate: for non-trivial features, run /qa to dispatch a blind verifier agent that tests the product without seeing source code. Required by /implement at phase gates. Available anytime via /qa.
+
+## Git Hooks
+
+Pre-commit hook in `scripts/hooks/` runs `typecheck:all` and `eslint --quiet` (errors only) on extension TS changes. Auto-configured by `npm install` via `prepare` script. Manual setup: `git config core.hooksPath scripts/hooks`.
+
+## Gotchas
+
+- VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
+- Agent research summaries may be wrong — read code yourself before stating codebase behavior as fact

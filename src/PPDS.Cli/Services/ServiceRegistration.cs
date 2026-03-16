@@ -57,6 +57,18 @@ public static class ServiceRegistration
                 metadataExecutor,
                 pool.GetTotalRecommendedParallelism());
         });
+
+        // TDS Endpoint executor — per-environment, uses same auth pattern as IConnectionService
+        services.AddTransient<ITdsQueryExecutor>(sp =>
+        {
+            var connectionInfo = sp.GetRequiredService<ResolvedConnectionInfo>();
+            return TdsQueryExecutorFactory.Create(
+                connectionInfo.Profile,
+                connectionInfo.EnvironmentUrl,
+                sp.GetRequiredService<ISecureCredentialStore>(),
+                sp.GetService<ILogger<TdsQueryExecutor>>());
+        });
+
         services.AddSingleton<IQueryHistoryService, QueryHistoryService>();
 
         // Export services

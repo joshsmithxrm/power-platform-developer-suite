@@ -1,0 +1,883 @@
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
+import { spawn, ChildProcess } from 'child_process';
+
+import * as vscode from 'vscode';
+import {
+    createMessageConnection,
+    MessageConnection,
+    StreamMessageReader,
+    StreamMessageWriter,
+    CancellationToken,
+    RequestType,
+    ParameterStructures,
+} from 'vscode-jsonrpc/node';
+
+import type {
+    AuthListResponse,
+    AuthWhoResponse,
+    AuthSelectResponse,
+    EnvListResponse,
+    EnvSelectResponse,
+    EnvConfigGetResponse,
+    EnvConfigSetResponse,
+    EnvConfigRemoveResponse,
+    EnvWhoResponse,
+    QueryResultResponse,
+    QueryCompleteResponse,
+    QueryHistoryListResponse,
+    QueryHistoryDeleteResponse,
+    QueryExportResponse,
+    QueryExplainResponse,
+    ProfileCreateResponse,
+    ProfileDeleteResponse,
+    ProfileRenameResponse,
+    ProfilesInvalidateResponse,
+    SolutionsListResponse,
+    SolutionComponentsResponse,
+    SchemaEntitiesResponse,
+    SchemaAttributesResponse,
+} from './types.js';
+
+// Re-export AuthWhoResponse for profileCommands.ts convenience
+export type { AuthWhoResponse } from './types.js';
+
+export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';
+
+/**
+ * Client for communicating with the ppds serve daemon via JSON-RPC.
+ *
+ * All RPC methods call ensureConnected() first, which starts the daemon
+ * process if it is not already running. If the daemon dies, the next RPC
+ * call will automatically restart it (auto-reconnect).
+ */
+/** Maps daemon stderr log-level tags to LogOutputChannel method names. */
+const DAEMON_LOG_LEVELS: Record<string, 'trace' | 'debug' | 'info' | 'warn' | 'error'> = {
+    TRC: 'trace',
+    DBG: 'debug',
+    INF: 'info',
+    WRN: 'warn',
+    ERR: 'error',
+    CRT: 'error',
+};
+
+const DAEMON_LOG_LEVEL_RE = /\]\s+\[(TRC|DBG|INF|WRN|ERR|CRT)\]/;
+
+/** Parses the log level from a daemon stderr line. Returns 'warn' for unrecognized formats. */
+export function parseDaemonLogLevel(line: string): 'trace' | 'debug' | 'info' | 'warn' | 'error' {
+    const match = DAEMON_LOG_LEVEL_RE.exec(line);
+    return match ? DAEMON_LOG_LEVELS[match[1]] : 'warn';
+}
+
+// RequestTypes with positional parameter encoding for DTO-based RPC methods.
+// StreamJsonRpc binds positional params (JSON array) to a single DTO parameter,
+// but vscode-jsonrpc defaults to named params (JSON object) which StreamJsonRpc
+// interprets as individual method arguments. These force positional encoding.
+// RequestType<Params, Result, Error> with positional encoding for DTO-based methods
+const RPC_QUERY_SQL = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/sql', ParameterStructures.byPosition);
+const RPC_QUERY_FETCH = new RequestType<Record<string, unknown>, QueryResultResponse, void>('query/fetch', ParameterStructures.byPosition);
+const RPC_QUERY_COMPLETE = new RequestType<Record<string, unknown>, QueryCompleteResponse, void>('query/complete', ParameterStructures.byPosition);
+const RPC_QUERY_HISTORY_LIST = new RequestType<Record<string, unknown>, QueryHistoryListResponse, void>('query/history/list', ParameterStructures.byPosition);
+const RPC_QUERY_HISTORY_DELETE = new RequestType<Record<string, unknown>, QueryHistoryDeleteResponse, void>('query/history/delete', ParameterStructures.byPosition);
+const RPC_QUERY_EXPORT = new RequestType<Record<string, unknown>, QueryExportResponse, void>('query/export', ParameterStructures.byPosition);
+const RPC_QUERY_EXPLAIN = new RequestType<Record<string, unknown>, QueryExplainResponse, void>('query/explain', ParameterStructures.byPosition);
+
+export class DaemonClient implements vscode.Disposable {
+    private static readonly STARTUP_TIMEOUT_MS = 30_000;
+
+    private process: ChildProcess | null = null;
+    private connection: MessageConnection | null = null;
+    private connectingPromise: Promise<void> | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private pendingNotificationHandlers: Array<{ method: string; handler: (...args: any[]) => void }> = [];
+    private _disposed = false;
+    private _state: DaemonState = 'stopped';
+    private _heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    private _heartbeatFailures = 0;
+    private static readonly HEARTBEAT_INTERVAL_MS = 30_000;
+    private static readonly HEARTBEAT_MAX_FAILURES = 3;
+
+    private readonly _onDidChangeState = new vscode.EventEmitter<DaemonState>();
+    readonly onDidChangeState = this._onDidChangeState.event;
+
+    private readonly _onDidReconnect = new vscode.EventEmitter<void>();
+    readonly onDidReconnect = this._onDidReconnect.event;
+
+    private extensionPath: string;
+    /** Temp directory holding shadow-copied daemon binaries (debug mode only). */
+    private shadowCopyDir: string | null = null;
+
+    constructor(extensionPath: string, private readonly log: vscode.LogOutputChannel) {
+        this.extensionPath = extensionPath;
+    }
+
+    private setState(state: DaemonState): void {
+        if (this._state === state) return;
+        this._state = state;
+        this._onDidChangeState.fire(state);
+    }
+
+    get state(): DaemonState { return this._state; }
+
+    /**
+     * Resolves the path to the ppds CLI binary.
+     * Resolution order:
+     *   1. Bundled binary in extension/bin/ (marketplace install)
+     *   2. Debug build output from src/PPDS.Cli/ (F5 development)
+     *   3. PATH fallback (global dotnet tool)
+     */
+    private resolvePpdsPath(): string {
+        const ext = process.platform === 'win32' ? '.exe' : '';
+
+        // 1. Bundled binary (marketplace / bundle-cli.js output)
+        const bundledPath = path.join(this.extensionPath, 'bin', `ppds${ext}`);
+        try {
+            fs.accessSync(bundledPath, fs.constants.X_OK);
+            return bundledPath;
+        } catch { /* not bundled */ }
+
+        // 2. Debug build output (F5 development — extensionPath is src/PPDS.Extension/)
+        //    Shadow-copy to a temp directory so dotnet build can overwrite the originals
+        //    while the daemon holds locks on the copies.
+        const debugDir = path.join(
+            this.extensionPath, '..', 'PPDS.Cli', 'bin', 'Debug', 'net8.0'
+        );
+        const debugBinary = path.join(debugDir, `ppds${ext}`);
+        try {
+            fs.accessSync(debugBinary, fs.constants.X_OK);
+            const shadowDir = this.shadowCopyDebugBuild(debugDir);
+            const shadowBinary = path.join(shadowDir, `ppds${ext}`);
+            this.log.info(`Using shadow-copied debug build: ${shadowBinary} (source: ${debugDir})`);
+            return shadowBinary;
+        } catch { /* no debug build */ }
+
+        // 3. PATH fallback
+        return 'ppds';
+    }
+
+    /**
+     * Copies the debug build output to a temp directory so the daemon runs from
+     * copies while dotnet build can freely overwrite the originals.
+     */
+    private shadowCopyDebugBuild(sourceDir: string): string {
+        // Reuse existing shadow copy if it still exists
+        if (this.shadowCopyDir && fs.existsSync(this.shadowCopyDir)) {
+            fs.rmSync(this.shadowCopyDir, { recursive: true, force: true });
+        }
+
+        const tempDir = path.join(os.tmpdir(), `ppds-daemon-${Date.now()}`);
+        fs.mkdirSync(tempDir, { recursive: true });
+
+        // Copy all files from the build output (shallow — no subdirectories needed)
+        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+            if (entry.isFile()) {
+                fs.copyFileSync(
+                    path.join(sourceDir, entry.name),
+                    path.join(tempDir, entry.name)
+                );
+            }
+        }
+
+        this.shadowCopyDir = tempDir;
+        return tempDir;
+    }
+
+    /**
+     * Removes the shadow-copy temp directory if it exists.
+     */
+    private cleanupShadowCopy(): void {
+        if (this.shadowCopyDir) {
+            try {
+                fs.rmSync(this.shadowCopyDir, { recursive: true, force: true });
+            } catch {
+                // Best-effort cleanup — temp dir will be reclaimed by OS eventually
+            }
+            this.shadowCopyDir = null;
+        }
+    }
+
+    /**
+     * Starts the daemon process and establishes JSON-RPC connection
+     */
+    async start(): Promise<void> {
+        if (this.connection) {
+            return; // Already running
+        }
+
+        this.setState('starting');
+
+        const ppdsPath = this.resolvePpdsPath();
+        this.log.info(`Starting ppds serve daemon (${ppdsPath})...`);
+
+        // Spawn the daemon process
+        this.process = spawn(ppdsPath, ['serve'], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        if (!this.process.stdout || !this.process.stdin) {
+            throw new Error('Failed to create daemon process streams');
+        }
+
+        // Log stderr with parsed log levels
+        this.process.stderr?.on('data', (data: Buffer) => {
+            const text = data.toString().trimEnd();
+            for (const line of text.split('\n')) {
+                const trimmed = line.trimEnd();
+                if (!trimmed) continue;
+                const level = parseDaemonLogLevel(trimmed);
+                this.log[level](`[daemon] ${trimmed}`);
+            }
+        });
+
+        this.process.on('error', (err) => {
+            this.log.error(`Daemon error: ${err.message}`);
+            vscode.window.showErrorMessage(`PPDS daemon error: ${err.message}`);
+        });
+
+        // Startup exit detection: rejects if the process exits before the
+        // handshake completes. Removed after handshake to avoid unhandled rejections.
+        let startupExitReject: ((err: Error) => void) | null = null;
+        const exitPromise = new Promise<never>((_, reject) => {
+            startupExitReject = reject;
+        });
+        // Prevent unhandled rejection if daemon exits in the narrow window
+        // between handshake success and startupExitReject being nulled.
+        exitPromise.catch(() => {});
+
+        const onStartupExit = (code: number | null): void => {
+            this.log.error(`Daemon exited during startup with code ${code}`);
+            this.connection = null;
+            this.process = null;
+            this.connectingPromise = null;
+            if (startupExitReject) {
+                startupExitReject(new Error(`Daemon exited during startup with code ${code}`));
+            }
+        };
+        this.process.on('exit', onStartupExit);
+
+        // Create JSON-RPC connection over stdio
+        const reader = new StreamMessageReader(this.process.stdout);
+        const writer = new StreamMessageWriter(this.process.stdin);
+        const connection = createMessageConnection(reader, writer);
+
+        // Guard: if dispose() was called while we were setting up, clean up and abort
+        if (this._disposed) {
+            connection.dispose();
+            this.process?.kill();
+            this.process = null;
+            throw new Error('DaemonClient is disposed');
+        }
+
+        this.connection = connection;
+
+        // Start listening for messages
+        this.connection.listen();
+
+        // Flush any notification handlers that were registered before connect
+        for (const pending of this.pendingNotificationHandlers) {
+            this.connection.onNotification(pending.method, pending.handler);
+        }
+        this.pendingNotificationHandlers = [];
+
+        // Startup handshake: race a health check against the process exit event
+        // and a startup timeout to detect immediate failures or hangs.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
+                () => reject(new Error(`Daemon startup timed out after ${DaemonClient.STARTUP_TIMEOUT_MS / 1000}s`)),
+                DaemonClient.STARTUP_TIMEOUT_MS
+            );
+        });
+
+        try {
+            await Promise.race([
+                this.connection.sendRequest('auth/list'),
+                exitPromise,
+                timeoutPromise,
+            ]);
+        } catch (err) {
+            this.connection?.dispose();
+            this.connection = null;
+            this.process?.kill();
+            this.process = null;
+            this.setState('error');
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        // Handshake succeeded — remove the startup exit listener to prevent
+        // unhandled rejections, then install a post-startup exit listener for
+        // auto-reconnect cleanup.
+        startupExitReject = null;
+        this.process.removeListener('exit', onStartupExit);
+
+        this.process.on('exit', (code: number | null) => {
+            this.log.warn(`Daemon exited with code ${code}`);
+            this.connection = null;
+            this.process = null;
+            this.stopHeartbeat();
+            this.setState('error');
+        });
+
+        this.log.info('Daemon connection established');
+        this.setState('ready');
+        this.startHeartbeat();
+    }
+
+    // ── Auth methods ────────────────────────────────────────────────────────
+
+    /**
+     * Lists all authentication profiles.
+     */
+    async authList(): Promise<AuthListResponse> {
+        await this.ensureConnected();
+
+        this.log.debug('Calling auth/list...');
+        const result = await this.connection!.sendRequest<AuthListResponse>('auth/list');
+
+        // Defensive: older daemon versions (pre-SystemTextJsonFormatter) return PascalCase keys
+        const raw = result as unknown as Record<string, unknown>;
+        if (!result.profiles && raw['Profiles']) {
+            result.profiles = raw['Profiles'] as AuthListResponse['profiles'];
+            result.activeProfile = (raw['ActiveProfile'] as string | undefined) ?? result.activeProfile;
+            result.activeProfileIndex = (raw['ActiveProfileIndex'] as number | undefined) ?? result.activeProfileIndex;
+        }
+
+        this.log.debug(`Got ${result.profiles?.length ?? 0} profiles`);
+        return result;
+    }
+
+    /**
+     * Gets detailed information about the currently active profile.
+     */
+    async authWho(): Promise<AuthWhoResponse> {
+        await this.ensureConnected();
+
+        this.log.debug('Calling auth/who...');
+        const result = await this.connection!.sendRequest<AuthWhoResponse>('auth/who');
+        this.log.debug(`auth/who returned profile index ${result.index}`);
+
+        return result;
+    }
+
+    /**
+     * Selects (activates) an authentication profile by index or name.
+     */
+    async authSelect(params: { index?: number; name?: string }): Promise<AuthSelectResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling auth/select with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        const result = await this.connection!.sendRequest<AuthSelectResponse>('auth/select', params);
+        this.log.debug(`Selected profile: ${result.name ?? result.identity}`);
+
+        return result;
+    }
+
+    // ── Environment methods ─────────────────────────────────────────────────
+
+    /**
+     * Lists available Dataverse environments (discovered + configured), optionally filtered.
+     */
+    async envList(filter?: string, forceRefresh?: boolean): Promise<EnvListResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) params.filter = filter;
+        if (forceRefresh) params.forceRefresh = true;
+        this.log.debug(`Calling env/list${filter ? ` with filter="${filter}"` : ''}${forceRefresh ? ' (force refresh)' : ''}...`);
+        const result = await this.connection!.sendRequest<EnvListResponse>('env/list', params);
+        this.log.debug(`Got ${result.environments.length} environments`);
+
+        return result;
+    }
+
+    /**
+     * Selects (activates) a Dataverse environment by URL or name.
+     */
+    async envSelect(environment: string): Promise<EnvSelectResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling env/select for "${environment}"...`);
+        const result = await this.connection!.sendRequest<EnvSelectResponse>('env/select', { environment });
+        this.log.debug(`Selected environment: ${result.displayName} (${result.url})`);
+
+        return result;
+    }
+
+    /**
+     * Returns WhoAmI details for the active environment connection.
+     * This is separate from authWho - it queries the live Dataverse connection.
+     */
+    async envWho(): Promise<EnvWhoResponse> {
+        await this.ensureConnected();
+
+        this.log.debug('Calling env/who...');
+        const result = await this.connection!.sendRequest<EnvWhoResponse>('env/who');
+        this.log.debug(`env/who: ${result.connectedAs} @ ${result.organizationName}`);
+
+        return result;
+    }
+
+    /**
+     * Gets the configuration for a specific environment.
+     */
+    async envConfigGet(environmentUrl: string): Promise<EnvConfigGetResponse> {
+        await this.ensureConnected();
+
+        this.log.debug(`Calling env/config/get for "${environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigGetResponse>('env/config/get', { environmentUrl });
+        this.log.debug(`Got config: label=${result.label ?? '(none)'}, type=${result.type ?? '(none)'}, color=${result.color ?? '(none)'}`);
+
+        return result;
+    }
+
+    /**
+     * Sets the configuration for a specific environment.
+     */
+    async envConfigSet(params: {
+        environmentUrl: string;
+        label?: string;
+        type?: string;
+        color?: string;
+    }): Promise<EnvConfigSetResponse> {
+        await this.ensureConnected();
+
+        this.log.debug(`Calling env/config/set for "${params.environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigSetResponse>('env/config/set', params);
+        this.log.debug(`Config saved: saved=${result.saved}`);
+
+        return result;
+    }
+
+    /**
+     * Removes a configured environment from environments.json.
+     */
+    async envConfigRemove(environmentUrl: string): Promise<EnvConfigRemoveResponse> {
+        await this.ensureConnected();
+
+        this.log.debug(`Calling env/config/remove for "${environmentUrl}"...`);
+        const result = await this.connection!.sendRequest<EnvConfigRemoveResponse>('env/config/remove', { environmentUrl });
+        this.log.debug(`Removed: ${result.removed}`);
+
+        return result;
+    }
+
+    // ── Query methods ───────────────────────────────────────────────────────
+
+    /**
+     * Executes a SQL query against the active Dataverse environment.
+     */
+    async querySql(params: {
+        sql: string;
+        environmentUrl?: string;
+        top?: number;
+        page?: number;
+        pagingCookie?: string;
+        count?: boolean;
+        showFetchXml?: boolean;
+        useTds?: boolean;
+        dmlSafety?: { isConfirmed?: boolean; isDryRun?: boolean; noLimit?: boolean; rowCap?: number };
+    }, token?: CancellationToken): Promise<QueryResultResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling query/sql: ${params.sql.substring(0, 100)}...`);
+        const result = token
+            ? await this.connection!.sendRequest(RPC_QUERY_SQL, params, token)
+            : await this.connection!.sendRequest(RPC_QUERY_SQL, params);
+        this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+
+        return result;
+    }
+
+    /**
+     * Executes a FetchXML query against the active Dataverse environment.
+     */
+    async queryFetch(params: {
+        fetchXml: string;
+        environmentUrl?: string;
+        top?: number;
+        page?: number;
+        pagingCookie?: string;
+        count?: boolean;
+    }, token?: CancellationToken): Promise<QueryResultResponse> {
+        await this.ensureConnected();
+
+        this.log.info('Calling query/fetch...');
+        const result = token
+            ? await this.connection!.sendRequest(RPC_QUERY_FETCH, params, token)
+            : await this.connection!.sendRequest(RPC_QUERY_FETCH, params);
+        this.log.debug(`Query returned ${result.count} records in ${result.executionTimeMs}ms`);
+
+        return result;
+    }
+
+    /**
+     * Gets IntelliSense completion items for SQL or FetchXML.
+     * Pass language='fetchxml' for FetchXML documents; omit or pass 'sql' for SQL.
+     * Uses quiet (non-logging) transport to avoid flooding the output channel
+     * on every keystroke.
+     */
+    async queryComplete(params: { sql: string; cursorOffset: number; language?: string }): Promise<QueryCompleteResponse> {
+        return this.sendRequestQuiet(RPC_QUERY_COMPLETE, params);
+    }
+
+    // ── Query History ────────────────────────────────────────────────────────
+
+    /**
+     * Lists query history entries.
+     */
+    async queryHistoryList(search?: string, limit?: number): Promise<QueryHistoryListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (search !== undefined) params.search = search;
+        if (limit !== undefined) params.limit = limit;
+        this.log.debug(`Calling query/history/list...`);
+        const result = await this.connection!.sendRequest(RPC_QUERY_HISTORY_LIST, params);
+        this.log.debug(`Got ${result.entries.length} history entries`);
+        return result;
+    }
+
+    /**
+     * Deletes a query history entry.
+     */
+    async queryHistoryDelete(id: string): Promise<QueryHistoryDeleteResponse> {
+        await this.ensureConnected();
+        this.log.debug(`Calling query/history/delete for "${id}"...`);
+        const result = await this.connection!.sendRequest(RPC_QUERY_HISTORY_DELETE, { id });
+        this.log.debug(`Deleted: ${result.deleted}`);
+        return result;
+    }
+
+    // ── Query Export & Explain ──────────────────────────────────────────────
+
+    /**
+     * Exports query results in the specified format (CSV, TSV, or JSON).
+     * The daemon executes the query and formats results server-side.
+     */
+    async queryExport(params: {
+        sql: string;
+        fetchXml?: string;
+        environmentUrl?: string;
+        format?: string;
+        includeHeaders?: boolean;
+        top?: number;
+    }): Promise<QueryExportResponse> {
+        await this.ensureConnected();
+        this.log.info(`Calling query/export...`);
+        const result = await this.connection!.sendRequest(RPC_QUERY_EXPORT, params);
+        this.log.debug(`Exported ${result.rowCount} rows as ${result.format}`);
+        return result;
+    }
+
+    /**
+     * Returns the execution plan (FetchXML) for a SQL query.
+     * Since Dataverse SQL is transpiled to FetchXML, the transpiled FetchXML
+     * serves as the execution plan.
+     */
+    async queryExplain(params: { sql: string; environmentUrl?: string }): Promise<QueryExplainResponse> {
+        await this.ensureConnected();
+        this.log.debug('Calling query/explain...');
+        const result = await this.connection!.sendRequest(RPC_QUERY_EXPLAIN, params);
+        this.log.debug(`Got explain plan (${result.format})`);
+        return result;
+    }
+
+    // ── Profile management ──────────────────────────────────────────────────
+
+    /**
+     * Creates a new authentication profile.
+     */
+    async profilesCreate(params: {
+        name?: string;
+        authMethod: string;
+        environmentUrl?: string;
+        applicationId?: string;
+        clientSecret?: string;
+        tenantId?: string;
+        certificatePath?: string;
+        certificatePassword?: string;
+        certificateThumbprint?: string;
+        username?: string;
+        password?: string;
+    }): Promise<ProfileCreateResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling profiles/create (method=${params.authMethod})...`);
+        const result = await this.connection!.sendRequest<ProfileCreateResponse>('profiles/create', params);
+        this.log.debug(`Profile created: index=${result.index}, name=${result.name ?? '(auto)'}`);
+
+        return result;
+    }
+
+    /**
+     * Deletes an authentication profile by index or name.
+     */
+    async profilesDelete(params: { index?: number; name?: string }): Promise<ProfileDeleteResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling profiles/delete with ${params.name ? `name="${params.name}"` : `index=${params.index}`}...`);
+        const result = await this.connection!.sendRequest<ProfileDeleteResponse>('profiles/delete', params);
+        this.log.debug(`Profile deleted: ${result.deleted}`);
+
+        return result;
+    }
+
+    /**
+     * Renames an authentication profile.
+     */
+    async profilesRename(currentName: string, newName: string): Promise<ProfileRenameResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling profiles/rename: "${currentName}" -> "${newName}"...`);
+        const result = await this.connection!.sendRequest<ProfileRenameResponse>(
+            'profiles/rename',
+            { currentName, newName }
+        );
+        this.log.debug(`Profile renamed: ${result.previousName} -> ${result.newName}`);
+
+        return result;
+    }
+
+    /**
+     * Invalidates (clears cached tokens for) a profile.
+     */
+    async profilesInvalidate(profileName: string): Promise<ProfilesInvalidateResponse> {
+        await this.ensureConnected();
+
+        this.log.info(`Calling profiles/invalidate for "${profileName}"...`);
+        const result = await this.connection!.sendRequest<ProfilesInvalidateResponse>(
+            'profiles/invalidate',
+            { profileName }
+        );
+        this.log.debug(`Profile "${profileName}" invalidated: ${result.invalidated}`);
+
+        return result;
+    }
+
+    // ── Solutions ───────────────────────────────────────────────────────────
+
+    /**
+     * Lists solutions in the active Dataverse environment.
+     */
+    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string): Promise<SolutionsListResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) {
+            params.filter = filter;
+        }
+        if (includeManaged !== undefined) {
+            params.includeManaged = includeManaged;
+        }
+        if (environmentUrl !== undefined) {
+            params.environmentUrl = environmentUrl;
+        }
+
+        this.log.info(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
+        const result = await this.connection!.sendRequest<SolutionsListResponse>('solutions/list', params);
+        this.log.debug(`Got ${result.solutions.length} solutions`);
+
+        return result;
+    }
+
+    /**
+     * Lists components for a specific solution.
+     */
+    async solutionsComponents(uniqueName: string, componentType?: number, environmentUrl?: string): Promise<SolutionComponentsResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { uniqueName };
+        if (componentType !== undefined) {
+            params.componentType = componentType;
+        }
+        if (environmentUrl !== undefined) {
+            params.environmentUrl = environmentUrl;
+        }
+
+        this.log.debug(`Calling solutions/components for "${uniqueName}"...`);
+        const result = await this.connection!.sendRequest<SolutionComponentsResponse>('solutions/components', params);
+        this.log.debug(`Got ${result.components.length} components`);
+
+        return result;
+    }
+
+    // ── Schema ──────────────────────────────────────────────────────────────
+
+    /**
+     * Lists all entities in the active Dataverse environment.
+     * Used for IntelliSense entity completion.
+     */
+    async schemaEntities(): Promise<SchemaEntitiesResponse> {
+        await this.ensureConnected();
+
+        this.log.debug('Calling schema/entities...');
+        const result = await this.connection!.sendRequest<SchemaEntitiesResponse>('schema/entities');
+        this.log.debug(`Got ${result.entities.length} entities`);
+
+        return result;
+    }
+
+    /**
+     * Lists attributes for a specific entity in the active Dataverse environment.
+     * Used for IntelliSense attribute completion.
+     */
+    async schemaAttributes(entity: string): Promise<SchemaAttributesResponse> {
+        await this.ensureConnected();
+
+        this.log.debug(`Calling schema/attributes for "${entity}"...`);
+        const result = await this.connection!.sendRequest<SchemaAttributesResponse>(
+            'schema/attributes',
+            { entity }
+        );
+        this.log.debug(`Got ${result.attributes.length} attributes for ${result.entityName}`);
+
+        return result;
+    }
+
+    // ── Notifications ───────────────────────────────────────────────────────
+
+    /**
+     * Registers a handler for device code authentication notifications.
+     * The daemon sends these when interactive browser-based auth is required.
+     */
+    onDeviceCode(handler: (params: { userCode: string; verificationUrl: string; message: string }) => void): void {
+        const method = 'auth/deviceCode';
+        if (this.connection) {
+            this.connection.onNotification(method, handler);
+        } else {
+            this.pendingNotificationHandlers.push({ method, handler });
+        }
+        this.log.debug('Registered auth/deviceCode notification handler');
+    }
+
+    // ── Diagnostic accessors ────────────────────────────────────────────────
+
+    /**
+     * Returns true if the daemon process is running and the JSON-RPC
+     * connection is established. Used by diagnostic commands.
+     */
+    isReady(): boolean {
+        return this.connection !== null && this.process !== null;
+    }
+
+    /**
+     * Returns the PID of the daemon child process, or null if not running.
+     * Used by diagnostic commands for process inspection.
+     */
+    getProcessId(): number | null {
+        return this.process?.pid ?? null;
+    }
+
+    // ── Connection management ───────────────────────────────────────────────
+
+    /**
+     * Sends an RPC request without logging, for high-frequency calls such as
+     * IntelliSense completions that would otherwise flood the output channel.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private async sendRequestQuiet<T>(method: string | RequestType<any, T, any>, params?: unknown): Promise<T> {
+        await this.ensureConnected();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument -- JSON-RPC accepts string | RequestType
+        return this.connection!.sendRequest(method as any, params);
+    }
+
+    /**
+     * Ensures the daemon is connected, starting it if necessary.
+     * This provides auto-reconnect: if the daemon process dies, the next
+     * RPC call will restart it since the exit handler sets connection to null.
+     */
+    private async ensureConnected(): Promise<void> {
+        if (this._disposed) throw new Error('DaemonClient is disposed');
+        if (this.connection) return;
+        if (!this.connectingPromise) {
+            const wasConnectedBefore = this._state === 'error';
+            this.setState('reconnecting');
+            this.connectingPromise = this.start().then(() => {
+                if (wasConnectedBefore) {
+                    this._onDidReconnect.fire();
+                }
+            }).finally(() => {
+                this.connectingPromise = null;
+            });
+        }
+        await this.connectingPromise;
+    }
+
+    private startHeartbeat(): void {
+        this.stopHeartbeat();
+        this._heartbeatTimer = setInterval(() => {
+            if (!this.connection || this._disposed) {
+                this.stopHeartbeat();
+                return;
+            }
+            // Use auth/list as heartbeat ping
+            // TODO: Consider a lightweight health/ping endpoint
+            this.connection.sendRequest('auth/list').then(() => {
+                this._heartbeatFailures = 0;
+            }).catch(() => {
+                this._heartbeatFailures++;
+                this.log.warn(`Heartbeat failed (${this._heartbeatFailures}/${DaemonClient.HEARTBEAT_MAX_FAILURES}) — daemon may be unresponsive`);
+                if (this._heartbeatFailures >= DaemonClient.HEARTBEAT_MAX_FAILURES) {
+                    this.log.warn('Max consecutive heartbeat failures reached — killing daemon');
+                    this.connection?.dispose();
+                    this.connection = null;
+                    this.process?.kill();
+                    this.process = null;
+                    this.stopHeartbeat();
+                    this.setState('error');
+                }
+            });
+        }, DaemonClient.HEARTBEAT_INTERVAL_MS);
+    }
+
+    private stopHeartbeat(): void {
+        if (this._heartbeatTimer) {
+            clearInterval(this._heartbeatTimer);
+            this._heartbeatTimer = undefined;
+        }
+        this._heartbeatFailures = 0;
+    }
+
+    async restart(): Promise<void> {
+        if (this._disposed) throw new Error('DaemonClient is disposed');
+        this.stopHeartbeat();
+        if (this.connection) {
+            this.connection.dispose();
+            this.connection = null;
+        }
+        if (this.process) {
+            this.process.kill();
+            this.process = null;
+        }
+        await this.start();
+    }
+
+    /**
+     * Stops the daemon and cleans up resources
+     */
+    dispose(): void {
+        this.log.info('Disposing daemon client...');
+        this._disposed = true;
+        this.connectingPromise = null;
+        this.stopHeartbeat();
+
+        if (this.connection) {
+            this.connection.dispose();
+            this.connection = null;
+        }
+
+        if (this.process) {
+            this.process.kill();
+            this.process = null;
+        }
+
+        this.cleanupShadowCopy();
+
+        // Dispose EventEmitters LAST
+        this.setState('stopped');
+        this._onDidChangeState.dispose();
+        this._onDidReconnect.dispose();
+    }
+}

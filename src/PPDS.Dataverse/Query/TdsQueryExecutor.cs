@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query;
 
@@ -58,7 +59,8 @@ public class TdsQueryExecutor : ITdsQueryExecutor
         var compatibility = TdsCompatibilityChecker.CheckCompatibility(sql);
         if (compatibility != TdsCompatibility.Compatible)
         {
-            throw new InvalidOperationException(
+            throw new QueryExecutionException(
+                QueryErrorCode.TdsIncompatible,
                 $"Query is not compatible with TDS Endpoint: {compatibility}. " +
                 "Use FetchXML execution path instead.");
         }

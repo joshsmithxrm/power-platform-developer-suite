@@ -255,6 +255,7 @@ namespace PPDS.Dataverse.DependencyInjection
 
             // Domain services (transient - CLI command support)
             services.AddTransient<ISolutionService, SolutionService>();
+            services.AddTransient<IComponentNameResolver, ComponentNameResolver>();
             services.AddTransient<IImportJobService, ImportJobService>();
             services.AddTransient<IEnvironmentVariableService, EnvironmentVariableService>();
             services.AddTransient<IUserService, UserService>();

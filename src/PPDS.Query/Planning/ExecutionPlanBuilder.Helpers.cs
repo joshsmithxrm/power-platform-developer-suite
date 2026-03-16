@@ -136,6 +136,147 @@ public sealed partial class ExecutionPlanBuilder
     }
 
     /// <summary>
+    /// Builds a client-side aggregation plan: strips aggregate="true" from FetchXML,
+    /// fetches raw rows, and computes aggregates in-process using <see cref="ClientAggregateNode"/>.
+    /// Triggered by the <c>-- ppds:HASH_GROUP</c> hint.
+    /// </summary>
+    private QueryPlanResult PlanClientSideAggregate(
+        QuerySpecification querySpec,
+        QueryPlanOptions options,
+        TranspileResult transpileResult,
+        string entityName)
+    {
+        // Strip aggregate directives from FetchXML to get raw data
+        var rawFetchXml = StripAggregateFromFetchXml(transpileResult.FetchXml);
+
+        var scanNode = new FetchXmlScanNode(
+            rawFetchXml,
+            entityName,
+            autoPage: true,
+            maxRows: options.MaxRows,
+            noLock: options.NoLock);
+
+        // Build ClientAggregateColumn list from ScriptDom
+        var aggregateColumns = BuildClientAggregateColumns(querySpec);
+        var groupByColumns = ExtractGroupByColumnNames(querySpec);
+
+        IQueryPlanNode rootNode = new ClientAggregateNode(scanNode, aggregateColumns, groupByColumns);
+
+        // HAVING clause
+        if (querySpec.HavingClause?.SearchCondition != null)
+        {
+            var aggMap = BuildAggregateAliasMap(querySpec);
+            var predicate = _expressionCompiler.CompilePredicate(querySpec.HavingClause.SearchCondition, aggMap);
+            var description = querySpec.HavingClause.SearchCondition.ToString() ?? "HAVING";
+            rootNode = new ClientFilterNode(rootNode, predicate, description);
+        }
+
+        return new QueryPlanResult
+        {
+            RootNode = rootNode,
+            FetchXml = transpileResult.FetchXml,
+            VirtualColumns = transpileResult.VirtualColumns,
+            EntityLogicalName = entityName
+        };
+    }
+
+    /// <summary>
+    /// Strips aggregate="true" and aggregate function attributes from FetchXML,
+    /// converting it to a raw data query. Removes alias attributes from aggregate
+    /// columns and keeps only the source column name attributes.
+    /// </summary>
+    private static string StripAggregateFromFetchXml(string fetchXml)
+    {
+        var doc = XDocument.Parse(fetchXml);
+        var fetchElement = doc.Root;
+        if (fetchElement == null) return fetchXml;
+
+        // Remove aggregate="true"
+        fetchElement.Attribute("aggregate")?.Remove();
+
+        // Process all attribute elements: remove aggregate and alias attributes,
+        // keep only the name attribute for raw data retrieval
+        foreach (var attr in doc.Descendants("attribute").ToList())
+        {
+            attr.Attribute("aggregate")?.Remove();
+            attr.Attribute("alias")?.Remove();
+            attr.Attribute("distinct")?.Remove();
+        }
+
+        // Remove groupby attributes from order elements
+        foreach (var order in doc.Descendants("order").ToList())
+        {
+            // Aggregate queries may have order by aggregate alias; remove these
+            // since the raw query won't have those aliases
+            var orderAlias = order.Attribute("alias");
+            if (orderAlias != null)
+            {
+                order.Remove();
+            }
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// Builds <see cref="ClientAggregateColumn"/> descriptors from a ScriptDom QuerySpecification's
+    /// SELECT list for client-side aggregation.
+    /// </summary>
+    private static IReadOnlyList<ClientAggregateColumn> BuildClientAggregateColumns(
+        QuerySpecification querySpec)
+    {
+        var columns = new List<ClientAggregateColumn>();
+        var aliasCounter = 0;
+
+        foreach (var element in querySpec.SelectElements)
+        {
+            if (element is not SelectScalarExpression { Expression: FunctionCall func } scalar
+                || func.OverClause != null)
+                continue;
+
+            var funcName = func.FunctionName?.Value;
+            if (!IsAggregateFunctionName(funcName))
+                continue;
+
+            aliasCounter++;
+            var alias = scalar.ColumnName?.Value
+                ?? $"{funcName!.ToLowerInvariant()}_{aliasCounter}";
+
+            // Extract source column from function parameters
+            var sourceColumn = "*";
+            if (func.Parameters.Count > 0 && func.Parameters[0] is ColumnReferenceExpression colRef)
+            {
+                sourceColumn = GetScriptDomColumnName(colRef);
+            }
+
+            var function = MapToClientAggregateFunction(funcName!);
+            columns.Add(new ClientAggregateColumn(sourceColumn, alias, function));
+        }
+
+        return columns;
+    }
+
+    /// <summary>
+    /// Maps a SQL aggregate function name to a <see cref="ClientAggregateFunction"/> enum value.
+    /// </summary>
+    private static ClientAggregateFunction MapToClientAggregateFunction(string functionName)
+    {
+        return functionName.ToUpperInvariant() switch
+        {
+            "COUNT" or "COUNT_BIG" => ClientAggregateFunction.Count,
+            "SUM" => ClientAggregateFunction.Sum,
+            "AVG" => ClientAggregateFunction.Avg,
+            "MIN" => ClientAggregateFunction.Min,
+            "MAX" => ClientAggregateFunction.Max,
+            "STDEV" => ClientAggregateFunction.Stdev,
+            "STDEVP" => ClientAggregateFunction.StdevP,
+            "VAR" => ClientAggregateFunction.Var,
+            "VARP" => ClientAggregateFunction.VarP,
+            _ => ClientAggregateFunction.Count
+        };
+    }
+
+    /// <summary>
     /// Builds merge aggregate column descriptors from a ScriptDom QuerySpecification.
     /// </summary>
     private static IReadOnlyList<MergeAggregateColumn> BuildMergeAggregateColumnsFromQuerySpec(

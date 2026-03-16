@@ -1,0 +1,173 @@
+/** Configuration for virtual scroll rendering */
+interface VirtualScrollConfig {
+    rowHeight: number;
+    overscan: number;
+    scrollContainerId: string;
+    tbodyId: string;
+    columnCount: number;
+}
+
+/**
+ * Generates inline HTML containing two script elements for virtual scrolling:
+ *   1. A <script type="application/json"> element holding the row data — prevents
+ *      </script> injection attacks from user-controlled strings inside JSON.
+ *   2. A <script> element with the virtual scroll logic that reads the JSON data
+ *      element and renders cells safely via escapeHtml at render time.
+ *
+ * Row data is CellData[][]  — each cell is { text: string; url?: string }.
+ * All HTML escaping happens inside the generated script, never before serialisation.
+ * Uses spacer-row approach: top spacer + visible rows + bottom spacer.
+ * Only re-renders when visible range changes (lastStart/lastEnd caching).
+ * Uses requestAnimationFrame for smooth scroll handling.
+ */
+export function generateVirtualScrollScript(rowDataJson: string, config: VirtualScrollConfig): string {
+    const dataElementId = `${config.scrollContainerId}-data`;
+    return `
+<script type="application/json" id="${dataElementId}">${rowDataJson.replace(/<\//g, '<\\/')}</script>
+<script>
+(function() {
+    var dataEl = document.getElementById('${dataElementId}');
+    if (!dataEl) return;
+    var allRows = JSON.parse(dataEl.textContent);
+    var ROW_HEIGHT = ${config.rowHeight};
+    var OVERSCAN = ${config.overscan};
+    var COL_COUNT = ${config.columnCount};
+    var container = document.getElementById('${config.scrollContainerId}');
+    var tbody = document.getElementById('${config.tbodyId}');
+    if (!container || !tbody) return;
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function escapeAttr(str) {
+        if (str === null || str === undefined) return '';
+        var s = String(str);
+        return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    var lastStart = -1, lastEnd = -1;
+    var rafId = null;
+
+    function render() {
+        var scrollTop = container.scrollTop;
+        var viewportHeight = container.clientHeight;
+        var totalRows = allRows.length;
+        var totalContentHeight = totalRows * ROW_HEIGHT;
+
+        // When clientHeight is 0 (pre-layout) or content fits without scrollbar,
+        // use the total content height so all rows render immediately.
+        if (viewportHeight <= 0 || totalContentHeight <= viewportHeight) {
+            viewportHeight = totalContentHeight;
+        }
+
+        var start = Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN;
+        var end = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN;
+        start = Math.max(0, start);
+        end = Math.min(totalRows, end);
+
+        if (start === lastStart && end === lastEnd) return;
+        lastStart = start;
+        lastEnd = end;
+
+        var topSpacerHeight = start * ROW_HEIGHT;
+        var bottomSpacerHeight = (totalRows - end) * ROW_HEIGHT;
+
+        var html = '';
+        if (topSpacerHeight > 0) {
+            html += '<tr class="virtual-spacer"><td colspan="' + COL_COUNT + '" style="height:' + topSpacerHeight + 'px"></td></tr>';
+        }
+        for (var i = start; i < end; i++) {
+            var rowClass = i % 2 === 0 ? 'row-even' : 'row-odd';
+            html += '<tr class="data-row ' + rowClass + '">';
+            for (var j = 0; j < allRows[i].length; j++) {
+                var cell = allRows[i][j];
+                if (cell.url) {
+                    html += '<td class="data-cell"><a href="' + escapeAttr(cell.url) + '" target="_blank">' + escapeHtml(cell.text) + '</a></td>';
+                } else {
+                    html += '<td class="data-cell">' + escapeHtml(cell.text) + '</td>';
+                }
+            }
+            html += '</tr>';
+        }
+        if (bottomSpacerHeight > 0) {
+            html += '<tr class="virtual-spacer"><td colspan="' + COL_COUNT + '" style="height:' + bottomSpacerHeight + 'px"></td></tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    container.addEventListener('scroll', function() {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(render);
+    });
+
+    // Re-render when container resizes (handles delayed layout in notebook iframes
+    // where clientHeight is initially 0).
+    if (typeof ResizeObserver !== 'undefined') {
+        var resizeObserver = new ResizeObserver(function() {
+            lastStart = -1; lastEnd = -1;
+            render();
+        });
+        resizeObserver.observe(container);
+    }
+
+    render();
+
+    // ── Cell selection and copy ──
+    var selectedCell = null;
+    var toast = document.createElement('div');
+    toast.className = 'copy-toast';
+    document.body.appendChild(toast);
+    var toastTimer = null;
+
+    function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('visible');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function() { toast.classList.remove('visible'); }, 1500);
+    }
+
+    function clearCellSelection() {
+        if (selectedCell) {
+            selectedCell.classList.remove('cell-selected');
+            selectedCell = null;
+        }
+    }
+
+    function getCellText(td) {
+        var link = td.querySelector('a');
+        return link ? link.textContent : td.textContent;
+    }
+
+    container.addEventListener('click', function(e) {
+        // Don't interfere with link clicks
+        if (e.target.closest('a')) return;
+        var td = e.target.closest('.data-cell');
+        if (!td) { clearCellSelection(); return; }
+        clearCellSelection();
+        td.classList.add('cell-selected');
+        selectedCell = td;
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (!selectedCell) return;
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            e.preventDefault();
+            var text = getCellText(selectedCell);
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function() {
+                    showToast('Copied: ' + (text.length > 30 ? text.substring(0, 30) + '...' : text));
+                });
+            }
+        }
+        if (e.key === 'Escape') {
+            clearCellSelection();
+        }
+    });
+})();
+</script>`;
+}

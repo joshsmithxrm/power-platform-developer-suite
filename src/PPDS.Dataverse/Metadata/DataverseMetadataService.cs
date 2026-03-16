@@ -330,6 +330,7 @@ public class DataverseMetadataService : IMetadataService
         return new EntitySummary
         {
             LogicalName = e.LogicalName,
+            MetadataId = e.MetadataId ?? Guid.Empty,
             DisplayName = GetLocalizedLabel(e.DisplayName),
             SchemaName = e.SchemaName,
             EntitySetName = e.EntitySetName,

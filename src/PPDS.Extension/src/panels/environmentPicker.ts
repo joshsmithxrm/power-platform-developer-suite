@@ -1,0 +1,103 @@
+import type { DaemonClient } from '../daemonClient.js';
+
+/**
+ * Returns the HTML for the environment picker button (placed in panel toolbar).
+ * The button shows the current environment name and opens a picker on click.
+ */
+export function getEnvironmentPickerHtml(): string {
+    return `
+    <div class="env-picker-container">
+        <span class="env-picker-label">Environment:</span>
+        <button class="env-picker-btn" id="env-picker-btn" title="Click to change environment">
+            <span id="env-picker-name">Loading...</span>
+            <span>&#9662;</span>
+        </button>
+    </div>`;
+}
+
+/**
+ * Represents an environment option for the picker.
+ */
+interface EnvironmentOption {
+    label: string;
+    url: string;
+    detail?: string;
+    isCurrent?: boolean;
+    type?: string | null;
+}
+
+/**
+ * Shows a VS Code QuickPick for environment selection.
+ * Returns the selected environment URL and display name, or undefined if cancelled.
+ */
+export async function showEnvironmentPicker(
+    daemon: DaemonClient,
+    currentUrl?: string,
+): Promise<{ url: string; displayName: string; type: string | null } | undefined> {
+    const vscode = await import('vscode');
+
+    let environments: EnvironmentOption[] = [];
+    try {
+        const result = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: 'Loading environments...' },
+            async () => daemon.envList(),
+        );
+        environments = result.environments.map(env => ({
+            label: env.friendlyName,
+            url: env.apiUrl,
+            detail: env.region ? `${env.apiUrl} (${env.region})` : env.apiUrl,
+            isCurrent: env.apiUrl === currentUrl,
+            type: env.type,
+        }));
+    } catch {
+        // Discovery failed — still allow manual entry
+    }
+
+    const items = environments.map(env => ({
+        label: env.isCurrent ? `$(check) ${env.label}` : env.label,
+        description: env.isCurrent ? 'current' : undefined,
+        detail: env.detail,
+        url: env.url,
+        displayName: env.label,
+        type: env.type ?? null,
+    }));
+
+    // Add manual entry option
+    items.push({
+        label: '$(link) Enter URL manually...',
+        description: '',
+        detail: 'Connect to an environment not in the list',
+        url: '__manual__',
+        displayName: '',
+        type: null,
+    });
+
+    const selected = await vscode.window.showQuickPick(items, {
+        title: 'Select Environment',
+        placeHolder: 'Choose an environment for this panel',
+        matchOnDetail: true,
+    });
+
+    if (!selected) return undefined;
+
+    if (selected.url === '__manual__') {
+        const url = await vscode.window.showInputBox({
+            title: 'Dataverse Environment URL',
+            prompt: 'Enter the full URL (e.g., https://myorg.crm.dynamics.com)',
+            placeHolder: 'https://myorg.crm.dynamics.com',
+            ignoreFocusOut: true,
+            validateInput: (value) => {
+                if (!value.trim()) return 'URL is required';
+                try { new URL(value.trim()); return undefined; }
+                catch { return 'Enter a valid URL'; }
+            },
+        });
+        if (!url) return undefined;
+        const trimmed = url.trim();
+        // Auto-save manual URL to environments.json so it persists
+        try { await daemon.envConfigSet({ environmentUrl: trimmed }); } catch { /* best-effort */ }
+        return { url: trimmed, displayName: trimmed, type: null };
+    }
+
+    return { url: selected.url, displayName: selected.displayName, type: selected.type };
+}

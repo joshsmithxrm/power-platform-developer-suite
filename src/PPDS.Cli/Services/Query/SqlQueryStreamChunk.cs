@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using PPDS.Dataverse.Query;
 
 namespace PPDS.Cli.Services.Query;
@@ -39,4 +40,21 @@ public sealed class SqlQueryStreamChunk
     /// The transpiled FetchXML, if available. Non-null only on the first chunk.
     /// </summary>
     public string? TranspiledFetchXml { get; init; }
+
+    /// <summary>
+    /// Environments that contributed data. Non-null only on the final chunk.
+    /// Single-env queries have one entry; cross-env queries have multiple.
+    /// </summary>
+    public IReadOnlyList<QueryDataSource>? DataSources { get; init; }
+
+    /// <summary>
+    /// Names of query hints that were applied. Non-null only on the final chunk.
+    /// Null when no hints were active.
+    /// </summary>
+    public IReadOnlyList<string>? AppliedHints { get; init; }
+
+    /// <summary>
+    /// The actual execution path used. Non-null only on the final chunk.
+    /// </summary>
+    public QueryExecutionMode? ExecutionMode { get; init; }
 }

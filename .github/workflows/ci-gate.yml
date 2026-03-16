@@ -26,6 +26,9 @@ jobs:
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
               - 'nuget.config'
+              - 'src/PPDS.Extension/**'
+              - '**.ts'
+              - '**.tsx'
 
   # These jobs satisfy branch protection when code workflows are skipped
   build-status:

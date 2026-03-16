@@ -6,9 +6,14 @@ using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Query;
+using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Resilience;
 
 namespace PPDS.Cli.Infrastructure;
@@ -23,6 +28,12 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// Default timeout for pool creation (5 minutes to allow for device code flow).
     /// </summary>
     private static readonly TimeSpan DefaultPoolCreationTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Maximum number of pooled connections per environment per profile.
+    /// TODO: Make this configurable via DaemonOptions in a future release.
+    /// </summary>
+    private const int MaxPoolSizePerProfile = 52;
 
     private readonly ConcurrentDictionary<string, Lazy<Task<CachedPoolEntry>>> _pools = new();
     private readonly ConcurrentBag<Task> _disposalTasks = new();
@@ -70,6 +81,32 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         CancellationToken cancellationToken = default)
     {
+        var entry = await GetOrCreateEntryAsync(profileNames, environmentUrl, deviceCodeCallback, cancellationToken)
+            .ConfigureAwait(false);
+        return entry.Pool;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IServiceProvider> GetOrCreateServiceProviderAsync(
+        IReadOnlyList<string> profileNames,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback = null,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = await GetOrCreateEntryAsync(profileNames, environmentUrl, deviceCodeCallback, cancellationToken)
+            .ConfigureAwait(false);
+        return entry.ServiceProvider;
+    }
+
+    /// <summary>
+    /// Core implementation that gets or creates a cached pool entry, shared by both public methods.
+    /// </summary>
+    private async Task<CachedPoolEntry> GetOrCreateEntryAsync(
+        IReadOnlyList<string> profileNames,
+        string environmentUrl,
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
         if (profileNames == null || profileNames.Count == 0)
@@ -97,8 +134,7 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
 
         try
         {
-            var entry = await lazyEntry.Value.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-            return entry.Pool;
+            return await lazyEntry.Value.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -254,15 +290,17 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
         var sources = new List<IConnectionSource>();
         try
         {
+            AuthProfile? firstProfile = null;
             foreach (var profileName in profileNames)
             {
                 var profile = collection.GetByNameOrIndex(profileName)
                     ?? throw new InvalidOperationException($"Profile '{profileName}' not found.");
+                firstProfile ??= profile;
 
                 var source = new ProfileConnectionSource(
                     profile,
                     environmentUrl,
-                    maxPoolSize: 52,
+                    maxPoolSize: MaxPoolSizePerProfile,
                     deviceCodeCallback: deviceCodeCallback,
                     environmentDisplayName: null,
                     credentialStore: credentialStore);
@@ -271,10 +309,16 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 sources.Add(adapter);
             }
 
+            // Guard: profileNames is always non-empty (validated by caller), but be explicit
+            if (firstProfile == null)
+                throw new InvalidOperationException("No profiles provided for pool creation.");
+
             // Build service provider with pool
             var serviceProvider = CreateProviderFromSources(
                 sources.ToArray(),
-                credentialStore);
+                credentialStore,
+                firstProfile,
+                environmentUrl);
 
             var pool = serviceProvider.GetRequiredService<IDataverseConnectionPool>();
 
@@ -305,14 +349,16 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     /// </summary>
     private ServiceProvider CreateProviderFromSources(
         IConnectionSource[] sources,
-        ISecureCredentialStore credentialStore)
+        ISecureCredentialStore credentialStore,
+        AuthProfile profile,
+        string environmentUrl)
     {
         var services = new ServiceCollection();
 
         // Configure minimal logging for daemon
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Warning);
+            builder.SetMinimumLevel(LogLevel.Information);
             builder.AddProvider(new LoggerFactoryProvider(_loggerFactory));
         });
 
@@ -328,8 +374,16 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             DisableAffinityCookie = true
         };
 
-        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService)
+        // Register shared services (IThrottleTracker, IBulkOperationExecutor, IMetadataService, IQueryExecutor)
         services.RegisterDataverseServices();
+
+        // TDS Endpoint executor — per-environment, uses same auth as connection pool
+        services.AddSingleton<ITdsQueryExecutor>(sp =>
+            TdsQueryExecutorFactory.Create(
+                profile,
+                environmentUrl,
+                credentialStore,
+                sp.GetService<ILogger<TdsQueryExecutor>>()));
 
         // Connection pool with factory delegate
         services.AddSingleton<IDataverseConnectionPool>(sp =>
@@ -338,6 +392,22 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 sp.GetRequiredService<IThrottleTracker>(),
                 poolOptions,
                 sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
+
+        // SQL query service — shared pipeline for all query RPC handlers (query/sql, query/explain, query/export)
+        services.AddTransient<ISqlQueryService>(sp =>
+        {
+            var queryExecutor = sp.GetRequiredService<IQueryExecutor>();
+            var tdsExecutor = sp.GetService<ITdsQueryExecutor>();
+            var bulkExecutor = sp.GetService<IBulkOperationExecutor>();
+            var metadataExecutor = sp.GetService<IMetadataQueryExecutor>();
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            return new SqlQueryService(
+                queryExecutor,
+                tdsExecutor,
+                bulkExecutor,
+                metadataExecutor,
+                pool.GetTotalRecommendedParallelism());
+        });
 
         return services.BuildServiceProvider();
     }

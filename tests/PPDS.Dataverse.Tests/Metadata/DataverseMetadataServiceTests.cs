@@ -1,8 +1,10 @@
+using System;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.DependencyInjection;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 
@@ -45,6 +47,20 @@ public class DataverseMetadataServiceTests
         // Assert
         metadataService.Should().NotBeNull();
         metadataService.Should().BeOfType<DataverseMetadataService>();
+    }
+
+    [Fact]
+    public void EntitySummary_HasMetadataIdProperty()
+    {
+        var summary = new EntitySummary
+        {
+            MetadataId = Guid.NewGuid(),
+            LogicalName = "account",
+            DisplayName = "Account",
+            SchemaName = "Account",
+            ObjectTypeCode = 1
+        };
+        summary.MetadataId.Should().NotBe(Guid.Empty);
     }
 
     [Fact]

@@ -1,0 +1,28 @@
+{
+  "private": true,
+  "description": "PPDS workspace — root proxy scripts for extension and TUI",
+  "scripts": {
+    "ext:compile": "npm run compile --prefix src/PPDS.Extension",
+    "ext:watch": "npm run watch --prefix src/PPDS.Extension",
+    "ext:package": "npm run package --prefix src/PPDS.Extension",
+    "ext:lint": "npm run lint --prefix src/PPDS.Extension",
+    "ext:test": "npm run test --prefix src/PPDS.Extension",
+    "ext:test:watch": "npm run test:watch --prefix src/PPDS.Extension",
+    "ext:test:e2e": "npm run test:e2e --prefix src/PPDS.Extension",
+    "ext:vsce:package": "npm run vsce:package --prefix src/PPDS.Extension",
+    "ext:local": "npm run local --prefix src/PPDS.Extension",
+    "ext:local:install": "npm run local:install --prefix src/PPDS.Extension",
+    "ext:local:uninstall": "npm run local:uninstall --prefix src/PPDS.Extension",
+    "ext:local:revert": "npm run local:revert --prefix src/PPDS.Extension",
+    "ext:release:test": "npm run release:test --prefix src/PPDS.Extension",
+    "ext:bundle:cli": "npm run bundle:cli --prefix src/PPDS.Extension",
+    "ext:package:win32-x64": "npm run package:win32-x64 --prefix src/PPDS.Extension",
+    "ext:package:linux-x64": "npm run package:linux-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-x64": "npm run package:darwin-x64 --prefix src/PPDS.Extension",
+    "ext:package:darwin-arm64": "npm run package:darwin-arm64 --prefix src/PPDS.Extension",
+    "ext:dev:webview": "npm run dev:webview --prefix src/PPDS.Extension",
+    "tui:test": "npm test --prefix tests/PPDS.Tui.E2eTests",
+    "tui:test:update": "npm run test:update --prefix tests/PPDS.Tui.E2eTests",
+    "tui:test:headed": "npm run test:headed --prefix tests/PPDS.Tui.E2eTests"
+  }
+}

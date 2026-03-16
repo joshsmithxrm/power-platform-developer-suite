@@ -79,6 +79,14 @@ states.json
 
 *.log
 
+# Node
+node_modules/
+
+# VS Code Extension test artifacts
+src/PPDS.Extension/test-results/
+src/PPDS.Extension/playwright-report/
+.vscode-test/
+
 # Git worktrees
 .worktrees/
 .muse/

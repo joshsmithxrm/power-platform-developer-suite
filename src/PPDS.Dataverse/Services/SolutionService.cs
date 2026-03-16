@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -8,6 +9,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -19,6 +22,9 @@ public class SolutionService : ISolutionService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly ILogger<SolutionService> _logger;
+    private readonly IMetadataService _metadataService;
+    private readonly IComponentNameResolver _nameResolver;
+    private readonly ICachedMetadataProvider _cachedMetadata;
 
     /// <summary>
     /// Component type names for common component types.
@@ -75,57 +81,74 @@ public class SolutionService : ISolutionService
         { 62, "SiteMap" },
         { 63, "ConnectionRole" },
         { 64, "ComplexControl" },
-        { 65, "FieldSecurityProfile" },
-        { 66, "FieldPermission" },
-        { 68, "PluginType" },
-        { 69, "PluginAssembly" },
-        { 70, "SdkMessageProcessingStep" },
-        { 71, "SdkMessageProcessingStepImage" },
-        { 72, "ServiceEndpoint" },
-        { 73, "RoutingRule" },
-        { 74, "RoutingRuleItem" },
-        { 75, "SLA" },
-        { 76, "SLAItem" },
-        { 77, "ConvertRule" },
-        { 78, "ConvertRuleItem" },
-        { 79, "HierarchyRule" },
-        { 80, "MobileOfflineProfile" },
-        { 81, "MobileOfflineProfileItem" },
-        { 82, "SimilarityRule" },
-        { 83, "CustomControl" },
-        { 84, "CustomControlDefaultConfig" },
-        { 85, "CustomControlResource" },
-        { 90, "Data SourceMapping" },
-        { 91, "SDKMessage" },
-        { 92, "SDKMessageFilter" },
-        { 93, "SdkMessagePair" },
-        { 95, "SdkMessageRequest" },
-        { 96, "SdkMessageRequestField" },
-        { 97, "SdkMessageResponse" },
-        { 98, "SdkMessageResponseField" },
-        { 150, "PluginPackage" },
-        { 161, "ServicePlanMapping" },
+        { 65, "HierarchyRule" },
+        { 66, "CustomControl" },
+        { 68, "CustomControlDefaultConfig" },
+        { 70, "FieldSecurityProfile" },
+        { 71, "FieldPermission" },
+        { 80, "Model-Driven App" },
+        { 90, "PluginType" },
+        { 91, "PluginAssembly" },
+        { 92, "SDKMessageProcessingStep" },
+        { 93, "SDKMessageProcessingStepImage" },
+        { 95, "ServiceEndpoint" },
+        { 150, "RoutingRule" },
+        { 151, "RoutingRuleItem" },
+        { 152, "SLA" },
+        { 153, "SLAItem" },
+        { 154, "ConvertRule" },
+        { 155, "ConvertRuleItem" },
+        { 161, "MobileOfflineProfile" },
+        { 162, "MobileOfflineProfileItem" },
+        { 165, "SimilarityRule" },
+        { 166, "DataSourceMapping" },
+        { 201, "SDKMessage" },
+        { 202, "SDKMessageFilter" },
+        { 203, "SdkMessagePair" },
+        { 204, "SdkMessageRequest" },
+        { 205, "SdkMessageRequestField" },
+        { 206, "SdkMessageResponse" },
+        { 207, "SdkMessageResponseField" },
+        { 208, "ImportMap" },
+        { 210, "WebWizard" },
         { 300, "CanvasApp" },
         { 371, "Connector" },
-        { 372, "EnvironmentVariableDefinition" },
-        { 373, "EnvironmentVariableValue" },
-        { 380, "AIProjectType" },
-        { 382, "AIProject" },
-        { 401, "AIConfiguration" },
-        { 402, "EntityAnalyticsConfiguration" },
-        { 430, "ProcessStage" },
-        { 431, "ProcessTrigger" }
+        { 372, "Connector" },
+        { 380, "EnvironmentVariableDefinition" },
+        { 381, "EnvironmentVariableValue" },
+        { 400, "AIProjectType" },
+        { 401, "AIProject" },
+        { 402, "AIConfiguration" },
+        { 430, "EntityAnalyticsConfiguration" },
+        { 431, "AttributeImageConfiguration" },
+        { 432, "EntityImageConfiguration" }
     };
+
+    /// <summary>
+    /// Per-environment cache for runtime-resolved component type names.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Dictionary<int, string>> _componentTypeCache = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SolutionService"/> class.
     /// </summary>
     /// <param name="pool">The connection pool.</param>
     /// <param name="logger">The logger.</param>
-    public SolutionService(IDataverseConnectionPool pool, ILogger<SolutionService> logger)
+    /// <param name="metadataService">The metadata service for runtime option set resolution.</param>
+    /// <param name="nameResolver">The component name resolver.</param>
+    /// <param name="cachedMetadata">The cached metadata provider for entity ObjectTypeCode resolution.</param>
+    public SolutionService(
+        IDataverseConnectionPool pool,
+        ILogger<SolutionService> logger,
+        IMetadataService metadataService,
+        IComponentNameResolver nameResolver,
+        ICachedMetadataProvider cachedMetadata)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
+        _nameResolver = nameResolver ?? throw new ArgumentNullException(nameof(nameResolver));
+        _cachedMetadata = cachedMetadata ?? throw new ArgumentNullException(nameof(cachedMetadata));
     }
 
     /// <inheritdoc />
@@ -294,10 +317,30 @@ public class SolutionService : ISolutionService
 
         var results = await client.RetrieveMultipleAsync(query, cancellationToken);
 
-        return results.Entities.Select(e =>
+        var envUrl = client.ConnectedOrgUniqueName ?? client.ConnectedOrgId?.ToString() ?? "default";
+
+        // Resolve component type names (uses cache after first call per env)
+        Dictionary<int, string> resolvedTypeNames;
+        try
+        {
+            resolvedTypeNames = await GetComponentTypeNamesAsync(envUrl, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve component type names for {EnvUrl}, falling back to hardcoded dictionary", envUrl);
+            resolvedTypeNames = ComponentTypeNames;
+        }
+
+        var components = results.Entities.Select(e =>
         {
             var type = e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.ComponentType)?.Value ?? 0;
-            var typeName = ComponentTypeNames.TryGetValue(type, out var name) ? name : $"Unknown ({type})";
+            var typeName = resolvedTypeNames.TryGetValue(type, out var name)
+                ? name
+                : ComponentTypeNames.TryGetValue(type, out var fallback)
+                    ? fallback
+                    : type >= 10000
+                        ? $"Unknown ({type})"
+                        : $"Component Type {type}";
 
             return new SolutionComponentInfo(
                 e.Id,
@@ -307,6 +350,65 @@ public class SolutionService : ISolutionService
                 e.GetAttributeValue<OptionSetValue>(SolutionComponent.Fields.RootComponentBehavior)?.Value ?? 0,
                 e.GetAttributeValue<bool?>(SolutionComponent.Fields.IsMetadata) ?? false);
         }).ToList();
+
+        // Log any component types that couldn't be resolved from either the option set or hardcoded dictionary
+        var unresolvedTypes = components
+            .Where(c => c.ComponentTypeName.StartsWith("Component Type ") || c.ComponentTypeName.StartsWith("Unknown ("))
+            .Select(c => c.ComponentType)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+
+        if (unresolvedTypes.Count > 0)
+        {
+            _logger.LogWarning(
+                "Component type resolution: {Count} type(s) unresolved [{Types}]. " +
+                "These are missing from both the componenttype option set metadata and the hardcoded fallback dictionary",
+                unresolvedTypes.Count, string.Join(", ", unresolvedTypes));
+        }
+
+        // Resolve component names by type
+        var resolveStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var grouped = components.GroupBy(c => c.ComponentType).ToList();
+
+        foreach (var group in grouped)
+        {
+            try
+            {
+                var names = await _nameResolver.ResolveAsync(
+                    group.Key,
+                    group.Select(c => c.ObjectId).ToList(),
+                    cancellationToken);
+
+                for (var i = 0; i < components.Count; i++)
+                {
+                    var comp = components[i];
+                    if (comp.ComponentType == group.Key &&
+                        names.TryGetValue(comp.ObjectId, out var resolved))
+                    {
+                        components[i] = comp with
+                        {
+                            LogicalName = resolved.LogicalName,
+                            SchemaName = resolved.SchemaName,
+                            DisplayName = resolved.DisplayName
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Name resolution failed for component type {Type}, components will show GUIDs",
+                    group.Key);
+            }
+        }
+
+        resolveStopwatch.Stop();
+        _logger.LogInformation(
+            "Total component name resolution: {TypeCount} types, {TotalMs}ms",
+            grouped.Count, resolveStopwatch.ElapsedMilliseconds);
+
+        return components;
     }
 
     /// <inheritdoc />
@@ -362,6 +464,76 @@ public class SolutionService : ISolutionService
 
         var request = new PublishAllXmlRequest();
         await client.ExecuteAsync(request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves component type names using a 3-tier approach:
+    /// Tier 1: componenttype global option set (covers types 1-432).
+    /// Tier 1.5: entity ObjectTypeCode lookup for custom types (&gt;= 10000) via the cached entity list —
+    ///           zero additional API calls.
+    /// Note: componenttype is a global Dataverse option set — identical across all environments.
+    /// The per-env cache key is used for structural consistency, but the values will be the same.
+    /// The metadata service uses its own pool connection; this is acceptable because the option
+    /// set values are environment-independent. Do NOT copy this pattern for per-environment option sets.
+    /// </summary>
+    private async Task<Dictionary<int, string>> GetComponentTypeNamesAsync(
+        string envUrl,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = envUrl.TrimEnd('/').ToLowerInvariant();
+
+        if (_componentTypeCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        var dict = new Dictionary<int, string>();
+
+        // Tier 1: componenttype global option set (covers types 1-432)
+        try
+        {
+            _logger.LogDebug("Fetching componenttype option set metadata for cache key: {EnvUrl}", cacheKey);
+            var optionSet = await _metadataService.GetOptionSetAsync("componenttype", cancellationToken);
+            foreach (var option in optionSet.Options)
+            {
+                dict[option.Value] = option.Label;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch componenttype metadata, using hardcoded dictionary as base");
+            foreach (var kvp in ComponentTypeNames)
+            {
+                dict[kvp.Key] = kvp.Value;
+            }
+        }
+
+        // Tier 1.5: Resolve custom types (>= 10000) via entity ObjectTypeCode lookup.
+        // These types correspond to Dataverse entity ObjectTypeCodes.
+        // The cached entity list is already populated — zero additional API calls.
+        try
+        {
+            var entities = await _cachedMetadata.GetEntitiesAsync(cancellationToken);
+            foreach (var entity in entities)
+            {
+                if (entity.ObjectTypeCode >= 10000 && !dict.ContainsKey(entity.ObjectTypeCode))
+                {
+                    var label = !string.IsNullOrWhiteSpace(entity.DisplayName)
+                        ? entity.DisplayName
+                        : entity.SchemaName ?? entity.LogicalName;
+                    dict[entity.ObjectTypeCode] = label;
+                }
+            }
+            _logger.LogDebug("Resolved {Count} custom component types via entity ObjectTypeCode lookup",
+                entities.Count(e => e.ObjectTypeCode >= 10000));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve custom component types via entity metadata");
+        }
+
+        _componentTypeCache.TryAdd(cacheKey, dict);
+        return dict;
     }
 
     private static SolutionInfo MapToSolutionInfo(Entity entity)

@@ -5,12 +5,12 @@ on:
     branches: [main]
     paths:
       - 'src/PPDS.Cli/Tui/**'
-      - 'tests/tui-e2e/**'
+      - 'tests/PPDS.Tui.E2eTests/**'
   pull_request:
     branches: [main]
     paths:
       - 'src/PPDS.Cli/Tui/**'
-      - 'tests/tui-e2e/**'
+      - 'tests/PPDS.Tui.E2eTests/**'
   workflow_dispatch:
 
 concurrency:
@@ -40,21 +40,21 @@ jobs:
       with:
         node-version: '20'
         cache: 'npm'
-        cache-dependency-path: tests/tui-e2e/package-lock.json
+        cache-dependency-path: tests/PPDS.Tui.E2eTests/package-lock.json
 
     - name: Build PPDS CLI
       run: dotnet build src/PPDS.Cli/PPDS.Cli.csproj -c Debug -f net10.0
 
     - name: Install tui-e2e dependencies
-      working-directory: tests/tui-e2e
+      working-directory: tests/PPDS.Tui.E2eTests
       run: npm ci
 
     - name: Install Playwright browsers
-      working-directory: tests/tui-e2e
+      working-directory: tests/PPDS.Tui.E2eTests
       run: npx playwright install --with-deps chromium
 
     - name: Run TUI E2E tests
-      working-directory: tests/tui-e2e
+      working-directory: tests/PPDS.Tui.E2eTests
       run: npm run test:update
       env:
         PPDS_FORCE_TUI: '1'
@@ -65,8 +65,8 @@ jobs:
       with:
         name: tui-e2e-results
         path: |
-          tests/tui-e2e/playwright-report/
-          tests/tui-e2e/test-results/
+          tests/PPDS.Tui.E2eTests/playwright-report/
+          tests/PPDS.Tui.E2eTests/test-results/
         retention-days: 7
 
     - name: Upload snapshots on failure
@@ -74,5 +74,5 @@ jobs:
       if: failure()
       with:
         name: tui-e2e-snapshot-diff
-        path: tests/tui-e2e/__snapshots__/
+        path: tests/PPDS.Tui.E2eTests/__snapshots__/
         retention-days: 7

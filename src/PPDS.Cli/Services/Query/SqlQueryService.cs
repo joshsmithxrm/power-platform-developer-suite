@@ -88,8 +88,13 @@ public sealed class SqlQueryService : ISqlQueryService
 
             if (topOverride.HasValue)
             {
-                // Inject TOP override into the ScriptDom AST before transpilation
-                InjectTopOverride(fragment, topOverride.Value);
+                // Only inject TOP override if the SQL doesn't already have one —
+                // don't clobber the user's explicit TOP with the extension's default
+                var querySpec = ExtractQuerySpecification(fragment);
+                if (querySpec?.TopRowFilter == null)
+                {
+                    InjectTopOverride(fragment, topOverride.Value);
+                }
             }
 
             // Extract the first statement from the TSqlScript wrapper.
@@ -130,7 +135,7 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var (fragment, planResult, safetyResult) =
+        var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
@@ -151,9 +156,27 @@ public sealed class SqlQueryService : ISqlQueryService
             _queryExecutor,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
-            metadataQueryExecutor: _metadataQueryExecutor);
+            metadataQueryExecutor: _metadataQueryExecutor,
+            executionOptions: executionOptions);
 
-        var result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
+        QueryResult result;
+        try
+        {
+            result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
+        }
+        catch (Exception ex) when (
+            request.UseTdsEndpoint
+            && ContainsTdsScanNode(planResult.RootNode)
+            && ex is not OperationCanceledException
+            && ex is not PpdsException)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.TdsConnectionFailed,
+                $"TDS Endpoint connection failed: {ex.Message}. The TDS Endpoint may be disabled " +
+                "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
+                "Platform admin to enable the TDS Endpoint.",
+                ex);
+        }
 
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
@@ -166,11 +189,17 @@ public sealed class SqlQueryService : ISqlQueryService
             planResult.VirtualColumns,
             isAggregate);
 
+        var dataSources = CollectDataSources(planResult.RootNode, "Local");
+        var appliedHints = CollectAppliedHints(hints);
+
         return new SqlQueryResult
         {
             OriginalSql = request.Sql,
             TranspiledFetchXml = planResult.FetchXml,
-            Result = expandedResult
+            Result = expandedResult,
+            DataSources = dataSources,
+            AppliedHints = appliedHints,
+            ExecutionMode = DetectExecutionMode(planResult.RootNode)
         };
     }
 
@@ -189,9 +218,27 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
+        // Parse query hints for EXPLAIN path too
+        var hints = QueryHintParser.Parse(fragment);
+
+        var effectivePoolCapacity = hints.MaxParallelism.HasValue
+            ? Math.Min(hints.MaxParallelism.Value, _poolCapacity)
+            : _poolCapacity;
+
+        // Don't override explicit TOP with hints.MaxResultRows (same guard as PrepareExecutionAsync)
+        var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
+        var effectiveMaxRows = sqlHasExplicitTop ? null : hints.MaxResultRows;
+
         var planOptions = new QueryPlanOptions
         {
-            RemoteExecutorFactory = RemoteExecutorFactory
+            RemoteExecutorFactory = RemoteExecutorFactory,
+            PoolCapacity = effectivePoolCapacity,
+            ForceClientAggregation = hints.ForceClientAggregation == true,
+            NoLock = hints.NoLock == true,
+            UseTdsEndpoint = hints.UseTdsEndpoint == true,
+            MaxRows = effectiveMaxRows,
+            TdsQueryExecutor = _tdsQueryExecutor,
+            OriginalSql = sql
         };
 
         QueryPlanResult planResult;
@@ -221,8 +268,11 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (chunkSize <= 0) chunkSize = 100;
 
-        var (fragment, planResult, safetyResult) =
+        var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
+
+        var streamDataSources = CollectDataSources(planResult.RootNode, "Local");
+        var streamAppliedHints = CollectAppliedHints(hints);
 
         // Dry-run: yield empty completion chunk
         if (safetyResult?.IsDryRun == true)
@@ -244,7 +294,8 @@ public sealed class SqlQueryService : ISqlQueryService
             _queryExecutor,
             cancellationToken,
             bulkOperationExecutor: _bulkOperationExecutor,
-            metadataQueryExecutor: _metadataQueryExecutor);
+            metadataQueryExecutor: _metadataQueryExecutor,
+            executionOptions: executionOptions);
 
         var chunkRows = new List<IReadOnlyDictionary<string, QueryValue>>(chunkSize);
         IReadOnlyList<QueryColumn>? columns = null;
@@ -252,36 +303,71 @@ public sealed class SqlQueryService : ISqlQueryService
         var isFirstChunk = true;
         var streamIsAggregate = HasAggregatesInFragment(fragment);
 
-        await foreach (var row in _planExecutor.ExecuteStreamingAsync(planResult, context, cancellationToken))
+        // Wrap streaming enumeration in TDS connection failure catch.
+        // Cannot use try/catch around yield return, so we use a helper that
+        // catches during MoveNextAsync and rethrows as PpdsException.
+        var streamEnumerator = _planExecutor
+            .ExecuteStreamingAsync(planResult, context, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+
+        try
         {
-            // Infer columns from first row
-            if (columns == null)
+            while (true)
             {
-                columns = InferColumnsFromRow(row);
-            }
-
-            chunkRows.Add(row.Values);
-            totalRows++;
-
-            if (chunkRows.Count >= chunkSize)
-            {
-                // Expand virtual columns (owneridname, statuscodename, etc.)
-                var expandedChunk = ExpandStreamingChunk(
-                    chunkRows, columns!, planResult.VirtualColumns, streamIsAggregate);
-
-                yield return new SqlQueryStreamChunk
+                QueryRow row;
+                try
                 {
-                    Rows = expandedChunk.rows,
-                    Columns = isFirstChunk ? expandedChunk.columns : null,
-                    EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
-                    TotalRowsSoFar = totalRows,
-                    IsComplete = false,
-                    TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
-                };
+                    if (!await streamEnumerator.MoveNextAsync().ConfigureAwait(false))
+                        break;
+                    row = streamEnumerator.Current;
+                }
+                catch (Exception ex) when (
+                    request.UseTdsEndpoint
+                    && ContainsTdsScanNode(planResult.RootNode)
+                    && ex is not OperationCanceledException
+                    && ex is not PpdsException)
+                {
+                    throw new PpdsException(
+                        ErrorCodes.Query.TdsConnectionFailed,
+                        $"TDS Endpoint connection failed: {ex.Message}. The TDS Endpoint may be disabled " +
+                        "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
+                        "Platform admin to enable the TDS Endpoint.",
+                        ex);
+                }
 
-                isFirstChunk = false;
-                chunkRows.Clear();
+                // Infer columns from first row
+                if (columns == null)
+                {
+                    columns = InferColumnsFromRow(row);
+                }
+
+                chunkRows.Add(row.Values);
+                totalRows++;
+
+                if (chunkRows.Count >= chunkSize)
+                {
+                    // Expand virtual columns (owneridname, statuscodename, etc.)
+                    var expandedChunk = ExpandStreamingChunk(
+                        chunkRows, columns!, planResult.VirtualColumns, streamIsAggregate);
+
+                    yield return new SqlQueryStreamChunk
+                    {
+                        Rows = expandedChunk.rows,
+                        Columns = isFirstChunk ? expandedChunk.columns : null,
+                        EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
+                        TotalRowsSoFar = totalRows,
+                        IsComplete = false,
+                        TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
+                    };
+
+                    isFirstChunk = false;
+                    chunkRows.Clear();
+                }
             }
+        }
+        finally
+        {
+            await streamEnumerator.DisposeAsync().ConfigureAwait(false);
         }
 
         // Yield final chunk with any remaining rows
@@ -295,7 +381,10 @@ public sealed class SqlQueryService : ISqlQueryService
             EntityLogicalName = isFirstChunk ? planResult.EntityLogicalName : null,
             TotalRowsSoFar = totalRows,
             IsComplete = true,
-            TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null
+            TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null,
+            DataSources = streamDataSources,
+            AppliedHints = streamAppliedHints,
+            ExecutionMode = DetectExecutionMode(planResult.RootNode)
         };
     }
 
@@ -307,7 +396,7 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
     /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
     /// </summary>
-    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult)>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions, QueryHintOverrides hints)>
         PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -321,6 +410,45 @@ public sealed class SqlQueryService : ISqlQueryService
         catch (QueryParseException ex)
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
+        }
+
+        // Parse query hints (-- ppds:* comments and OPTION() clauses)
+        var hints = QueryHintParser.Parse(fragment);
+
+        // Apply plan-level overrides: hints win over caller settings
+        if (hints.UseTdsEndpoint == true)
+        {
+            request = request with { UseTdsEndpoint = true };
+        }
+        if (hints.MaxResultRows.HasValue)
+        {
+            request = request with { TopOverride = hints.MaxResultRows.Value };
+        }
+
+        // TDS compatibility pre-check — fail fast before planning.
+        // When the user explicitly requests TDS, they get TDS or an error,
+        // never a silent substitution to Dataverse.
+        if (request.UseTdsEndpoint)
+        {
+            var querySpec = ExtractQuerySpecification(fragment);
+            var entityName = querySpec != null ? ExtractEntityName(querySpec) : null;
+            var tdsCompatibility = TdsCompatibilityChecker.CheckCompatibility(
+                request.Sql, entityName);
+
+            if (tdsCompatibility != TdsCompatibility.Compatible)
+            {
+                var reason = tdsCompatibility switch
+                {
+                    TdsCompatibility.IncompatibleDml =>
+                        "Cannot execute via TDS: DML statements (DELETE, UPDATE, INSERT) are not supported by the TDS Endpoint. Disable TDS mode to execute this query against Dataverse.",
+                    TdsCompatibility.IncompatibleEntity =>
+                        $"Cannot execute via TDS: The target entity is not available via the TDS Endpoint (elastic/virtual table). Disable TDS mode to query via Dataverse.",
+                    _ =>
+                        "Cannot execute via TDS: This query uses features not supported by the TDS Endpoint. Disable TDS mode to execute via Dataverse."
+                };
+
+                throw new PpdsException(ErrorCodes.Query.TdsIncompatible, reason);
+            }
         }
 
         // DML safety check
@@ -345,7 +473,7 @@ public sealed class SqlQueryService : ISqlQueryService
             if (safetyResult.RequiresConfirmation)
             {
                 throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
+                    ErrorCodes.Query.DmlConfirmationRequired,
                     "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
             }
 
@@ -356,10 +484,30 @@ public sealed class SqlQueryService : ISqlQueryService
         var (estimatedRecordCount, minDate, maxDate) =
             await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
 
+        // Apply hint-level overrides to pool capacity
+        var effectivePoolCapacity = hints.MaxParallelism.HasValue
+            ? Math.Min(hints.MaxParallelism.Value, _poolCapacity)
+            : _poolCapacity;
+
+        // Build execution options from bypass hints
+        var executionOptions = (hints.BypassPlugins == true || hints.BypassFlows == true)
+            ? new QueryExecutionOptions
+            {
+                BypassPlugins = hints.BypassPlugins == true,
+                BypassFlows = hints.BypassFlows == true
+            }
+            : null;
+
+        // Only apply TopOverride as MaxRows if the SQL itself does not contain a TOP clause.
+        // The extension sends a default top (100) on every query — we must not clobber the
+        // user's explicit TOP 5 with the default 100.
+        var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
+        var effectiveMaxRows = sqlHasExplicitTop ? null : request.TopOverride;
+
         // Build execution plan
         var planOptions = new QueryPlanOptions
         {
-            MaxRows = request.TopOverride,
+            MaxRows = effectiveMaxRows,
             PageNumber = request.PageNumber,
             PagingCookie = request.PagingCookie,
             IncludeCount = request.IncludeCount,
@@ -368,11 +516,13 @@ public sealed class SqlQueryService : ISqlQueryService
             TdsQueryExecutor = _tdsQueryExecutor,
             DmlRowCap = dmlRowCap,
             EnablePrefetch = request.EnablePrefetch,
-            PoolCapacity = _poolCapacity,
+            PoolCapacity = effectivePoolCapacity,
             EstimatedRecordCount = estimatedRecordCount,
             MinDate = minDate,
             MaxDate = maxDate,
-            RemoteExecutorFactory = RemoteExecutorFactory
+            RemoteExecutorFactory = RemoteExecutorFactory,
+            ForceClientAggregation = hints.ForceClientAggregation == true,
+            NoLock = hints.NoLock == true
         };
 
         QueryPlanResult planResult;
@@ -388,7 +538,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // Check cross-environment DML policy after planning
         CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety);
 
-        return (fragment, planResult, safetyResult);
+        return (fragment, planResult, safetyResult, executionOptions, hints);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -573,6 +723,50 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
+    /// Collects all data sources (local + remote) that participated in the query.
+    /// </summary>
+    private static List<QueryDataSource> CollectDataSources(
+        IQueryPlanNode rootNode,
+        string localLabel)
+    {
+        var sources = new List<QueryDataSource>
+        {
+            new() { Label = localLabel, IsRemote = false }
+        };
+        CollectRemoteLabels(rootNode, sources);
+        return sources;
+    }
+
+    private static void CollectRemoteLabels(IQueryPlanNode node, List<QueryDataSource> sources)
+    {
+        if (node is RemoteScanNode remote)
+        {
+            if (!sources.Any(s => s.Label == remote.RemoteLabel))
+                sources.Add(new QueryDataSource { Label = remote.RemoteLabel, IsRemote = true });
+        }
+        foreach (var child in node.Children)
+            CollectRemoteLabels(child, sources);
+    }
+
+    /// <summary>
+    /// Collects the names of query hints that were actively applied.
+    /// Returns null when no hints were active.
+    /// </summary>
+    private static List<string>? CollectAppliedHints(QueryHintOverrides hints)
+    {
+        var applied = new List<string>();
+        if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
+        if (hints.NoLock == true) applied.Add("NOLOCK");
+        if (hints.BypassPlugins == true) applied.Add("BYPASS_PLUGINS");
+        if (hints.BypassFlows == true) applied.Add("BYPASS_FLOWS");
+        if (hints.MaxResultRows.HasValue) applied.Add("MAX_ROWS");
+        if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
+        if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
+        if (hints.DmlBatchSize.HasValue) applied.Add("BATCH_SIZE");
+        return applied.Count > 0 ? applied : null;
+    }
+
+    /// <summary>
     /// Detects if a DML statement targets a remote environment by checking for RemoteScanNode in the plan.
     /// Returns the remote label if found, null otherwise (SELECT or local-only DML).
     /// </summary>
@@ -660,5 +854,27 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Detects the execution mode by walking the plan tree for TdsScanNode.
+    /// </summary>
+    private static QueryExecutionMode DetectExecutionMode(IQueryPlanNode rootNode)
+    {
+        if (ContainsTdsScanNode(rootNode))
+            return QueryExecutionMode.Tds;
+        return QueryExecutionMode.Dataverse;
+    }
+
+    private static bool ContainsTdsScanNode(IQueryPlanNode node)
+    {
+        if (node is TdsScanNode)
+            return true;
+        foreach (var child in node.Children)
+        {
+            if (ContainsTdsScanNode(child))
+                return true;
+        }
+        return false;
     }
 }

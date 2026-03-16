@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using Xunit;
 
 namespace PPDS.Dataverse.Tests.Query;
@@ -406,15 +407,15 @@ public class TdsQueryExecutorMappingTests
     #region ExecuteSqlAsync Validation
 
     [Fact]
-    public async Task ExecuteSqlAsync_DmlStatement_ThrowsInvalidOperation()
+    public async Task ExecuteSqlAsync_DmlStatement_ThrowsQueryExecutionException()
     {
         var executor = new TdsQueryExecutor(
             "https://org.crm.dynamics.com",
             _ => Task.FromResult("token"));
 
-        var act = () => executor.ExecuteSqlAsync("DELETE FROM account");
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*IncompatibleDml*");
+        var ex = await Assert.ThrowsAsync<QueryExecutionException>(
+            () => executor.ExecuteSqlAsync("DELETE FROM account"));
+        Assert.Equal(QueryErrorCode.TdsIncompatible, ex.ErrorCode);
     }
 
     [Fact]

@@ -39,6 +39,8 @@ Before dispatching any agents, load the specification context that will be injec
   - `src/PPDS.Mcp/` → `specs/mcp.md`
   - `src/PPDS.Migration/` → `specs/migration.md`
   - `src/PPDS.Auth/` → `specs/authentication.md`
+  - `src/PPDS.Extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
+  - `src/PPDS.Extension/` → check `specs/README.md` for extension-related specs
 - Always include `specs/architecture.md`
 - Read each relevant spec and extract the `## Acceptance Criteria` section
 
@@ -101,7 +103,17 @@ For EACH phase in the plan, repeat this cycle:
 - If specs with ACs are relevant to this phase, check: do the AC test methods pass?
   Run: `dotnet test --filter "FullyQualifiedName~{TestMethodFromAC}" -v q --no-build`
   for each AC referenced by this phase's tasks
-- Re-run verification after fixes. Do NOT proceed until gate passes.
+- If the phase touches extension code (`src/PPDS.Extension/` directory):
+  Invoke `/verify extension` to check daemon status, tree views, and panel state.
+  Then invoke `/qa extension` to dispatch a blind verifier agent that tests the UI without seeing source code.
+- If the phase touches TUI code (`src/PPDS.Cli/Tui/`):
+  Invoke `/verify tui` to check TUI rendering.
+- If the phase touches MCP code (`src/PPDS.Mcp/`):
+  Invoke `/verify mcp` to check tool responses.
+  Then invoke `/qa mcp` to dispatch a blind verifier for tool responses.
+- If the phase touches CLI commands (`src/PPDS.Cli/Commands/`, not `Serve/`):
+  Invoke `/qa cli` to verify command output matches expectations.
+- Re-run verification after fixes. Do NOT proceed until gate passes AND /qa passes.
 
 **D. Review**
 - Use `superpowers:requesting-code-review` agent to review the phase's work against the plan

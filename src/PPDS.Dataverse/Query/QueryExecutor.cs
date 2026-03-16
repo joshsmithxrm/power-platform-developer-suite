@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Pooling;
 
@@ -110,6 +111,126 @@ public class QueryExecutor : IQueryExecutor
         var records = MapRecords(entityCollection, columns, isAggregate);
 
         // For all-attributes, infer columns from all records (attributes with null values are omitted from responses)
+        if (columns.Count == 0 && records.Count > 0)
+        {
+            columns = InferColumnsFromRecords(records);
+        }
+
+        _logger?.LogInformation("Query returned {Count} records in {ElapsedMs}ms (moreRecords: {MoreRecords})",
+            entityCollection.Entities.Count, stopwatch.ElapsedMilliseconds, entityCollection.MoreRecords);
+
+        return new QueryResult
+        {
+            EntityLogicalName = entityLogicalName,
+            Columns = columns,
+            Records = records,
+            Count = records.Count,
+            TotalCount = entityCollection.TotalRecordCount > 0 ? entityCollection.TotalRecordCount : null,
+            MoreRecords = entityCollection.MoreRecords,
+            PagingCookie = entityCollection.PagingCookie,
+            PageNumber = effectivePageNumber,
+            ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
+            ExecutedFetchXml = modifiedFetchXml,
+            IsAggregate = isAggregate
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<QueryResult> ExecuteFetchXmlAsync(
+        string fetchXml,
+        int? pageNumber,
+        string? pagingCookie,
+        bool includeCount,
+        QueryExecutionOptions? executionOptions,
+        CancellationToken cancellationToken = default)
+    {
+        // When no execution options are active, delegate to the standard path
+        if (executionOptions is not { BypassPlugins: true } and not { BypassFlows: true })
+        {
+            return await ExecuteFetchXmlAsync(fetchXml, pageNumber, pagingCookie, includeCount, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(fetchXml);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // Parse the FetchXML to extract metadata and apply paging
+        var fetchDoc = XDocument.Parse(fetchXml);
+        var fetchElement = fetchDoc.Root
+            ?? throw new ArgumentException("Invalid FetchXML: missing root element", nameof(fetchXml));
+
+        var entityElement = fetchElement.Element("entity")
+            ?? throw new ArgumentException("Invalid FetchXML: missing entity element", nameof(fetchXml));
+
+        var entityLogicalName = entityElement.Attribute("name")?.Value
+            ?? throw new ArgumentException("Invalid FetchXML: entity missing name attribute", nameof(fetchXml));
+
+        var isAggregate = string.Equals(fetchElement.Attribute("aggregate")?.Value, "true", StringComparison.OrdinalIgnoreCase);
+
+        var columns = ExtractColumns(entityElement, entityLogicalName, isAggregate);
+
+        // Resolve top/page conflict
+        var topAttr = fetchElement.Attribute("top");
+        if (topAttr != null && (pageNumber.HasValue || !string.IsNullOrEmpty(pagingCookie)))
+        {
+            if (int.TryParse(topAttr.Value, out var topInt))
+            {
+                topAttr.Remove();
+                fetchElement.SetAttributeValue("count", Math.Min(topInt, 5000).ToString());
+            }
+        }
+
+        // Apply paging if specified
+        var effectivePageNumber = pageNumber ?? 1;
+        if (pageNumber.HasValue || !string.IsNullOrEmpty(pagingCookie))
+        {
+            fetchElement.SetAttributeValue("page", effectivePageNumber.ToString());
+            if (!string.IsNullOrEmpty(pagingCookie))
+            {
+                fetchElement.SetAttributeValue("paging-cookie", pagingCookie);
+            }
+        }
+
+        if (includeCount)
+        {
+            fetchElement.SetAttributeValue("returntotalrecordcount", "true");
+        }
+
+        var modifiedFetchXml = fetchDoc.ToString(SaveOptions.DisableFormatting);
+
+        _logger?.LogDebug("Executing FetchXML with execution options for entity {Entity}, page {Page} (BypassPlugins={BypassPlugins}, BypassFlows={BypassFlows})",
+            entityLogicalName, effectivePageNumber, executionOptions.BypassPlugins, executionOptions.BypassFlows);
+
+        // Execute via RetrieveMultipleRequest to attach bypass parameters
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        var request = new RetrieveMultipleRequest
+        {
+            Query = new FetchExpression(modifiedFetchXml)
+        };
+
+        if (executionOptions.BypassPlugins)
+        {
+            request.Parameters["BypassCustomPluginExecution"] = true;
+        }
+
+        if (executionOptions.BypassFlows)
+        {
+            request.Parameters["SuppressCallbackRegistrationExpanderJob"] = true;
+        }
+
+        var response = (RetrieveMultipleResponse)await client.ExecuteAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+
+        var entityCollection = response.EntityCollection;
+
+        stopwatch.Stop();
+
+        // Map results (same logic as base method)
+        var records = MapRecords(entityCollection, columns, isAggregate);
+
         if (columns.Count == 0 && records.Count > 0)
         {
             columns = InferColumnsFromRecords(records);
