@@ -186,6 +186,11 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
                     } else {
                         toolbar.removeAttribute('data-env-type');
                     }
+                    if (msg.envColor) {
+                        toolbar.setAttribute('data-env-color', msg.envColor.toLowerCase());
+                    } else {
+                        toolbar.removeAttribute('data-env-color');
+                    }
                 }
             }
             break;

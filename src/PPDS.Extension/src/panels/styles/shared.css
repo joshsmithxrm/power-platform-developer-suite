@@ -28,6 +28,21 @@ body {
 .toolbar[data-env-type="test"]        { border-top: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
 .toolbar[data-env-type="trial"]       { border-top: 3px solid var(--vscode-editorInfo-foreground, #3794ff); }
 
+/* ── Environment color accent (from configured color) ─────────────────── */
+.toolbar[data-env-color="red"]          { border-left: 4px solid #e74c3c; }
+.toolbar[data-env-color="green"]        { border-left: 4px solid #2ecc71; }
+.toolbar[data-env-color="yellow"]       { border-left: 4px solid #f1c40f; }
+.toolbar[data-env-color="cyan"]         { border-left: 4px solid #00bcd4; }
+.toolbar[data-env-color="blue"]         { border-left: 4px solid #3498db; }
+.toolbar[data-env-color="gray"]         { border-left: 4px solid #95a5a6; }
+.toolbar[data-env-color="brown"]        { border-left: 4px solid #8d6e63; }
+.toolbar[data-env-color="white"]        { border-left: 4px solid #ecf0f1; }
+.toolbar[data-env-color="brightred"]    { border-left: 4px solid #ff6b6b; }
+.toolbar[data-env-color="brightgreen"]  { border-left: 4px solid #69db7c; }
+.toolbar[data-env-color="brightyellow"] { border-left: 4px solid #ffe066; }
+.toolbar[data-env-color="brightcyan"]   { border-left: 4px solid #66d9ef; }
+.toolbar[data-env-color="brightblue"]   { border-left: 4px solid #74b9ff; }
+
 .toolbar-spacer {
     flex: 1;
 }
