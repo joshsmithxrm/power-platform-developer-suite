@@ -52,6 +52,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
     private environmentType: string | null = null;
+    private environmentColor: string | null = null;
     private profileName: string | undefined;
     private readonly initialSql: string | undefined;
 
@@ -216,7 +217,13 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     this.environmentUrl = env.url;
                     this.environmentDisplayName = env.displayName;
                     this.environmentType = env.type;
-                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: env.type });
+                    try {
+                        const config = await this.daemon.envConfigGet(env.url);
+                        this.environmentColor = config.resolvedColor ?? null;
+                    } catch {
+                        this.environmentColor = null;
+                    }
+                    this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: env.type, envColor: this.environmentColor });
                     this.updateTitle();
                 }
                 break;
@@ -255,7 +262,15 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         } catch {
             // No active profile or environment
         }
-        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, envType: this.environmentType });
+        if (this.environmentUrl) {
+            try {
+                const config = await this.daemon.envConfigGet(this.environmentUrl);
+                this.environmentColor = config.resolvedColor ?? null;
+            } catch {
+                this.environmentColor = null;
+            }
+        }
+        this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, envType: this.environmentType, envColor: this.environmentColor });
         this.updateTitle();
     }
 

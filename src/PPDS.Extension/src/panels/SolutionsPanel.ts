@@ -21,6 +21,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private environmentUrl: string | undefined;
     private environmentDisplayName: string | undefined;
     private environmentType: string | null = null;
+    private environmentColor: string | null = null;
     private environmentId: string | null = null;
     private profileName: string | undefined;
 
@@ -142,8 +143,16 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             } else {
                 this.environmentId = await this.resolveEnvironmentId();
             }
+            if (this.environmentUrl) {
+                try {
+                    const config = await this.daemon.envConfigGet(this.environmentUrl);
+                    this.environmentColor = config.resolvedColor ?? null;
+                } catch {
+                    this.environmentColor = null;
+                }
+            }
             this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType });
+            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType, envColor: this.environmentColor });
             await this.loadSolutions();
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -158,8 +167,14 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             this.environmentDisplayName = result.displayName;
             this.environmentType = result.type;
             this.environmentId = await this.resolveEnvironmentId();
+            try {
+                const config = await this.daemon.envConfigGet(result.url);
+                this.environmentColor = config.resolvedColor ?? null;
+            } catch {
+                this.environmentColor = null;
+            }
             this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type });
+            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type, envColor: this.environmentColor });
             await this.loadSolutions();
         }
     }
