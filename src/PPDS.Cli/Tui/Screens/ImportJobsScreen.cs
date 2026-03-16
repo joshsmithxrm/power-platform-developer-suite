@@ -98,7 +98,11 @@ internal sealed class ImportJobsScreen : TuiScreenBase
                 var succeeded = _jobs.Count(j => j.Status == "Succeeded");
                 var failed = _jobs.Count(j => j.Status == "Failed");
                 var inProgress = _jobs.Count(j => j.Status == "In Progress");
-                _statusLabel.Text = $"{_jobs.Count} import job{(_jobs.Count != 1 ? "s" : "")} \u2014 {succeeded} succeeded, {failed} failed, {inProgress} in progress";
+                var statusParts = new List<string> { $"{_jobs.Count} import job{(_jobs.Count != 1 ? "s" : "")}" };
+                if (succeeded > 0) statusParts.Add($"{succeeded} succeeded");
+                if (failed > 0) statusParts.Add($"{failed} failed");
+                if (inProgress > 0) statusParts.Add($"{inProgress} in progress");
+                _statusLabel.Text = string.Join(" \u2014 ", statusParts);
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }

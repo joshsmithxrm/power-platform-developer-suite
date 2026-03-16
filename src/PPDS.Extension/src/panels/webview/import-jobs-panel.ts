@@ -84,10 +84,14 @@ const table = new DataTable<ImportJobViewDto>({
     defaultSortDirection: 'desc',
     statusEl: statusText,
     formatStatus: (items) => {
-        const succeeded = items.filter(j => j.status.toLowerCase() === 'succeeded' || j.status.toLowerCase() === 'completed').length;
-        const failed = items.filter(j => j.status.toLowerCase() === 'failed').length;
-        return items.length + ' import job' + (items.length !== 1 ? 's' : '') +
-            ' \u2014 ' + succeeded + ' succeeded, ' + failed + ' failed';
+        const succeeded = items.filter(j => j.status === 'Succeeded').length;
+        const failed = items.filter(j => j.status === 'Failed').length;
+        const inProgress = items.filter(j => j.status === 'In Progress').length;
+        const parts = [items.length + ' import job' + (items.length !== 1 ? 's' : '')];
+        if (succeeded > 0) parts.push(succeeded + ' succeeded');
+        if (failed > 0) parts.push(failed + ' failed');
+        if (inProgress > 0) parts.push(inProgress + ' in progress');
+        return parts.join(' \u2014 ');
     },
     emptyMessage: 'No import jobs found',
 });
