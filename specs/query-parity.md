@@ -84,8 +84,8 @@ SqlQueryResult (with DataSources metadata)
 | `QueryHintOverrides` | Nullable override bag — null means "use default" |
 | `QueryExecutionOptions` | Execution-level options (BypassPlugins, BypassFlows, NoLock) threaded to executor |
 | `QueryPlanOptions` | Plan-level options (UseTds, ForceClientAggregation, MaxRows, etc.) |
-| `FetchXmlGenerator` | Emits `no-lock="true"` when NoLock hint is active |
-| `IQueryExecutor` | Accepts execution options, sets OrganizationRequest headers |
+| `FetchXmlScanNode` | Injects `no-lock="true"` into FetchXML string when NoLock hint is active |
+| `QueryPlanContext` | Carries `QueryExecutionOptions` through plan execution — nodes apply headers at execution time |
 
 ### Dependencies
 
@@ -109,7 +109,7 @@ SqlQueryResult (with DataSources metadata)
 
 #### Primary Flow
 
-**query/sql RPC call:**
+**query/sql RPC call (execute mode):**
 
 1. **Validate**: Check `request.Sql` is non-empty
 2. **Resolve environment**: Call `WithProfileAndEnvironmentAsync(request.EnvironmentUrl, ...)` to get service provider
@@ -118,8 +118,12 @@ SqlQueryResult (with DataSources metadata)
 5. **Wire safety**: Set `ProfileResolver`, `EnvironmentSafetySettings`, `EnvironmentProtectionLevel` from environment config
 6. **Build request**: Map RPC `QuerySqlRequest` fields to `SqlQueryRequest`
 7. **Execute**: Call `service.ExecuteAsync(sqlRequest, cancellationToken)`
-8. **Map response**: Convert `SqlQueryResult` to `QueryResultResponse` (records, columns, paging, timing, executed FetchXML, query mode)
+8. **Map response**: Convert `SqlQueryResult` to `QueryResultResponse` — map `sqlQueryResult.Result` (records, columns, paging, timing) and `sqlQueryResult.TranspiledFetchXml` (executed FetchXML). The source object type changes from `QueryResult` to `SqlQueryResult` wrapper, but the RPC response fields remain identical.
 9. **Save history**: Fire-and-forget history save (unchanged)
+
+**query/sql RPC call (showFetchXml mode):**
+
+When `request.ShowFetchXml` is true, the caller wants only the transpiled FetchXML without execution. This code path uses `service.TranspileSql(request.Sql, request.Top)` instead of `ExecuteAsync()` and returns the FetchXML string in the response. No plan building, no execution, no wiring needed.
 
 #### Constraints
 
@@ -131,10 +135,10 @@ SqlQueryResult (with DataSources metadata)
 
 #### Core Requirements
 
-1. `SqlQueryService.PrepareExecutionAsync()` calls `QueryHintParser.Parse(fragment)` after parsing SQL, before building the execution plan
+1. Both `SqlQueryService.PrepareExecutionAsync()` and `SqlQueryService.ExplainAsync()` call `QueryHintParser.Parse(fragment)` after parsing SQL, before building the execution plan — so `EXPLAIN` output reflects hint-influenced plans
 2. Plan-level hints (`USE_TDS`, `MAX_ROWS`, `MAXDOP`, `HASH_GROUP`) override corresponding fields in `QueryPlanOptions`
-3. FetchXML-level hints (`NOLOCK`) are passed to the FetchXML generation layer, resulting in `no-lock="true"` on the `<fetch>` element
-4. Execution-level hints (`BYPASS_PLUGINS`, `BYPASS_FLOWS`) are threaded to `IQueryExecutor` and applied as OrganizationRequest headers (`BypassCustomPluginExecution`, `SuppressCallbackRegistrationExpanderJob`)
+3. FetchXML-level hints (`NOLOCK`) are applied in `FetchXmlScanNode` by injecting `no-lock="true"` into the FetchXML string before execution. `NoLock` is a new property on `QueryPlanOptions` (does not exist today), threaded through to `FetchXmlScanNode` at plan construction.
+4. Execution-level hints (`BYPASS_PLUGINS`, `BYPASS_FLOWS`) are carried via `QueryExecutionOptions` on `QueryPlanContext` — plan nodes read from context and set OrganizationRequest headers at execution time. This avoids changing the `IQueryExecutor` interface, which would be a breaking change for all implementations (including `RemoteScanNode`'s executor and test fakes).
 5. DML-level hints (`BATCH_SIZE`) override the batch size for bulk DML operations
 6. Inline hints override caller-provided settings — the query text is the user's explicit intent
 
@@ -172,15 +176,22 @@ SqlQueryResult (with DataSources metadata)
 
 1. **`SqlQueryService.PrepareExecutionAsync()`**: After `QueryParser.Parse()`, call `QueryHintParser.Parse(fragment)`. Merge overrides into `QueryPlanOptions`. Create `QueryExecutionOptions` from execution-level hints. Thread both through to execution.
 
-2. **`QueryPlanOptions`**: Add `ForceClientAggregation` (bool, default false). Add `NoLock` (bool, default false). Other plan-level hints map to existing fields.
+2. **`QueryPlanOptions`**: Add two new properties (neither exists today):
+   - `ForceClientAggregation` (bool, default false) — forces aggregate queries to client-side hash grouping
+   - `NoLock` (bool, default false) — signals `FetchXmlScanNode` to inject `no-lock="true"`
+   Other plan-level hints map to existing fields (`UseTdsEndpoint`, `MaxRows`, `PoolCapacity`).
 
-3. **`QueryExecutionOptions`** (new type): `BypassPlugins` (bool), `BypassFlows` (bool). Passed to plan executor and applied on `IQueryExecutor` calls.
+3. **`QueryExecutionOptions`** (new type): `BypassPlugins` (bool), `BypassFlows` (bool). Stored on `QueryPlanContext` so plan nodes can read them at execution time.
 
-4. **`FetchXmlGenerator.Generate()`** or **`FetchXmlScanNode`**: When `NoLock` is true, emit `no-lock="true"` on the `<fetch>` element.
+4. **`QueryPlanContext`**: Add `QueryExecutionOptions? ExecutionOptions` property. Set by `SqlQueryService` before plan execution.
 
-5. **`IQueryExecutor.ExecuteFetchXmlAsync()`**: Accept optional `QueryExecutionOptions`. When `BypassPlugins` is true, set `BypassCustomPluginExecution` header. When `BypassFlows` is true, set `SuppressCallbackRegistrationExpanderJob` header.
+5. **`FetchXmlScanNode`**: When `NoLock` is true (from `QueryPlanOptions` at construction), inject `no-lock="true"` attribute into the FetchXML string before calling `IQueryExecutor.ExecuteFetchXmlAsync()`. This is string manipulation on the already-generated FetchXML — no `IQueryExecutor` interface change needed.
 
-6. **`ExecutionPlanBuilder.PlanSelect()`**: When `ForceClientAggregation` is true and query has aggregates, route to client-side hash group plan regardless of record count.
+6. **`FetchXmlScanNode` (execution headers)**: When `context.ExecutionOptions?.BypassPlugins` is true, set `BypassCustomPluginExecution` header on the `OrganizationRequest`. Same for `BypassFlows` → `SuppressCallbackRegistrationExpanderJob`. Headers are set on the request object passed to `IQueryExecutor`, not on the executor itself — no interface change needed.
+
+7. **`ExecutionPlanBuilder.PlanSelect()`**: When `ForceClientAggregation` is true and query has aggregates, route to client-side hash group plan regardless of record count.
+
+8. **`IQueryExecutor`**: No changes. Execution-level hints flow through `QueryPlanContext` and are applied by plan nodes at the request level, preserving interface stability.
 
 #### Precedence Rule
 
@@ -252,6 +263,8 @@ public sealed record QueryDataSource
 
 After `_planBuilder.Plan()` returns, walk the `QueryPlanResult.RootNode` tree to collect `RemoteScanNode.RemoteLabel` values. The local environment is always present. Remote labels are collected from any `RemoteScanNode` in the plan.
 
+**Local environment label resolution**: The local environment's label comes from the environment config (if a label is configured), falling back to the environment's display name (from discovery), then the environment URL as a last resort. This mirrors how the panel toolbar already resolves the environment name for display.
+
 #### VS Code Banner
 
 When `dataSources` has 2+ entries, render above the results grid:
@@ -288,6 +301,8 @@ Each label is styled with its environment color (using the same CSS custom prope
 | AC-18 | Single-environment query does not show data source banner | Visual verification via `@webview-cdp` | 🔲 |
 | AC-19 | Hints work identically in TUI, CLI, and VS Code (all use `SqlQueryService`) | Manual verification against PPDS Dev | 🔲 |
 | AC-20 | Daemon no longer contains inline SQL transpilation or direct FetchXML execution code | Code review — `TranspileSqlToFetchXml` method deleted | 🔲 |
+| AC-21 | `ExplainAsync()` reflects hint-influenced plans (e.g., `-- ppds:USE_TDS` changes explain output to show TDS routing) | `SqlQueryServiceTests.Explain_ReflectsHints` | 🔲 |
+| AC-22 | `showFetchXml` mode uses `service.TranspileSql()` instead of inline transpilation | `RpcMethodHandlerTests.QuerySql_ShowFetchXml_UsesService` | 🔲 |
 
 ### Edge Cases
 
@@ -300,6 +315,10 @@ Each label is styled with its environment color (using the same CSS custom prope
 | BATCH_SIZE on SELECT | `-- ppds:BATCH_SIZE 500`<br>`SELECT * FROM account` | Hint has no effect, no error |
 | Hint with extra whitespace | `--  ppds:NOLOCK` | Parsed correctly (flexible whitespace) |
 | Empty environment color | No color configured, type is Sandbox | Toolbar shows Brown (Sandbox default) |
+| BYPASS_PLUGINS on cross-env DML | `-- ppds:BYPASS_PLUGINS`<br>`DELETE FROM [QA].account WHERE ...` | Hint applies to the remote executor's OrganizationRequest — `FetchXmlScanNode` reads from `QueryPlanContext.ExecutionOptions` regardless of whether the executor is local or remote |
+| HASH_GROUP + USE_TDS | `-- ppds:HASH_GROUP`<br>`-- ppds:USE_TDS`<br>`SELECT region, COUNT(*) FROM account GROUP BY region` | TDS wins — query goes to TDS endpoint, HASH_GROUP is irrelevant (SQL Server handles aggregation) |
+| Multi-statement script | `-- ppds:NOLOCK`<br>`SELECT * FROM account; SELECT * FROM contact` | Hint applies to all statements in the batch — `QueryHintParser` walks the entire token stream |
+| Local environment label in DataSources | Single-env query on PPDS Dev | `DataSources: [{ Label: "PPDS Dev", IsRemote: false }]` — label resolved from environment config label, falling back to environment display name, then URL |
 
 ---
 
@@ -449,3 +468,4 @@ Already defined in `src/PPDS.Query/Planning/QueryHintParser.cs:124-142`. All nul
 - IntelliSense completions for `-- ppds:` prefix in SQL editor
 - VS Code UI controls (buttons/toggles) for hint discoverability
 - Environment color in QuickPick environment picker
+- Update `query.md` Non-Goals/Unsupported Features to reflect current reality (HAVING and cross-env are now supported)
