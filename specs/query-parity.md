@@ -140,7 +140,7 @@ When `SqlQueryService` throws exceptions, the daemon must catch and remap to exi
 | `QueryParseException` | `ErrorCodes.Query.ParseError` | Wrap in `RpcException` with parse error details |
 | `PpdsException` with `DmlBlocked` ErrorCode | `ErrorCodes.Query.DmlBlocked` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlBlocked = true }` |
 | `PpdsException` with `DmlConfirmationRequired` ErrorCode | `ErrorCodes.Query.DmlConfirmationRequired` | Wrap in `RpcException` with `DmlSafetyErrorData { DmlConfirmationRequired = true }` |
-| `PpdsException` (other) | `ErrorCodes.Query.ExecutionError` | Wrap in `RpcException` with error message |
+| `PpdsException` (other) | `ErrorCodes.Query.ExecutionFailed` | Wrap in `RpcException` with error message |
 | Other exceptions | Standard StreamJsonRpc error | Let StreamJsonRpc handle (500-level equivalent) |
 
 The daemon's `QuerySqlAsync` method wraps the `service.ExecuteAsync()` call in a try/catch that performs this mapping. This replaces the current inline DML safety checks that throw `RpcException` directly.
@@ -181,7 +181,7 @@ After switching to `SqlQueryService`, the following code in `RpcMethodHandler.cs
 1. Both `SqlQueryService.PrepareExecutionAsync()` and `SqlQueryService.ExplainAsync()` call `QueryHintParser.Parse(fragment)` after parsing SQL, before building the execution plan — so `EXPLAIN` output reflects hint-influenced plans
 2. Plan-level hints (`USE_TDS`, `MAX_ROWS`, `MAXDOP`, `HASH_GROUP`) override corresponding fields in `QueryPlanOptions`
 3. FetchXML-level hints (`NOLOCK`) are applied in `FetchXmlScanNode` by injecting `no-lock="true"` into the FetchXML string before execution. `NoLock` is a new property on `QueryPlanOptions` (does not exist today), threaded through to `FetchXmlScanNode` at plan construction.
-4. Execution-level hints (`BYPASS_PLUGINS`, `BYPASS_FLOWS`) are carried via `QueryExecutionOptions` on `QueryPlanContext` — plan nodes read from context and set OrganizationRequest headers at execution time. This avoids changing the `IQueryExecutor` interface, which would be a breaking change for all implementations (including `RemoteScanNode`'s executor and test fakes).
+4. Execution-level hints (`BYPASS_PLUGINS`, `BYPASS_FLOWS`) are carried via `QueryExecutionOptions` on `QueryPlanContext` so plan nodes have them available. `FetchXmlScanNode` passes them to a new non-breaking default-implementation overload on `IQueryExecutor` (see Changes Per Layer item 6 below). Existing implementations are unaffected because the default delegates to the existing method.
 5. DML-level hints (`BATCH_SIZE`) override the batch size for bulk DML operations
 6. Inline hints override caller-provided settings — the query text is the user's explicit intent
 
