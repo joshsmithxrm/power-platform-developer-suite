@@ -78,23 +78,23 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 2. If UI/output changed → /verify for affected surface
 3. /pr when ready
 
-### Enforcement
-Steps 5-8 are enforced by hooks. The PR gate hook will block `gh pr create` if incomplete. Run /status to check.
+### Commits and enforcement
+Commit after each GitHub issue fixed or plan task completed — don't ask, just do it. One commit per fix.
+Steps 5-8 enforced by hooks. PR gate blocks `gh pr create` if incomplete. Run /status to check.
 
 ### STOP conditions
 - DO NOT skip steps 5-8 because "tests pass." Tests are necessary, not sufficient.
 - DO NOT declare work complete without visual verification of affected surfaces.
 
 ### Autonomy scope
-"Don't ask, just do it" applies to: committing, running gates, verification, QA, review, triaging external review comments (fix valid, dismiss invalid with rationale).
-"Don't ask, just do it" does NOT apply to: skipping workflow steps, filing/closing issues, creating PRs without passing gates.
-After external review: respond to EACH comment individually on the PR with action taken. Include summary in PR status report.
+"Don't ask, just do it" applies to: committing, gates, verification, QA, review, triaging review comments. Does NOT apply to: skipping workflow steps, filing/closing issues, PRs without passing gates.
+After external review: respond to EACH PR comment individually with action taken. Include summary in status report.
 
 ## Git Hooks
 
-Pre-commit hook in `scripts/hooks/` runs `typecheck:all` and `eslint --quiet` (errors only) on extension TS changes. Auto-configured by `npm install` via `prepare` script. Manual setup: `git config core.hooksPath scripts/hooks`.
+Pre-commit hook (`scripts/hooks/`) runs `typecheck:all` + `eslint --quiet` on extension TS changes. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
 
 ## Gotchas
 
 - VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
-- Agent research summaries may be wrong — read code yourself before stating codebase behavior as fact
+- Agent research summaries may be wrong — read code yourself before stating facts
