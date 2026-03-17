@@ -540,7 +540,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             url += $"/main.aspx?pagetype=entitylist&etn={_selectedEntity.LogicalName}";
         }
 
-        var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
+        using var dialog = new Dialog("Open in Maker", new Button("OK", is_default: true))
         {
             Width = 70,
             Height = 7
@@ -548,7 +548,6 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         dialog.Add(new Label { X = 1, Y = 1, Text = "Open this URL in your browser:" });
         dialog.Add(new Label { X = 1, Y = 2, Text = url });
         Application.Run(dialog);
-        dialog.Dispose();
     }
 
     #endregion
