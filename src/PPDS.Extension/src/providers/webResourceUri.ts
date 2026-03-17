@@ -32,7 +32,12 @@ export function parseWebResourceUri(uri: vscode.Uri): ParsedWebResourceUri {
         throw new Error(`Invalid web resource URI: ${uri.toString()}`);
     }
     const params = new URLSearchParams(uri.query);
-    const mode = (params.get('mode') as WebResourceContentMode) ?? 'unpublished';
+    const VALID_MODES: ReadonlySet<string> = new Set(['unpublished', 'published', 'server-current', 'local-pending']);
+    const rawMode = params.get('mode') ?? 'unpublished';
+    if (!VALID_MODES.has(rawMode)) {
+        throw new Error(`Invalid web resource content mode: ${rawMode}`);
+    }
+    const mode = rawMode as WebResourceContentMode;
     return {
         environmentId: parts[0],
         webResourceId: parts[1],

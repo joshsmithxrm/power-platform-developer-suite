@@ -2891,22 +2891,29 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            var content = await webResourceService.GetContentAsync(resourceId, published, ct);
-
-            return new WebResourcesGetResponse
+            try
             {
-                Resource = content != null
-                    ? new WebResourceDetailDto
-                    {
-                        Id = content.Id.ToString(),
-                        Name = content.Name,
-                        WebResourceType = content.WebResourceType,
-                        Content = content.Content,
-                        ModifiedOn = content.ModifiedOn?.ToString("o")
-                    }
-                    : null
-            };
+                var webResourceService = sp.GetRequiredService<IWebResourceService>();
+                var content = await webResourceService.GetContentAsync(resourceId, published, ct);
+
+                return new WebResourcesGetResponse
+                {
+                    Resource = content != null
+                        ? new WebResourceDetailDto
+                        {
+                            Id = content.Id.ToString(),
+                            Name = content.Name,
+                            WebResourceType = content.WebResourceType,
+                            Content = content.Content,
+                            ModifiedOn = content.ModifiedOn?.ToString("o")
+                        }
+                        : null
+                };
+            }
+            catch (KeyNotFoundException ex)
+            {
+                throw new RpcException(ErrorCodes.WebResource.NotFound, ex.Message);
+            }
         }, cancellationToken);
     }
 
@@ -2966,13 +2973,24 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            await webResourceService.UpdateContentAsync(resourceId, content, ct);
-
-            return new WebResourcesUpdateResponse
+            try
             {
-                Success = true
-            };
+                var webResourceService = sp.GetRequiredService<IWebResourceService>();
+                await webResourceService.UpdateContentAsync(resourceId, content, ct);
+
+                return new WebResourcesUpdateResponse
+                {
+                    Success = true
+                };
+            }
+            catch (KeyNotFoundException ex)
+            {
+                throw new RpcException(ErrorCodes.WebResource.NotFound, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new RpcException(ErrorCodes.WebResource.NotEditable, ex.Message);
+            }
         }, cancellationToken);
     }
 
@@ -3007,13 +3025,20 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            var count = await webResourceService.PublishAsync(parsedIds, ct);
-
-            return new WebResourcesPublishResponse
+            try
             {
-                PublishedCount = count
-            };
+                var webResourceService = sp.GetRequiredService<IWebResourceService>();
+                var count = await webResourceService.PublishAsync(parsedIds, ct);
+
+                return new WebResourcesPublishResponse
+                {
+                    PublishedCount = count
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new RpcException(ErrorCodes.Operation.InProgress, ex.Message);
+            }
         }, cancellationToken);
     }
 
@@ -3028,13 +3053,20 @@ public class RpcMethodHandler : IDisposable
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            await webResourceService.PublishAllAsync(ct);
-
-            return new WebResourcesPublishAllResponse
+            try
             {
-                Success = true
-            };
+                var webResourceService = sp.GetRequiredService<IWebResourceService>();
+                await webResourceService.PublishAllAsync(ct);
+
+                return new WebResourcesPublishAllResponse
+                {
+                    Success = true
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new RpcException(ErrorCodes.Operation.InProgress, ex.Message);
+            }
         }, cancellationToken);
     }
 

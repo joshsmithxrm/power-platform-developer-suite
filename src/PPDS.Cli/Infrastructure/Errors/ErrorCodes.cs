@@ -135,6 +135,9 @@ public static class ErrorCodes
 
         /// <summary>The operation is not supported.</summary>
         public const string NotSupported = "Operation.NotSupported";
+
+        /// <summary>A conflicting operation is already in progress.</summary>
+        public const string InProgress = "Operation.InProgress";
     }
 
     /// <summary>

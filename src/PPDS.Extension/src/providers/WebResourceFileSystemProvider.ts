@@ -76,7 +76,7 @@ export class WebResourceFileSystemProvider implements vscode.FileSystemProvider,
         const parsed = parseWebResourceUri(uri);
         const now = Date.now();
 
-        // Determine permissions: read-only for published mode and binary types
+        // Determine permissions: read-only for non-unpublished modes (published, server-current, local-pending)
         const isReadOnly = parsed.mode === 'published'
             || parsed.mode === 'server-current'
             || parsed.mode === 'local-pending';

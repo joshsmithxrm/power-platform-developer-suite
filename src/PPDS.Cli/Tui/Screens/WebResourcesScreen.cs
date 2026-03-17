@@ -68,6 +68,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
     private async Task LoadDataAsync()
     {
+        if (EnvironmentUrl == null)
+        {
+            _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+            return;
+        }
+
         // Cancel any previous load
         _loadCts?.Cancel();
         _loadCts?.Dispose();
@@ -192,6 +198,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
     private async Task PublishSelectedAsync()
     {
+        if (EnvironmentUrl == null)
+        {
+            _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+            return;
+        }
+
         var selectedRow = _table.SelectedRow;
         if (selectedRow < 0 || selectedRow >= _resources.Count) return;
         var resource = _resources[selectedRow];
@@ -231,6 +243,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
     private async Task ShowSolutionFilterAsync()
     {
+        if (EnvironmentUrl == null)
+        {
+            _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+            return;
+        }
+
         try
         {
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
