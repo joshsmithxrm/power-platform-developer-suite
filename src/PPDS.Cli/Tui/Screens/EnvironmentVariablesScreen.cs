@@ -280,6 +280,20 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                         else if (variable.Type == "JSON" && valueEditor is TextView tv)
                         {
                             newValue = tv.Text?.ToString();
+
+                            // Validate JSON syntax
+                            if (!string.IsNullOrEmpty(newValue))
+                            {
+                                try
+                                {
+                                    System.Text.Json.JsonDocument.Parse(newValue);
+                                }
+                                catch (System.Text.Json.JsonException)
+                                {
+                                    MessageBox.ErrorQuery("Validation Error", "Value must be valid JSON.", "OK");
+                                    return;
+                                }
+                            }
                         }
                         else if (valueEditor is TextField tf)
                         {

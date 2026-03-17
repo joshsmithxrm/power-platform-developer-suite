@@ -262,3 +262,13 @@
     font-style: italic;
     padding: 8px 0;
 }
+
+.edit-validation-error {
+    color: var(--vscode-inputValidation-errorForeground, #f14c4c);
+    background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.1));
+    border: 1px solid var(--vscode-inputValidation-errorBorder, #f14c4c);
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-top: 4px;
+    border-radius: 2px;
+}

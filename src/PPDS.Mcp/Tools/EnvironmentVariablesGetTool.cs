@@ -59,7 +59,7 @@ public sealed class EnvironmentVariablesGetTool
             IsManaged = variable.IsManaged,
             IsRequired = variable.IsRequired,
             SecretStore = variable.SecretStore,
-            HasOverride = variable.CurrentValue != null && variable.CurrentValue != variable.DefaultValue,
+            HasOverride = variable.CurrentValueId.HasValue,
             IsMissing = variable.IsRequired && variable.CurrentValue == null && variable.DefaultValue == null,
             CreatedOn = variable.CreatedOn?.ToString("o"),
             ModifiedOn = variable.ModifiedOn?.ToString("o")

@@ -2484,12 +2484,18 @@ public class RpcMethodHandler : IDisposable
             {
                 OrphanedReferences = orphanedReferences,
                 OrphanedFlows = orphanedFlows,
-                TotalReferences = analysis.Relationships.Count(r =>
-                    r.Type == ConnRefRelationshipType.OrphanedConnectionReference ||
-                    r.Type == ConnRefRelationshipType.FlowToConnectionReference),
-                TotalFlows = analysis.Relationships.Count(r =>
-                    r.Type == ConnRefRelationshipType.OrphanedFlow ||
-                    r.Type == ConnRefRelationshipType.FlowToConnectionReference)
+                TotalReferences = analysis.Relationships
+                    .Where(r => r.Type is ConnRefRelationshipType.OrphanedConnectionReference
+                             or ConnRefRelationshipType.FlowToConnectionReference)
+                    .Select(r => r.ConnectionReferenceLogicalName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count(),
+                TotalFlows = analysis.Relationships
+                    .Where(r => r.Type is ConnRefRelationshipType.OrphanedFlow
+                             or ConnRefRelationshipType.FlowToConnectionReference)
+                    .Select(r => r.FlowUniqueName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count()
             };
         }, cancellationToken);
     }
@@ -2631,7 +2637,7 @@ public class RpcMethodHandler : IDisposable
             ConnectionId = r.ConnectionId,
             IsManaged = r.IsManaged,
             ModifiedOn = r.ModifiedOn?.ToString("o"),
-            ConnectionStatus = connInfo?.Status.ToString(),
+            ConnectionStatus = connInfo?.Status.ToString() ?? "N/A",
             ConnectorDisplayName = connInfo?.ConnectorDisplayName
         };
     }
@@ -2649,7 +2655,7 @@ public class RpcMethodHandler : IDisposable
             ConnectionId = r.ConnectionId,
             IsManaged = r.IsManaged,
             ModifiedOn = r.ModifiedOn?.ToString("o"),
-            ConnectionStatus = connectionInfo?.Status.ToString(),
+            ConnectionStatus = connectionInfo?.Status.ToString() ?? "N/A",
             ConnectorDisplayName = connectionInfo?.ConnectorDisplayName,
             Description = r.Description,
             IsBound = r.IsBound,
@@ -2742,7 +2748,7 @@ public class RpcMethodHandler : IDisposable
                 "The 'schemaName' parameter is required");
         }
 
-        if (string.IsNullOrWhiteSpace(value))
+        if (value == null)
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,

@@ -53,7 +53,7 @@ public sealed class EnvironmentVariablesListTool
                 CurrentValue = v.CurrentValue,
                 IsManaged = v.IsManaged,
                 IsRequired = v.IsRequired,
-                HasOverride = v.CurrentValue != null && v.CurrentValue != v.DefaultValue,
+                HasOverride = v.CurrentValueId.HasValue,
                 IsMissing = v.IsRequired && v.CurrentValue == null && v.DefaultValue == null
             }).ToList()
         };

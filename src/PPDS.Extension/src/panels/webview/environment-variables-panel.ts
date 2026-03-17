@@ -35,6 +35,7 @@ const editDialogCancel = document.getElementById('edit-dialog-cancel') as HTMLEl
 const editDialogClose = document.getElementById('edit-dialog-close') as HTMLElement;
 
 let editingSchemaName: string | null = null;
+let editingType: string | null = null;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -163,7 +164,35 @@ editDialogSave.addEventListener('click', () => {
     if (!editingSchemaName) return;
     const input = editDialogInputContainer.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea');
     if (!input) return;
-    vscode.postMessage({ command: 'saveVariable', schemaName: editingSchemaName, value: input.value });
+    const val = input.value;
+
+    // Type-aware validation (AC-EV-05)
+    if (editingType === 'json' && val.trim()) {
+        try { JSON.parse(val); } catch {
+            const existing = editDialogInputContainer.querySelector('.edit-validation-error');
+            if (existing) existing.remove();
+            const err = document.createElement('div');
+            err.className = 'edit-validation-error';
+            err.textContent = 'Invalid JSON syntax';
+            editDialogInputContainer.appendChild(err);
+            return;
+        }
+    }
+    if (editingType === 'number' && val.trim() && isNaN(Number(val))) {
+        const existing = editDialogInputContainer.querySelector('.edit-validation-error');
+        if (existing) existing.remove();
+        const err = document.createElement('div');
+        err.className = 'edit-validation-error';
+        err.textContent = 'Invalid number';
+        editDialogInputContainer.appendChild(err);
+        return;
+    }
+
+    // Clear any previous validation error
+    const existing = editDialogInputContainer.querySelector('.edit-validation-error');
+    if (existing) existing.remove();
+
+    vscode.postMessage({ command: 'saveVariable', schemaName: editingSchemaName, value: val });
 });
 
 // ── Keyboard shortcuts ──
@@ -224,8 +253,9 @@ function renderDetail(detail: EnvironmentVariableDetailViewDto): void {
 // ── Edit dialog rendering ──
 function showEditDialog(schemaName: string, displayName: string | null, type: string, currentValue: string | null): void {
     editingSchemaName = schemaName;
+    editingType = type.toLowerCase();
     editDialogTitle.textContent = 'Edit: ' + (displayName ?? schemaName);
-    const lower = type.toLowerCase();
+    const lower = editingType;
     let inputHtml: string;
 
     if (lower === 'boolean') {
