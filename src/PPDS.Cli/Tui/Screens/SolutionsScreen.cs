@@ -102,6 +102,16 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
     private async Task LoadDataAsync()
     {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                _isLoading = false;
+                _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+            });
+            return;
+        }
+
         // Cancel any in-flight load to prevent races from rapid toggle
         _loadCts?.Cancel();
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
