@@ -24,6 +24,11 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
     private bool _isLoading;
     private string? _errorMessage;
     private Dialog? _detailDialog;
+    private CancellationTokenSource? _loadCts;
+    private object? _filterDebounceToken;
+    private bool _isShowingDetail;
+
+    private const int FilterDebounceMs = 300;
 
     public override string Title => "Solutions";
 
@@ -97,31 +102,44 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
     private async Task LoadDataAsync()
     {
+        // Cancel any in-flight load to prevent races from rapid toggle
+        _loadCts?.Cancel();
+        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
+        var ct = _loadCts.Token;
+
         try
         {
-            _isLoading = true;
-            _errorMessage = null;
-            _statusLabel.Text = "Loading solutions...";
-            Application.Refresh();
+            Application.MainLoop.Invoke(() =>
+            {
+                _isLoading = true;
+                _errorMessage = null;
+                _statusLabel.Text = "Loading solutions...";
+            });
 
-            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
             var service = provider.GetRequiredService<ISolutionService>();
 
             var includeManaged = _managedCheckBox.Checked;
-            _allSolutions = await service.ListAsync(
+            var solutions = await service.ListAsync(
                 filter: null,
                 includeManaged: includeManaged,
-                cancellationToken: ScreenCancellation);
+                cancellationToken: ct);
 
-            _isLoading = false;
-            ApplyClientFilter();
-        }
-        catch (OperationCanceledException) { /* screen closing */ }
-        catch (Exception ex)
-        {
-            _isLoading = false;
+            ct.ThrowIfCancellationRequested();
+
             Application.MainLoop.Invoke(() =>
             {
+                _allSolutions = solutions;
+                _isLoading = false;
+                ApplyClientFilterOnUiThread();
+            });
+        }
+        catch (OperationCanceledException) { /* screen closing or superseded load */ }
+        catch (Exception ex)
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                _isLoading = false;
                 _errorMessage = ex.Message;
                 ErrorService.ReportError("Failed to load solutions", ex, "Solutions.Load");
                 _statusLabel.Text = "Error loading solutions";
@@ -129,7 +147,10 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
         }
     }
 
-    private void ApplyClientFilter()
+    /// <summary>
+    /// Applies client-side filtering. Must be called on the UI thread.
+    /// </summary>
+    private void ApplyClientFilterOnUiThread()
     {
         var filterText = _filterField.Text?.ToString() ?? "";
 
@@ -164,17 +185,32 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
                 sol.ModifiedOn?.ToString("g") ?? "\u2014");
         }
 
-        Application.MainLoop.Invoke(() =>
-        {
-            _table.Table = dt;
-            var unmanaged = _filteredSolutions.Count(s => !s.IsManaged);
-            _statusLabel.Text = $"{_filteredSolutions.Count} solution{(_filteredSolutions.Count != 1 ? "s" : "")} \u2014 {unmanaged} unmanaged";
-        });
+        _table.Table = dt;
+        var unmanaged = _filteredSolutions.Count(s => !s.IsManaged);
+        _statusLabel.Text = $"{_filteredSolutions.Count} solution{(_filteredSolutions.Count != 1 ? "s" : "")} \u2014 {unmanaged} unmanaged";
     }
 
     private void OnFilterTextChanged(NStack.ustring _)
     {
-        ApplyClientFilter();
+        // Cancel any pending debounce timer
+        if (_filterDebounceToken != null && Application.MainLoop != null)
+        {
+            Application.MainLoop.RemoveTimeout(_filterDebounceToken);
+            _filterDebounceToken = null;
+        }
+
+        // Schedule debounced filter application
+        if (Application.MainLoop != null)
+        {
+            _filterDebounceToken = Application.MainLoop.AddTimeout(
+                TimeSpan.FromMilliseconds(FilterDebounceMs),
+                _ =>
+                {
+                    _filterDebounceToken = null;
+                    ApplyClientFilterOnUiThread();
+                    return false; // do not repeat
+                });
+        }
     }
 
     private void OnManagedToggled(bool _)
@@ -184,8 +220,10 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
     private void OnCellActivated(TableView.CellActivatedEventArgs args)
     {
-        if (args.Row < 0 || args.Row >= _filteredSolutions.Count) return;
-        var solution = _filteredSolutions[args.Row];
+        if (_isShowingDetail) return;
+        var solutions = _filteredSolutions;
+        if (args.Row < 0 || args.Row >= solutions.Count) return;
+        var solution = solutions[args.Row];
         ErrorService.FireAndForget(ShowComponentsDialogAsync(solution), "Solutions.ShowComponents");
     }
 
@@ -227,7 +265,8 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
             Application.MainLoop.Invoke(() =>
             {
-                _detailDialog?.Dispose();
+                if (_isShowingDetail) return;
+                _isShowingDetail = true;
 
                 var textView = new TextView
                 {
@@ -250,6 +289,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
                 Application.Run(_detailDialog);
                 _detailDialog.Dispose();
                 _detailDialog = null;
+                _isShowingDetail = false;
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -313,6 +353,12 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
         _filterField.TextChanged -= OnFilterTextChanged;
         _managedCheckBox.Toggled -= OnManagedToggled;
         _table.CellActivated -= OnCellActivated;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        if (_filterDebounceToken != null)
+        {
+            Application.MainLoop?.RemoveTimeout(_filterDebounceToken);
+        }
         _detailDialog?.Dispose();
     }
 }
