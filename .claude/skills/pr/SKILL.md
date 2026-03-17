@@ -1,11 +1,11 @@
 ---
 name: pr
-description: Create PR, monitor CI and code reviews, triage comments, and present summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
+description: Create PR, wait for Gemini review, triage every comment, and present summary. Use when work is ready to ship — after gates, verify, QA, and review are complete.
 ---
 
 # PR
 
-End-to-end PR lifecycle: rebase, create, monitor CI + external reviews, triage comments, and present a summary to the user.
+End-to-end PR lifecycle: rebase, create, wait for Gemini review, triage comments, and present a summary to the user.
 
 ## Prerequisites
 
@@ -51,46 +51,52 @@ EOF
 
 Keep title under 70 characters. Use conventional commit format.
 
-### 3. Monitor CI + Reviews
+### 3. Wait for Gemini Review
+
+Gemini posts review comments within 2-3 minutes of PR creation. Do NOT skip this step.
 
 **Polling strategy:**
-- Wait 30 seconds after PR creation (let GitHub register checks)
-- Poll every 30 seconds for the first 2 minutes
-- Poll every 2 minutes after that
-- **Max wait: 15 minutes total**
-- On timeout: report current status and what's still pending
+- Wait 30 seconds after PR creation (let GitHub register the PR)
+- Poll every 30 seconds
+- **Max wait: 10 minutes**
+- On timeout: report that no review was received
 
-**Check CI:**
+**How to check:**
 ```bash
-gh pr checks <pr-number>
+# Check for reviews
+gh api repos/{owner}/{repo}/pulls/{number}/reviews --jq 'length'
+
+# Check for review comments
+gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'
 ```
 
-**Check reviews:**
+Stop polling when reviews or comments appear (length > 0). CI status is NOT monitored — `/gates` already verified build/tests locally. The user checks CI on the PR page when ready to merge.
+
+### 4. Triage EVERY Review Comment
+
+This step is MANDATORY. Do not skip it. Do not defer it. Do not declare done without completing it.
+
+**Get all review comments:**
 ```bash
-gh api repos/{owner}/{repo}/pulls/{number}/reviews
+gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | {id, user: .user.login, path, line, body}'
 ```
-
-### 4. Triage Review Comments
-
-When external reviews (Gemini, etc.) are complete:
 
 **For each comment:**
 1. Evaluate against constitution and codebase patterns
 2. If valid (mechanical issue, real bug, correct suggestion) → fix it
 3. If invalid (conflicts with our patterns, misunderstands codebase) → dismiss with rationale
-4. **Reply directly to EACH review comment** (not a top-level PR comment):
-   ```bash
-   # Get review comments
-   gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | {id, path, body}'
 
-   # Reply to a specific comment (threads the reply under the original)
-   gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body="..."
-   ```
-   Reply text:
-   - Fixed: "Fixed in {commit SHA} — {brief description}"
-   - Dismissed: "Not applicable — {rationale referencing constitution/pattern}"
+**Reply directly to EACH comment** (threaded reply, not top-level):
+```bash
+# Reply to a specific review comment
+gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body="..."
+```
 
-   Do NOT use `gh pr comment` — that creates a top-level comment, not a threaded reply.
+Reply text:
+- Fixed: "Fixed in {commit SHA} — {brief description}"
+- Dismissed: "Not applicable — {rationale referencing constitution/pattern}"
+
+**Do NOT use `gh pr comment`** — that creates a top-level comment, not a threaded reply.
 
 **Push fixes as a new commit:**
 ```bash
@@ -101,15 +107,16 @@ git push
 
 ### 5. Present Summary
 
-After CI passes and comments are addressed, present to the user:
+After comments are triaged and responded to:
 
 ```
 PR ready for review: {url}
 
-CI: ✓ All checks passed
-Reviews: {N} comments from {reviewer}
+Gemini review: {N} comments
   Fixed: {count} ({brief list})
   Dismissed: {count} ({brief list})
+
+CI: running — check PR page for status.
 
 Awaiting your review.
 ```
@@ -128,14 +135,14 @@ After PR is created:
 
 ## Timeout Behavior
 
-If CI or reviews don't complete within 15 minutes:
+If Gemini doesn't post within 10 minutes:
 
 ```
 PR created: {url}
-CI: ⏳ Still running ({list pending checks})
-Reviews: ⏳ No reviews yet
+Gemini: no review received within 10 minutes.
+CI: running — check PR page for status.
 
-Check back later or run /status.
+Awaiting your review.
 ```
 
 ## Error Handling
@@ -144,5 +151,4 @@ Check back later or run /status.
 |-------|----------|
 | Rebase conflicts | Present conflicts to user, do NOT auto-resolve |
 | PR creation fails | Check `gh auth status`, suggest `gh auth login` if needed |
-| CI fails | Report which checks failed, suggest fixes |
 | Push rejected | Check if branch is behind, suggest rebase |
