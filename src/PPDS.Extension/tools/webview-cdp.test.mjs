@@ -78,9 +78,19 @@ describe('parseArgs', () => {
     expect(result).toEqual({ command: 'eval', args: ['document.title'], page: true, target: undefined, ext: undefined });
   });
 
-  it('parses --target flag', () => {
+  it('parses --target with numeric index', () => {
     const result = parseArgs(['eval', '1+1', '--target', '2']);
     expect(result).toEqual({ command: 'eval', args: ['1+1'], page: false, target: 2, ext: undefined });
+  });
+
+  it('parses --target active', () => {
+    const result = parseArgs(['eval', '1+1', '--target', 'active']);
+    expect(result).toEqual({ command: 'eval', args: ['1+1'], page: false, target: 'active', ext: undefined });
+  });
+
+  it('parses --target active with --ext', () => {
+    const result = parseArgs(['click', '#btn', '--target', 'active', '--ext', 'ppds']);
+    expect(result).toEqual({ command: 'click', args: ['#btn'], page: false, right: false, target: 'active', ext: 'ppds' });
   });
 
   it('parses --ext flag on interaction commands', () => {

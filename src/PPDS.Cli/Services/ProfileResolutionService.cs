@@ -1,4 +1,5 @@
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Tui.Infrastructure;
 
 namespace PPDS.Cli.Services;
 
@@ -24,9 +25,9 @@ public sealed class ProfileResolutionService
                         nameof(configs));
 
                 if (_labelIndex.ContainsKey(config.Label))
-                    throw new ArgumentException(
-                        $"Duplicate environment label '{config.Label}'. Each environment must have a unique label.",
-                        nameof(configs));
+                {
+                    TuiDebugLog.Log($"Warning: Duplicate environment label '{config.Label}' — using last occurrence");
+                }
 
                 _labelIndex[config.Label] = config;
             }

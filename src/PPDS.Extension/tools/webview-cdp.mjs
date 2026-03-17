@@ -89,7 +89,10 @@ export function parseArgs(argv) {
   let target, ext, right = false, page = false;
   const args = [];
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--target' && i + 1 < rest.length) { target = parseInt(rest[++i], 10); }
+    if (rest[i] === '--target' && i + 1 < rest.length) {
+      const val = rest[++i];
+      target = val === 'active' ? 'active' : parseInt(val, 10);
+    }
     else if (rest[i] === '--ext' && i + 1 < rest.length) { ext = rest[++i]; }
     else if (rest[i] === '--right') { right = true; }
     else if (rest[i] === '--page') { page = true; }
@@ -239,7 +242,40 @@ async function runDaemon(workspace) {
 
     if (candidates.length === 0) throw new Error('No webview found. Open a panel first.');
 
-    const idx = targetIndex ?? 0;
+    // --target active: find the visible/focused webview
+    if (targetIndex === 'active') {
+      const visibleFrames = [];
+      for (const frame of candidates) {
+        try {
+          const isVisible = await frame.evaluate(() => document.visibilityState === 'visible');
+          if (isVisible) visibleFrames.push(frame);
+        } catch { /* skip detached frames */ }
+      }
+      if (visibleFrames.length === 0) throw new Error('No visible webview found. Focus a webview panel first.');
+      if (visibleFrames.length > 1) throw new Error(`Multiple visible webviews found (${visibleFrames.length}). Use --target <index> to disambiguate.`);
+      return visibleFrames[0];
+    }
+
+    // When no explicit --target is specified and multiple candidates exist,
+    // prefer visible frames (sort visible first, then DOM order)
+    if (targetIndex == null && candidates.length > 1) {
+      const visibility = [];
+      for (const frame of candidates) {
+        try {
+          const isVisible = await frame.evaluate(() => document.visibilityState === 'visible');
+          visibility.push(isVisible);
+        } catch {
+          visibility.push(false);
+        }
+      }
+      // If exactly one is visible, use it; otherwise keep DOM order
+      const visibleIndices = visibility.reduce((acc, v, i) => v ? [...acc, i] : acc, []);
+      if (visibleIndices.length === 1) {
+        return candidates[visibleIndices[0]];
+      }
+    }
+
+    const idx = typeof targetIndex === 'number' ? targetIndex : 0;
     if (idx < 0 || idx >= candidates.length)
       throw new Error(`Target index ${idx} out of range (found ${candidates.length} webviews)`);
 
@@ -376,7 +412,37 @@ async function runDaemon(workspace) {
           // Extension ID is in the parent (wrapper) frame's URL
           const parentUrl = frame.parentFrame()?.url() || '';
           const extMatch = parentUrl.match(/extensionId=([^&]*)/);
-          targets.push({ ext: extMatch?.[1] || 'unknown', src: url });
+          // Check visibility
+          let visible = false;
+          try {
+            visible = await frame.evaluate(() => document.visibilityState === 'visible');
+          } catch { /* skip */ }
+          // Extract panel title from VS Code tab bar via main page
+          let title = null;
+          try {
+            // webview ID is in the URL: vscode-webview://<id>/...
+            const webviewId = new URL(url).hostname;
+            title = await page.evaluate((wvId) => {
+              // VS Code tab elements have data-resource-name or aria-label with panel title
+              const tabs = document.querySelectorAll('.tab');
+              for (const tab of tabs) {
+                const label = tab.getAttribute('aria-label') || '';
+                const resourceUri = tab.querySelector('.label-name')?.getAttribute('data-resource-name') || '';
+                // Check if this tab's resource references the webview ID
+                if (label.includes(wvId) || resourceUri.includes(wvId)) {
+                  return tab.querySelector('.label-name')?.textContent?.trim() || label;
+                }
+              }
+              // Fallback: try matching via active tab's webview container
+              return null;
+            }, webviewId);
+          } catch { /* title extraction is best-effort */ }
+          targets.push({
+            ext: extMatch?.[1] || 'unknown',
+            src: url,
+            title: title || '(unknown)',
+            visible,
+          });
         }
         return { targets };
       }
@@ -669,7 +735,8 @@ async function cmdConnect() {
   }
   console.log(`Found ${result.targets.length} webview target(s):`);
   result.targets.forEach((t, i) => {
-    console.log(`  ${i}: ${t.ext} — ${t.src.substring(0, 80)}`);
+    const activeMarker = t.visible ? ' *' : '';
+    console.log(`  ${i}: ${t.ext} — ${t.title}${activeMarker}`);
   });
 }
 

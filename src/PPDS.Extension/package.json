@@ -200,6 +200,12 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "ppds.environmentDetails",
+        "title": "Environment Details",
+        "category": "PPDS",
+        "icon": "$(info)"
+      },
+      {
         "command": "ppds.testConnection",
         "title": "Test Connection",
         "icon": "$(plug)"
@@ -369,6 +375,11 @@
           "command": "ppds.openInDynamics",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-open@2"
+        },
+        {
+          "command": "ppds.environmentDetails",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-open@3"
         },
         {
           "command": "ppds.configureEnvironment",

@@ -70,7 +70,7 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
         _configService = session?.EnvironmentConfigService;
 
         Width = 72;
-        Height = 28;
+        Height = 30;
 
         // Filter field
         var filterLabel = new Label("Filter:")
@@ -192,36 +192,51 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
             Visible = false
         };
 
-        // Buttons
+        // Buttons - Row 1 (primary actions)
         _selectButton = new Button("_Select")
         {
             X = Pos.Center() - 25,
-            Y = Pos.AnchorEnd(1)
+            Y = Pos.AnchorEnd(2)
         };
         _selectButton.Clicked += OnSelectClicked;
 
         var detailsButton = new Button("De_tails")
         {
             X = Pos.Center() - 10,
-            Y = Pos.AnchorEnd(1)
+            Y = Pos.AnchorEnd(2)
         };
         detailsButton.Clicked += OnDetailsClicked;
 
         var configButton = new Button("Con_figure")
         {
             X = Pos.Center() + 5,
-            Y = Pos.AnchorEnd(1)
+            Y = Pos.AnchorEnd(2)
         };
         configButton.Clicked += OnConfigureClicked;
 
         var cancelButton = new Button("_Cancel")
         {
             X = Pos.Center() + 18,
-            Y = Pos.AnchorEnd(1)
+            Y = Pos.AnchorEnd(2)
         };
         cancelButton.Clicked += () => { Application.RequestStop(); };
 
-        Add(filterLabel, _filterField, listFrame, previewFrame, urlLabel, _urlField, _spinner, _statusLabel, _selectButton, detailsButton, configButton, cancelButton);
+        // Buttons - Row 2 (browser actions)
+        var makerButton = new Button("Open in _Maker")
+        {
+            X = Pos.Center() - 20,
+            Y = Pos.AnchorEnd(1)
+        };
+        makerButton.Clicked += OnOpenInMakerClicked;
+
+        var dynamicsButton = new Button("Open in D_ynamics")
+        {
+            X = Pos.Center() + 2,
+            Y = Pos.AnchorEnd(1)
+        };
+        dynamicsButton.Clicked += OnOpenInDynamicsClicked;
+
+        Add(filterLabel, _filterField, listFrame, previewFrame, urlLabel, _urlField, _spinner, _statusLabel, _selectButton, detailsButton, configButton, cancelButton, makerButton, dynamicsButton);
 
         // Defer loading until dialog is visible to ensure spinner renders
         Loaded += () =>
@@ -453,6 +468,61 @@ internal sealed class EnvironmentSelectorDialog : TuiDialog, ITuiStateCapture<En
             {
                 UpdatePreviewPanel(_filteredEnvironments[_listView.SelectedItem]);
             }
+        }
+    }
+
+    private void OnOpenInMakerClicked()
+    {
+        var env = GetSelectedEnvironment();
+        if (env == null) return;
+
+        string url;
+        if (!string.IsNullOrWhiteSpace(env.EnvironmentId))
+        {
+            url = $"https://make.powerapps.com/environments/{env.EnvironmentId}/solutions";
+        }
+        else
+        {
+            MessageBox.Query("Environment ID Unavailable",
+                "The environment ID is not available for this environment.\nOpening Maker Portal home instead.", "OK");
+            url = "https://make.powerapps.com";
+        }
+
+        OpenUrl(url);
+    }
+
+    private void OnOpenInDynamicsClicked()
+    {
+        var env = GetSelectedEnvironment();
+        if (env == null) return;
+
+        var url = env.Url.TrimEnd('/');
+        OpenUrl(url);
+    }
+
+    private EnvironmentSummary? GetSelectedEnvironment()
+    {
+        if (_listView.SelectedItem >= 0 && _listView.SelectedItem < _filteredEnvironments.Count)
+        {
+            return _filteredEnvironments[_listView.SelectedItem];
+        }
+
+        MessageBox.Query("No Environment", "Please select an environment first.", "OK");
+        return null;
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            MessageBox.ErrorQuery("Error", $"Failed to open browser: {ex.Message}", "OK");
         }
     }
 

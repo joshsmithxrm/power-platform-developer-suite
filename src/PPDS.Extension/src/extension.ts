@@ -7,6 +7,7 @@ import { ToolsTreeDataProvider } from './views/toolsTreeView.js';
 import { registerProfileCommands } from './commands/profileCommands.js';
 import { registerEnvironmentConfigCommand } from './commands/environmentConfigCommand.js';
 import { registerBrowserCommands } from './commands/browserCommands.js';
+import { registerEnvironmentDetailsCommand } from './commands/environmentDetailsCommand.js';
 import { ExplainDocumentProvider } from './providers/explainDocumentProvider.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
@@ -356,6 +357,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // ── Browser Commands ──────────────────────────────────────────────
     registerBrowserCommands(context, client);
+
+    // ── Environment Details Command ─────────────────────────────────
+    registerEnvironmentDetailsCommand(context, client);
 
     // ── Debug / Diagnostic Commands ──────────────────────────────────
     registerDebugCommands(context, client, profileTreeProvider, extensionState, {

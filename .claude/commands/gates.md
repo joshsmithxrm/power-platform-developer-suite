@@ -105,6 +105,17 @@ npm test --prefix src/PPDS.Extension
 Pass: 0 failures
 Fail: report failing test names and messages
 
+**Gate 5.5: TUI Snapshot Tests** (if TUI files changed: `src/PPDS.Cli/Tui/`)
+
+```bash
+npm run tui:test
+```
+
+Pass: all snapshots match
+Fail: snapshot mismatch — report which snapshots differ
+
+**Snapshot baselines:** Snapshots in `tests/PPDS.Tui.E2eTests/tests/__snapshots__/` are committed baselines for visual regression testing. If your TUI changes produce new or updated snapshots, commit them with the code that changed them. New screens generate new snapshot files; layout changes update existing ones. Use `npm run tui:test -- --update-snapshots` to regenerate after intentional visual changes.
+
 **Gate 6: AC Verification** (if specs with ACs are relevant)
 
 Read `specs/README.md` to map changed files to specs. For each relevant spec with ACs:
@@ -141,7 +152,7 @@ Gates are necessary but NOT sufficient. After gates pass:
 - **If changed files include webview TS/CSS/HTML** (`src/PPDS.Extension/src/panels/`): You MUST also run `/verify extension` and/or `/qa extension` for visual verification. Gates prove code compiles and tests pass — they do NOT prove it renders correctly or works as the user would experience.
 - **If changed files include CLI commands** (`src/PPDS.Cli/Commands/`, not `Serve/`): Run the command and verify the output.
 - **If changed files include MCP tools** (`src/PPDS.Mcp/`): Call the tool and verify the response.
-- **If changed files include TUI** (`src/PPDS.Cli/Tui/`): Run `npm run tui:test` for snapshot verification.
+- **If changed files include TUI** (`src/PPDS.Cli/Tui/`): Run `/verify tui` for interactive verification (Gate 5.5 covers snapshot regression, but interactive testing catches what snapshots can't).
 
 **Do not commit UI/CLI/MCP changes with only gates passing.** That is how bugs ship undetected.
 

@@ -78,14 +78,20 @@ public class ProfileResolutionServiceTests
     }
 
     [Fact]
-    public void Constructor_DuplicateLabels_ThrowsArgumentException()
+    public void Constructor_DuplicateLabels_UsesLastWriteWins()
     {
         var configs = new[]
         {
             new EnvironmentConfig { Label = "UAT", Url = "https://uat.crm.dynamics.com/" },
             new EnvironmentConfig { Label = "uat", Url = "https://uat2.crm.dynamics.com/" }
         };
-        var act = () => new ProfileResolutionService(configs);
-        act.Should().Throw<ArgumentException>().WithMessage("*Duplicate*uat*");
+
+        // Should not throw — last-write-wins prevents TUI crash on orphaned configs
+        var service = new ProfileResolutionService(configs);
+
+        // The second config (uat2) should win
+        var resolved = service.ResolveByLabel("UAT");
+        resolved.Should().NotBeNull();
+        resolved!.Url.Should().Be("https://uat2.crm.dynamics.com/");
     }
 }

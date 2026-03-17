@@ -11,10 +11,17 @@ import sys
 
 def main():
     # Read stdin (Claude Code sends JSON with tool info)
+    # Parse command to check if this is actually a gh pr create command
+    command = ""
     try:
-        json.load(sys.stdin)
-    except (json.JSONDecodeError, EOFError):
+        hook_input = json.load(sys.stdin)
+        command = hook_input.get("tool_input", {}).get("command", "")
+    except (json.JSONDecodeError, EOFError, AttributeError):
         pass
+
+    # Only enforce on gh pr create — skip all other Bash commands
+    if "gh pr create" not in command:
+        sys.exit(0)
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
