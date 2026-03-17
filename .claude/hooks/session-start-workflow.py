@@ -42,11 +42,11 @@ def main():
     if not os.path.exists(state_path):
         # No state file — inject workflow reminder
         print(
-            f"WORKFLOW REMINDER for branch {branch}:\n"
+            f"WORKFLOW ENFORCEMENT ACTIVE on branch {branch}:\n"
             "  No workflow state tracked yet.\n"
             "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
             "  For bug fixes: /gates → /verify (if UI changed) → /pr\n"
-            "  PR creation is blocked by hooks until gates, verify, QA, and review are complete.",
+            + _behavioral_rules(),
             file=sys.stderr,
         )
         sys.exit(0)
@@ -78,7 +78,7 @@ def main():
         pass
 
     # Build status lines
-    lines = [f"WORKFLOW STATE for branch {branch}:"]
+    lines = [f"WORKFLOW ENFORCEMENT ACTIVE on branch {branch}:"]
 
     # Gates
     gates = state.get("gates", {})
@@ -142,8 +142,23 @@ def main():
     if missing:
         lines.append(f"  Required before PR: {', '.join(missing)}")
 
+    lines.append(_behavioral_rules())
+
     print("\n".join(lines), file=sys.stderr)
     sys.exit(0)
+
+
+def _behavioral_rules():
+    """Key behavioral rules injected into every session."""
+    return (
+        "\n"
+        "  RULES (enforced by hooks — read CLAUDE.md for full details):\n"
+        "  • Commit after EACH issue fixed or plan task completed. One commit per fix.\n"
+        "  • You MUST visually verify affected surfaces before declaring done.\n"
+        "    A passing test suite is NOT verification. Use the product yourself.\n"
+        "  • Do NOT declare work complete without running /gates → /verify → /qa → /review.\n"
+        "  • PR creation WILL BE BLOCKED if these steps are incomplete."
+    )
 
 
 if __name__ == "__main__":
