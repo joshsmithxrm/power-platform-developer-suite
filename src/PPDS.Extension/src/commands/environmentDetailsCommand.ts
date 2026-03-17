@@ -18,40 +18,65 @@ export function registerEnvironmentDetailsCommand(
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.environmentDetails', async (item?: EnvironmentTreeItem) => {
             try {
-                // Guard: ensure an environment is available
-                if (!item?.envUrl) {
+                // Determine the target environment URL
+                let targetUrl: string;
+                if (item?.envUrl) {
+                    targetUrl = item.envUrl;
+                } else {
                     const who = await daemonClient.authWho();
                     if (!who.environment?.url) {
                         vscode.window.showInformationMessage('No environment selected.');
                         return;
                     }
+                    targetUrl = who.environment.url;
                 }
 
-                const details = await daemonClient.envWho();
+                // envWho() queries the live Dataverse connection, which is
+                // always the active environment. Verify the target matches.
+                const activeEnv = await daemonClient.envWho();
+                const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
 
-                const lines = [
-                    `Environment: ${details.organizationName} (${details.url})`,
-                    `Unique Name: ${details.uniqueName}`,
-                    `Version: ${details.version}`,
-                    `Organization ID: ${details.organizationId}`,
-                    `User ID: ${details.userId}`,
-                    `Business Unit ID: ${details.businessUnitId}`,
-                    `Connected As: ${details.connectedAs}`,
-                ];
-
-                if (details.environmentType) {
-                    lines.push(`Type: ${details.environmentType}`);
-                }
-
-                await vscode.window.showInformationMessage(
-                    lines.join('\n'),
-                    { modal: true },
-                    'Copy to Clipboard',
-                ).then(selection => {
+                if (normalise(activeEnv.url) !== normalise(targetUrl)) {
+                    // Non-active environment — show what we know from the tree item
+                    const lines = [
+                        `Environment: ${item?.envDisplayName ?? targetUrl}`,
+                        `URL: ${targetUrl}`,
+                        '',
+                        'Full details (version, org ID, user) are only available for the active environment.',
+                    ];
+                    const selection = await vscode.window.showInformationMessage(
+                        lines.join('\n'),
+                        { modal: true },
+                        'Copy to Clipboard',
+                    );
                     if (selection === 'Copy to Clipboard') {
                         void vscode.env.clipboard.writeText(lines.join('\n'));
                     }
-                });
+                    return;
+                }
+
+                const lines = [
+                    `Environment: ${activeEnv.organizationName} (${activeEnv.url})`,
+                    `Unique Name: ${activeEnv.uniqueName}`,
+                    `Version: ${activeEnv.version}`,
+                    `Organization ID: ${activeEnv.organizationId}`,
+                    `User ID: ${activeEnv.userId}`,
+                    `Business Unit ID: ${activeEnv.businessUnitId}`,
+                    `Connected As: ${activeEnv.connectedAs}`,
+                ];
+
+                if (activeEnv.environmentType) {
+                    lines.push(`Type: ${activeEnv.environmentType}`);
+                }
+
+                const selection = await vscode.window.showInformationMessage(
+                    lines.join('\n'),
+                    { modal: true },
+                    'Copy to Clipboard',
+                );
+                if (selection === 'Copy to Clipboard') {
+                    void vscode.env.clipboard.writeText(lines.join('\n'));
+                }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to get environment details: ${message}`);
