@@ -40,6 +40,7 @@ export class ToolsTreeDataProvider
         { label: 'Import Jobs', commandId: 'ppds.openImportJobs', icon: 'history' },
         { label: 'Plugin Traces', commandId: 'ppds.openPluginTraces', icon: 'debug-stackframe' },
         { label: 'Metadata Browser', commandId: 'ppds.openMetadataBrowser', icon: 'symbol-class' },
+        { label: 'Web Resources', commandId: 'ppds.openWebResources', icon: 'file-code' },
         { label: 'Show Logs', commandId: 'ppds.showLogs', icon: 'output', alwaysEnabled: true },
     ];
 

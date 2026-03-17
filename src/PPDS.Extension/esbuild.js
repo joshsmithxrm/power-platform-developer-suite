@@ -90,6 +90,18 @@ const builds = [
         outfile: 'dist/plugin-traces-panel.js',
         logLevel: 'warning',
     },
+    // Web Resources panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/web-resources-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/web-resources-panel.js',
+        logLevel: 'warning',
+    },
     // Metadata Browser panel webview (browser, IIFE)
     {
         entryPoints: ['src/panels/webview/metadata-browser-panel.ts'],
@@ -179,6 +191,14 @@ const builds = [
         bundle: true,
         minify: production,
         outfile: 'dist/environment-variables-panel.css',
+        logLevel: 'warning',
+    },
+    // Web Resources panel CSS
+    {
+        entryPoints: ['src/panels/styles/web-resources-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/web-resources-panel.css',
         logLevel: 'warning',
     },
 ];
