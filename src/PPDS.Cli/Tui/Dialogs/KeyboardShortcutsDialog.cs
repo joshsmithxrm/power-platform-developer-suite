@@ -39,12 +39,15 @@ internal sealed class KeyboardShortcutsDialog : TuiDialog, ITuiStateCapture<Keyb
         Width = 55;
         Height = Math.Min(lineCount + 6, 30); // +6 for border, padding, button
 
-        var content = new Label(text)
+        var content = new TextView
         {
             X = 1,
             Y = 1,
             Width = Dim.Fill() - 2,
-            Height = Dim.Fill() - 2
+            Height = Dim.Fill() - 2,
+            ReadOnly = true,
+            Text = text,
+            ColorScheme = TuiColorPalette.Default
         };
 
         var closeButton = new Button("_OK")
