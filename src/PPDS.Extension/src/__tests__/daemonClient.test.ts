@@ -756,42 +756,58 @@ describe('DaemonClient', () => {
         });
     });
 
-    describe('schemaEntities', () => {
-        it('should call schema/entities and return result', async () => {
+    describe('metadataEntities', () => {
+        it('should call metadata/entities and return result', async () => {
             const mockResult = {
                 entities: [
-                    { logicalName: 'account', displayName: 'Account', isCustom: false },
-                    { logicalName: 'contact', displayName: 'Contact', isCustom: false },
+                    { logicalName: 'account', schemaName: 'Account', displayName: 'Account', isCustomEntity: false, isManaged: false, ownershipType: 'UserOwned', objectTypeCode: 1, description: null },
+                    { logicalName: 'contact', schemaName: 'Contact', displayName: 'Contact', isCustomEntity: false, isManaged: false, ownershipType: 'UserOwned', objectTypeCode: 2, description: null },
                 ],
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
-            const result = await client.schemaEntities();
+            const result = await client.metadataEntities();
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('schema/entities');
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('metadata/entities', {});
             expect(result.entities).toHaveLength(2);
             expect(result.entities[0].logicalName).toBe('account');
         });
     });
 
-    describe('schemaAttributes', () => {
-        it('should call schema/attributes with entity name', async () => {
+    describe('metadataEntity', () => {
+        it('should call metadata/entity with logicalName', async () => {
             const mockResult = {
-                entityName: 'account',
-                attributes: [
-                    { logicalName: 'name', displayName: 'Account Name', dataType: 'String', isCustom: false },
-                    { logicalName: 'accountid', displayName: 'Account', dataType: 'Uniqueidentifier', isCustom: false },
-                ],
+                entity: {
+                    logicalName: 'account',
+                    schemaName: 'Account',
+                    displayName: 'Account',
+                    isCustomEntity: false,
+                    isManaged: false,
+                    ownershipType: 'UserOwned',
+                    objectTypeCode: 1,
+                    description: null,
+                    primaryIdAttribute: 'accountid',
+                    primaryNameAttribute: 'name',
+                    entitySetName: 'accounts',
+                    isActivity: false,
+                    attributes: [],
+                    oneToManyRelationships: [],
+                    manyToOneRelationships: [],
+                    manyToManyRelationships: [],
+                    keys: [],
+                    privileges: [],
+                    globalOptionSets: [],
+                },
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
-            const result = await client.schemaAttributes('account');
+            const result = await client.metadataEntity('account', true);
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('schema/attributes', {
-                entity: 'account',
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('metadata/entity', {
+                logicalName: 'account',
+                includeGlobalOptionSets: true,
             });
-            expect(result.entityName).toBe('account');
-            expect(result.attributes).toHaveLength(2);
+            expect(result.entity.logicalName).toBe('account');
         });
     });
 
