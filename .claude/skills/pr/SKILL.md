@@ -78,9 +78,19 @@ When external reviews (Gemini, etc.) are complete:
 1. Evaluate against constitution and codebase patterns
 2. If valid (mechanical issue, real bug, correct suggestion) → fix it
 3. If invalid (conflicts with our patterns, misunderstands codebase) → dismiss with rationale
-4. **Reply to EACH comment individually on the PR** with the action taken:
+4. **Reply directly to EACH review comment** (not a top-level PR comment):
+   ```bash
+   # Get review comments
+   gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | {id, path, body}'
+
+   # Reply to a specific comment (threads the reply under the original)
+   gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body="..."
+   ```
+   Reply text:
    - Fixed: "Fixed in {commit SHA} — {brief description}"
    - Dismissed: "Not applicable — {rationale referencing constitution/pattern}"
+
+   Do NOT use `gh pr comment` — that creates a top-level comment, not a threaded reply.
 
 **Push fixes as a new commit:**
 ```bash
