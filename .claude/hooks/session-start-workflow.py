@@ -166,22 +166,23 @@ def _show_main_guidance(project_dir):
             worktrees = []
             current_path = None
             current_branch = None
+
+            def _collect(path, branch):
+                if path and branch and branch not in ("main", "master"):
+                    rel = os.path.relpath(path, project_dir)
+                    worktrees.append(f"  {rel}  [{branch}]")
+
             for line in result.stdout.strip().split("\n"):
                 if line.startswith("worktree "):
                     current_path = line[len("worktree "):]
                 elif line.startswith("branch refs/heads/"):
                     current_branch = line[len("branch refs/heads/"):]
                 elif line == "":
-                    if current_path and current_branch and current_branch not in ("main", "master"):
-                        # Show relative path from project dir
-                        rel = os.path.relpath(current_path, project_dir)
-                        worktrees.append(f"  {rel}  [{current_branch}]")
+                    _collect(current_path, current_branch)
                     current_path = None
                     current_branch = None
             # Handle last entry (no trailing blank line)
-            if current_path and current_branch and current_branch not in ("main", "master"):
-                rel = os.path.relpath(current_path, project_dir)
-                worktrees.append(f"  {rel}  [{current_branch}]")
+            _collect(current_path, current_branch)
 
             if worktrees:
                 lines.append("")

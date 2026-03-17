@@ -5,7 +5,7 @@ description: Bootstrap a feature worktree with workflow state. Use when starting
 
 # Start
 
-Bootstrap a feature worktree with branch, workflow state, and a Windows Terminal split pane.
+Bootstrap a feature worktree with branch, workflow state, and a Windows Terminal tab.
 
 ## When to Use
 
