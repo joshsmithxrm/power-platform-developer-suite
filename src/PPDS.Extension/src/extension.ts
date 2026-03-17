@@ -20,6 +20,7 @@ import { QueryPanel } from './panels/QueryPanel.js';
 import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { ImportJobsPanel } from './panels/ImportJobsPanel.js';
 import { PluginTracesPanel } from './panels/PluginTracesPanel.js';
+import { MetadataBrowserPanel } from './panels/MetadataBrowserPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
@@ -70,6 +71,9 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openPluginTraces', () => {
             PluginTracesPanel.show(context.extensionUri, client);
+        }),
+        vscode.commands.registerCommand('ppds.openMetadataBrowser', () => {
+            MetadataBrowserPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -377,6 +381,7 @@ export function activate(context: vscode.ExtensionContext): void {
         solutionsPanels: () => SolutionsPanel.instanceCount,
         importJobsPanels: () => ImportJobsPanel.instanceCount,
         pluginTracesPanels: () => PluginTracesPanel.instanceCount,
+        metadataBrowserPanels: () => MetadataBrowserPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks

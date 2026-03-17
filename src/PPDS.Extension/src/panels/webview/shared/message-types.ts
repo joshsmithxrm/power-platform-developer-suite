@@ -5,7 +5,7 @@
  */
 
 // Import daemon response types that appear in message payloads
-import type { QueryResultResponse, CompletionItemDto } from '../../../types.js';
+import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto } from '../../../types.js';
 
 // ── Query Panel ─────────────────────────────────────────────────────────────
 
@@ -209,6 +209,39 @@ export type PluginTracesPanelHostToWebview =
     | { command: 'timelineLoaded'; nodes: TimelineNodeViewDto[] }
     | { command: 'traceLevelLoaded'; level: string; levelValue: number }
     | { command: 'deleteComplete'; deletedCount: number }
+    | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
+
+// ── Metadata Browser Panel ─────────────────────────────────────────────
+
+/** Entity summary as sent to the webview for the entity list. */
+export interface MetadataEntityViewDto {
+    logicalName: string;
+    schemaName: string;
+    displayName: string;
+    isCustomEntity: boolean;
+    isManaged: boolean;
+    ownershipType: string | null;
+    description: string | null;
+}
+
+/** Messages the Metadata Browser Panel webview sends to the extension host. */
+export type MetadataBrowserPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'selectEntity'; logicalName: string }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'openInMaker'; entityLogicalName?: string }
+    | { command: 'copyToClipboard'; text: string }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Metadata Browser Panel webview. */
+export type MetadataBrowserPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'entitiesLoaded'; entities: MetadataEntityViewDto[] }
+    | { command: 'entityDetailLoaded'; entity: MetadataEntityDetailDto }
+    | { command: 'entityDetailLoading'; logicalName: string }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };

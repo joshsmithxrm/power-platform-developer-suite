@@ -268,28 +268,124 @@ export interface EnvWhoResponse {
     environmentType: string | null;
 }
 
-// ── Schema ──────────────────────────────────────────────────────────────────
+// ── Metadata ─────────────────────────────────────────────────────────────────
 
-export interface SchemaEntitiesResponse {
-    entities: EntitySummaryDto[];
+export interface MetadataEntitiesResponse {
+    entities: MetadataEntitySummaryDto[];
 }
 
-export interface EntitySummaryDto {
+export interface MetadataEntitySummaryDto {
+    logicalName: string;
+    schemaName: string;
+    displayName: string;
+    isCustomEntity: boolean;
+    isManaged: boolean;
+    ownershipType: string | null;
+    objectTypeCode: number;
+    description: string | null;
+}
+
+export interface MetadataEntityResponse {
+    entity: MetadataEntityDetailDto;
+}
+
+export interface MetadataEntityDetailDto extends MetadataEntitySummaryDto {
+    primaryIdAttribute: string | null;
+    primaryNameAttribute: string | null;
+    entitySetName: string | null;
+    isActivity: boolean;
+    attributes: MetadataAttributeDto[];
+    oneToManyRelationships: MetadataRelationshipDto[];
+    manyToOneRelationships: MetadataRelationshipDto[];
+    manyToManyRelationships: MetadataManyToManyDto[];
+    keys: MetadataKeyDto[];
+    privileges: MetadataPrivilegeDto[];
+    globalOptionSets: MetadataOptionSetDto[];
+}
+
+export interface MetadataAttributeDto {
     logicalName: string;
     displayName: string | null;
-    isCustom: boolean;
+    schemaName: string | null;
+    attributeType: string;
+    attributeTypeName: string | null;
+    isPrimaryId: boolean;
+    isPrimaryName: boolean;
+    isCustomAttribute: boolean;
+    requiredLevel: string | null;
+    maxLength: number | null;
+    minValue: number | null;
+    maxValue: number | null;
+    precision: number | null;
+    targets: string[] | null;
+    optionSetName: string | null;
+    isGlobalOptionSet: boolean;
+    options: MetadataOptionValueDto[] | null;
+    format: string | null;
+    dateTimeBehavior: string | null;
+    sourceType: number | null;
+    isSecured: boolean;
+    description: string | null;
+    autoNumberFormat: string | null;
 }
 
-export interface SchemaAttributesResponse {
-    entityName: string;
-    attributes: AttributeSummaryDto[];
+export interface MetadataRelationshipDto {
+    schemaName: string;
+    relationshipType: string;
+    referencedEntity: string | null;
+    referencedAttribute: string | null;
+    referencingEntity: string | null;
+    referencingAttribute: string | null;
+    cascadeAssign: string | null;
+    cascadeDelete: string | null;
+    cascadeMerge: string | null;
+    cascadeReparent: string | null;
+    cascadeShare: string | null;
+    cascadeUnshare: string | null;
+    isHierarchical: boolean;
 }
 
-export interface AttributeSummaryDto {
+export interface MetadataManyToManyDto {
+    schemaName: string;
+    entity1LogicalName: string | null;
+    entity1IntersectAttribute: string | null;
+    entity2LogicalName: string | null;
+    entity2IntersectAttribute: string | null;
+    intersectEntityName: string | null;
+}
+
+export interface MetadataKeyDto {
+    schemaName: string;
     logicalName: string;
     displayName: string | null;
-    dataType: string;
-    isCustom: boolean;
+    keyAttributes: string[];
+    entityKeyIndexStatus: string | null;
+    isManaged: boolean;
+}
+
+export interface MetadataPrivilegeDto {
+    privilegeId: string;
+    name: string;
+    privilegeType: string;
+    canBeLocal: boolean;
+    canBeDeep: boolean;
+    canBeGlobal: boolean;
+    canBeBasic: boolean;
+}
+
+export interface MetadataOptionSetDto {
+    name: string;
+    displayName: string | null;
+    optionSetType: string;
+    isGlobal: boolean;
+    options: MetadataOptionValueDto[];
+}
+
+export interface MetadataOptionValueDto {
+    value: number;
+    label: string;
+    color: string | null;
+    description: string | null;
 }
 
 // ── Import Jobs ──────────────────────────────────────────────────────────────
