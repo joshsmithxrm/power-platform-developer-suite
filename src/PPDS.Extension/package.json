@@ -237,6 +237,17 @@
         "icon": "$(history)"
       },
       {
+        "command": "ppds.openPluginTraces",
+        "title": "Plugin Traces",
+        "category": "PPDS",
+        "icon": "$(debug-stackframe)"
+      },
+      {
+        "command": "ppds.openPluginTracesForEnv",
+        "title": "Open Plugin Traces",
+        "icon": "$(debug-stackframe)"
+      },
+      {
         "command": "ppds.copyEnvironmentUrl",
         "title": "Copy URL",
         "icon": "$(copy)"
@@ -365,6 +376,11 @@
           "command": "ppds.openImportJobsForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@3"
+        },
+        {
+          "command": "ppds.openPluginTracesForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@4"
         },
         {
           "command": "ppds.openInMaker",

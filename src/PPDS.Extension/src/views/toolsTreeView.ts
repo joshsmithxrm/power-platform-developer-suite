@@ -38,6 +38,7 @@ export class ToolsTreeDataProvider
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
         { label: 'Import Jobs', commandId: 'ppds.openImportJobs', icon: 'history' },
+        { label: 'Plugin Traces', commandId: 'ppds.openPluginTraces', icon: 'debug-stackframe' },
         { label: 'Show Logs', commandId: 'ppds.showLogs', icon: 'output', alwaysEnabled: true },
     ];
 

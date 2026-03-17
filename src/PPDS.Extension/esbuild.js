@@ -78,6 +78,18 @@ const builds = [
         outfile: 'dist/import-jobs-panel.js',
         logLevel: 'warning',
     },
+    // Plugin Traces panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/plugin-traces-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/plugin-traces-panel.js',
+        logLevel: 'warning',
+    },
     // ── Panel CSS bundles ────────────────────────────────────────────────────
     {
         entryPoints: ['src/panels/styles/query-panel.css'],
@@ -99,6 +111,14 @@ const builds = [
         bundle: true,
         minify: production,
         outfile: 'dist/import-jobs-panel.css',
+        logLevel: 'warning',
+    },
+    // Plugin Traces panel CSS
+    {
+        entryPoints: ['src/panels/styles/plugin-traces-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/plugin-traces-panel.css',
         logLevel: 'warning',
     },
 ];
