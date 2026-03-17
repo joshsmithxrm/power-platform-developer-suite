@@ -22,6 +22,24 @@ def main():
     # Get project directory from environment or use current directory
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
+    # Block commits on main
+    try:
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if branch_result.returncode == 0 and branch_result.stdout.strip() in ("main", "master"):
+            print(
+                "❌ Cannot commit to main. Use /start <name> to create a feature worktree.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass  # If git isn't available, don't block
+
     try:
         print("🔨 Running pre-commit validation...", file=sys.stderr)
         

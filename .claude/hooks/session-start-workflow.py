@@ -33,8 +33,9 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Skip on main
+    # On main: show active worktrees and /start guidance
     if branch in ("main", "master"):
+        _show_main_guidance(project_dir)
         sys.exit(0)
 
     state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
@@ -146,6 +147,54 @@ def main():
 
     print("\n".join(lines), file=sys.stderr)
     sys.exit(0)
+
+
+def _show_main_guidance(project_dir):
+    """Show active worktrees and /start guidance when on main."""
+    lines = ["You are on main."]
+
+    # List active worktrees (exclude the main worktree itself)
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            worktrees = []
+            current_path = None
+            current_branch = None
+            for line in result.stdout.strip().split("\n"):
+                if line.startswith("worktree "):
+                    current_path = line[len("worktree "):]
+                elif line.startswith("branch refs/heads/"):
+                    current_branch = line[len("branch refs/heads/"):]
+                elif line == "":
+                    if current_path and current_branch and current_branch not in ("main", "master"):
+                        # Show relative path from project dir
+                        rel = os.path.relpath(current_path, project_dir)
+                        worktrees.append(f"  {rel}  [{current_branch}]")
+                    current_path = None
+                    current_branch = None
+            # Handle last entry (no trailing blank line)
+            if current_path and current_branch and current_branch not in ("main", "master"):
+                rel = os.path.relpath(current_path, project_dir)
+                worktrees.append(f"  {rel}  [{current_branch}]")
+
+            if worktrees:
+                lines.append("")
+                lines.append("Active worktrees:")
+                lines.extend(worktrees)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    lines.append("")
+    lines.append("To start new work: /start <feature-name>")
+    lines.append("Planning and exploration are fine on main. Implementation requires a worktree.")
+
+    print("\n".join(lines), file=sys.stderr)
 
 
 def _behavioral_rules():

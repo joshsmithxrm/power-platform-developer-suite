@@ -1,6 +1,6 @@
 ---
 name: write-skill
-description: Author new skills following PPDS conventions — naming, structure, frontmatter, discoverability, workflow state integration. Use when creating or restructuring skills.
+description: Author or modify skills following PPDS conventions — naming, structure, frontmatter, discoverability, workflow state integration. Use when creating, editing, or restructuring skills.
 ---
 
 # Write Skill

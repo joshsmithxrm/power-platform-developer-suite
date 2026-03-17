@@ -58,6 +58,13 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 
 ## Workflow (REQUIRED SEQUENCE)
 
+### Starting work
+Before any implementation, ensure you're on a feature branch:
+- New work: `/start <feature-name>` (creates worktree + branch + workflow state)
+- Existing work: switch to the relevant worktree
+- Planning and exploration can happen on main; implementation cannot.
+- Commits on main are blocked by the pre-commit hook.
+
 ### New feature or non-trivial change
 1. /spec (or verify spec exists with numbered ACs)
 2. /spec-audit (verify spec matches codebase reality)
