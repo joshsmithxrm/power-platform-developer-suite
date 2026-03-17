@@ -25,34 +25,40 @@ public sealed class PluginTracesDeleteTool
     }
 
     /// <summary>
-    /// Deletes plugin trace logs by specific IDs or by age threshold.
+    /// Deletes plugin trace logs by specific IDs, by age threshold, or by filter criteria.
     /// </summary>
     /// <param name="ids">Trace IDs to delete (array of GUID strings).</param>
     /// <param name="olderThanDays">Delete all traces older than this many days.</param>
+    /// <param name="typeName">Delete traces matching this plugin type name.</param>
+    /// <param name="messageName">Delete traces matching this message name.</param>
+    /// <param name="primaryEntity">Delete traces matching this entity logical name.</param>
+    /// <param name="errorsOnly">Delete only traces with exceptions.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result with count of deleted traces.</returns>
     [McpServerTool(Name = "ppds_plugin_traces_delete")]
-    [Description("Delete plugin trace logs. Provide either specific IDs for targeted deletion, or olderThanDays for bulk cleanup. Exactly one parameter must be specified.")]
+    [Description("Delete plugin trace logs. Provide specific IDs for targeted deletion, olderThanDays for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion. Priority: ids > olderThanDays > filter.")]
     public async Task<PluginTracesDeleteResult> ExecuteAsync(
         [Description("Trace IDs to delete (array of GUID strings from ppds_plugin_traces_list)")]
         string[]? ids = null,
         [Description("Delete all traces older than this many days (minimum 1). Use for bulk cleanup.")]
         int? olderThanDays = null,
+        [Description("Delete traces matching this plugin type name")]
+        string? typeName = null,
+        [Description("Delete traces matching this message name (e.g., 'Create', 'Update')")]
+        string? messageName = null,
+        [Description("Delete traces matching this entity logical name (e.g., 'account')")]
+        string? primaryEntity = null,
+        [Description("Delete only traces that have exceptions")]
+        bool? errorsOnly = null,
         CancellationToken cancellationToken = default)
     {
-        if (ids == null && olderThanDays == null)
-        {
-            return new PluginTracesDeleteResult
-            {
-                Error = "At least one parameter is required: provide 'ids' for targeted deletion or 'olderThanDays' for bulk cleanup."
-            };
-        }
+        var hasFilter = typeName != null || messageName != null || primaryEntity != null || errorsOnly == true;
 
-        if (ids != null && olderThanDays != null)
+        if (ids == null && olderThanDays == null && !hasFilter)
         {
             return new PluginTracesDeleteResult
             {
-                Error = "Provide only one of 'ids' or 'olderThanDays', not both."
+                Error = "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion."
             };
         }
 
@@ -64,7 +70,12 @@ public sealed class PluginTracesDeleteTool
             return await DeleteByIdsAsync(traceService, ids, cancellationToken).ConfigureAwait(false);
         }
 
-        return await DeleteOlderThanAsync(traceService, olderThanDays!.Value, cancellationToken).ConfigureAwait(false);
+        if (olderThanDays != null)
+        {
+            return await DeleteOlderThanAsync(traceService, olderThanDays.Value, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await DeleteByFilterAsync(traceService, typeName, messageName, primaryEntity, errorsOnly, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<PluginTracesDeleteResult> DeleteByIdsAsync(
@@ -117,6 +128,30 @@ public sealed class PluginTracesDeleteTool
 
         var olderThan = TimeSpan.FromDays(olderThanDays);
         var deletedCount = await traceService.DeleteOlderThanAsync(olderThan, progress: null, cancellationToken).ConfigureAwait(false);
+
+        return new PluginTracesDeleteResult
+        {
+            DeletedCount = deletedCount
+        };
+    }
+
+    private static async Task<PluginTracesDeleteResult> DeleteByFilterAsync(
+        IPluginTraceService traceService,
+        string? typeName,
+        string? messageName,
+        string? primaryEntity,
+        bool? errorsOnly,
+        CancellationToken cancellationToken)
+    {
+        var filter = new PluginTraceFilter
+        {
+            TypeName = typeName,
+            MessageName = messageName,
+            PrimaryEntity = primaryEntity,
+            HasException = errorsOnly == true ? true : null
+        };
+
+        var deletedCount = await traceService.DeleteByFilterAsync(filter, progress: null, cancellationToken).ConfigureAwait(false);
 
         return new PluginTracesDeleteResult
         {

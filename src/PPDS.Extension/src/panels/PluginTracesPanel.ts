@@ -402,30 +402,65 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     </select>
     <vscode-button id="delete-btn" appearance="secondary" title="Delete traces">Delete</vscode-button>
     <vscode-button id="trace-level-btn" appearance="secondary" title="View/change trace level">Trace Level</vscode-button>
+    <span id="trace-level-indicator" class="trace-level-indicator"></span>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 
-<div id="filter-bar"></div>
+<div id="filter-bar" class="filter-bar">
+    <button id="filter-toggle-btn" class="filter-toggle-btn">Filters &#x25BC;</button>
+    <div class="filter-fields">
+        <div class="filter-field">
+            <label>Entity</label>
+            <input type="text" id="filter-entity" placeholder="Entity name..." />
+        </div>
+        <div class="filter-field">
+            <label>Message</label>
+            <input type="text" id="filter-message" placeholder="Message name..." />
+        </div>
+        <div class="filter-field">
+            <label>Plugin</label>
+            <input type="text" id="filter-plugin" placeholder="Plugin type..." />
+        </div>
+        <div class="filter-field">
+            <label>Mode</label>
+            <select id="filter-mode">
+                <option value="">All</option>
+                <option value="Sync">Sync</option>
+                <option value="Async">Async</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>&nbsp;</label>
+            <label><input type="checkbox" id="filter-exceptions" /> Exceptions only</label>
+        </div>
+    </div>
+    <div class="quick-filters">
+        <span id="qf-last-hour" class="quick-filter-pill">Last Hour</span>
+        <span id="qf-exceptions" class="quick-filter-pill">Exceptions Only</span>
+        <span id="qf-long-running" class="quick-filter-pill">Long Running</span>
+        <button id="qf-clear-all" class="filter-toggle-btn">Clear All</button>
+    </div>
+</div>
 
 <div class="panel-content">
     <div id="table-pane" class="table-pane">
         <div class="empty-state" id="empty-state">Loading plugin traces...</div>
     </div>
-    <div class="resize-handle"></div>
-    <div id="detail-pane" class="detail-pane" style="display: none;">
+    <div id="resize-handle" class="resize-handle"></div>
+    <div id="detail-pane" class="detail-pane">
         <div class="detail-tabs-bar">
             <button class="detail-tab active" data-tab="details">Details</button>
             <button class="detail-tab" data-tab="exception">Exception</button>
             <button class="detail-tab" data-tab="message-block">Message Block</button>
-            <button class="detail-tab" data-tab="configuration">Configuration</button>
+            <button class="detail-tab" data-tab="config">Configuration</button>
             <button class="detail-tab" data-tab="timeline">Timeline</button>
         </div>
         <div class="detail-tab-content" id="tab-details"></div>
-        <div class="detail-tab-content" id="tab-exception" style="display: none;"></div>
-        <div class="detail-tab-content" id="tab-message-block" style="display: none;"></div>
-        <div class="detail-tab-content" id="tab-configuration" style="display: none;"></div>
-        <div class="detail-tab-content" id="tab-timeline" style="display: none;"></div>
+        <div class="detail-tab-content" id="tab-exception"></div>
+        <div class="detail-tab-content" id="tab-message-block"></div>
+        <div class="detail-tab-content" id="tab-config"></div>
+        <div class="detail-tab-content" id="tab-timeline"></div>
     </div>
 </div>
 

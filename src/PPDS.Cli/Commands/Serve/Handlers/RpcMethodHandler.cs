@@ -2154,21 +2154,22 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
-    /// Deletes plugin traces by IDs or by age.
+    /// Deletes plugin traces by IDs, by age, or by filter.
     /// Maps to: ppds plugintraces delete --json
     /// </summary>
     [JsonRpcMethod("pluginTraces/delete")]
     public async Task<PluginTracesDeleteResponse> PluginTracesDeleteAsync(
         string[]? ids = null,
         int? olderThanDays = null,
+        TraceFilterDto? filter = null,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if ((ids == null || ids.Length == 0) && olderThanDays == null)
+        if ((ids == null || ids.Length == 0) && olderThanDays == null && filter == null)
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
-                "Either 'ids' or 'olderThanDays' must be provided");
+                "One of 'ids', 'olderThanDays', or 'filter' must be provided");
         }
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
@@ -2192,10 +2193,15 @@ public class RpcMethodHandler : IDisposable
 
                 deletedCount = await traceService.DeleteByIdsAsync(guids, cancellationToken: ct);
             }
+            else if (olderThanDays != null)
+            {
+                var olderThan = TimeSpan.FromDays(olderThanDays.Value);
+                deletedCount = await traceService.DeleteOlderThanAsync(olderThan, cancellationToken: ct);
+            }
             else
             {
-                var olderThan = TimeSpan.FromDays(olderThanDays!.Value);
-                deletedCount = await traceService.DeleteOlderThanAsync(olderThan, cancellationToken: ct);
+                var domainFilter = MapTraceFilterFromDto(filter) ?? new PluginTraceFilter();
+                deletedCount = await traceService.DeleteByFilterAsync(domainFilter, cancellationToken: ct);
             }
 
             return new PluginTracesDeleteResponse

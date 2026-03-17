@@ -226,7 +226,7 @@
 .col-mode { width: 60px; }
 
 /* ── Detail Tabs ─────────────────────────────────────────────────── */
-.detail-tabs {
+.detail-tabs-bar {
     display: flex;
     border-bottom: 1px solid var(--vscode-panel-border);
     flex-shrink: 0;
@@ -383,4 +383,61 @@
 
 .auto-refresh-active {
     color: var(--vscode-testing-iconPassed, #4caf50);
+}
+
+/* ── Delete Dropdown ───────────────────────────────────────────── */
+.delete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    min-width: 180px;
+    background: var(--vscode-menu-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    padding: 4px 0;
+}
+
+.delete-dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 6px 12px;
+    font-size: 12px;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+    cursor: pointer;
+    font-family: var(--vscode-font-family);
+}
+
+.delete-dropdown-item:hover {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+    color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}
+
+.delete-older-dialog {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--vscode-menu-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.delete-older-dialog input[type="number"] {
+    width: 60px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 3px 6px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
 }

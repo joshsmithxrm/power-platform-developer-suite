@@ -105,11 +105,27 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
             ct.ThrowIfCancellationRequested();
 
+            // Check trace level when no traces are found to give actionable guidance
+            PluginTraceLogSetting? traceSetting = null;
+            if (traces.Count == 0 && _currentFilter == null)
+            {
+                var settings = await service.GetSettingsAsync(ct);
+                traceSetting = settings.Setting;
+            }
+
             Application.MainLoop?.Invoke(() =>
             {
                 _traces = traces;
                 PopulateTable();
-                UpdateStatusLabel();
+
+                if (traceSetting == PluginTraceLogSetting.Off && _traces.Count == 0)
+                {
+                    _statusLabel.Text = "Plugin trace level is Off \u2014 no new traces are being recorded. Use Ctrl+L to change.";
+                }
+                else
+                {
+                    UpdateStatusLabel();
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing or superseded load */ }
@@ -178,6 +194,12 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
     private async Task ShowDetailDialogAsync(PluginTraceInfo trace)
     {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            Application.MainLoop?.Invoke(() => { _statusLabel.Text = "No environment connected"; });
+            return;
+        }
+
         try
         {
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
@@ -237,6 +259,12 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
     private async Task ShowTimelineAsync()
     {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            Application.MainLoop?.Invoke(() => { _statusLabel.Text = "No environment connected"; });
+            return;
+        }
+
         var selectedRow = _table.SelectedRow;
         if (selectedRow < 0 || selectedRow >= _traces.Count)
         {
@@ -306,6 +334,12 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
     private async Task ExecuteDeleteAsync(TraceDeleteResult deleteResult)
     {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            Application.MainLoop?.Invoke(() => { _statusLabel.Text = "No environment connected"; });
+            return;
+        }
+
         try
         {
             Application.MainLoop?.Invoke(() =>
@@ -350,6 +384,12 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
     private async Task ShowTraceLevelAsync()
     {
+        if (string.IsNullOrEmpty(EnvironmentUrl))
+        {
+            Application.MainLoop?.Invoke(() => { _statusLabel.Text = "No environment connected"; });
+            return;
+        }
+
         try
         {
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);

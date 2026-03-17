@@ -126,7 +126,7 @@ qfClearAll.addEventListener('click', () => {
     filterEntity.value = '';
     filterMessage.value = '';
     filterPlugin.value = '';
-    filterMode.value = 'All';
+    filterMode.value = '';
     filterExceptions.checked = false;
     qfLastHour.classList.remove('active');
     qfExceptions.classList.remove('active');
@@ -570,7 +570,7 @@ refreshBtn.addEventListener('click', () => {
 
 autoRefreshSelect.addEventListener('change', () => {
     const value = autoRefreshSelect.value;
-    const interval = value === 'off' ? null : parseInt(value, 10);
+    const interval = value ? parseInt(value, 10) : null;
     vscode.postMessage({ command: 'setAutoRefresh', intervalSeconds: interval });
 
     // Visual indicator for active auto-refresh
@@ -581,10 +581,68 @@ autoRefreshSelect.addEventListener('change', () => {
     }
 });
 
+// ── Delete dropdown menu ─────────────────────────────────────────────────
+const deleteDropdown = document.createElement('div');
+deleteDropdown.className = 'delete-dropdown';
+deleteDropdown.style.display = 'none';
+deleteDropdown.innerHTML = [
+    '<button class="delete-dropdown-item" id="delete-selected">Delete selected</button>',
+    '<button class="delete-dropdown-item" id="delete-older-than">Delete older than...</button>',
+].join('');
+deleteBtn.parentElement!.style.position = 'relative';
+deleteBtn.insertAdjacentElement('afterend', deleteDropdown);
+
 deleteBtn.addEventListener('click', () => {
+    const isVisible = deleteDropdown.style.display !== 'none';
+    deleteDropdown.style.display = isVisible ? 'none' : '';
+});
+
+document.getElementById('delete-selected')!.addEventListener('click', () => {
+    deleteDropdown.style.display = 'none';
     const selId = table.getSelectedId();
     if (selId) {
         vscode.postMessage({ command: 'deleteTraces', ids: [selId] });
+    }
+});
+
+// Inline input for "Delete older than" (prompt() is unavailable in webviews)
+const deleteOlderDialog = document.createElement('div');
+deleteOlderDialog.className = 'delete-older-dialog';
+deleteOlderDialog.style.display = 'none';
+deleteOlderDialog.innerHTML = [
+    '<label>Delete traces older than</label>',
+    '<input type="number" id="delete-older-days" min="1" value="7" />',
+    '<label>day(s)</label>',
+    '<button id="delete-older-confirm" class="delete-dropdown-item">Delete</button>',
+    '<button id="delete-older-cancel" class="delete-dropdown-item">Cancel</button>',
+].join(' ');
+deleteBtn.parentElement!.appendChild(deleteOlderDialog);
+
+document.getElementById('delete-older-than')!.addEventListener('click', () => {
+    deleteDropdown.style.display = 'none';
+    deleteOlderDialog.style.display = '';
+    const daysInput = document.getElementById('delete-older-days') as HTMLInputElement;
+    daysInput.value = '7';
+    daysInput.focus();
+});
+
+document.getElementById('delete-older-confirm')!.addEventListener('click', () => {
+    const daysInput = document.getElementById('delete-older-days') as HTMLInputElement;
+    const days = parseInt(daysInput.value, 10);
+    deleteOlderDialog.style.display = 'none';
+    if (!isNaN(days) && days > 0) {
+        vscode.postMessage({ command: 'deleteOlderThan', days });
+    }
+});
+
+document.getElementById('delete-older-cancel')!.addEventListener('click', () => {
+    deleteOlderDialog.style.display = 'none';
+});
+
+// Close dropdown when clicking elsewhere
+document.addEventListener('click', (e) => {
+    if (!deleteBtn.contains(e.target as Node) && !deleteDropdown.contains(e.target as Node)) {
+        deleteDropdown.style.display = 'none';
     }
 });
 
