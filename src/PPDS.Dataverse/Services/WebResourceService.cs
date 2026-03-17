@@ -174,8 +174,17 @@ public class WebResourceService : IWebResourceService
         else
         {
             // RetrieveUnpublished returns latest saved (unpublished) content
-            entity = await client.RetrieveUnpublishedAsync(
-                WebResource.EntityLogicalName, id, contentColumns, cancellationToken);
+            try
+            {
+                entity = await client.RetrieveUnpublishedAsync(
+                    WebResource.EntityLogicalName, id, contentColumns, cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // RetrieveUnpublished throws if the resource doesn't exist;
+                // return null for consistency with the published path
+                return null;
+            }
         }
 
         var base64Content = entity.GetAttributeValue<string>(WebResource.Fields.Content);

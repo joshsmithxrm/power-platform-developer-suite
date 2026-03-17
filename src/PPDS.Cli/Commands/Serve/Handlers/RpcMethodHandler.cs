@@ -2891,29 +2891,22 @@ public class RpcMethodHandler : IDisposable
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            try
-            {
-                var webResourceService = sp.GetRequiredService<IWebResourceService>();
-                var content = await webResourceService.GetContentAsync(resourceId, published, ct);
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            var content = await webResourceService.GetContentAsync(resourceId, published, ct);
 
-                return new WebResourcesGetResponse
-                {
-                    Resource = content != null
-                        ? new WebResourceDetailDto
-                        {
-                            Id = content.Id.ToString(),
-                            Name = content.Name,
-                            WebResourceType = content.WebResourceType,
-                            Content = content.Content,
-                            ModifiedOn = content.ModifiedOn?.ToString("o")
-                        }
-                        : null
-                };
-            }
-            catch (KeyNotFoundException ex)
+            return new WebResourcesGetResponse
             {
-                throw new RpcException(ErrorCodes.WebResource.NotFound, ex.Message);
-            }
+                Resource = content != null
+                    ? new WebResourceDetailDto
+                    {
+                        Id = content.Id.ToString(),
+                        Name = content.Name,
+                        WebResourceType = content.WebResourceType,
+                        Content = content.Content,
+                        ModifiedOn = content.ModifiedOn?.ToString("o")
+                    }
+                    : null
+            };
         }, cancellationToken);
     }
 
