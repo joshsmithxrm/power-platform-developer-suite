@@ -98,6 +98,12 @@ Reply text:
 
 **Do NOT use `gh pr comment`** — that creates a top-level comment, not a threaded reply.
 
+**Common mistakes:**
+- WRONG: `gh pr comment 123 --body "Addressed all feedback"` → this is a single top-level comment, not per-comment replies
+- WRONG: Posting a summary issue comment that groups all findings → reviewers can't see which comment was addressed
+- RIGHT: Loop over each `comment_id` from the API response and POST a reply to each one individually
+- RIGHT: Each reply references the specific commit SHA or explains why the finding was dismissed
+
 **Push fixes as a new commit:**
 ```bash
 git add <files>
@@ -132,6 +138,19 @@ After PR is created:
   }
 }
 ```
+
+After Gemini comments are triaged (step 4 complete), update workflow state:
+```json
+{
+  "pr": {
+    "url": "https://github.com/...",
+    "created": "2026-03-16T17:00:00Z",
+    "gemini_triaged": true
+  }
+}
+```
+
+The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 4.
 
 ## Timeout Behavior
 

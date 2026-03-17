@@ -97,6 +97,9 @@ Steps 5-8 enforced by hooks. PR gate blocks `gh pr create` if incomplete. Run /s
 "Don't ask, just do it" applies to: committing, gates, verification, QA, review, triaging review comments (fix valid, dismiss invalid w/ rationale). Does NOT apply to: skipping workflow steps, filing/closing issues, PRs without passing gates.
 After external review: respond to EACH PR comment individually with action taken. Include summary in status report.
 
+### Pipeline chaining
+After completing each workflow step, proceed to the next step without asking for permission. The sequence gates → verify → qa → review → pr is a pipeline — execute it end-to-end unless a step fails. Do NOT stop between steps to present a summary and wait. The stop hook will block the session from ending if steps are incomplete.
+
 ## Git Hooks
 
 Pre-commit hook (`scripts/hooks/`) runs `typecheck:all` + `eslint --quiet` on extension TS changes. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
