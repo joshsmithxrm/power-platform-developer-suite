@@ -279,6 +279,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
         menuItems.Add(new MenuBarItem("_Tools", new MenuItem[]
         {
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
+            new("Solutions", "Browse Dataverse solutions", () => NavigateToSolutions()),
             new("Import Jobs", "View solution import jobs", () => NavigateToImportJobs()),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Environment Details...", "View organization and connection info",
@@ -429,6 +430,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
 
             var sqlScreen = new SqlQueryScreen(_deviceCodeCallback, _session, environmentUrl, displayName);
             NavigateTo(sqlScreen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToSolutions()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Solutions...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new SolutionsScreen(_session);
+            NavigateTo(screen);
 
             return false;
         });
