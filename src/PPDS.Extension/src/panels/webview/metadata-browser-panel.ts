@@ -518,7 +518,7 @@ function toggleOptionValues(
             row.appendChild(labelTd);
 
             const colorTd = document.createElement('td');
-            if (opt.color) {
+            if (opt.color && /^#[0-9a-fA-F]{3,8}$/.test(opt.color)) {
                 const swatch = document.createElement('span');
                 swatch.className = 'color-swatch';
                 swatch.style.backgroundColor = opt.color;

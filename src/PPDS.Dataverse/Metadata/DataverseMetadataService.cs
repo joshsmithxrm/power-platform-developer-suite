@@ -157,6 +157,8 @@ public class DataverseMetadataService : IMetadataService
         bool includeGlobalOptionSets = false,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalName);
+
         var entity = await GetEntityAsync(
             logicalName,
             includeAttributes: true,

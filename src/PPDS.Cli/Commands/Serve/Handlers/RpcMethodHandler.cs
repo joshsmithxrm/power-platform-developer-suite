@@ -789,8 +789,8 @@ public class RpcMethodHandler : IDisposable
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataService = sp.GetRequiredService<IMetadataService>();
-            var entities = await metadataService.GetEntitiesAsync(cancellationToken: ct);
+            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
+            var entities = await metadataProvider.GetEntitiesAsync(ct);
 
             return new MetadataEntitiesResponse
             {

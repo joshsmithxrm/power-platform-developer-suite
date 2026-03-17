@@ -19,6 +19,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     private readonly TableView _detailTable;
     private readonly Label _statusLabel;
     private readonly Button[] _tabButtons;
+    private readonly Action[] _tabClickHandlers;
 
     private List<EntitySummary> _allEntities = [];
     private List<EntitySummary> _filteredEntities = [];
@@ -77,6 +78,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
         // Create tab buttons
         _tabButtons = new Button[TabNames.Length];
+        _tabClickHandlers = new Action[TabNames.Length];
         var tabX = 0;
         for (int i = 0; i < TabNames.Length; i++)
         {
@@ -87,7 +89,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 Y = 0,
                 ColorScheme = i == 0 ? TuiColorPalette.TabActive : TuiColorPalette.TabInactive
             };
-            _tabButtons[i].Clicked += () => SwitchTab(idx);
+            _tabClickHandlers[i] = () => SwitchTab(idx);
+            _tabButtons[i].Clicked += _tabClickHandlers[i];
             // Estimate button width: text length + brackets/padding (Terminal.Gui adds "[ ]" around text)
             tabX += TabNames[i].Length + 6;
         }
@@ -153,8 +156,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             return;
         }
 
-        _loadCts?.Cancel();
+        var oldCts = _loadCts;
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
+        oldCts?.Cancel();
+        oldCts?.Dispose();
         var ct = _loadCts.Token;
 
         try
@@ -192,8 +197,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
     private async Task LoadEntityDetailAsync(string logicalName)
     {
-        _loadCts?.Cancel();
+        var oldCts = _loadCts;
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
+        oldCts?.Cancel();
+        oldCts?.Dispose();
         var ct = _loadCts.Token;
 
         try
@@ -279,6 +286,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             })
             .ToList();
 
+        _lastSelectedIndex = -1;
         _entityList.SetSource(displayNames);
         UpdateStatusLabel();
     }
@@ -325,6 +333,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     {
         if (_selectedEntity == null)
         {
+            (_detailTable.Table as IDisposable)?.Dispose();
             _detailTable.Table = new System.Data.DataTable();
             return;
         }
@@ -339,6 +348,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             _ => new System.Data.DataTable()
         };
 
+        (_detailTable.Table as IDisposable)?.Dispose();
         _detailTable.Table = dt;
     }
 
@@ -547,10 +557,9 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     {
         _searchField.TextChanged -= OnSearchTextChanged;
         _entityList.SelectedItemChanged -= OnEntitySelectionChanged;
-        foreach (var btn in _tabButtons)
+        for (int i = 0; i < _tabButtons.Length; i++)
         {
-            // Button.Clicked is an event; we need to clear handlers.
-            // Since we used lambdas, the best we can do is dispose the button.
+            _tabButtons[i].Clicked -= _tabClickHandlers[i];
         }
         _loadCts?.Cancel();
         _loadCts?.Dispose();

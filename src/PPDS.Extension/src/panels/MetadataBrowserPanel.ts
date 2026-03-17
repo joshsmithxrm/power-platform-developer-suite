@@ -214,7 +214,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         }
     }
 
-    private async loadEntityDetail(logicalName: string): Promise<void> {
+    private async loadEntityDetail(logicalName: string, isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'entityDetailLoading', logicalName });
             const result = await this.daemon.metadataEntity(logicalName, true, this.environmentUrl);
@@ -224,6 +224,11 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
+
+            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEntityDetail(logicalName, true))) {
+                return;
+            }
+
             this.postMessage({ command: 'error', message: `Failed to load entity detail: ${msg}` });
         }
     }
