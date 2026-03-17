@@ -89,18 +89,15 @@ Capture output to report which remote refs were pruned.
 For each remaining (non-locked) active worktree:
 
 ```bash
-cd <worktree-path>
-git rebase origin/main
+git -C <worktree-path> rebase origin/main
 ```
 
 If rebase produces conflicts:
-1. Run `git rebase --abort` immediately
+1. Run `git -C <worktree-path> rebase --abort` immediately
 2. Record the worktree as "rebase conflict" in the report
 3. Continue to the next worktree
 
 Do NOT leave any worktree in a mid-rebase state.
-
-Return to the main worktree directory after all rebases.
 
 ### 8. Final Report
 
