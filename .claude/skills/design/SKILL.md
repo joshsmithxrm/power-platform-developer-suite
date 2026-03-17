@@ -77,3 +77,4 @@ After user approves the written spec:
 | Asking 5 questions at once | One question per message |
 | Proposing only one approach | Always propose 2-3 with trade-offs |
 | Skipping the spec | The spec IS the deliverable of this skill |
+| Using plan mode with /design | /design has its own approval gates (one question at a time, incremental validation). Plan mode blocks spec writing. Exit plan mode before running /design. |

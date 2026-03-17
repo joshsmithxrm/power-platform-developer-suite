@@ -46,9 +46,18 @@ git worktree list --porcelain
 git branch --merged main | grep -v '^\*\?\s*main$'
 ```
 
-Build three lists:
-- **Merged worktrees:** worktrees whose branch appears in the merged list
+For each branch in the merged list, check for divergent commits:
+
+```bash
+git log main..<branch> --oneline
+```
+
+If this produces **no output**, the branch has zero commits beyond main — it was created for future work or was fast-forward merged. Remove it from the merged list and classify it as **"not started"** (to be skipped).
+
+Build four lists:
+- **Merged worktrees:** worktrees whose branch appears in the merged list (after filtering)
 - **Active worktrees:** worktrees whose branch does NOT appear in the merged list
+- **Not started:** branches/worktrees removed from the merged list by the divergence check — report as skipped
 - **Locked worktrees:** worktrees with `locked` attribute in porcelain output — skip regardless of merge status
 
 ### 4. Remove Merged Worktrees
@@ -130,12 +139,13 @@ Present a summary:
 | Worktree | Branch | Reason |
 |----------|--------|--------|
 | .worktrees/wip | feature/wip | Locked |
+| .worktrees/prep | feature/prep | No divergent commits (not started) |
 
 ### Summary
 - Removed: N worktrees, N branches
 - Pruned: N remote refs
 - Rebased: N OK, N conflicts
-- Skipped: N locked
+- Skipped: N locked, N not started
 ```
 
 If `--dry-run` was specified, prefix the report title with `[DRY RUN]` and note that no changes were made.
