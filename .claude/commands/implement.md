@@ -106,6 +106,14 @@ For EACH phase in the plan, repeat this cycle:
 - Review each agent's summary (do NOT read full transcripts - save context)
 - Mark tasks as completed
 
+**B2. Cross-Agent Consistency Check**
+When parallel agents implement the same semantic concept across surfaces (e.g., RPC + MCP + TUI + Extension), check for consistency BEFORE proceeding:
+- Same field names and types across surfaces (e.g., `HasOverride` uses the same logic in MCP and RPC)
+- Nullable/non-nullable agreement between C# DTOs and TypeScript interfaces
+- Error codes defined in one layer are actually used in other layers
+- Default values match across surfaces (e.g., "N/A" fallback in both mapper and TS type)
+This prevents the most common parallel-agent defect: each agent delivers its slice correctly but cross-slice contracts are inconsistent.
+
 **C. Verify Phase Gate**
 - Run full solution build: `dotnet build PPDS.sln -v q` (or appropriate build command)
 - Run full test suite: `dotnet test PPDS.sln --filter "Category!=Integration" -v q --no-build`
