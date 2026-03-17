@@ -126,7 +126,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _envConfigService = new EnvironmentConfigService(_envConfigStore);
 
         // Initialize lazy service instances (thread-safe by default)
-        _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance));
+        _profileService = new Lazy<IProfileService>(() => new ProfileService(_profileStore, NullLogger<ProfileService>.Instance, envConfigStore: _envConfigStore));
         _environmentService = new Lazy<IEnvironmentService>(() => new EnvironmentService(_profileStore, NullLogger<EnvironmentService>.Instance));
         _themeService = new Lazy<ITuiThemeService>(() => new TuiThemeService(_envConfigService));
         _errorService = new Lazy<ITuiErrorService>(() => new TuiErrorService());
@@ -147,9 +147,6 @@ internal sealed class InteractiveSession : IAsyncDisposable
         // Pre-load environment config so sync-over-async calls in UI thread are cache hits
         var envConfigs = await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
 
-        // Build label resolver for cross-environment queries ([LABEL].entity syntax)
-        _profileResolutionService = new ProfileResolutionService(envConfigs.Environments);
-
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
             ? collection.ActiveProfile
@@ -157,18 +154,28 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
         TuiDebugLog.Log($"Loaded profile: {profile?.DisplayIdentifier ?? "(none)"}, AuthMethod: {profile?.AuthMethod}");
 
+        if (profile == null)
+        {
+            TuiDebugLog.Log("No active profile — skipping initialization. User will select a profile.");
+            return;
+        }
+
+        // Build label resolver for cross-environment queries ([LABEL].entity syntax)
+        // Only needed when we have a profile that can actually execute queries
+        _profileResolutionService = new ProfileResolutionService(envConfigs.Environments);
+
         // Set the identity for status bar display
-        CurrentProfileIdentity = profile?.IdentityDisplay;
+        CurrentProfileIdentity = profile.IdentityDisplay;
 
         // If using active profile (no explicit name specified), update _profileName
         // so CurrentProfileName returns the actual profile name instead of null
-        if (string.IsNullOrEmpty(_profileName) && profile != null)
+        if (string.IsNullOrEmpty(_profileName))
         {
             _profileName = profile.Name ?? collection.ActiveProfileName ?? $"[{profile.Index}]";
             TuiDebugLog.Log($"Using active profile: {_profileName}");
         }
 
-        if (profile?.Environment?.Url != null)
+        if (profile.Environment?.Url != null)
         {
             _activeEnvironmentUrl = profile.Environment.Url;
             _activeEnvironmentDisplayName = profile.Environment.DisplayName;
