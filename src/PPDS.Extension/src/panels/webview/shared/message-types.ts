@@ -369,7 +369,7 @@ export type WebResourcesPanelWebviewToHost =
     | { command: 'requestSolutionList' }
     | { command: 'selectSolution'; solutionId: string | null }
     | { command: 'toggleTextOnly'; textOnly: boolean }
-    | { command: 'openWebResource'; id: string; name: string; isTextType: boolean }
+    | { command: 'openWebResource'; id: string; name: string; isTextType: boolean; webResourceType: number }
     | { command: 'publishSelected'; ids: string[] }
     | { command: 'openInMaker' }
     | { command: 'webviewError'; error: string; stack?: string };

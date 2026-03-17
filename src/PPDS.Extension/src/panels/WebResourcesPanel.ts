@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
 import { buildMakerUrl } from '../commands/browserCommands.js';
+import type { WebResourceFileSystemProvider } from '../providers/WebResourceFileSystemProvider.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
@@ -31,6 +32,9 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     /** Monotonically increasing request ID to discard stale responses. */
     private requestId = 0;
 
+    /** File system provider for opening web resources in editor. */
+    private readonly fsp: WebResourceFileSystemProvider | undefined;
+
     /**
      * Returns the number of open WebResourcesPanel instances.
      * Used by diagnostic commands for panel state inspection.
@@ -45,13 +49,14 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         context: vscode.ExtensionContext,
         envUrl?: string,
         envDisplayName?: string,
+        fsp?: WebResourceFileSystemProvider,
     ): WebResourcesPanel {
         if (WebResourcesPanel.instances.length >= WebResourcesPanel.MAX_PANELS) {
             const oldest = WebResourcesPanel.instances[0];
             oldest.panel?.reveal();
             return oldest;
         }
-        const panel = new WebResourcesPanel(extensionUri, daemon, context, envUrl, envDisplayName);
+        const panel = new WebResourcesPanel(extensionUri, daemon, context, envUrl, envDisplayName, fsp);
         return panel;
     }
 
@@ -61,8 +66,10 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         private readonly context: vscode.ExtensionContext,
         initialEnvUrl?: string,
         initialEnvDisplayName?: string,
+        fsp?: WebResourceFileSystemProvider,
     ) {
         super();
+        this.fsp = fsp;
 
         if (initialEnvUrl) {
             this.environmentUrl = initialEnvUrl;
@@ -93,6 +100,15 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         panel.webview.html = this.getHtmlContent(panel.webview);
         this.initPanel(panel);
         this.subscribeToDaemonReconnect(this.daemon);
+
+        // Auto-refresh when a web resource is saved via the FSP
+        if (this.fsp) {
+            this.disposables.push(
+                this.fsp.onDidSaveWebResource(() => {
+                    void this.loadWebResources();
+                }),
+            );
+        }
     }
 
     protected async handleMessage(message: WebResourcesPanelWebviewToHost): Promise<void> {
@@ -120,7 +136,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 await this.loadWebResources();
                 break;
             case 'openWebResource':
-                await this.openWebResource(message.id, message.name);
+                await this.openWebResource(message.id, message.name, message.webResourceType);
                 break;
             case 'publishSelected':
                 await this.publishSelected(message.ids);
@@ -171,6 +187,10 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                     this.environmentColor = null;
                 }
             }
+            // Register environment mapping for FSP
+            if (this.fsp && this.environmentId && this.environmentUrl) {
+                this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
+            }
             this.updatePanelTitle();
             this.postMessage({
                 command: 'updateEnvironment',
@@ -201,6 +221,10 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 }
             } catch {
                 this.environmentColor = null;
+            }
+            // Register environment mapping for FSP
+            if (this.fsp && this.environmentId && this.environmentUrl) {
+                this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
             }
             this.updatePanelTitle();
             this.postMessage({
@@ -282,11 +306,18 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         }
     }
 
-    private async openWebResource(_id: string, name: string): Promise<void> {
-        // For now, open in Maker Portal. FSP wiring comes in Chunk 4.
-        if (this.environmentId) {
+    private async openWebResource(id: string, name: string, webResourceType: number): Promise<void> {
+        if (this.fsp && this.environmentId && this.environmentUrl) {
+            await this.fsp.openWebResource(
+                this.environmentId,
+                this.environmentUrl,
+                id,
+                name,
+                webResourceType,
+            );
+        } else if (this.environmentId) {
+            // Fallback: open in Maker Portal when FSP is not available
             const baseUrl = buildMakerUrl(this.environmentId);
-            // Navigate to the web resources section in maker portal
             const url = `${baseUrl}?app=d365default&forceUCI=1`;
             await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {

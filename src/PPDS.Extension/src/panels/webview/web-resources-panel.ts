@@ -84,7 +84,8 @@ const table = new DataTable<WebResourceInfoDto>({
                 if (r.isTextType) {
                     return '<span class="wr-name-link" data-wr-id="'
                         + escapeHtml(r.id) + '" data-wr-name="'
-                        + escapeHtml(r.name) + '" data-wr-text="true">'
+                        + escapeHtml(r.name) + '" data-wr-text="true"'
+                        + ' data-wr-type="' + String(r.type) + '">'
                         + escapeHtml(r.name) + '</span>';
                 }
                 return escapeHtml(r.name);
@@ -154,8 +155,9 @@ content.addEventListener('click', (e) => {
         const id = link.dataset.wrId;
         const name = link.dataset.wrName;
         const isTextType = link.dataset.wrText === 'true';
+        const webResourceType = Number(link.dataset.wrType ?? '0');
         if (id && name) {
-            vscode.postMessage({ command: 'openWebResource', id, name, isTextType });
+            vscode.postMessage({ command: 'openWebResource', id, name, isTextType, webResourceType });
         }
     }
 });
