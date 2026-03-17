@@ -61,15 +61,16 @@ Write `.claude/workflow-state.json` in the worktree:
 }
 ```
 
-### 6. Open Windows Terminal Split Pane
+### 6. Open Windows Terminal Tab
 
 ```bash
-wt -w ppds split-pane -d "<absolute-worktree-path>"
+wt -w 0 new-tab --title "<name>" -- pwsh -NoExit -Command "Set-Location '<absolute-worktree-path>'"
 ```
 
-- First call creates a new "ppds" window with one pane
-- Subsequent calls split within that same window
-- All worktrees visible as split panes
+- `-w 0` adds the tab to the current window (not a new window)
+- `--title` shows the worktree name on the tab
+- `Set-Location` runs after the PowerShell profile loads (the profile may override `-d`)
+- Each worktree gets its own full-width tab
 
 If `wt` is not found, warn and continue:
 ```

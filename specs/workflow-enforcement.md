@@ -269,7 +269,7 @@ Each skill writes its own entry to `.claude/workflow-state.json` upon successful
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
 | `/status` | Display current workflow state. | Reads `.claude/workflow-state.json` and displays the same summary as SessionStart hook. On-demand visibility into what's been done and what's pending. No state writes. |
-| `/start` | Bootstrap a feature worktree. | Accepts feature name, creates worktree at `.worktrees/<name>` with branch `feature/<name>`, initializes `workflow-state.json` with `branch` and `started` fields, opens Windows Terminal split pane via `wt -w ppds split-pane -d <path>`, prints required workflow sequence. Handles: existing branch (no `-b`), existing worktree (offer switch), missing `wt` (warn + skip). |
+| `/start` | Bootstrap a feature worktree. | Accepts feature name, creates worktree at `.worktrees/<name>` with branch `feature/<name>`, initializes `workflow-state.json` with `branch` and `started` fields, opens new tab in current Windows Terminal window via `wt -w 0 new-tab`, prints required workflow sequence. Handles: existing branch (no `-b`), existing worktree (offer switch), missing `wt` (warn + skip). |
 
 ### Main Branch Bootstrap
 
@@ -403,7 +403,7 @@ After all skills in this spec are implemented:
 | AC-33 | `/shakedown` includes parity comparison across tested surfaces | Manual: run `/shakedown` on 2+ surfaces, verify parity matrix in output | 🔲 |
 | AC-34 | `/start foo` creates worktree at `.worktrees/foo` with branch `feature/foo` | Manual: run `/start foo`, verify worktree + branch | 🔲 |
 | AC-35 | `/start foo` initializes `workflow-state.json` with `branch` and `started` fields | Manual: run `/start foo`, read state file in worktree | 🔲 |
-| AC-36 | `/start foo` opens split pane via `wt -w ppds split-pane -d <path>` | Manual: run `/start foo`, verify pane opens in ppds window | 🔲 |
+| AC-36 | `/start foo` opens new tab in current window via `wt -w 0 new-tab` | Manual: run `/start foo`, verify tab opens in current window | 🔲 |
 | AC-37 | `/start foo` when worktree already exists offers to switch instead of creating | Manual: run `/start foo` twice, verify no duplicate | 🔲 |
 | AC-38 | SessionStart hook on main shows active worktrees and `/start` guidance | Manual: start session on main with existing worktrees | 🔲 |
 | AC-39 | Pre-commit hook blocks `git commit` on main with guidance message | Manual: attempt commit on main, verify exit code 2 | 🔲 |
