@@ -269,6 +269,9 @@ namespace PPDS.Dataverse.DependencyInjection
             // Phase 3 services
             services.AddTransient<IPluginTraceService, PluginTraceService>();
 
+            // Phase 2d services (Web Resources)
+            services.AddTransient<IWebResourceService, WebResourceService>();
+
             return services;
         }
     }
