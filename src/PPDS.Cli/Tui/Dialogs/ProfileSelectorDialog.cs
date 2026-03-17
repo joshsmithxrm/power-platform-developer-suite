@@ -1,3 +1,4 @@
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Tui.Infrastructure;
@@ -192,8 +193,7 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
 
             foreach (var profile in _profiles)
             {
-                var envHint = profile.EnvironmentName != null ? $" [{profile.EnvironmentName}]" : "";
-                items.Add($"{profile.DisplayIdentifier} ({profile.Identity}){envHint}");
+                items.Add(FormatProfileDisplay(profile));
             }
 
             _listView.SetSource(items);
@@ -461,6 +461,39 @@ internal sealed class ProfileSelectorDialog : TuiDialog, ITuiStateCapture<Profil
             ProfileWasDeleted = true;
             Application.RequestStop();
         }
+    }
+
+    private static bool IsServicePrincipal(AuthMethod method) => method is
+        AuthMethod.ClientSecret or AuthMethod.CertificateFile or
+        AuthMethod.CertificateStore or AuthMethod.GitHubFederated or
+        AuthMethod.AzureDevOpsFederated or AuthMethod.ManagedIdentity;
+
+    private static string FormatProfileDisplay(ProfileSummary profile)
+    {
+        var envHint = profile.EnvironmentName != null ? $" [{profile.EnvironmentName}]" : "";
+
+        if (profile.Name != null)
+        {
+            // Named profile: [2] MyProfile (user@domain.com) [Contoso Dev]
+            return $"{profile.DisplayIdentifier} ({profile.Identity}){envHint}";
+        }
+
+        if (IsServicePrincipal(profile.AuthMethod))
+        {
+            // Unnamed SPN: [2] SPN · Contoso Dev  or  [2] SPN · 3b039cb2
+            var hint = profile.EnvironmentName ?? TruncateId(profile.Identity);
+            return $"[{profile.Index}] SPN \u00b7 {hint}";
+        }
+
+        // Unnamed interactive: [2] user@domain.com [Contoso Dev]
+        return $"[{profile.Index}] {profile.Identity}{envHint}";
+    }
+
+    private static string TruncateId(string identity)
+    {
+        // Truncate GUIDs to first 8 chars for readability
+        var dashIndex = identity.IndexOf('-');
+        return dashIndex > 0 ? identity[..dashIndex] : identity;
     }
 
     /// <inheritdoc />
