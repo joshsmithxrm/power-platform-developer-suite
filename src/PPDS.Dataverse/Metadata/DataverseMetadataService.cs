@@ -152,6 +152,44 @@ public class DataverseMetadataService : IMetadataService
     }
 
     /// <inheritdoc />
+    public async Task<(EntityMetadataDto Entity, IReadOnlyList<OptionSetMetadataDto> GlobalOptionSets)> GetEntityWithGlobalOptionSetsAsync(
+        string logicalName,
+        bool includeGlobalOptionSets = false,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetEntityAsync(
+            logicalName,
+            includeAttributes: true,
+            includeRelationships: true,
+            includeKeys: true,
+            includePrivileges: true,
+            cancellationToken: cancellationToken);
+
+        if (!includeGlobalOptionSets)
+        {
+            return (entity, Array.Empty<OptionSetMetadataDto>());
+        }
+
+        var globalOptionSetNames = entity.Attributes
+            .Where(a => a.IsGlobalOptionSet && !string.IsNullOrEmpty(a.OptionSetName))
+            .Select(a => a.OptionSetName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (globalOptionSetNames.Count == 0)
+        {
+            return (entity, Array.Empty<OptionSetMetadataDto>());
+        }
+
+        var optionSetTasks = globalOptionSetNames
+            .Select(name => GetOptionSetAsync(name, cancellationToken));
+
+        var optionSets = await Task.WhenAll(optionSetTasks);
+
+        return (entity, optionSets);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<AttributeMetadataDto>> GetAttributesAsync(
         string entityLogicalName,
         string? attributeType = null,

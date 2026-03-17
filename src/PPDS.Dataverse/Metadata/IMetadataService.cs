@@ -41,6 +41,15 @@ public interface IMetadataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets full metadata for a specific entity, optionally including
+    /// global option set values for picklist attributes.
+    /// </summary>
+    Task<(EntityMetadataDto Entity, IReadOnlyList<OptionSetMetadataDto> GlobalOptionSets)> GetEntityWithGlobalOptionSetsAsync(
+        string logicalName,
+        bool includeGlobalOptionSets = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets all attributes for an entity.
     /// </summary>
     /// <param name="entityLogicalName">The entity logical name.</param>
