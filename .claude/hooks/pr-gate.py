@@ -25,19 +25,12 @@ def main():
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
-    # Skip enforcement on main branch
-    try:
-        branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if branch.returncode == 0 and branch.stdout.strip() in ("main", "master"):
-            sys.exit(0)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass  # Can't determine branch — continue with checks
+    # Resolve the working directory for git checks.
+    # If the gh pr create command includes a -C or --repo-dir flag, use that.
+    # Otherwise, try to detect the worktree directory from the command.
+    # The session may be on main while the PR targets a worktree branch,
+    # so we must NOT skip enforcement based on the session's branch.
+    # Instead, we check workflow state which lives in the worktree.
 
     state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
 
