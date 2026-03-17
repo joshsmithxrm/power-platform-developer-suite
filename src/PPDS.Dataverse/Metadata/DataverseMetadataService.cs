@@ -184,9 +184,23 @@ public class DataverseMetadataService : IMetadataService
         }
 
         var optionSetTasks = globalOptionSetNames
-            .Select(name => GetOptionSetAsync(name, cancellationToken));
+            .Select(async name =>
+            {
+                try
+                {
+                    return await GetOptionSetAsync(name, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogWarning(ex, "Failed to retrieve global option set {OptionSetName} for entity {EntityLogicalName}", name, logicalName);
+                    return null;
+                }
+            });
 
-        var optionSets = await Task.WhenAll(optionSetTasks);
+        var optionSets = (await Task.WhenAll(optionSetTasks).ConfigureAwait(false))
+            .Where(os => os is not null)
+            .Select(os => os!)
+            .ToList();
 
         return (entity, optionSets);
     }

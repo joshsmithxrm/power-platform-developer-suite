@@ -79,20 +79,19 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         // Create tab buttons
         _tabButtons = new Button[TabNames.Length];
         _tabClickHandlers = new Action[TabNames.Length];
-        var tabX = 0;
+        Button? previousButton = null;
         for (int i = 0; i < TabNames.Length; i++)
         {
             var idx = i;
             _tabButtons[i] = new Button(TabNames[i])
             {
-                X = tabX,
+                X = previousButton is null ? 0 : Pos.Right(previousButton) + 1,
                 Y = 0,
                 ColorScheme = i == 0 ? TuiColorPalette.TabActive : TuiColorPalette.TabInactive
             };
             _tabClickHandlers[i] = () => SwitchTab(idx);
             _tabButtons[i].Clicked += _tabClickHandlers[i];
-            // Estimate button width: text length + brackets/padding (Terminal.Gui adds "[ ]" around text)
-            tabX += TabNames[i].Length + 6;
+            previousButton = _tabButtons[i];
         }
 
         _detailTable = new TableView
