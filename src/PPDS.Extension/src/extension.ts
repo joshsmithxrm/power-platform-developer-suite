@@ -21,6 +21,8 @@ import { SolutionsPanel } from './panels/SolutionsPanel.js';
 import { ImportJobsPanel } from './panels/ImportJobsPanel.js';
 import { PluginTracesPanel } from './panels/PluginTracesPanel.js';
 import { MetadataBrowserPanel } from './panels/MetadataBrowserPanel.js';
+import { ConnectionReferencesPanel } from './panels/ConnectionReferencesPanel.js';
+import { EnvironmentVariablesPanel } from './panels/EnvironmentVariablesPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
@@ -74,6 +76,11 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openMetadataBrowser', () => {
             MetadataBrowserPanel.show(context.extensionUri, client);
+        vscode.commands.registerCommand('ppds.openConnectionReferences', () => {
+            ConnectionReferencesPanel.show(context.extensionUri, client);
+        }),
+        vscode.commands.registerCommand('ppds.openEnvironmentVariables', () => {
+            EnvironmentVariablesPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -274,6 +281,16 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('ppds.openPluginTracesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
             PluginTracesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        // Open Connection References targeting this environment
+        vscode.commands.registerCommand('ppds.openConnectionReferencesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            ConnectionReferencesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        })),
+
+        // Open Environment Variables targeting this environment
+        vscode.commands.registerCommand('ppds.openEnvironmentVariablesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            EnvironmentVariablesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
         })),
 
         // Copy environment URL to clipboard
@@ -382,6 +399,8 @@ export function activate(context: vscode.ExtensionContext): void {
         importJobsPanels: () => ImportJobsPanel.instanceCount,
         pluginTracesPanels: () => PluginTracesPanel.instanceCount,
         metadataBrowserPanels: () => MetadataBrowserPanel.instanceCount,
+        connectionReferencesPanels: () => ConnectionReferencesPanel.instanceCount,
+        environmentVariablesPanels: () => EnvironmentVariablesPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks

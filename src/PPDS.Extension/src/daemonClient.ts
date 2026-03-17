@@ -47,6 +47,12 @@ import type {
     PluginTracesTraceLevelResponse,
     PluginTracesSetTraceLevelResponse,
     TraceFilterDto,
+    ConnectionReferencesListResponse,
+    ConnectionReferencesGetResponse,
+    ConnectionReferencesAnalyzeResponse,
+    EnvironmentVariablesListResponse,
+    EnvironmentVariablesGetResponse,
+    EnvironmentVariablesSetResponse,
 } from './types.js';
 
 // Re-export AuthWhoResponse for profileCommands.ts convenience
@@ -742,6 +748,65 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     // ── Plugin Traces ─────────────────────────────────────────────────────────
+    // ── Connection References ───────────────────────────────────────────────
+
+    async connectionReferencesList(solutionId?: string, environmentUrl?: string): Promise<ConnectionReferencesListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (solutionId !== undefined) params.solutionId = solutionId;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling connectionReferences/list...');
+        const result = await this.connection!.sendRequest<ConnectionReferencesListResponse>('connectionReferences/list', params);
+        this.log.debug(`Got ${result.references.length} connection references`);
+        return result;
+    }
+
+    async connectionReferencesGet(logicalName: string, environmentUrl?: string): Promise<ConnectionReferencesGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { logicalName };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling connectionReferences/get for ${logicalName}...`);
+        return await this.connection!.sendRequest<ConnectionReferencesGetResponse>('connectionReferences/get', params);
+    }
+
+    async connectionReferencesAnalyze(environmentUrl?: string): Promise<ConnectionReferencesAnalyzeResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling connectionReferences/analyze...');
+        return await this.connection!.sendRequest<ConnectionReferencesAnalyzeResponse>('connectionReferences/analyze', params);
+    }
+
+    // ── Environment Variables ───────────────────────────────────────────────
+
+    async environmentVariablesList(solutionId?: string, environmentUrl?: string): Promise<EnvironmentVariablesListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (solutionId !== undefined) params.solutionId = solutionId;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling environmentVariables/list...');
+        const result = await this.connection!.sendRequest<EnvironmentVariablesListResponse>('environmentVariables/list', params);
+        this.log.debug(`Got ${result.variables.length} environment variables`);
+        return result;
+    }
+
+    async environmentVariablesGet(schemaName: string, environmentUrl?: string): Promise<EnvironmentVariablesGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { schemaName };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling environmentVariables/get for ${schemaName}...`);
+        return await this.connection!.sendRequest<EnvironmentVariablesGetResponse>('environmentVariables/get', params);
+    }
+
+    async environmentVariablesSet(schemaName: string, value: string, environmentUrl?: string): Promise<EnvironmentVariablesSetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { schemaName, value };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling environmentVariables/set for ${schemaName}...`);
+        return await this.connection!.sendRequest<EnvironmentVariablesSetResponse>('environmentVariables/set', params);
+    }
+
+    // ── Schema ──────────────────────────────────────────────────────────────
 
     async pluginTracesList(filter?: TraceFilterDto, top?: number, environmentUrl?: string): Promise<PluginTracesListResponse> {
         await this.ensureConnected();

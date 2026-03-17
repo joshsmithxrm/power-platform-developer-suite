@@ -139,6 +139,44 @@ const builds = [
         bundle: true,
         minify: production,
         outfile: 'dist/metadata-browser-panel.css',
+    // Connection References panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/connection-references-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/connection-references-panel.js',
+        logLevel: 'warning',
+    },
+    // Connection References panel CSS
+    {
+        entryPoints: ['src/panels/styles/connection-references-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/connection-references-panel.css',
+        logLevel: 'warning',
+    },
+    // Environment Variables panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/environment-variables-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/environment-variables-panel.js',
+        logLevel: 'warning',
+    },
+    // Environment Variables panel CSS
+    {
+        entryPoints: ['src/panels/styles/environment-variables-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/environment-variables-panel.css',
         logLevel: 'warning',
     },
 ];
