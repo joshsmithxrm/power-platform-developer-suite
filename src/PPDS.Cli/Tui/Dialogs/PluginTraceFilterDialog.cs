@@ -134,7 +134,6 @@ internal sealed class PluginTraceFilterDialog : TuiDialog
             ColorScheme = TuiColorPalette.TextInput
         };
         Add(_minDurationField);
-        row += 2;
 
         // Buttons
         var applyButton = new Button("_Apply")
@@ -144,6 +143,13 @@ internal sealed class PluginTraceFilterDialog : TuiDialog
         };
         applyButton.Clicked += () =>
         {
+            var minDurText = _minDurationField.Text?.ToString()?.Trim();
+            if (!string.IsNullOrEmpty(minDurText) && !int.TryParse(minDurText, out _))
+            {
+                MessageBox.ErrorQuery("Invalid Input", "Min Duration must be a number.", "OK");
+                return;
+            }
+
             _applied = true;
             Application.RequestStop();
         };

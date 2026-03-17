@@ -36,7 +36,7 @@ public sealed class PluginTracesDeleteTool
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result with count of deleted traces.</returns>
     [McpServerTool(Name = "ppds_plugin_traces_delete")]
-    [Description("Delete plugin trace logs. Provide specific IDs for targeted deletion, olderThanDays for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion. Priority: ids > olderThanDays > filter.")]
+    [Description("Delete plugin trace logs. Provide exactly one mode: specific IDs for targeted deletion, olderThanDays for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion.")]
     public async Task<PluginTracesDeleteResult> ExecuteAsync(
         [Description("Trace IDs to delete (array of GUID strings from ppds_plugin_traces_list)")]
         string[]? ids = null,
@@ -54,11 +54,23 @@ public sealed class PluginTracesDeleteTool
     {
         var hasFilter = typeName != null || messageName != null || primaryEntity != null || errorsOnly == true;
 
-        if (ids == null && olderThanDays == null && !hasFilter)
+        int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
+            + (olderThanDays.HasValue ? 1 : 0)
+            + (hasFilter ? 1 : 0);
+
+        if (modeCount == 0)
         {
             return new PluginTracesDeleteResult
             {
                 Error = "At least one parameter is required: provide 'ids' for targeted deletion, 'olderThanDays' for age-based cleanup, or filter parameters (typeName, messageName, primaryEntity, errorsOnly) for criteria-based deletion."
+            };
+        }
+
+        if (modeCount > 1)
+        {
+            return new PluginTracesDeleteResult
+            {
+                Error = "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly)."
             };
         }
 

@@ -71,6 +71,16 @@ internal sealed class TraceDeleteDialog : TuiDialog
         };
         confirmButton.Clicked += () =>
         {
+            if (_modeGroup.SelectedItem == 1)
+            {
+                var dayText = _dayCountField.Text?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(dayText) || !int.TryParse(dayText, out var days) || days <= 0)
+                {
+                    MessageBox.ErrorQuery("Invalid Input", "Day count must be a positive number.", "OK");
+                    return;
+                }
+            }
+
             _confirmed = true;
             Application.RequestStop();
         };

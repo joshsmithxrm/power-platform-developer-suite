@@ -2165,12 +2165,13 @@ public class RpcMethodHandler : IDisposable
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if ((ids == null || ids.Length == 0) && olderThanDays == null && filter == null)
-        {
-            throw new RpcException(
-                ErrorCodes.Validation.RequiredField,
-                "One of 'ids', 'olderThanDays', or 'filter' must be provided");
-        }
+        int modeCount = (ids != null && ids.Length > 0 ? 1 : 0)
+            + (olderThanDays.HasValue ? 1 : 0)
+            + (filter != null ? 1 : 0);
+        if (modeCount == 0)
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "One of 'ids', 'olderThanDays', or 'filter' must be provided");
+        if (modeCount > 1)
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "Only one of 'ids', 'olderThanDays', or 'filter' may be provided per call");
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
@@ -2290,8 +2291,8 @@ public class RpcMethodHandler : IDisposable
             HasException = dto.HasException,
             CorrelationId = dto.CorrelationId != null && Guid.TryParse(dto.CorrelationId, out var corrId) ? corrId : null,
             MinDurationMs = dto.MinDurationMs,
-            CreatedAfter = dto.StartDate != null ? DateTime.Parse(dto.StartDate, null, System.Globalization.DateTimeStyles.RoundtripKind) : null,
-            CreatedBefore = dto.EndDate != null ? DateTime.Parse(dto.EndDate, null, System.Globalization.DateTimeStyles.RoundtripKind) : null
+            CreatedAfter = dto.StartDate != null && DateTime.TryParse(dto.StartDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var startDate) ? startDate : null,
+            CreatedBefore = dto.EndDate != null && DateTime.TryParse(dto.EndDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var endDate) ? endDate : null
         };
     }
 

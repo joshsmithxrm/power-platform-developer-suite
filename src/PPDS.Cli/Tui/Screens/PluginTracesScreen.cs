@@ -223,10 +223,16 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
                 _activeDialog?.Dispose();
                 _activeDialog = new PluginTraceDetailDialog(detail, Session);
-                Application.Run(_activeDialog);
-                _activeDialog.Dispose();
-                _activeDialog = null;
-                _isShowingDialog = false;
+                try
+                {
+                    Application.Run(_activeDialog);
+                }
+                finally
+                {
+                    _activeDialog.Dispose();
+                    _activeDialog = null;
+                    _isShowingDialog = false;
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
@@ -299,10 +305,16 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
                 _activeDialog?.Dispose();
                 _activeDialog = new TraceTimelineDialog(timeline, Session);
-                Application.Run(_activeDialog);
-                _activeDialog.Dispose();
-                _activeDialog = null;
-                _isShowingDialog = false;
+                try
+                {
+                    Application.Run(_activeDialog);
+                }
+                finally
+                {
+                    _activeDialog.Dispose();
+                    _activeDialog = null;
+                    _isShowingDialog = false;
+                }
             });
         }
         catch (OperationCanceledException) { /* screen closing */ }
