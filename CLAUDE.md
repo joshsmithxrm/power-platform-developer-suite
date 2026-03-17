@@ -87,7 +87,7 @@ Steps 5-8 enforced by hooks. PR gate blocks `gh pr create` if incomplete. Run /s
 - DO NOT declare work complete without visual verification of affected surfaces.
 
 ### Autonomy scope
-"Don't ask, just do it" applies to: committing, gates, verification, QA, review, triaging review comments. Does NOT apply to: skipping workflow steps, filing/closing issues, PRs without passing gates.
+"Don't ask, just do it" applies to: committing, gates, verification, QA, review, triaging review comments (fix valid, dismiss invalid w/ rationale). Does NOT apply to: skipping workflow steps, filing/closing issues, PRs without passing gates.
 After external review: respond to EACH PR comment individually with action taken. Include summary in status report.
 
 ## Git Hooks
