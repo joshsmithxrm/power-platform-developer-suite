@@ -2065,6 +2065,291 @@ public class RpcMethodHandler : IDisposable
     }
 
     #endregion
+
+    #region Plugin Traces
+
+    /// <summary>
+    /// Lists plugin trace logs with optional filtering.
+    /// Maps to: ppds plugintraces list --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/list")]
+    public async Task<PluginTracesListResponse> PluginTracesListAsync(
+        TraceFilterDto? filter = null,
+        int top = 100,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            var serviceFilter = MapTraceFilterFromDto(filter);
+            var traces = await traceService.ListAsync(serviceFilter, top, ct);
+
+            return new PluginTracesListResponse
+            {
+                Traces = traces.Select(MapTraceInfoToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single plugin trace with full details.
+    /// Maps to: ppds plugintraces get --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/get")]
+    public async Task<PluginTracesGetResponse> PluginTracesGetAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var traceId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter must be a valid GUID");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            var trace = await traceService.GetAsync(traceId, ct)
+                ?? throw new RpcException(
+                    ErrorCodes.Operation.NotFound,
+                    $"Plugin trace '{id}' not found");
+
+            return new PluginTracesGetResponse
+            {
+                Trace = MapTraceDetailToDto(trace)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds a timeline hierarchy from traces with the given correlation ID.
+    /// Maps to: ppds plugintraces timeline --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/timeline")]
+    public async Task<PluginTracesTimelineResponse> PluginTracesTimelineAsync(
+        string correlationId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId) || !Guid.TryParse(correlationId, out var corrId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'correlationId' parameter must be a valid GUID");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            var nodes = await traceService.BuildTimelineAsync(corrId, ct);
+
+            return new PluginTracesTimelineResponse
+            {
+                Nodes = nodes.Select(MapTimelineNodeToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes plugin traces by IDs or by age.
+    /// Maps to: ppds plugintraces delete --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/delete")]
+    public async Task<PluginTracesDeleteResponse> PluginTracesDeleteAsync(
+        string[]? ids = null,
+        int? olderThanDays = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if ((ids == null || ids.Length == 0) && olderThanDays == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "Either 'ids' or 'olderThanDays' must be provided");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            int deletedCount;
+
+            if (ids != null && ids.Length > 0)
+            {
+                var guids = new List<Guid>(ids.Length);
+                foreach (var idStr in ids)
+                {
+                    if (!Guid.TryParse(idStr, out var guid))
+                    {
+                        throw new RpcException(
+                            ErrorCodes.Validation.InvalidValue,
+                            $"The ID '{idStr}' is not a valid GUID");
+                    }
+                    guids.Add(guid);
+                }
+
+                deletedCount = await traceService.DeleteByIdsAsync(guids, cancellationToken: ct);
+            }
+            else
+            {
+                var olderThan = TimeSpan.FromDays(olderThanDays!.Value);
+                deletedCount = await traceService.DeleteOlderThanAsync(olderThan, cancellationToken: ct);
+            }
+
+            return new PluginTracesDeleteResponse
+            {
+                DeletedCount = deletedCount
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the current plugin trace logging level.
+    /// Maps to: ppds plugintraces tracelevel --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/traceLevel")]
+    public async Task<PluginTracesTraceLevelResponse> PluginTracesTraceLevelAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            var settings = await traceService.GetSettingsAsync(ct);
+
+            return new PluginTracesTraceLevelResponse
+            {
+                Level = settings.SettingName,
+                LevelValue = (int)settings.Setting
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the plugin trace logging level.
+    /// Maps to: ppds plugintraces settracelevel --json
+    /// </summary>
+    [JsonRpcMethod("pluginTraces/setTraceLevel")]
+    public async Task<PluginTracesSetTraceLevelResponse> PluginTracesSetTraceLevelAsync(
+        string level,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(level))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'level' parameter is required");
+        }
+
+        if (!Enum.TryParse<PluginTraceLogSetting>(level, ignoreCase: true, out var setting))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.InvalidValue,
+                $"Invalid trace level '{level}'. Valid values are: Off, Exception, All");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var traceService = sp.GetRequiredService<IPluginTraceService>();
+            await traceService.SetSettingsAsync(setting, ct);
+
+            return new PluginTracesSetTraceLevelResponse
+            {
+                Success = true
+            };
+        }, cancellationToken);
+    }
+
+    // ── Plugin Traces mapper helpers ────────────────────────────────────────
+
+    private static PluginTraceFilter? MapTraceFilterFromDto(TraceFilterDto? dto)
+    {
+        if (dto == null) return null;
+
+        PluginTraceMode? mode = null;
+        if (dto.Mode != null && Enum.TryParse<PluginTraceMode>(dto.Mode, ignoreCase: true, out var parsedMode))
+        {
+            mode = parsedMode;
+        }
+
+        return new PluginTraceFilter
+        {
+            TypeName = dto.TypeName,
+            MessageName = dto.MessageName,
+            PrimaryEntity = dto.PrimaryEntity,
+            Mode = mode,
+            HasException = dto.HasException,
+            CorrelationId = dto.CorrelationId != null && Guid.TryParse(dto.CorrelationId, out var corrId) ? corrId : null,
+            MinDurationMs = dto.MinDurationMs,
+            CreatedAfter = dto.StartDate != null ? DateTime.Parse(dto.StartDate, null, System.Globalization.DateTimeStyles.RoundtripKind) : null,
+            CreatedBefore = dto.EndDate != null ? DateTime.Parse(dto.EndDate, null, System.Globalization.DateTimeStyles.RoundtripKind) : null
+        };
+    }
+
+    private static PluginTraceInfoDto MapTraceInfoToDto(PluginTraceInfo trace)
+    {
+        return new PluginTraceInfoDto
+        {
+            Id = trace.Id.ToString(),
+            TypeName = trace.TypeName,
+            MessageName = trace.MessageName,
+            PrimaryEntity = trace.PrimaryEntity,
+            Mode = trace.Mode == PluginTraceMode.Synchronous ? "Sync" : "Async",
+            OperationType = trace.OperationType.ToString(),
+            Depth = trace.Depth,
+            CreatedOn = trace.CreatedOn.ToString("o"),
+            DurationMs = trace.DurationMs,
+            HasException = trace.HasException,
+            CorrelationId = trace.CorrelationId?.ToString()
+        };
+    }
+
+    private static PluginTraceDetailDto MapTraceDetailToDto(PluginTraceDetail detail)
+    {
+        return new PluginTraceDetailDto
+        {
+            Id = detail.Id.ToString(),
+            TypeName = detail.TypeName,
+            MessageName = detail.MessageName,
+            PrimaryEntity = detail.PrimaryEntity,
+            Mode = detail.Mode == PluginTraceMode.Synchronous ? "Sync" : "Async",
+            OperationType = detail.OperationType.ToString(),
+            Depth = detail.Depth,
+            CreatedOn = detail.CreatedOn.ToString("o"),
+            DurationMs = detail.DurationMs,
+            HasException = detail.HasException,
+            CorrelationId = detail.CorrelationId?.ToString(),
+            ConstructorDurationMs = detail.ConstructorDurationMs,
+            ExecutionStartTime = detail.ExecutionStartTime?.ToString("o"),
+            ExceptionDetails = detail.ExceptionDetails,
+            MessageBlock = detail.MessageBlock,
+            Configuration = detail.Configuration,
+            SecureConfiguration = detail.SecureConfiguration,
+            RequestId = detail.RequestId?.ToString()
+        };
+    }
+
+    private static TimelineNodeDto MapTimelineNodeToDto(TimelineNode node)
+    {
+        return new TimelineNodeDto
+        {
+            TraceId = node.Trace.Id.ToString(),
+            TypeName = node.Trace.TypeName,
+            MessageName = node.Trace.MessageName,
+            Depth = node.Trace.Depth,
+            DurationMs = node.Trace.DurationMs,
+            HasException = node.Trace.HasException,
+            OffsetPercent = node.OffsetPercent,
+            WidthPercent = node.WidthPercent,
+            HierarchyDepth = node.HierarchyDepth,
+            Children = node.Children.Select(MapTimelineNodeToDto).ToList()
+        };
+    }
+
+    #endregion
 }
 
 #region Response DTOs
@@ -3103,6 +3388,192 @@ public class ImportJobDetailDto : ImportJobInfoDto
     [JsonPropertyName("data")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Data { get; set; }
+}
+
+// ── Plugin Traces DTOs ──────────────────────────────────────────────────────
+
+public class PluginTracesListResponse
+{
+    [JsonPropertyName("traces")]
+    public List<PluginTraceInfoDto> Traces { get; set; } = [];
+}
+
+public class PluginTracesGetResponse
+{
+    [JsonPropertyName("trace")]
+    public PluginTraceDetailDto Trace { get; set; } = null!;
+}
+
+public class PluginTracesTimelineResponse
+{
+    [JsonPropertyName("nodes")]
+    public List<TimelineNodeDto> Nodes { get; set; } = [];
+}
+
+public class PluginTracesDeleteResponse
+{
+    [JsonPropertyName("deletedCount")]
+    public int DeletedCount { get; set; }
+}
+
+public class PluginTracesTraceLevelResponse
+{
+    [JsonPropertyName("level")]
+    public string Level { get; set; } = "";
+
+    [JsonPropertyName("levelValue")]
+    public int LevelValue { get; set; }
+}
+
+public class PluginTracesSetTraceLevelResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class PluginTraceInfoDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonPropertyName("messageName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessageName { get; set; }
+
+    [JsonPropertyName("primaryEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryEntity { get; set; }
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonPropertyName("operationType")]
+    public string OperationType { get; set; } = "";
+
+    [JsonPropertyName("depth")]
+    public int Depth { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    public string CreatedOn { get; set; } = "";
+
+    [JsonPropertyName("durationMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DurationMs { get; set; }
+
+    [JsonPropertyName("hasException")]
+    public bool HasException { get; set; }
+
+    [JsonPropertyName("correlationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CorrelationId { get; set; }
+}
+
+public class PluginTraceDetailDto : PluginTraceInfoDto
+{
+    [JsonPropertyName("constructorDurationMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ConstructorDurationMs { get; set; }
+
+    [JsonPropertyName("executionStartTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutionStartTime { get; set; }
+
+    [JsonPropertyName("exceptionDetails")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExceptionDetails { get; set; }
+
+    [JsonPropertyName("messageBlock")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessageBlock { get; set; }
+
+    [JsonPropertyName("configuration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Configuration { get; set; }
+
+    [JsonPropertyName("secureConfiguration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecureConfiguration { get; set; }
+
+    [JsonPropertyName("requestId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequestId { get; set; }
+}
+
+public class TimelineNodeDto
+{
+    [JsonPropertyName("traceId")]
+    public string TraceId { get; set; } = "";
+
+    [JsonPropertyName("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonPropertyName("messageName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessageName { get; set; }
+
+    [JsonPropertyName("depth")]
+    public int Depth { get; set; }
+
+    [JsonPropertyName("durationMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DurationMs { get; set; }
+
+    [JsonPropertyName("hasException")]
+    public bool HasException { get; set; }
+
+    [JsonPropertyName("offsetPercent")]
+    public double OffsetPercent { get; set; }
+
+    [JsonPropertyName("widthPercent")]
+    public double WidthPercent { get; set; }
+
+    [JsonPropertyName("hierarchyDepth")]
+    public int HierarchyDepth { get; set; }
+
+    [JsonPropertyName("children")]
+    public List<TimelineNodeDto> Children { get; set; } = [];
+}
+
+public class TraceFilterDto
+{
+    [JsonPropertyName("typeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TypeName { get; set; }
+
+    [JsonPropertyName("messageName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessageName { get; set; }
+
+    [JsonPropertyName("primaryEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryEntity { get; set; }
+
+    [JsonPropertyName("mode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; set; }
+
+    [JsonPropertyName("hasException")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HasException { get; set; }
+
+    [JsonPropertyName("correlationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CorrelationId { get; set; }
+
+    [JsonPropertyName("minDurationMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinDurationMs { get; set; }
+
+    [JsonPropertyName("startDate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StartDate { get; set; }
+
+    [JsonPropertyName("endDate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EndDate { get; set; }
 }
 
 #endregion

@@ -40,6 +40,13 @@ import type {
     SchemaAttributesResponse,
     ImportJobsListResponse,
     ImportJobsGetResponse,
+    PluginTracesListResponse,
+    PluginTracesGetResponse,
+    PluginTracesTimelineResponse,
+    PluginTracesDeleteResponse,
+    PluginTracesTraceLevelResponse,
+    PluginTracesSetTraceLevelResponse,
+    TraceFilterDto,
 } from './types.js';
 
 // Re-export AuthWhoResponse for profileCommands.ts convenience
@@ -730,6 +737,90 @@ export class DaemonClient implements vscode.Disposable {
         this.log.info(`Calling importJobs/get for ${id}...`);
         const result = await this.connection!.sendRequest<ImportJobsGetResponse>('importJobs/get', params);
         this.log.debug(`Got import job detail: ${result.job.solutionName}`);
+
+        return result;
+    }
+
+    // ── Plugin Traces ─────────────────────────────────────────────────────────
+
+    async pluginTracesList(filter?: TraceFilterDto, top?: number, environmentUrl?: string): Promise<PluginTracesListResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) params.filter = filter;
+        if (top !== undefined) params.top = top;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling pluginTraces/list...');
+        const result = await this.connection!.sendRequest<PluginTracesListResponse>('pluginTraces/list', params);
+        this.log.debug(`Got ${result.traces.length} plugin traces`);
+
+        return result;
+    }
+
+    async pluginTracesGet(id: string, environmentUrl?: string): Promise<PluginTracesGetResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling pluginTraces/get for ${id}...`);
+        const result = await this.connection!.sendRequest<PluginTracesGetResponse>('pluginTraces/get', params);
+        this.log.debug(`Got plugin trace detail: ${result.trace.typeName}`);
+
+        return result;
+    }
+
+    async pluginTracesTimeline(correlationId: string, environmentUrl?: string): Promise<PluginTracesTimelineResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { correlationId };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling pluginTraces/timeline for ${correlationId}...`);
+        const result = await this.connection!.sendRequest<PluginTracesTimelineResponse>('pluginTraces/timeline', params);
+        this.log.debug(`Got ${result.nodes.length} timeline nodes`);
+
+        return result;
+    }
+
+    async pluginTracesDelete(ids?: string[], olderThanDays?: number, environmentUrl?: string): Promise<PluginTracesDeleteResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (ids !== undefined) params.ids = ids;
+        if (olderThanDays !== undefined) params.olderThanDays = olderThanDays;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling pluginTraces/delete...');
+        const result = await this.connection!.sendRequest<PluginTracesDeleteResponse>('pluginTraces/delete', params);
+        this.log.debug(`Deleted ${result.deletedCount} plugin traces`);
+
+        return result;
+    }
+
+    async pluginTracesTraceLevel(environmentUrl?: string): Promise<PluginTracesTraceLevelResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling pluginTraces/traceLevel...');
+        const result = await this.connection!.sendRequest<PluginTracesTraceLevelResponse>('pluginTraces/traceLevel', params);
+        this.log.debug(`Trace level: ${result.level} (${result.levelValue})`);
+
+        return result;
+    }
+
+    async pluginTracesSetTraceLevel(level: string, environmentUrl?: string): Promise<PluginTracesSetTraceLevelResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { level };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling pluginTraces/setTraceLevel with level=${level}...`);
+        const result = await this.connection!.sendRequest<PluginTracesSetTraceLevelResponse>('pluginTraces/setTraceLevel', params);
+        this.log.debug(`Set trace level success: ${result.success}`);
 
         return result;
     }
