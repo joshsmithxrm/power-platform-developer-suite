@@ -76,6 +76,7 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openMetadataBrowser', () => {
             MetadataBrowserPanel.show(context.extensionUri, client);
+        }),
         vscode.commands.registerCommand('ppds.openConnectionReferences', () => {
             ConnectionReferencesPanel.show(context.extensionUri, client);
         }),
@@ -281,6 +282,8 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('ppds.openPluginTracesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
             PluginTracesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        })),
+
         // Open Connection References targeting this environment
         vscode.commands.registerCommand('ppds.openConnectionReferencesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;

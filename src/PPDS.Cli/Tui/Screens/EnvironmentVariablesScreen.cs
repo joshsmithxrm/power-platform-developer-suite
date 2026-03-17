@@ -188,7 +188,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 {
                     var readOnlyLabel = new Label(variable.CurrentValue ?? "(not set - read only)")
                     {
-                        X = 1, Y = y++
+                        X = 1, Y = y
                     };
                     detailViews.Add(readOnlyLabel);
                 }
@@ -209,7 +209,6 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     {
                         boolGroup.SelectedItem = 1;
                     }
-                    y += 2;
                     detailViews.Add(boolGroup);
                 }
                 else if (variable.Type == "JSON")
@@ -224,7 +223,6 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                         ReadOnly = false
                     };
                     valueEditor = textView;
-                    y += 6;
                     detailViews.Add(textView);
                 }
                 else
@@ -233,7 +231,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                     var textField = new TextField(variable.CurrentValue ?? "")
                     {
                         X = 1,
-                        Y = y++,
+                        Y = y,
                         Width = Dim.Fill(2)
                     };
                     valueEditor = textField;

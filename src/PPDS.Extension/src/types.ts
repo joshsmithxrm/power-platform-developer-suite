@@ -488,6 +488,8 @@ export interface TraceFilterDto {
     minDurationMs?: number;
     startDate?: string;
     endDate?: string;
+}
+
 // ── Connection References ───────────────────────────────────────────────
 
 export interface ConnectionReferencesListResponse {

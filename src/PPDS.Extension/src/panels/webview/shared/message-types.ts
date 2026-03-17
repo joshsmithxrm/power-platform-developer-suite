@@ -243,6 +243,9 @@ export type MetadataBrowserPanelHostToWebview =
     | { command: 'entityDetailLoaded'; entity: MetadataEntityDetailDto }
     | { command: 'entityDetailLoading'; logicalName: string }
     | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
+
 // ── Connection References Panel ──────────────────────────────────────────
 
 /** Connection reference info as sent to the webview for table display. */

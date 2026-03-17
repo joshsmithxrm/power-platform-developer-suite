@@ -252,6 +252,8 @@
         "title": "Open Metadata Browser",
         "category": "PPDS",
         "icon": "$(symbol-class)"
+      },
+      {
         "command": "ppds.openConnectionReferences",
         "title": "Open Connection References",
         "category": "PPDS",
