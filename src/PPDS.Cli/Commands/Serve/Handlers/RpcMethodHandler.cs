@@ -30,6 +30,7 @@ using StreamJsonRpc;
 using PluginTypeInfoModel = PPDS.Cli.Plugins.Registration.PluginTypeInfo;
 using PluginImageInfoModel = PPDS.Cli.Plugins.Registration.PluginImageInfo;
 using ConnRefRelationshipType = PPDS.Dataverse.Services.RelationshipType;
+using WebResourceInfoModel = PPDS.Dataverse.Services.WebResourceInfo;
 
 namespace PPDS.Cli.Commands.Serve.Handlers;
 
@@ -2831,6 +2832,232 @@ public class RpcMethodHandler : IDisposable
     }
 
     #endregion
+
+    #region Web Resources
+
+    /// <summary>
+    /// Lists web resources for an environment, optionally filtered by solution.
+    /// Maps to: ppds webresources list --json
+    /// </summary>
+    [JsonRpcMethod("webResources/list")]
+    public async Task<WebResourcesListResponse> WebResourcesListAsync(
+        string? solutionId = null,
+        bool textOnly = true,
+        int top = 5000,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        Guid? parsedSolutionId = null;
+        if (!string.IsNullOrWhiteSpace(solutionId))
+        {
+            if (!Guid.TryParse(solutionId, out var sid))
+            {
+                throw new RpcException(
+                    ErrorCodes.Validation.InvalidValue,
+                    "The 'solutionId' parameter must be a valid GUID");
+            }
+            parsedSolutionId = sid;
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            var resources = await webResourceService.ListAsync(parsedSolutionId, textOnly, top, ct);
+
+            return new WebResourcesListResponse
+            {
+                Resources = resources.Select(MapWebResourceToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single web resource with content.
+    /// Maps to: ppds webresources get --json
+    /// </summary>
+    [JsonRpcMethod("webResources/get")]
+    public async Task<WebResourcesGetResponse> WebResourcesGetAsync(
+        string id,
+        bool published = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter must be a valid GUID");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            var content = await webResourceService.GetContentAsync(resourceId, published, ct);
+
+            return new WebResourcesGetResponse
+            {
+                Resource = content != null
+                    ? new WebResourceDetailDto
+                    {
+                        Id = content.Id.ToString(),
+                        Name = content.Name,
+                        WebResourceType = content.WebResourceType,
+                        Content = content.Content,
+                        ModifiedOn = content.ModifiedOn?.ToString("o")
+                    }
+                    : null
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the modifiedOn timestamp for a web resource (lightweight conflict detection).
+    /// Maps to: ppds webresources get-modified-on
+    /// </summary>
+    [JsonRpcMethod("webResources/getModifiedOn")]
+    public async Task<WebResourcesGetModifiedOnResponse> WebResourcesGetModifiedOnAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter must be a valid GUID");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            var modifiedOn = await webResourceService.GetModifiedOnAsync(resourceId, ct);
+
+            return new WebResourcesGetModifiedOnResponse
+            {
+                ModifiedOn = modifiedOn?.ToString("o")
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates the content of a web resource. Does NOT publish.
+    /// Maps to: ppds webresources update
+    /// </summary>
+    [JsonRpcMethod("webResources/update")]
+    public async Task<WebResourcesUpdateResponse> WebResourcesUpdateAsync(
+        string id,
+        string content,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var resourceId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'id' parameter must be a valid GUID");
+        }
+
+        if (content == null)
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'content' parameter is required");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            await webResourceService.UpdateContentAsync(resourceId, content, ct);
+
+            return new WebResourcesUpdateResponse
+            {
+                Success = true
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Publishes specific web resources via PublishXml.
+    /// Maps to: ppds webresources publish
+    /// </summary>
+    [JsonRpcMethod("webResources/publish")]
+    public async Task<WebResourcesPublishResponse> WebResourcesPublishAsync(
+        string[] ids,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (ids == null || ids.Length == 0)
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'ids' parameter must contain at least one GUID");
+        }
+
+        var parsedIds = new List<Guid>(ids.Length);
+        foreach (var rawId in ids)
+        {
+            if (!Guid.TryParse(rawId, out var parsed))
+            {
+                throw new RpcException(
+                    ErrorCodes.Validation.InvalidValue,
+                    $"The value '{rawId}' is not a valid GUID");
+            }
+            parsedIds.Add(parsed);
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            var count = await webResourceService.PublishAsync(parsedIds, ct);
+
+            return new WebResourcesPublishResponse
+            {
+                PublishedCount = count
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Publishes all customizations via PublishAllXml.
+    /// Maps to: ppds webresources publish-all
+    /// </summary>
+    [JsonRpcMethod("webResources/publishAll")]
+    public async Task<WebResourcesPublishAllResponse> WebResourcesPublishAllAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var webResourceService = sp.GetRequiredService<IWebResourceService>();
+            await webResourceService.PublishAllAsync(ct);
+
+            return new WebResourcesPublishAllResponse
+            {
+                Success = true
+            };
+        }, cancellationToken);
+    }
+
+    private static WebResourceInfoDto MapWebResourceToDto(WebResourceInfoModel wr)
+    {
+        return new WebResourceInfoDto
+        {
+            Id = wr.Id.ToString(),
+            Name = wr.Name,
+            DisplayName = wr.DisplayName,
+            Type = wr.WebResourceType,
+            TypeName = wr.TypeName,
+            FileExtension = wr.FileExtension,
+            IsManaged = wr.IsManaged,
+            IsTextType = wr.IsTextType,
+            CreatedBy = wr.CreatedByName,
+            CreatedOn = wr.CreatedOn?.ToString("o"),
+            ModifiedBy = wr.ModifiedByName,
+            ModifiedOn = wr.ModifiedOn?.ToString("o")
+        };
+    }
+
+    #endregion
 }
 
 #region Response DTOs
@@ -4558,5 +4785,113 @@ public class EnvironmentVariableDetailDto : EnvironmentVariableInfoDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CreatedOn { get; set; }
 }
+
+// ── Web Resources DTOs ──────────────────────────────────────────────────────
+
+#region Web Resources DTOs
+
+public class WebResourcesListResponse
+{
+    [JsonPropertyName("resources")]
+    public List<WebResourceInfoDto> Resources { get; set; } = [];
+}
+
+public class WebResourcesGetResponse
+{
+    [JsonPropertyName("resource")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WebResourceDetailDto? Resource { get; set; }
+}
+
+public class WebResourcesGetModifiedOnResponse
+{
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class WebResourcesUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class WebResourcesPublishResponse
+{
+    [JsonPropertyName("publishedCount")]
+    public int PublishedCount { get; set; }
+}
+
+public class WebResourcesPublishAllResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class WebResourceInfoDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("type")]
+    public int Type { get; set; }
+
+    [JsonPropertyName("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonPropertyName("fileExtension")]
+    public string FileExtension { get; set; } = "";
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("isTextType")]
+    public bool IsTextType { get; set; }
+
+    [JsonPropertyName("createdBy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedBy { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedBy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedBy { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class WebResourceDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("webResourceType")]
+    public int WebResourceType { get; set; }
+
+    [JsonPropertyName("content")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Content { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+#endregion
 
 #endregion
