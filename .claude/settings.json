@@ -199,7 +199,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/pre-commit-validate.py",
+            "command": "py .claude/hooks/pre-commit-validate.py",
             "timeout": 120
           }
         ]
@@ -209,7 +209,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/pr-gate.py",
+            "command": "py .claude/hooks/pr-gate.py",
             "timeout": 30
           }
         ]
@@ -221,7 +221,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/post-commit-state.py",
+            "command": "py .claude/hooks/post-commit-state.py",
             "timeout": 10
           }
         ]
@@ -232,7 +232,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/session-start-workflow.py",
+            "command": "py .claude/hooks/session-start-workflow.py",
             "timeout": 10
           }
         ]
@@ -243,7 +243,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/session-stop-workflow.py",
+            "command": "py .claude/hooks/session-stop-workflow.py",
             "timeout": 10
           }
         ]
