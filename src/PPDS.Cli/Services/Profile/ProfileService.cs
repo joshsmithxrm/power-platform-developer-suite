@@ -24,6 +24,7 @@ public sealed class ProfileService : IProfileService
     private readonly ProfileStore _store;
     private readonly ILogger<ProfileService> _logger;
     private readonly Func<ISecureCredentialStore> _credentialStoreFactory;
+    private readonly EnvironmentConfigStore? _envConfigStore;
 
     /// <summary>
     /// Creates a new profile service.
@@ -35,14 +36,19 @@ public sealed class ProfileService : IProfileService
     /// <see cref="NativeCredentialStore"/> directly (production default).
     /// Pass a custom factory in tests to avoid requiring a configured GCM credential store.
     /// </param>
+    /// <param name="envConfigStore">
+    /// Optional environment config store for cleaning up orphaned environment configs on profile deletion.
+    /// </param>
     public ProfileService(
         ProfileStore store,
         ILogger<ProfileService> logger,
-        Func<ISecureCredentialStore>? credentialStoreFactory = null)
+        Func<ISecureCredentialStore>? credentialStoreFactory = null,
+        EnvironmentConfigStore? envConfigStore = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _credentialStoreFactory = credentialStoreFactory ?? (() => new NativeCredentialStore());
+        _envConfigStore = envConfigStore;
     }
 
     /// <inheritdoc />
@@ -97,6 +103,9 @@ public sealed class ProfileService : IProfileService
             return false;
         }
 
+        // Capture environment URL before removal for orphan cleanup
+        var deletedEnvUrl = profile.Environment?.Url;
+
         // Clean up stored credentials for this profile (only if no other profiles share them)
         await CleanupCredentialsAsync(collection, profile, cancellationToken);
 
@@ -104,6 +113,19 @@ public sealed class ProfileService : IProfileService
         await _store.SaveAsync(collection, cancellationToken);
 
         _logger.LogInformation("Deleted profile {ProfileIdentifier}", profile.DisplayIdentifier);
+
+        // Clean up orphaned environment configs (if no remaining profile references the URL)
+        if (_envConfigStore != null && !string.IsNullOrEmpty(deletedEnvUrl))
+        {
+            var isUrlStillReferenced = collection.All.Any(p =>
+                string.Equals(p.Environment?.Url?.TrimEnd('/'), deletedEnvUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+
+            if (!isUrlStillReferenced)
+            {
+                await _envConfigStore.RemoveConfigAsync(deletedEnvUrl, cancellationToken);
+                _logger.LogInformation("Cleaned up orphaned environment config for {Url}", deletedEnvUrl);
+            }
+        }
 
         return true;
     }
