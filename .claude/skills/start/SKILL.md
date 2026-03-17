@@ -64,7 +64,7 @@ Write `.claude/workflow-state.json` in the worktree:
 ### 6. Open Windows Terminal Tab
 
 ```bash
-wt -w 0 new-tab --title "<name>" -- pwsh -NoExit -Command "Set-Location '<absolute-worktree-path>'; claude"
+wt -w 0 new-tab --title "<name>" -- pwsh -NoExit -Command "Set-Location '<absolute-worktree-path>' && claude"
 ```
 
 - `-w 0` adds the tab to the current window (not a new window)
