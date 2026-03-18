@@ -1,9 +1,17 @@
 # {System Name}
 
 **Status:** Draft | Implemented
-**Version:** 1.0
 **Last Updated:** YYYY-MM-DD
-**Code:** [path/](../path/) | None
+**Code:** [path/](../path/) | None | System-wide
+**Surfaces:** CLI | TUI | Extension | MCP | All | N/A
+
+{**Code** must be grep-friendly path prefixes — not prose like "Multiple (see spec)".}
+{Every spec with an implementation must have at least one code path. See Constitution SL4.}
+{Examples:}
+{- Good: `[src/PPDS.Dataverse/Services/](../src/PPDS.Dataverse/Services/)`}
+{- Good: `[src/PPDS.Cli/Commands/PluginTraces/](../src/PPDS.Cli/Commands/PluginTraces/)`}
+{- Bad: `Multiple — see per-panel sections`}
+{- Bad: `None` (when code exists)}
 
 ---
 
@@ -67,6 +75,26 @@
 1. **{Step}**: {Description}
 2. **{Step}**: {Description}
 3. **{Step}**: {Description}
+
+### Surface-Specific Behavior
+
+{Include subsections only for surfaces with meaningful behavior beyond the Application Service.}
+
+#### CLI Surface
+
+{CLI-specific commands, flags, output format.}
+
+#### TUI Surface
+
+{Screen layout, keyboard navigation, filter dialogs.}
+
+#### Extension Surface
+
+{Panel wiring, webview behavior, VS Code integration.}
+
+#### MCP Surface
+
+{Tool schema, response format.}
 
 ### Constraints
 
@@ -250,6 +278,14 @@ public class New{Thing} : I{Thing}
 - [{other-spec}.md](./other-spec.md) - {Relationship description}
 
 {Note: ADRs are absorbed into Design Decisions, not linked here.}
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| YYYY-MM-DD | Initial spec |
 
 ---
 
