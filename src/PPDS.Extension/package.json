@@ -407,14 +407,18 @@
         },
         {
           "command": "ppds.openPluginTracesForEnv",
-          "command": "ppds.openConnectionReferencesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@4"
         },
         {
-          "command": "ppds.openEnvironmentVariablesForEnv",
+          "command": "ppds.openConnectionReferencesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@5"
+        },
+        {
+          "command": "ppds.openEnvironmentVariablesForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@6"
         },
         {
           "command": "ppds.openInMaker",

@@ -139,6 +139,8 @@ const builds = [
         bundle: true,
         minify: production,
         outfile: 'dist/metadata-browser-panel.css',
+        logLevel: 'warning',
+    },
     // Connection References panel webview (browser, IIFE)
     {
         entryPoints: ['src/panels/webview/connection-references-panel.ts'],
