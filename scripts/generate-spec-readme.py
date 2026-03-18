@@ -72,9 +72,8 @@ def extract_frontmatter(filepath):
             in_overview = True
             continue
         if in_overview and line.strip() and not line.startswith("#"):
-            # Take first sentence
-            sentence = re.split(r"(?<=[.!?])\s", line.strip())[0]
-            purpose = sentence
+            # Take entire first line — more robust than sentence splitting
+            purpose = line.strip()
             break
 
     # Escape pipe characters to prevent breaking markdown table
