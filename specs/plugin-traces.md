@@ -1,15 +1,15 @@
 # Plugin Traces
 
 **Status:** Implemented
-**Version:** 1.0
-**Last Updated:** 2026-01-28
-**Code:** [src/PPDS.Dataverse/Services/](../src/PPDS.Dataverse/Services/) | [src/PPDS.Cli/Commands/PluginTraces/](../src/PPDS.Cli/Commands/PluginTraces/)
+**Last Updated:** 2026-03-18
+**Code:** [src/PPDS.Dataverse/Services/IPluginTraceService.cs](../src/PPDS.Dataverse/Services/IPluginTraceService.cs) | [src/PPDS.Cli/Commands/PluginTraces/](../src/PPDS.Cli/Commands/PluginTraces/) | [src/PPDS.Extension/src/panels/PluginTracesPanel.ts](../src/PPDS.Extension/src/panels/PluginTracesPanel.ts) | [src/PPDS.Cli/Tui/Screens/PluginTracesScreen.cs](../src/PPDS.Cli/Tui/Screens/PluginTracesScreen.cs)
+**Surfaces:** CLI, TUI, Extension, MCP
 
 ---
 
 ## Overview
 
-The plugin traces system provides querying, inspection, and management of Dataverse plugin trace logs. It supports filtered listing, detailed trace inspection, execution timeline visualization with depth-based hierarchy, trace log settings management, and bulk deletion with progress reporting.
+The plugin traces system provides querying, inspection, and management of Dataverse plugin trace logs. It supports filtered listing, detailed trace inspection, execution timeline visualization with depth-based hierarchy, trace log settings management, and bulk deletion with progress reporting. Available across all four PPDS surfaces — CLI, TUI, VS Code extension, and MCP.
 
 ### Goals
 
@@ -17,6 +17,7 @@ The plugin traces system provides querying, inspection, and management of Datave
 - **Timeline**: Visualize plugin execution chains as hierarchical timelines using correlation IDs
 - **Management**: Delete traces (single, filtered, bulk) and control trace logging settings
 - **Performance**: Identify slow plugins via duration filtering and execution metrics
+- **Multi-surface consistency**: Same data and operations via VS Code, TUI, MCP, and CLI (Constitution A1, A2)
 
 ### Non-Goals
 
@@ -29,32 +30,30 @@ The plugin traces system provides querying, inspection, and management of Datave
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Application Layer                            │
-│            (CLI: ppds plugintraces list/get/delete/...)          │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-         ┌─────────────────────┴─────────────────────┐
-         │                                           │
-         ▼                                           ▼
-┌──────────────────────────┐          ┌──────────────────────────────┐
-│   IPluginTraceService    │          │  TimelineHierarchyBuilder    │
-│   (query, delete,        │          │  (depth-based hierarchy,     │
-│    settings, count)      │          │   positioning calculation)   │
-└────────────┬─────────────┘          └──────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│ IDataverseConnectionPool │
-│ (FetchXml + QueryExpr)   │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│     Dataverse            │
-│   (plugintracelog entity) │
-└──────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      UI Surfaces (thin)                       │
+│  ┌───────────┐  ┌──────────────┐  ┌──────┐  ┌─────────┐    │
+│  │  VS Code  │  │     TUI      │  │ MCP  │  │   CLI   │    │
+│  │  Webview  │  │   Screen     │  │ Tool │  │ Command │    │
+│  └─────┬─────┘  └──────┬───────┘  └──┬───┘  └────┬────┘    │
+│   JSON-RPC          Direct        Direct       Direct        │
+│  ┌─────▼────────────────▼────────────▼────────────▼────────┐ │
+│  │                IPluginTraceService                       │ │
+│  │    ListAsync, GetAsync, GetRelatedAsync,                 │ │
+│  │    BuildTimelineAsync, DeleteAsync, Settings              │ │
+│  ├─────────────────────────────────────────────────────────┤ │
+│  │            TimelineHierarchyBuilder                      │ │
+│  │    (depth-based hierarchy, positioning calculation)       │ │
+│  └─────────────────────┬───────────────────────────────────┘ │
+│                        │                                      │
+│  ┌─────────────────────▼───────────────────────────────────┐ │
+│  │         IDataverseConnectionPool                         │ │
+│  │         (FetchXml + QueryExpression)                     │ │
+│  └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+VS Code panel communicates through the daemon (JSON-RPC over stdio). TUI, MCP, and CLI call services directly. All surfaces get the same data from the same service methods (Constitution A1, A2).
 
 ### Components
 
@@ -63,12 +62,19 @@ The plugin traces system provides querying, inspection, and management of Datave
 | `PluginTraceService` | Query, delete, settings operations via connection pool |
 | `TimelineHierarchyBuilder` | Static utility: builds depth-based timeline hierarchies |
 | CLI Commands (6) | list, get, related, timeline, settings, delete |
+| `PluginTracesPanel.ts` | VS Code webview panel — filter bar, split pane, 5-tab detail, auto-refresh |
+| `PluginTracesScreen.cs` | TUI screen — split pane, filter/timeline/delete/traceLevel dialogs |
+| `PluginTracesListTool.cs` | MCP tool — filtered trace listing |
+| `PluginTracesGetTool.cs` | MCP tool — full trace detail |
+| `PluginTracesTimelineTool.cs` | MCP tool — execution timeline |
+| `PluginTracesDeleteTool.cs` | MCP tool — bulk trace cleanup |
 
 ### Dependencies
 
 - Depends on: [connection-pooling.md](./connection-pooling.md) for pooled Dataverse clients
 - Depends on: [authentication.md](./authentication.md) for environment connection
 - Uses patterns from: [architecture.md](./architecture.md) for Application Service layer
+- Uses patterns from: [CONSTITUTION.md](./CONSTITUTION.md) — A1, A2, D1
 
 ---
 
@@ -99,12 +105,75 @@ The plugin traces system provides querying, inspection, and management of Datave
 2. **Delete**: `ppds plugintraces delete --older-than 7d` to remove old traces
 3. **Delete all**: `ppds plugintraces delete --all --force` to clear all traces
 
+### RPC Endpoints
+
+| Method | Request | Response |
+|--------|---------|----------|
+| `pluginTraces/list` | `{ filter?: TraceFilter, top?, environmentUrl? }` | `{ traces: PluginTraceInfo[] }` |
+| `pluginTraces/get` | `{ id, environmentUrl? }` | `{ trace: PluginTraceDetail }` |
+| `pluginTraces/timeline` | `{ correlationId, environmentUrl? }` | `{ nodes: TimelineNode[] }` |
+| `pluginTraces/delete` | `{ ids?, olderThanDays?, environmentUrl? }` | `{ deletedCount: number }` |
+| `pluginTraces/traceLevel` | `{ environmentUrl? }` | `{ level: string }` |
+| `pluginTraces/setTraceLevel` | `{ level, environmentUrl? }` | `{ success: boolean }` |
+
+**TraceFilter fields:** typeName?, messageName?, primaryEntity?, mode? (Sync/Async), hasException?, correlationId?, minDuration?, startDate?, endDate?
+
+**PluginTraceInfo fields (list):** id, createdOn, typeName, primaryEntity, messageName, operationType, mode, depth, duration, hasException
+
+**PluginTraceDetail fields:** all of PluginTraceInfo + exceptionDetails, messageBlock, configuration, secureConfiguration, correlationId, executionStartTime, performanceConstructorDuration, performanceExecutionDuration
+
+**TimelineNode fields:** traceId, typeName, messageName, depth, duration, startTime, hasException, children[]
+
+### Extension Surface
+
+- **viewType:** `ppds.pluginTraces`
+- **Layout:** Three-zone with split pane — top: filter bar + trace list, bottom: detail/timeline (resizable splitter)
+- **Filter bar (persistent, collapsible):** Entity filter, message filter, plugin name filter, mode (Sync/Async/All), exceptions only toggle, date range, quick filters (Last Hour, Exceptions Only, Long Running >1s), clear all
+- **Table columns:** Status (icon), Time, Duration, Plugin Name, Entity, Message, Depth, Mode
+- **Color coding:** Exception rows red, long-running (>1s) yellow
+- **Detail pane (5 tabs):** Details, Exception (monospace), Message Block (monospace), Configuration, Timeline (hierarchical tree with timing)
+- **Actions:** Refresh, filter, auto-refresh toggle (5/15/30/60/300s), delete (selected/filtered/older than N days with confirmation), set trace level (Off/Exception/All with volume warning), export (CSV/JSON), open related traces (by correlation ID), environment picker with theming
+
+### TUI Surface
+
+- **Class:** `PluginTracesScreen` extending `TuiScreenBase`, implementing `ITuiScreen` and `ITuiStateCapture<PluginTraceScreenState>`
+- **Layout:** Split pane — top: data table, bottom: detail view (resizable via SplitterView)
+- **Filter bar:** Inline quick-filter bar for type name, message name, entity, and errors-only toggle. Advanced filter via Ctrl+F opens `PluginTraceFilterDialog` with all 16 `PluginTraceFilter` criteria. Quick filter bar uses 300ms debounce to avoid excessive Dataverse calls.
+- **Hotkeys:** Ctrl+R (refresh), Enter (toggle detail), Ctrl+F (filter dialog), Ctrl+T (timeline), Ctrl+D (delete dialog), Ctrl+L (trace level), Ctrl+E (export), Tab (cycle detail tabs)
+- **Dialogs:**
+  - `PluginTraceDetailDialog` — full trace detail with exception (scrollable), message block, timing. Button to navigate to timeline for this trace's correlation ID. Implements `ITuiStateCapture<PluginTraceDetailDialogState>`.
+  - `PluginTraceFilterDialog` — advanced 16-criteria filter form. Returns configured `PluginTraceFilter` on Apply, null on Cancel. Implements `ITuiStateCapture<PluginTraceFilterDialogState>`.
+  - `PluginTraceTimelineDialog` — hierarchical timeline tree from `TimelineHierarchyBuilder`. Selecting a node opens its detail dialog. Implements `ITuiStateCapture<PluginTraceTimelineDialogState>`.
+  - `TraceLevelDialog` — read/set trace logging level with volume warning for "All"
+  - `TraceDeleteDialog` — delete by selected IDs, by filter, or older than N days with confirmation
+- **Status line:** Shows trace count and active filter summary
+- **State capture types:**
+  - `PluginTraceScreenState`: TraceCount, SelectedTraceId, SelectedTypeName, IsLoading, IsErrorsOnly, QuickFilterType/Message/Entity, HasAdvancedFilter, StatusText, ErrorMessage
+  - `PluginTraceDetailDialogState`: TraceId, TypeName, MessageName, PrimaryEntity, DurationMs, HasException, ExceptionText, MessageBlock, CorrelationId, Depth
+  - `PluginTraceFilterDialogState`: All 16 filter criteria fields + IsApplied
+  - `PluginTraceTimelineDialogState`: RootCount, TotalNodeCount, SelectedTraceId, SelectedTypeName, TotalDurationMs
+- **Error handling:** All service calls run on background thread; UI updates via `Application.MainLoop.Invoke()`. Errors reported via `ITuiErrorService.ReportError()` with F12 detail access. Connection errors show "Press F5 to retry" in status line.
+- **Edge cases:** Trace with no correlation ID disables timeline button (tooltip explains why). No traces matching filter shows "0 traces matching filter" in status line. Delete button disabled during load.
+
+### MCP Surface
+
+| Tool | Input | Output | Status |
+|------|-------|--------|--------|
+| `ppds_plugin_traces_list` | `{ filter?, top? }` | Filtered trace list | Exists |
+| `ppds_plugin_traces_get` | `{ id }` | Full trace detail | Exists |
+| `ppds_plugin_traces_timeline` | `{ correlationId }` | Execution tree | Exists |
+| `ppds_plugin_traces_delete` | `{ ids?, olderThanDays? }` | Deleted count | Exists |
+
 ### Constraints
 
 - Plugin trace logging must be enabled in the environment (settings set to Exception or All)
 - Traces are created by the platform, not by this system
 - `plugintracelog` entity has OData limitations; FetchXml is used for count operations
 - Bulk deletion uses parallel requests via connection pool
+- TUI filter bar debounce at 300ms to avoid excessive Dataverse calls
+- Maximum 1000 traces per query (configurable via top parameter)
+- Timeline dialog shows traces for one correlation ID only
+- Deletion confirmation is mandatory; no silent bulk deletes
 
 ### Validation Rules
 
@@ -114,6 +183,36 @@ The plugin traces system provides querying, inspection, and management of Datave
 | `--older-than` | Must be valid duration (e.g., 7d, 24h, 30m) | Parse error |
 | `--all` | Requires `--force` flag | Error message |
 | `--record` | Format: `entity` or `entity/guid` | Parse error with example |
+| Min Duration (TUI filter) | Non-negative integer | "Duration must be a positive number" |
+| Max Duration (TUI filter) | Greater than Min Duration | "Max duration must be greater than min" |
+| Created After/Before (TUI filter) | Valid date format | "Enter date as YYYY-MM-DD or YYYY-MM-DD HH:mm" |
+
+---
+
+## Acceptance Criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-PT-01 | `pluginTraces/list` applies all filter combinations server-side | TBD | ✅ |
+| AC-PT-02 | `pluginTraces/get` returns full detail including exception, message block, configuration | TBD | ✅ |
+| AC-PT-03 | `pluginTraces/timeline` returns hierarchical execution tree | TBD | ✅ |
+| AC-PT-04 | `pluginTraces/delete` supports by IDs, by filter, and by age | TBD | ✅ |
+| AC-PT-05 | `pluginTraces/traceLevel` and `setTraceLevel` read/write organization setting | TBD | ✅ |
+| AC-PT-06 | VS Code panel displays trace list with filter bar, color-coded status, resizable detail pane | TBD | ✅ |
+| AC-PT-07 | Detail pane has 5 tabs (Details, Exception, Message Block, Configuration, Timeline) | TBD | ✅ |
+| AC-PT-08 | Timeline tab renders hierarchical execution chain with timing | TBD | ✅ |
+| AC-PT-09 | Quick filters apply correct filter combinations | TBD | ✅ |
+| AC-PT-10 | Auto-refresh updates list at configured interval without losing selection | TBD | ✅ |
+| AC-PT-11 | Delete operations require confirmation and report count | TBD | ✅ |
+| AC-PT-12 | Trace level change shows warning about volume impact for "All" | TBD | ✅ |
+| AC-PT-13 | TUI PluginTracesScreen provides equivalent functionality with split pane | TBD | ✅ |
+| AC-PT-14 | Existing MCP tools continue working; delete tool supports bulk cleanup | TBD | ✅ |
+| AC-PT-15 | All surfaces handle "trace level is Off" — informational message, not empty table | TBD | ✅ |
+| AC-PT-16 | VS Code panel has export button — CSV and JSON formats, respects current filter state | TBD | 🔲 |
+| AC-PT-17 | VS Code filter bar has start date and end date inputs; quick filters update date inputs | TBD | 🔲 |
+| AC-PT-18 | Panel calls `resolveEnvironmentId()` and supports Open in Maker action | TBD | 🔲 |
+| AC-PT-19 | TUI Ctrl+E hotkey exports filtered traces to CSV/JSON file | TBD | 🔲 |
+| AC-PT-20 | Open in Maker uses `buildMakerUrl()` (not inline URL construction) | TBD | 🔲 |
 
 ---
 
@@ -428,16 +527,21 @@ Deletes plugin trace logs with multiple modes.
 | Settings update failed | Insufficient privileges | Requires System Administrator role |
 | Deletion failed | Service protection limits | Automatic retry via connection pool |
 | Filter parse error | Invalid --record or --older-than format | Error message with expected format |
+| Service unavailable | No connection to environment | Status line error; retry with F5 (TUI) or Ctrl+R (Extension) |
+| Authentication expired | Token expired mid-session | Re-authentication dialog (TUI) or reconnect prompt (Extension) |
 
 ### Edge Cases
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
-| No traces match filter | Return empty list, count returns 0 |
+| No traces match filter | Return empty list, count returns 0. TUI/Extension show "No traces found" message |
 | Delete non-existent trace | Return false (not found) |
 | --all without --force | Error: "--all requires --force" |
 | Depth = 1 trace | Root node in timeline (HierarchyDepth = 0) |
-| No correlation ID | Timeline returns single-node list |
+| No correlation ID | Timeline returns single-node list. TUI disables timeline button with tooltip |
+| Trace level is Off | Informational message on all surfaces, not just empty table |
+| Very long exception text | Scrollable views on all surfaces (TextView in TUI, monospace in Extension) |
+| Delete while loading (TUI) | Delete button disabled during load; re-enabled after |
 
 ---
 
@@ -492,6 +596,25 @@ Deletes plugin trace logs with multiple modes.
 - Positive: Progress feedback for long operations
 - Negative: Service protection limits may throttle (handled by pool retry)
 
+### Why Inline Filter Bar + Advanced Filter Dialog (TUI)?
+
+**Context:** Plugin traces have 16 filter criteria. Exposing all in the main UI would be overwhelming; exposing none would lose the quick-filter experience.
+
+**Decision:** Two-tier filtering. Inline filter bar for the 3 most common text filters (type, message, entity) plus errors-only toggle. Ctrl+F opens advanced dialog for all 16 criteria.
+
+**Consequences:**
+- Positive: Fast common-case filtering without leaving the table
+- Positive: Full power available via Ctrl+F for complex investigations
+- Negative: Two places to set filters; must show combined summary in status line
+
+### Why Split Pane in Extension but Modal Dialogs in TUI?
+
+**Context:** Both surfaces need to show trace detail alongside the trace list.
+
+**Decision:** Extension uses a resizable split pane (top: list, bottom: detail). TUI uses modal dialogs for detail and timeline.
+
+**Rationale:** Extension webview has sufficient viewport height and CSS layout flexibility for split panes. TUI has limited terminal height and 7 trace table columns that need full width. Modal dialogs give the TUI detail view full focus for exception reading, with Esc returning to the table with selection preserved.
+
 ---
 
 ## Configuration
@@ -517,20 +640,17 @@ Deletes plugin trace logs with multiple modes.
 | `PluginStepId` | Guid? | null | Plugin step ID |
 | `OrderBy` | string? | null | Sort field (default: "createdon desc") |
 
+### TUI Screen Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| Default top | int | 100 | Number of traces per query |
+| Default order | string | "createdon desc" | Default sort order |
+| Debounce delay | int | 300 | Filter debounce in milliseconds |
+
 ---
 
 ## Testing
-
-### Acceptance Criteria
-
-- [ ] List returns traces matching all filter criteria combinations
-- [ ] Get returns full details including exception and message block
-- [ ] Related returns all traces sharing correlation ID
-- [ ] Timeline builds correct hierarchy from execution depth
-- [ ] Settings get/set reads and updates organization setting
-- [ ] Delete removes traces and reports progress
-- [ ] Count returns accurate count for dry-run operations
-- [ ] --all requires --force flag
 
 ### Edge Cases
 
@@ -538,9 +658,13 @@ Deletes plugin trace logs with multiple modes.
 |----------|-------|-----------------|
 | Empty environment | Any list query | Empty list |
 | Single trace | Timeline with 1 trace | Single root node, no children |
-| Deep nesting | Depth 1→2→3→2→1 | Two root nodes, first with 2-level subtree |
+| Deep nesting | Depth 1->2->3->2->1 | Two root nodes, first with 2-level subtree |
 | Missing duration | Trace with DurationMs=null | Display as "--" or 0 |
 | Concurrent deletion | Parallel delete + list | Eventually consistent results |
+| No correlation ID (TUI) | Selected trace has null CorrelationId | Ctrl+T shows "No correlation ID" message |
+| Filter produces 0 results | Restrictive filter | Empty table, status "0 traces matching filter" |
+| Delete all visible (TUI) | Select all + delete | Confirmation with count, table empties on success |
+| Long exception text | 500+ line stack trace | Scrollable TextView in TUI detail dialog |
 
 ### Test Examples
 
@@ -574,6 +698,21 @@ public async Task ListAsync_FiltersErrorsOnly()
 
     Assert.All(traces, t => Assert.True(t.HasException));
 }
+
+[Fact]
+[Trait("Category", "TuiUnit")]
+public void PluginTraceScreen_CapturesInitialState()
+{
+    var session = CreateMockSession();
+    var screen = new PluginTraceScreen(session, new TuiErrorService());
+
+    var state = screen.CaptureState();
+
+    Assert.Equal(0, state.TraceCount);
+    Assert.Null(state.SelectedTraceId);
+    Assert.False(state.IsLoading);
+    Assert.False(state.IsErrorsOnly);
+}
 ```
 
 ---
@@ -584,12 +723,23 @@ public async Task ListAsync_FiltersErrorsOnly()
 - [connection-pooling.md](./connection-pooling.md) - Pooled clients for parallel operations
 - [architecture.md](./architecture.md) - Application Service layer pattern
 - [cli.md](./cli.md) - CLI output formatting and global options
+- [tui.md](./tui.md) - TUI framework: ITuiScreen, TuiDialog, IHotkeyRegistry, ITuiErrorService, state capture
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-01-28 | Initial spec — service layer and CLI commands |
+| 2026-03-18 | Merged TUI surface from tui-plugin-traces.md, Extension/MCP surfaces from panel-parity.md per SL1/SL3 |
 
 ---
 
 ## Roadmap
 
-- Real-time trace tailing with polling interval
+- Real-time trace tailing with configurable poll interval
 - Trace export to file (CSV/JSON) for offline analysis
 - Aggregate statistics (slowest plugins, error rates by entity)
-- TUI trace browser with interactive filtering and timeline visualization
+- Trace comparison view (diff two traces side-by-side)
+- Direct navigation from trace to plugin registration tree node

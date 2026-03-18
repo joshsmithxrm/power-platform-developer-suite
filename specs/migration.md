@@ -1,9 +1,9 @@
 # Migration
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-28
-**Code:** [src/PPDS.Migration/](../src/PPDS.Migration/)
+**Surfaces:** CLI, TUI
+**Code:** [src/PPDS.Migration/](../src/PPDS.Migration/), TUI: [src/PPDS.Tui/Screens/MigrationScreen.cs](../src/PPDS.Tui/Screens/MigrationScreen.cs)
 
 ---
 
@@ -155,6 +155,63 @@ The migration system provides high-performance data export and import between Da
 | Output path | Must be valid file path | `ArgumentException` |
 | Import data | Must have schema and entity data | `InvalidDataException` |
 | Target environment | Must have entities defined | `SchemaMismatchException` |
+
+### TUI Surface
+
+The `MigrationScreen` provides an interactive Terminal.Gui interface for configuring and monitoring export/import operations. It lives under **Tools > Data Migration** in TuiShell, replacing the "Coming Soon" placeholder.
+
+**Key components:**
+
+| Component | Responsibility |
+|-----------|----------------|
+| `MigrationScreen` | Main screen: mode selection, configuration panel, real-time progress, results display |
+| `ExecutionPlanPreviewDialog` | Modal showing tier ordering, deferred fields, and M2M relationships before import starts |
+| `TuiMigrationProgressReporter` | Adapts `IProgressReporter` to TUI by marshaling all callbacks via `Application.MainLoop.Invoke()` |
+
+**Layout:** RadioGroup (Export/Import) at top; configuration panel below (file paths, options per mode); progress area with phase label, entity progress bars, rate/ETA; results area showing per-entity success/failure/warning counts.
+
+**Hotkeys:**
+
+| Key | Action |
+|-----|--------|
+| Ctrl+Enter | Start export or import operation |
+| Ctrl+P | Open ExecutionPlanPreviewDialog (import mode only) |
+| Escape | Cancel running operation (with confirmation) |
+
+**Core types:**
+
+- `MigrationScreen` — implements `ITuiScreen` and `ITuiStateCapture<MigrationScreenState>`; title is "Data Migration - {environment}"
+- `MigrationScreenState` — captures mode, operation state, paths, current phase/entity, record counts, rate, ETA, elapsed, error/warning counts
+- `MigrationMode` — `Export` | `Import`
+- `MigrationOperationState` — `Idle` | `Configuring` | `PreviewingPlan` | `Running` | `Completed` | `Failed` | `Cancelled`
+- `ExecutionPlanPreviewDialog` — extends `TuiDialog`, implements `ITuiStateCapture<ExecutionPlanPreviewDialogState>`; `IsApproved` indicates proceed vs. cancel
+- `ExecutionPlanPreviewDialogState` — captures tier count, entity count, deferred field count, M2M relationship count, tier summaries
+- `TuiMigrationProgressReporter` — implements `IProgressReporter`; all `Report()`, `Complete()`, and `Error()` calls dispatched to UI thread
+
+**Key TUI constraints:**
+
+- Only one operation (export or import) may run at a time; UI blocks Start while running
+- All migration work runs on a background thread; UI updates are marshaled via `Application.MainLoop.Invoke()`
+- File paths are validated before the Start button is enabled (schema `.xml` must exist for export; data `.zip` must exist for import)
+- Import options cannot be modified while an operation is running
+- Cancellation fires the `CancellationToken`; the operation completes its current batch then stops; partial results are displayed
+- Operations are not resumable — cancellation requires a full restart (mitigated by upsert mode)
+
+**Import plan preview flow:** Before starting import, Ctrl+P reads the data file via `ICmtDataReader`, builds the dependency graph via `IDependencyGraphBuilder`, builds the execution plan via `IExecutionPlanBuilder`, and displays it in `ExecutionPlanPreviewDialog`. The user must approve (Proceed) before the import begins.
+
+**TUI acceptance criteria:**
+
+- [ ] Screen loads in Export mode by default
+- [ ] Mode switch changes configuration panel without losing shared progress/results UI
+- [ ] File paths validated; Start button disabled until paths are valid
+- [ ] Ctrl+P opens `ExecutionPlanPreviewDialog` showing tiers, deferred fields, M2M counts
+- [ ] Progress area updates phase, entity, record count, rate, and ETA in real time
+- [ ] Results area shows per-entity success/failure/warning counts after completion
+- [ ] Cancel stops the operation; partial results displayed; state shows `Cancelled`
+- [ ] `TuiMigrationProgressReporter` marshals all progress updates to the UI thread
+- [ ] `MigrationScreen.CaptureState()` returns accurate `MigrationScreenState`
+
+**TUI code location:** `src/PPDS.Tui/Screens/MigrationScreen.cs` (screen, state, mode, operation state), `src/PPDS.Tui/Dialogs/ExecutionPlanPreviewDialog.cs` (dialog), `src/PPDS.Tui/Progress/TuiMigrationProgressReporter.cs` (progress adapter). Tests use `[Trait("Category", "TuiUnit")]`.
 
 ---
 
@@ -652,3 +709,11 @@ public async Task ParallelExporter_ExportsAllEntities()
 - Resume support for interrupted imports
 - Automatic entity detection from environment
 - Cross-environment user name-based mapping
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Merged TUI surface content from tui-migration.md per SL3 |
