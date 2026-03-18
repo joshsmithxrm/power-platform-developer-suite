@@ -207,7 +207,10 @@ def _behavioral_rules():
         "  • You MUST visually verify affected surfaces before declaring done.\n"
         "    A passing test suite is NOT verification. Use the product yourself.\n"
         "  • Do NOT declare work complete without running /gates → /verify → /qa → /review.\n"
-        "  • PR creation WILL BE BLOCKED if these steps are incomplete."
+        "  • PR creation WILL BE BLOCKED if these steps are incomplete.\n"
+        "  • The stop hook WILL BLOCK session end if workflow steps are incomplete.\n"
+        "  • After each workflow step, proceed to the next WITHOUT asking permission.\n"
+        "    gates → verify → qa → review → pr is a pipeline. Execute end-to-end."
     )
 
 
