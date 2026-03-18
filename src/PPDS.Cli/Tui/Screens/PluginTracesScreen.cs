@@ -91,6 +91,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         // Cancel any in-flight load to prevent races
         _loadCts?.Cancel();
+        _loadCts?.Dispose();
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
         var ct = _loadCts.Token;
 

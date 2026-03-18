@@ -266,6 +266,13 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     }
 
     private async publishAll(): Promise<void> {
+        const confirm = await vscode.window.showWarningMessage(
+            'Publish all customizations? This publishes everything, not just web resources.',
+            { modal: true },
+            'Publish All',
+        );
+        if (confirm !== 'Publish All') return;
+
         try {
             this.postMessage({ command: 'loading' });
             await this.daemon.webResourcesPublishAll(this.environmentUrl);
