@@ -53,6 +53,8 @@ import type {
     EnvironmentVariablesListResponse,
     EnvironmentVariablesGetResponse,
     EnvironmentVariablesSetResponse,
+    WebResourceInfoDto,
+    WebResourceDetailDto,
 } from './types.js';
 
 // Re-export AuthWhoResponse for profileCommands.ts convenience
@@ -804,6 +806,108 @@ export class DaemonClient implements vscode.Disposable {
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
         this.log.info(`Calling environmentVariables/set for ${schemaName}...`);
         return await this.connection!.sendRequest<EnvironmentVariablesSetResponse>('environmentVariables/set', params);
+    }
+
+    // ── Web Resources ──────────────────────────────────────────────────────
+
+    async webResourcesList(
+        solutionId?: string,
+        textOnly = true,
+        top = 5000,
+        environmentUrl?: string,
+    ): Promise<{ resources: WebResourceInfoDto[] }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { textOnly, top };
+        if (solutionId !== undefined) params.solutionId = solutionId;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling webResources/list...');
+        const result = await this.connection!.sendRequest<{ resources: WebResourceInfoDto[] }>('webResources/list', params);
+        this.log.debug(`Got ${result.resources.length} web resources`);
+
+        return result;
+    }
+
+    async webResourcesGet(
+        id: string,
+        published = false,
+        environmentUrl?: string,
+    ): Promise<{ resource: WebResourceDetailDto | null }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { id, published };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling webResources/get for ${id}...`);
+        const result = await this.connection!.sendRequest<{ resource: WebResourceDetailDto | null }>('webResources/get', params);
+        this.log.debug(`Got web resource detail: ${result.resource?.name ?? 'null'}`);
+
+        return result;
+    }
+
+    async webResourcesGetModifiedOn(
+        id: string,
+        environmentUrl?: string,
+    ): Promise<{ modifiedOn: string | null }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling webResources/getModifiedOn for ${id}...`);
+        const result = await this.connection!.sendRequest<{ modifiedOn: string | null }>('webResources/getModifiedOn', params);
+        this.log.debug(`Got modifiedOn: ${result.modifiedOn ?? 'null'}`);
+
+        return result;
+    }
+
+    async webResourcesUpdate(
+        id: string,
+        content: string,
+        environmentUrl?: string,
+    ): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { id, content };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling webResources/update for ${id}...`);
+        const result = await this.connection!.sendRequest<{ success: boolean }>('webResources/update', params);
+        this.log.debug(`Update result: ${result.success}`);
+
+        return result;
+    }
+
+    async webResourcesPublish(
+        ids: string[],
+        environmentUrl?: string,
+    ): Promise<{ publishedCount: number }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { ids };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info(`Calling webResources/publish for ${ids.length} resources...`);
+        const result = await this.connection!.sendRequest<{ publishedCount: number }>('webResources/publish', params);
+        this.log.debug(`Published ${result.publishedCount} web resources`);
+
+        return result;
+    }
+
+    async webResourcesPublishAll(
+        environmentUrl?: string,
+    ): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.info('Calling webResources/publishAll...');
+        const result = await this.connection!.sendRequest<{ success: boolean }>('webResources/publishAll', params);
+        this.log.debug(`PublishAll result: ${result.success}`);
+
+        return result;
     }
 
     // ── Schema ──────────────────────────────────────────────────────────────

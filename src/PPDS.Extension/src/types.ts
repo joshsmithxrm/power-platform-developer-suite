@@ -576,3 +576,28 @@ export interface EnvironmentVariableDetailDto extends EnvironmentVariableInfoDto
     description: string | null;
     createdOn: string | null;
 }
+
+// ── Web Resources ──────────────────────────────────────────────────────────
+
+export interface WebResourceInfoDto {
+    id: string;
+    name: string;
+    displayName?: string;
+    type: number;
+    typeName: string;
+    fileExtension: string;
+    isManaged: boolean;
+    isTextType: boolean;
+    createdBy?: string;
+    createdOn?: string;
+    modifiedBy?: string;
+    modifiedOn?: string;
+}
+
+export interface WebResourceDetailDto {
+    id: string;
+    name: string;
+    webResourceType: number;
+    content?: string;
+    modifiedOn?: string;
+}

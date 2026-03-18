@@ -5,7 +5,7 @@
  */
 
 // Import daemon response types that appear in message payloads
-import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto } from '../../../types.js';
+import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto, WebResourceInfoDto } from '../../../types.js';
 
 // ── Query Panel ─────────────────────────────────────────────────────────────
 
@@ -357,4 +357,29 @@ export type EnvironmentVariablesPanelHostToWebview =
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
     | { command: 'deploymentSettingsExported'; filePath: string }
     | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
+
+// ── Web Resources Panel ──────────────────────────────────────────────────
+
+/** Messages the Web Resources Panel webview sends to the extension host. */
+export type WebResourcesPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'requestSolutionList' }
+    | { command: 'selectSolution'; solutionId: string | null }
+    | { command: 'toggleTextOnly'; textOnly: boolean }
+    | { command: 'openWebResource'; id: string; name: string; isTextType: boolean; webResourceType: number }
+    | { command: 'publishSelected'; ids: string[] }
+    | { command: 'openInMaker' }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Web Resources Panel webview. */
+export type WebResourcesPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
+    | { command: 'webResourcesLoaded'; resources: WebResourceInfoDto[]; requestId: number }
+    | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'publishResult'; count: number; error?: string }
     | { command: 'daemonReconnected' };

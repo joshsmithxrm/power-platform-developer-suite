@@ -135,6 +135,9 @@ public static class ErrorCodes
 
         /// <summary>The operation is not supported.</summary>
         public const string NotSupported = "Operation.NotSupported";
+
+        /// <summary>A conflicting operation is already in progress.</summary>
+        public const string InProgress = "Operation.InProgress";
     }
 
     /// <summary>
@@ -249,5 +252,23 @@ public static class ErrorCodes
 
         /// <summary>The dotnet tool update process exited with non-zero.</summary>
         public const string UpdateFailed = "UpdateCheck.UpdateFailed";
+    }
+
+    /// <summary>
+    /// Web resource operation errors.
+    /// </summary>
+    public static class WebResource
+    {
+        /// <summary>Web resource not found by ID.</summary>
+        public const string NotFound = "WebResource.NotFound";
+
+        /// <summary>Attempted to edit a binary web resource (PNG/JPG/GIF/ICO/XAP).</summary>
+        public const string NotEditable = "WebResource.NotEditable";
+
+        /// <summary>Content conflict — server version has changed since last fetch.</summary>
+        public const string Conflict = "WebResource.Conflict";
+
+        /// <summary>Publish failed for one or more web resources.</summary>
+        public const string PublishFailed = "WebResource.PublishFailed";
     }
 }

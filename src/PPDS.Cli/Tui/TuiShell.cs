@@ -285,6 +285,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Environment Variables", "View and edit environment variables", () => NavigateToEnvironmentVariables()),
             new("Plugin Traces", "Browse plugin trace logs", () => NavigateToPluginTraces()),
             new("Metadata Browser", "Browse entity metadata", () => NavigateToMetadataBrowser()),
+            new("Web Resources", "Browse and manage web resources", () => NavigateToWebResources()),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Environment Details...", "View organization and connection info",
                 hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
@@ -583,6 +584,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _contentArea.Remove(loadingLabel);
 
             var screen = new MetadataExplorerScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToWebResources()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Web Resources...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new WebResourcesScreen(_session);
             NavigateTo(screen);
 
             return false;

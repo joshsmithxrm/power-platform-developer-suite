@@ -276,6 +276,17 @@
         "icon": "$(symbol-variable)"
       },
       {
+        "command": "ppds.openWebResources",
+        "title": "Open Web Resources",
+        "category": "PPDS",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "ppds.openWebResourcesForEnv",
+        "title": "Open Web Resources",
+        "icon": "$(file-code)"
+      },
+      {
         "command": "ppds.copyEnvironmentUrl",
         "title": "Copy URL",
         "icon": "$(copy)"
@@ -419,6 +430,11 @@
           "command": "ppds.openEnvironmentVariablesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@6"
+        },
+        {
+          "command": "ppds.openWebResourcesForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@7"
         },
         {
           "command": "ppds.openInMaker",

@@ -9,6 +9,8 @@ import { registerEnvironmentConfigCommand } from './commands/environmentConfigCo
 import { registerBrowserCommands } from './commands/browserCommands.js';
 import { registerEnvironmentDetailsCommand } from './commands/environmentDetailsCommand.js';
 import { ExplainDocumentProvider } from './providers/explainDocumentProvider.js';
+import { WebResourceFileSystemProvider } from './providers/WebResourceFileSystemProvider.js';
+import { WEB_RESOURCE_SCHEME } from './providers/webResourceUri.js';
 import { DataverseNotebookSerializer } from './notebooks/DataverseNotebookSerializer.js';
 import { DataverseNotebookController } from './notebooks/DataverseNotebookController.js';
 import {
@@ -23,6 +25,7 @@ import { PluginTracesPanel } from './panels/PluginTracesPanel.js';
 import { MetadataBrowserPanel } from './panels/MetadataBrowserPanel.js';
 import { ConnectionReferencesPanel } from './panels/ConnectionReferencesPanel.js';
 import { EnvironmentVariablesPanel } from './panels/EnvironmentVariablesPanel.js';
+import { WebResourcesPanel } from './panels/WebResourcesPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
@@ -60,6 +63,7 @@ function cmd(handler: (...args: any[]) => any): (...args: any[]) => Promise<void
 function registerPanelCommands(
     context: vscode.ExtensionContext,
     client: DaemonClient,
+    fsp: WebResourceFileSystemProvider,
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('ppds.dataExplorer', () => {
@@ -82,6 +86,9 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openEnvironmentVariables', () => {
             EnvironmentVariablesPanel.show(context.extensionUri, client);
+        }),
+        vscode.commands.registerCommand('ppds.openWebResources', () => {
+            WebResourcesPanel.show(context.extensionUri, client, context, undefined, undefined, fsp);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -145,6 +152,13 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.workspace.registerTextDocumentContentProvider(ExplainDocumentProvider.scheme, explainProvider),
         explainProvider,
+    );
+
+    // ── Web Resource FileSystemProvider ─────────────────────────────
+    const webResourceFsp = new WebResourceFileSystemProvider(client);
+    context.subscriptions.push(
+        vscode.workspace.registerFileSystemProvider(WEB_RESOURCE_SCHEME, webResourceFsp, { isCaseSensitive: true }),
+        webResourceFsp,
     );
 
     // ── Restart Daemon Command ───────────────────────────────────────
@@ -296,6 +310,12 @@ export function activate(context: vscode.ExtensionContext): void {
             EnvironmentVariablesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
         })),
 
+        // Open Web Resources targeting this environment
+        vscode.commands.registerCommand('ppds.openWebResourcesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            WebResourcesPanel.show(context.extensionUri, client, context, item.envUrl, item.envDisplayName, webResourceFsp);
+        })),
+
         // Copy environment URL to clipboard
         vscode.commands.registerCommand('ppds.copyEnvironmentUrl', async (item: { envUrl: string }) => {
             if (!item?.envUrl) return;
@@ -404,6 +424,7 @@ export function activate(context: vscode.ExtensionContext): void {
         metadataBrowserPanels: () => MetadataBrowserPanel.instanceCount,
         connectionReferencesPanels: () => ConnectionReferencesPanel.instanceCount,
         environmentVariablesPanels: () => EnvironmentVariablesPanel.instanceCount,
+        webResourcesPanels: () => WebResourcesPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks
@@ -432,7 +453,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // ── Panel Commands ───────────────────────────────────────────────
-    registerPanelCommands(context, client);
+    registerPanelCommands(context, client, webResourceFsp);
 }
 
 export function deactivate(): void {
