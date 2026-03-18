@@ -65,6 +65,22 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
+    # Planning phase: if no commits beyond main, skip enforcement
+    # (design discussions don't owe gates/verify/review)
+    try:
+        result = subprocess.run(
+            ["git", "log", "main..HEAD", "--oneline"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and not result.stdout.strip():
+            # Zero commits beyond main — still in planning phase
+            sys.exit(0)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
     # Check for uncommitted changes
     uncommitted = 0
     try:
