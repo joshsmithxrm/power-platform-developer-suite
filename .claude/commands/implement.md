@@ -63,13 +63,14 @@ to the orchestrator — do not silently deviate.
 
 ### Step 3.5: Initialize Workflow State
 
-Update `.workflow/state.json` to record that implementation has started:
-1. Read the file (create `{}` if missing)
-2. Set `branch` to the current branch name
-3. Set `spec` to the path of the primary spec associated with the plan
-4. Set `plan` to the plan file path ($ARGUMENTS)
-5. Set `started` to the current ISO 8601 timestamp
-6. Write the file back
+Record that implementation has started:
+
+```bash
+python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
+python scripts/workflow-state.py set spec "{spec-path}"
+python scripts/workflow-state.py set plan "$ARGUMENTS"
+python scripts/workflow-state.py set started now
+```
 
 ### Step 4: Create Task Tracking
 - Use TaskCreate to build a task list from the plan phases

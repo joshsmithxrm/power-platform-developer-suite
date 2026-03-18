@@ -65,31 +65,33 @@ Skills that represent workflow steps should write to `.workflow/state.json` on c
 
 **When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Supporting knowledge skills (ext-verify, tui-verify, cli-verify, mcp-verify) do NOT write state — the orchestrator skill that invokes them does.
 
-**How to write state:**
+**How to write state:** Use the utility script — never write JSON by hand:
 
+```bash
+python scripts/workflow-state.py set <dotted.key> <value>
 ```
-After successful completion, read `.workflow/state.json` (create if missing),
-update the relevant field with an ISO 8601 timestamp, and write the file back.
+
+Magic values: `now` → UTC ISO timestamp, `true`/`false` → boolean, digits → integer.
 
 Example for /gates:
-{
-  "gates": {
-    "passed": "2026-03-16T16:00:00Z",
-    "commit_ref": "<current HEAD>"
-  }
-}
+```bash
+python scripts/workflow-state.py set gates.passed now
+python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
 ```
 
 **State fields by skill:**
 
-| Skill | Field | Value |
-|-------|-------|-------|
-| `/gates` | `gates.passed`, `gates.commit_ref` | ISO timestamp, HEAD SHA |
-| `/verify` | `verify.{surface}` | ISO timestamp |
-| `/qa` | `qa.{surface}` | ISO timestamp |
-| `/review` | `review.passed`, `review.findings` | ISO timestamp, finding count |
-| `/implement` | `branch`, `spec`, `plan`, `started` | strings, ISO timestamp |
-| `/pr` | `pr.url`, `pr.created` | URL string, ISO timestamp |
+| Skill | Command |
+|-------|---------|
+| `/gates` | `set gates.passed now` + `set gates.commit_ref {HEAD}` |
+| `/verify` | `set verify.{surface} now` |
+| `/qa` | `set qa.{surface} now` |
+| `/review` | `set review.passed now` + `set review.findings {count}` |
+| `/implement` | `set branch {name}` + `set spec {path}` + `set plan {path}` + `set started now` |
+| `/pr` | `set pr.url {url}` + `set pr.created now` |
+| `/start` | `init {branch-name}` (creates fresh state file) |
+| `/converge` | `set-null gates.passed` + `set-null gates.commit_ref` |
+| `/reset` | `delete` (removes state file) |
 
 ## Skill Categories
 
@@ -110,6 +112,6 @@ When creating a new skill:
 1. Name follows `{action}` or `{action}-{qualifier}` convention
 2. SKILL.md has frontmatter with `name` and `description`
 3. Description is written for AI discoverability (trigger words, not technology)
-4. If it represents a workflow gate, it writes to `.workflow/state.json`
+4. If it represents a workflow gate, it calls `python scripts/workflow-state.py`
 5. If it references other skills, it uses current names (not old names)
 6. Directory is `.claude/skills/<name>/SKILL.md`

@@ -418,13 +418,13 @@ Present the final merged report to the user.
 
 ## Workflow State
 
-After QA passes for a surface (verdict is PASS — all checks green), update `.workflow/state.json`:
-1. Read the file (create `{}` if missing)
-2. Set `qa.{surface}` to the current ISO 8601 timestamp
-3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`
-4. Write the file back
+After QA passes for a surface (verdict is PASS — all checks green), run:
 
-Example: after `/qa extension` passes, set `qa.ext` to the timestamp.
+```bash
+python scripts/workflow-state.py set qa.{surface} now
+```
+
+Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/qa extension` → `qa.ext`.
 
 ## Rules
 
