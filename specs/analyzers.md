@@ -1,9 +1,9 @@
 # Roslyn Analyzers
 
 **Status:** Partial (3 of 13 rules implemented)
-**Version:** 1.0
 **Last Updated:** 2026-01-27
 **Code:** [src/PPDS.Analyzers/](../src/PPDS.Analyzers/)
+**Surfaces:** N/A
 
 ---
 
@@ -451,6 +451,12 @@ public async Task PPDS012_TaskResult_ReportsWarning()
 - [connection-pooling.md](./connection-pooling.md) - Pattern enforced by planned PPDS007
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

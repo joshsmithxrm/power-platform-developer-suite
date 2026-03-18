@@ -1,9 +1,9 @@
 # Dataverse Services
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Dataverse/Services/](../src/PPDS.Dataverse/Services/) | [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/)
+**Surfaces:** All
 
 ---
 
@@ -540,6 +540,14 @@ public async Task ListAsync_WithTypeNameFilter_ReturnsMatching()
 - [bulk-operations.md](./bulk-operations.md) - High-throughput record operations
 - [architecture.md](./architecture.md) - Cross-cutting patterns and error handling
 - [migration.md](./migration.md) - Uses services for data migration workflows
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ---
 

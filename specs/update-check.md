@@ -1,9 +1,9 @@
 # Update Check and Self-Update
 
 **Status:** Implemented (partial — self-update not yet built)
-**Version:** 1.0
 **Last Updated:** 2026-03-15
 **Code:** [src/PPDS.Cli/Services/UpdateCheck/](../src/PPDS.Cli/Services/UpdateCheck/), [src/PPDS.Cli/Commands/VersionCommand.cs](../src/PPDS.Cli/Commands/VersionCommand.cs), [src/PPDS.Cli/Infrastructure/StartupUpdateNotifier.cs](../src/PPDS.Cli/Infrastructure/StartupUpdateNotifier.cs)
+**Surfaces:** CLI
 
 ---
 
@@ -570,6 +570,14 @@ public void FormatNotification_BothUpdatesAvailable_ReturnsTwoLines()
 
 - [cli.md](./cli.md) — Command registration, GlobalOptions, exit codes, stderr/stdout contract (needs update: add `version` command to command groups table, confirm exit code mapping)
 - [architecture.md](./architecture.md) — Application Services pattern (A1), DI registration, error handling (needs update: add IUpdateCheckService to service inventory, add update-check.json and update-status.json to shared local state)
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ---
 
