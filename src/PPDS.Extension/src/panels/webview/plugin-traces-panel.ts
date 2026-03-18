@@ -55,6 +55,8 @@ const filterMessage = document.getElementById('filter-message') as HTMLInputElem
 const filterPlugin = document.getElementById('filter-plugin') as HTMLInputElement;
 const filterMode = document.getElementById('filter-mode') as HTMLSelectElement;
 const filterExceptions = document.getElementById('filter-exceptions') as HTMLInputElement;
+const filterStartDate = document.getElementById('filter-start-date') as HTMLInputElement;
+const filterEndDate = document.getElementById('filter-end-date') as HTMLInputElement;
 
 let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -66,12 +68,16 @@ function collectFilter(): TraceFilterViewDto {
     if (filterMode.value && filterMode.value !== 'All') filter.mode = filterMode.value;
     if (filterExceptions.checked) filter.hasException = true;
 
-    // Merge active quick filter state
-    const lastHourPill = document.getElementById('qf-last-hour') as HTMLElement;
-    const longRunningPill = document.getElementById('qf-long-running') as HTMLElement;
-    if (lastHourPill.classList.contains('active')) {
-        filter.startDate = new Date(Date.now() - 3600000).toISOString();
+    // Date range from inputs
+    if (filterStartDate.value) {
+        filter.startDate = new Date(filterStartDate.value).toISOString();
     }
+    if (filterEndDate.value) {
+        filter.endDate = new Date(filterEndDate.value).toISOString();
+    }
+
+    // Merge active quick filter state
+    const longRunningPill = document.getElementById('qf-long-running') as HTMLElement;
     if (longRunningPill.classList.contains('active')) {
         filter.minDurationMs = 1000;
     }
@@ -99,6 +105,8 @@ filterExceptions.addEventListener('change', () => {
     }
     applyFilterDebounced();
 });
+filterStartDate.addEventListener('change', applyFilterDebounced);
+filterEndDate.addEventListener('change', applyFilterDebounced);
 
 // Quick filter pills
 const qfLastHour = document.getElementById('qf-last-hour') as HTMLElement;
@@ -108,6 +116,13 @@ const qfClearAll = document.getElementById('qf-clear-all') as HTMLElement;
 
 qfLastHour.addEventListener('click', () => {
     qfLastHour.classList.toggle('active');
+    if (qfLastHour.classList.contains('active')) {
+        filterStartDate.value = new Date(Date.now() - 3600000).toISOString().slice(0, 16);
+        filterEndDate.value = '';
+    } else {
+        filterStartDate.value = '';
+        filterEndDate.value = '';
+    }
     applyFilterDebounced();
 });
 
@@ -128,6 +143,8 @@ qfClearAll.addEventListener('click', () => {
     filterPlugin.value = '';
     filterMode.value = '';
     filterExceptions.checked = false;
+    filterStartDate.value = '';
+    filterEndDate.value = '';
     qfLastHour.classList.remove('active');
     qfExceptions.classList.remove('active');
     qfLongRunning.classList.remove('active');
@@ -639,10 +656,39 @@ document.getElementById('delete-older-cancel')!.addEventListener('click', () => 
     deleteOlderDialog.style.display = 'none';
 });
 
-// Close dropdown when clicking elsewhere
+// ── Export dropdown menu ─────────────────────────────────────────────────
+const exportBtn = document.getElementById('export-btn') as HTMLElement;
+const exportDropdown = document.createElement('div');
+exportDropdown.className = 'export-dropdown';
+exportDropdown.style.display = 'none';
+exportDropdown.innerHTML = [
+    '<div class="export-dropdown-item" data-format="csv">Export as CSV\u2026</div>',
+    '<div class="export-dropdown-item" data-format="json">Export as JSON\u2026</div>',
+    '<div class="export-dropdown-item" data-format="clipboard">Copy to Clipboard</div>',
+].join('');
+exportBtn.parentElement!.style.position = 'relative';
+exportBtn.insertAdjacentElement('afterend', exportDropdown);
+
+exportBtn.addEventListener('click', () => {
+    const isVisible = exportDropdown.style.display !== 'none';
+    exportDropdown.style.display = isVisible ? 'none' : '';
+});
+
+exportDropdown.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>('.export-dropdown-item');
+    if (target?.dataset.format) {
+        exportDropdown.style.display = 'none';
+        vscode.postMessage({ command: 'exportTraces', format: target.dataset.format });
+    }
+});
+
+// Close dropdowns when clicking elsewhere
 document.addEventListener('click', (e) => {
     if (!deleteBtn.contains(e.target as Node) && !deleteDropdown.contains(e.target as Node)) {
         deleteDropdown.style.display = 'none';
+    }
+    if (!exportBtn.contains(e.target as Node) && !exportDropdown.contains(e.target as Node)) {
+        exportDropdown.style.display = 'none';
     }
 });
 

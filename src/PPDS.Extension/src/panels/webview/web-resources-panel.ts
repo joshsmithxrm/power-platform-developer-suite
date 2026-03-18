@@ -24,6 +24,8 @@ const publishBtn = document.getElementById('publish-btn') as HTMLButtonElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
 const solutionSelect = document.getElementById('solution-select') as HTMLSelectElement;
 const textOnlyCb = document.getElementById('text-only-cb') as HTMLInputElement;
+const searchInput = document.getElementById('wr-search') as HTMLInputElement;
+const publishAllBtn = document.getElementById('publish-all-btn') as HTMLElement;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -37,6 +39,10 @@ function updateEnvironmentDisplay(name: string | null): void {
 
 // ── Request versioning ──
 let lastRequestId = 0;
+
+// ── Search state ──
+let allResources: WebResourceInfoDto[] = [];
+let searchTerm = '';
 
 // ── Type badge helper ──
 function typeBadgeHtml(typeName: string): string {
@@ -139,7 +145,11 @@ const table = new DataTable<WebResourceInfoDto>({
     formatStatus: (items) => {
         const text = items.filter(r => r.isTextType).length;
         const managed = items.filter(r => r.isManaged).length;
-        const parts = [items.length + ' web resource' + (items.length !== 1 ? 's' : '')];
+        const isFiltered = searchTerm.length > 0 && items.length !== allResources.length;
+        const countLabel = isFiltered
+            ? items.length + ' of ' + allResources.length + ' web resources'
+            : items.length + ' web resource' + (items.length !== 1 ? 's' : '');
+        const parts = [countLabel];
         if (text > 0) parts.push(text + ' text');
         if (managed > 0) parts.push(managed + ' managed');
         return parts.join(' \u2014 ');
@@ -188,6 +198,33 @@ textOnlyCb.addEventListener('change', () => {
     vscode.postMessage({ command: 'toggleTextOnly', textOnly: textOnlyCb.checked });
 });
 
+// ── Search filter ──
+function applySearchFilter(): void {
+    const term = searchTerm.toLowerCase();
+    const filtered = term.length === 0
+        ? allResources
+        : allResources.filter(r =>
+            r.name.toLowerCase().includes(term)
+            || (r.displayName ?? '').toLowerCase().includes(term)
+            || r.typeName.toLowerCase().includes(term)
+        );
+    table.setItems(filtered);
+}
+
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        searchTerm = searchInput.value.trim();
+        applySearchFilter();
+    }, 300);
+});
+
+// ── Publish All ──
+publishAllBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'publishAll' });
+});
+
 // ── Reconnect banner ──
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
@@ -228,7 +265,8 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             lastRequestId = msg.requestId;
             selectedIds.clear();
             updatePublishButton();
-            table.setItems(msg.resources);
+            allResources = msg.resources;
+            applySearchFilter();
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';

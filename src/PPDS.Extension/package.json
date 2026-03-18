@@ -254,6 +254,11 @@
         "icon": "$(symbol-class)"
       },
       {
+        "command": "ppds.openMetadataBrowserForEnv",
+        "title": "Open Metadata Browser",
+        "category": "PPDS"
+      },
+      {
         "command": "ppds.openConnectionReferences",
         "title": "Open Connection References",
         "category": "PPDS",
@@ -422,19 +427,24 @@
           "group": "env-tools@4"
         },
         {
-          "command": "ppds.openConnectionReferencesForEnv",
+          "command": "ppds.openMetadataBrowserForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@5"
         },
         {
-          "command": "ppds.openEnvironmentVariablesForEnv",
+          "command": "ppds.openConnectionReferencesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@6"
         },
         {
-          "command": "ppds.openWebResourcesForEnv",
+          "command": "ppds.openEnvironmentVariablesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@7"
+        },
+        {
+          "command": "ppds.openWebResourcesForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@8"
         },
         {
           "command": "ppds.openInMaker",

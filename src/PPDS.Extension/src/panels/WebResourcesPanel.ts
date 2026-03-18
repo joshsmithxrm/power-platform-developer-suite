@@ -136,6 +136,9 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             case 'publishSelected':
                 await this.publishSelected(message.ids);
                 break;
+            case 'publishAll':
+                await this.publishAll();
+                break;
             case 'openInMaker':
                 await this.openInMaker();
                 break;
@@ -262,6 +265,17 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         }
     }
 
+    private async publishAll(): Promise<void> {
+        try {
+            this.postMessage({ command: 'loading' });
+            await this.daemon.webResourcesPublishAll(this.environmentUrl);
+            await this.loadWebResources();
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Publish All failed: ${msg}` });
+        }
+    }
+
     private async openInMaker(): Promise<void> {
         if (this.environmentId) {
             const url = buildMakerUrl(this.environmentId);
@@ -302,6 +316,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh web resources">Refresh</vscode-button>
     <vscode-button id="publish-btn" appearance="secondary" title="Publish selected web resources" disabled>Publish</vscode-button>
+    <vscode-button id="publish-all-btn" appearance="secondary" title="Publish all customizations">Publish All</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Web Resources in Maker Portal">Maker Portal</vscode-button>
     <div class="solution-filter">
         <span class="solution-filter-label">Solution:</span>
@@ -313,6 +328,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         <input type="checkbox" id="text-only-cb" checked>
         Text only
     </label>
+    <input type="text" id="wr-search" class="search-input" placeholder="Search web resources..." title="Filter by name" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>

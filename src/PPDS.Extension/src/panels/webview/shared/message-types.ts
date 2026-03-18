@@ -199,6 +199,7 @@ export type PluginTracesPanelWebviewToHost =
     | { command: 'setAutoRefresh'; intervalSeconds: number | null }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
+    | { command: 'exportTraces'; format: string }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
@@ -372,6 +373,7 @@ export type WebResourcesPanelWebviewToHost =
     | { command: 'toggleTextOnly'; textOnly: boolean }
     | { command: 'openWebResource'; id: string; name: string; isTextType: boolean; webResourceType: number }
     | { command: 'publishSelected'; ids: string[] }
+    | { command: 'publishAll' }
     | { command: 'openInMaker' }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };

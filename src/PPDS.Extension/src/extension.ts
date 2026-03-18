@@ -316,6 +316,12 @@ export function activate(context: vscode.ExtensionContext): void {
             WebResourcesPanel.show(context.extensionUri, client, context, item.envUrl, item.envDisplayName, webResourceFsp);
         })),
 
+        // Open Metadata Browser targeting this environment
+        vscode.commands.registerCommand('ppds.openMetadataBrowserForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            MetadataBrowserPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        })),
+
         // Copy environment URL to clipboard
         vscode.commands.registerCommand('ppds.copyEnvironmentUrl', async (item: { envUrl: string }) => {
             if (!item?.envUrl) return;
