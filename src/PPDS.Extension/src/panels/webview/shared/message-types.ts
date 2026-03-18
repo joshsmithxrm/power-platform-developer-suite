@@ -129,3 +129,86 @@ export type ImportJobsPanelHostToWebview =
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
+
+// ── Plugin Traces Panel ──────────────────────────────────────────────────
+
+/** Plugin trace info as sent to the webview for table display. */
+export interface PluginTraceViewDto {
+    id: string;
+    typeName: string;
+    messageName: string | null;
+    primaryEntity: string | null;
+    mode: string;
+    operationType: string;
+    depth: number;
+    createdOn: string;
+    durationMs: number | null;
+    hasException: boolean;
+    correlationId: string | null;
+}
+
+/** Plugin trace detail for the detail pane. */
+export interface PluginTraceDetailViewDto extends PluginTraceViewDto {
+    constructorDurationMs: number | null;
+    executionStartTime: string | null;
+    exceptionDetails: string | null;
+    messageBlock: string | null;
+    configuration: string | null;
+    secureConfiguration: string | null;
+    requestId: string | null;
+}
+
+/** Timeline node for the waterfall visualization. */
+export interface TimelineNodeViewDto {
+    traceId: string;
+    typeName: string;
+    messageName: string | null;
+    depth: number;
+    durationMs: number | null;
+    hasException: boolean;
+    offsetPercent: number;
+    widthPercent: number;
+    hierarchyDepth: number;
+    children: TimelineNodeViewDto[];
+}
+
+/** Filter state sent from webview to host. */
+export interface TraceFilterViewDto {
+    typeName?: string;
+    messageName?: string;
+    primaryEntity?: string;
+    mode?: string;
+    hasException?: boolean;
+    correlationId?: string;
+    minDurationMs?: number;
+    startDate?: string;
+    endDate?: string;
+}
+
+/** Messages the Plugin Traces Panel webview sends to the extension host. */
+export type PluginTracesPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'applyFilter'; filter: TraceFilterViewDto }
+    | { command: 'selectTrace'; id: string }
+    | { command: 'loadTimeline'; correlationId: string }
+    | { command: 'deleteTraces'; ids: string[] }
+    | { command: 'deleteOlderThan'; days: number }
+    | { command: 'requestTraceLevel' }
+    | { command: 'setTraceLevel'; level: string }
+    | { command: 'setAutoRefresh'; intervalSeconds: number | null }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'copyToClipboard'; text: string }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Plugin Traces Panel webview. */
+export type PluginTracesPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'tracesLoaded'; traces: PluginTraceViewDto[] }
+    | { command: 'traceDetailLoaded'; trace: PluginTraceDetailViewDto }
+    | { command: 'timelineLoaded'; nodes: TimelineNodeViewDto[] }
+    | { command: 'traceLevelLoaded'; level: string; levelValue: number }
+    | { command: 'deleteComplete'; deletedCount: number }
+    | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };

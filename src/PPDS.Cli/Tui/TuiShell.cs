@@ -281,6 +281,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
             new("Solutions", "Browse Dataverse solutions", () => NavigateToSolutions()),
             new("Import Jobs", "View solution import jobs", () => NavigateToImportJobs()),
+            new("Plugin Traces", "Browse plugin trace logs", () => NavigateToPluginTraces()),
             new("", "", () => {}, null, null, Key.Null), // Separator
             new("Environment Details...", "View organization and connection info",
                 hasEnvironment ? () => ShowEnvironmentDetails() : (Action?)null),
@@ -479,6 +480,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _contentArea.Remove(loadingLabel);
 
             var screen = new ImportJobsScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToPluginTraces()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Plugin Traces...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new PluginTracesScreen(_session);
             NavigateTo(screen);
 
             return false;

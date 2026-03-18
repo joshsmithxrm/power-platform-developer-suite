@@ -317,3 +317,79 @@ export interface ImportJobInfoDto {
 export interface ImportJobDetailDto extends ImportJobInfoDto {
     data: string | null;
 }
+
+// ── Plugin Traces ────────────────────────────────────────────────────────────
+
+export interface PluginTracesListResponse {
+    traces: PluginTraceInfoDto[];
+}
+
+export interface PluginTracesGetResponse {
+    trace: PluginTraceDetailDto;
+}
+
+export interface PluginTracesTimelineResponse {
+    nodes: TimelineNodeDto[];
+}
+
+export interface PluginTracesDeleteResponse {
+    deletedCount: number;
+}
+
+export interface PluginTracesTraceLevelResponse {
+    level: string;
+    levelValue: number;
+}
+
+export interface PluginTracesSetTraceLevelResponse {
+    success: boolean;
+}
+
+export interface PluginTraceInfoDto {
+    id: string;
+    typeName: string;
+    messageName: string | null;
+    primaryEntity: string | null;
+    mode: string;
+    operationType: string;
+    depth: number;
+    createdOn: string;
+    durationMs: number | null;
+    hasException: boolean;
+    correlationId: string | null;
+}
+
+export interface PluginTraceDetailDto extends PluginTraceInfoDto {
+    constructorDurationMs: number | null;
+    executionStartTime: string | null;
+    exceptionDetails: string | null;
+    messageBlock: string | null;
+    configuration: string | null;
+    secureConfiguration: string | null;
+    requestId: string | null;
+}
+
+export interface TimelineNodeDto {
+    traceId: string;
+    typeName: string;
+    messageName: string | null;
+    depth: number;
+    durationMs: number | null;
+    hasException: boolean;
+    offsetPercent: number;
+    widthPercent: number;
+    hierarchyDepth: number;
+    children: TimelineNodeDto[];
+}
+
+export interface TraceFilterDto {
+    typeName?: string;
+    messageName?: string;
+    primaryEntity?: string;
+    mode?: string;
+    hasException?: boolean;
+    correlationId?: string;
+    minDurationMs?: number;
+    startDate?: string;
+    endDate?: string;
+}
