@@ -41,11 +41,18 @@ If `merge --ff-only` fails, main has local commits not on origin. STOP and repor
 Prune first so we know which remote branches were deleted (indicating merged PRs):
 
 ```bash
-git remote prune origin --dry-run   # capture what will be pruned
+git remote prune origin --dry-run   # capture what will be pruned (lines like "* [would prune] origin/feature/foo")
+```
+
+If `--dry-run` mode is **not** active, execute the actual prune:
+
+```bash
 git remote prune origin             # actually prune
 ```
 
-Save the list of pruned refs (e.g., `origin/feature/foo`) for squash-merge detection below.
+If `--dry-run` mode **is** active, skip the actual prune — use the `--dry-run` output for classification only.
+
+Save the list of pruned refs (extract the ref name after `[would prune]`, e.g., `origin/feature/foo`) for squash-merge detection below.
 
 Now identify merged branches:
 
@@ -65,13 +72,13 @@ git log main..<branch> --oneline
 
 If this produces **no output**, the branch has zero commits beyond main — it was created for future work or was fast-forward merged. Remove it from the merged list and classify it as **"not started"** (to be skipped).
 
-**Squash-merge detection:** For each branch NOT in the merged list, check if its remote tracking branch was just pruned (i.e., `origin/<branch>` appeared in the prune output). If so, the PR was squash-merged on GitHub and the remote branch was deleted — classify the branch as **"squash-merged."** Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
+**Squash-merge detection:** For each local branch (whether or not it has a worktree) that is NOT in the merged list **and NOT classified as "not started"**, check if `origin/<branch>` appears as an exact match in the pruned refs list. If so, the PR was likely squash-merged on GitHub and the remote branch was deleted — classify the branch as **"squash-merged."** Note: a pruned remote could also mean the branch was manually deleted or the PR was closed without merging. The `-D` deletion in step 5 is the consequence, so the report should flag squash-merged branches clearly so the user can intervene if needed. Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
 
 Build five lists:
-- **Merged worktrees:** worktrees whose branch appears in the merged list (after filtering)
-- **Squash-merged worktrees:** worktrees whose branch was detected via the pruned-remote heuristic
-- **Active worktrees:** worktrees whose branch is NOT merged and NOT squash-merged
-- **Not started:** branches/worktrees removed from the merged list by the divergence check — report as skipped
+- **Merged:** branches in the `--merged` list (after filtering) — with or without worktrees
+- **Squash-merged:** branches detected via the pruned-remote heuristic — with or without worktrees
+- **Active:** branches NOT merged, NOT squash-merged, NOT "not started"
+- **Not started:** branches removed from the merged list by the divergence check — report as skipped
 - **Locked worktrees:** worktrees with `locked` attribute in porcelain output — skip regardless of merge status
 
 ### 4. Remove Merged Worktrees
