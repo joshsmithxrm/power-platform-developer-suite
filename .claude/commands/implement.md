@@ -71,7 +71,7 @@ to the orchestrator — do not silently deviate.
 
 ### Step 3.5: Initialize Workflow State
 
-Update `.claude/workflow-state.json` to record that implementation has started:
+Update `.workflow/state.json` to record that implementation has started:
 1. Read the file (create `{}` if missing)
 2. Set `branch` to the current branch name
 3. Set `spec` to the path of the primary spec associated with the plan
@@ -188,7 +188,7 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 
 **F. Final State Check**
 - Verify git log shows clean commit history with one commit per phase
-- Verify `.claude/workflow-state.json` shows fresh timestamps for gates, verify, qa, and review
+- Verify `.workflow/state.json` shows fresh timestamps for gates, verify, qa, and review
 - All timestamps must be more recent than the `started` timestamp
 
 ## Rules

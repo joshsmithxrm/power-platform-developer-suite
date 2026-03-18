@@ -178,7 +178,7 @@ Present structured results:
 
 ## Workflow State
 
-After verification passes for a surface (verdict is PASS), update `.claude/workflow-state.json`:
+After verification passes for a surface (verdict is PASS), update `.workflow/state.json`:
 1. Read the file (create `{}` if missing)
 2. Set `verify.{surface}` to the current ISO 8601 timestamp
 3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`

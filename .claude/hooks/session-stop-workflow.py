@@ -38,7 +38,8 @@ def main():
     if branch in ("main", "master", "unknown"):
         sys.exit(0)
 
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
     # No state file — no workflow tracked, allow stop
     if not os.path.exists(state_path):

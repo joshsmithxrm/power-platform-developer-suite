@@ -32,7 +32,8 @@ def main():
     # so we must NOT skip enforcement based on the session's branch.
     # Instead, we check workflow state which lives in the worktree.
 
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
     # No state file = no evidence of any workflow steps
     if not os.path.exists(state_path):
@@ -49,7 +50,7 @@ def main():
     except (json.JSONDecodeError, OSError):
         print(
             "PR blocked. Workflow state file is corrupted.\n"
-            "  Delete .claude/workflow-state.json and re-run workflow steps.",
+            "  Delete .workflow/state.json and re-run workflow steps.",
             file=sys.stderr,
         )
         sys.exit(2)

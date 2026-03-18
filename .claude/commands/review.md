@@ -106,7 +106,7 @@ Include total counts and a clear verdict:
 
 ## Workflow State
 
-After review completes (all findings evaluated and verdict rendered), update `.claude/workflow-state.json`:
+After review completes (all findings evaluated and verdict rendered), update `.workflow/state.json`:
 1. Read the file (create `{}` if missing)
 2. Set `review.passed` to the current ISO 8601 timestamp
 3. Set `review.findings` to the total count of findings (critical + important + suggestion)

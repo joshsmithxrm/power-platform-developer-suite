@@ -52,7 +52,7 @@ git branch --list "feature/<name>"
 
 ### 5. Initialize Workflow State
 
-Write `.claude/workflow-state.json` in the worktree:
+Write `.workflow/state.json` in the worktree:
 
 ```json
 {

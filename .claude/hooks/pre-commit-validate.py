@@ -118,7 +118,7 @@ def main():
 
 def _check_workflow_state(project_dir):
     """Check if gates are stale and warn (does not block)."""
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
     if not os.path.exists(state_path):
         return
 

@@ -61,14 +61,14 @@ description: One sentence describing when to use this skill. Write for AI discov
 
 ## Workflow State Integration
 
-Skills that represent workflow steps should write to `.claude/workflow-state.json` on completion.
+Skills that represent workflow steps should write to `.workflow/state.json` on completion.
 
 **When to write state:** Only if the skill represents a gate that hooks check (gates, verify, QA, review). Supporting knowledge skills (ext-verify, tui-verify, cli-verify, mcp-verify) do NOT write state — the orchestrator skill that invokes them does.
 
 **How to write state:**
 
 ```
-After successful completion, read `.claude/workflow-state.json` (create if missing),
+After successful completion, read `.workflow/state.json` (create if missing),
 update the relevant field with an ISO 8601 timestamp, and write the file back.
 
 Example for /gates:
@@ -110,6 +110,6 @@ When creating a new skill:
 1. Name follows `{action}` or `{action}-{qualifier}` convention
 2. SKILL.md has frontmatter with `name` and `description`
 3. Description is written for AI discoverability (trigger words, not technology)
-4. If it represents a workflow gate, it writes to `workflow-state.json`
+4. If it represents a workflow gate, it writes to `.workflow/state.json`
 5. If it references other skills, it uses current names (not old names)
 6. Directory is `.claude/skills/<name>/SKILL.md`

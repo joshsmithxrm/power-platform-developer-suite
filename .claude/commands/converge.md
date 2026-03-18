@@ -28,7 +28,7 @@ Cycle | Gate | Review Critical | Review Important | Regressions | Verdict
 ### Step 2: Run Cycle
 
 **A. Clear Stale State**
-Before running gates, clear the previous gate result in `.claude/workflow-state.json`:
+Before running gates, clear the previous gate result in `.workflow/state.json`:
 1. Read the file (create `{}` if missing)
 2. Set `gates.passed` to `null`
 3. Set `gates.commit_ref` to `null`
