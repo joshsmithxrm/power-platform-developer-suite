@@ -49,11 +49,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private lastUseTds = false;
     /** Language used for the last query (for loadMore to use the same execution path). */
     private lastLanguage = 'sql';
-    private environmentUrl: string | undefined;
-    private environmentDisplayName: string | undefined;
-    private environmentType: string | null = null;
-    private environmentColor: string | null = null;
-    private profileName: string | undefined;
+    protected readonly panelLabel = 'Data Explorer';
     private readonly initialSql: string | undefined;
 
     private constructor(
@@ -255,6 +251,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         // super.dispose() has its own _disposed guard to prevent re-entrancy
         super.dispose();
     }
+
+    // QueryPanel uses its own initEnvironment() flow — these hooks are unused
+    protected override async onInitialized(): Promise<void> { /* no-op */ }
+    protected override async onEnvironmentChanged(): Promise<void> { /* no-op */ }
 
     private async initEnvironment(): Promise<void> {
         // Always fetch profile name for the title

@@ -64,6 +64,8 @@ internal sealed class WebResourcesScreen : TuiScreenBase
         RegisterHotkey(registry, Key.CtrlMask | Key.F, "Solution filter", () => ErrorService.FireAndForget(ShowSolutionFilterAsync(), "WebResources.Filter"));
         RegisterHotkey(registry, Key.CtrlMask | Key.T, "Toggle text-only", ToggleTextOnly);
         RegisterHotkey(registry, Key.CtrlMask | Key.O, "Open in Maker", OpenInMaker);
+        RegisterHotkey(registry, Key.CtrlMask | Key.ShiftMask | Key.P, "Publish All", () =>
+            ErrorService.FireAndForget(PublishAllAsync(), "WebResources.PublishAll"));
     }
 
     private async Task LoadDataAsync()
@@ -237,6 +239,49 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             {
                 ErrorService.ReportError("Failed to publish web resource", ex, "WebResources.Publish");
                 _statusLabel.Text = "Error publishing web resource";
+            });
+        }
+    }
+
+    private async Task PublishAllAsync()
+    {
+        if (EnvironmentUrl == null)
+        {
+            _statusLabel.Text = "No environment selected. Use the status bar to connect.";
+            return;
+        }
+
+        var result = MessageBox.Query(
+            "Publish All Customizations",
+            "Publish all customizations? This publishes everything, not just web resources.",
+            "Publish All", "Cancel");
+
+        if (result != 0) return;
+
+        try
+        {
+            _statusLabel.Text = "Publishing all customizations...";
+            Application.Refresh();
+
+            var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+            var service = provider.GetRequiredService<IWebResourceService>();
+
+            await service.PublishAllAsync(ScreenCancellation);
+
+            Application.MainLoop.Invoke(() =>
+            {
+                _statusLabel.Text = "All customizations published successfully";
+            });
+
+            await LoadDataAsync();
+        }
+        catch (OperationCanceledException) { /* screen closing */ }
+        catch (Exception ex)
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to publish all customizations", ex, "WebResources.PublishAll");
+                _statusLabel.Text = "Error publishing customizations";
             });
         }
     }

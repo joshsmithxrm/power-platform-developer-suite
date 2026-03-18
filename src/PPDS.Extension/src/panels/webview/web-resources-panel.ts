@@ -13,6 +13,7 @@ import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable } from './shared/data-table.js';
+import { SolutionFilter } from './shared/solution-filter.js';
 
 const vscode = getVsCodeApi<WebResourcesPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as WebResourcesPanelWebviewToHost));
@@ -22,8 +23,10 @@ const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const publishBtn = document.getElementById('publish-btn') as HTMLButtonElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
-const solutionSelect = document.getElementById('solution-select') as HTMLSelectElement;
+const solutionFilterContainer = document.getElementById('solution-filter-container') as HTMLElement;
 const textOnlyCb = document.getElementById('text-only-cb') as HTMLInputElement;
+const searchInput = document.getElementById('wr-search') as HTMLInputElement;
+const publishAllBtn = document.getElementById('publish-all-btn') as HTMLElement;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -37,6 +40,10 @@ function updateEnvironmentDisplay(name: string | null): void {
 
 // ── Request versioning ──
 let lastRequestId = 0;
+
+// ── Search state ──
+let allResources: WebResourceInfoDto[] = [];
+let searchTerm = '';
 
 // ── Type badge helper ──
 function typeBadgeHtml(typeName: string): string {
@@ -139,7 +146,11 @@ const table = new DataTable<WebResourceInfoDto>({
     formatStatus: (items) => {
         const text = items.filter(r => r.isTextType).length;
         const managed = items.filter(r => r.isManaged).length;
-        const parts = [items.length + ' web resource' + (items.length !== 1 ? 's' : '')];
+        const isFiltered = searchTerm.length > 0 && items.length !== allResources.length;
+        const countLabel = isFiltered
+            ? items.length + ' of ' + allResources.length + ' web resources'
+            : items.length + ' web resource' + (items.length !== 1 ? 's' : '');
+        const parts = [countLabel];
         if (text > 0) parts.push(text + ' text');
         if (managed > 0) parts.push(managed + ' managed');
         return parts.join(' \u2014 ');
@@ -178,14 +189,48 @@ makerBtn.addEventListener('click', () => {
 });
 
 // ── Solution filter ──
-solutionSelect.addEventListener('change', () => {
-    const val = solutionSelect.value || null;
-    vscode.postMessage({ command: 'selectSolution', solutionId: val });
+const solutionFilter = new SolutionFilter(solutionFilterContainer, {
+    onChange: (solutionId) => {
+        vscode.postMessage({ command: 'selectSolution', solutionId });
+    },
+    getState: () => vscode.getState() as Record<string, unknown> | undefined,
+    setState: (state) => vscode.setState(state),
+    storageKey: 'webResources.solutionFilter',
 });
+
+// Request solution list on load
+vscode.postMessage({ command: 'requestSolutionList' });
 
 // ── Text-only toggle ──
 textOnlyCb.addEventListener('change', () => {
     vscode.postMessage({ command: 'toggleTextOnly', textOnly: textOnlyCb.checked });
+});
+
+// ── Search filter ──
+function applySearchFilter(): void {
+    const term = searchTerm.toLowerCase();
+    const filtered = term.length === 0
+        ? allResources
+        : allResources.filter(r =>
+            r.name.toLowerCase().includes(term)
+            || (r.displayName ?? '').toLowerCase().includes(term)
+            || r.typeName.toLowerCase().includes(term)
+        );
+    table.setItems(filtered);
+}
+
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        searchTerm = searchInput.value.trim();
+        applySearchFilter();
+    }, 300);
+});
+
+// ── Publish All ──
+publishAllBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'publishAll' });
 });
 
 // ── Reconnect banner ──
@@ -228,7 +273,8 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             lastRequestId = msg.requestId;
             selectedIds.clear();
             updatePublishButton();
-            table.setItems(msg.resources);
+            allResources = msg.resources;
+            applySearchFilter();
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
@@ -261,25 +307,11 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
 
 // ── Solution dropdown population ──
 function populateSolutionDropdown(solutions: SolutionOptionDto[]): void {
-    // Preserve current selection
-    const currentValue = solutionSelect.value;
-
-    // Clear all options except "All Solutions"
-    while (solutionSelect.options.length > 1) {
-        solutionSelect.remove(1);
-    }
-
-    for (const sol of solutions) {
-        const option = document.createElement('option');
-        option.value = sol.id;
-        option.textContent = sol.friendlyName;
-        solutionSelect.appendChild(option);
-    }
-
-    // Restore selection if it still exists
-    if (currentValue && [...solutionSelect.options].some(o => o.value === currentValue)) {
-        solutionSelect.value = currentValue;
-    }
+    solutionFilter.setSolutions(solutions.map(s => ({
+        id: s.id,
+        uniqueName: s.uniqueName,
+        friendlyName: s.friendlyName,
+    })));
 }
 
 // Signal ready

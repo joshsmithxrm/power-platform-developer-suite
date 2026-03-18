@@ -5,9 +5,9 @@ import type { EnvironmentTreeItem } from '../views/profileTreeView.js';
 
 const MAKER_BASE_URL = 'https://make.powerapps.com';
 
-export function buildMakerUrl(environmentId: string | null): string {
+export function buildMakerUrl(environmentId: string | null, path?: string): string {
     if (environmentId) {
-        return `${MAKER_BASE_URL}/environments/${environmentId}/solutions`;
+        return `${MAKER_BASE_URL}/environments/${environmentId}${path ?? '/solutions'}`;
     }
     return MAKER_BASE_URL;
 }

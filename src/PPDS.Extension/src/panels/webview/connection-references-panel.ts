@@ -45,6 +45,7 @@ const solutionFilter = new SolutionFilter(solutionFilterContainer, {
     },
     getState: () => vscode.getState() as Record<string, unknown> | undefined,
     setState: (state) => vscode.setState(state),
+    storageKey: 'connectionReferences.solutionFilter',
 });
 
 // Request solution list on load

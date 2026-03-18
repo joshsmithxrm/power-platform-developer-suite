@@ -55,6 +55,7 @@ const solutionFilter = new SolutionFilter(solutionFilterContainer, {
     },
     getState: () => vscode.getState() as Record<string, unknown> | undefined,
     setState: (state) => vscode.setState(state),
+    storageKey: 'environmentVariables.solutionFilter',
 });
 
 // Request solution list on load

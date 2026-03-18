@@ -3,10 +3,11 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { TraceFilterDto } from '../types.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { buildMakerUrl } from '../commands/browserCommands.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type {
     PluginTracesPanelWebviewToHost,
     PluginTracesPanelHostToWebview,
@@ -23,14 +24,11 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 
     private static readonly MAX_PANELS = 5;
 
-    private environmentUrl: string | undefined;
-    private environmentDisplayName: string | undefined;
-    private environmentType: string | null = null;
-    private environmentColor: string | null = null;
-    private profileName: string | undefined;
+    protected readonly panelLabel = 'Plugin Traces';
 
     private currentFilter: TraceFilterDto | undefined;
     private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+    private lastLoadedTraces: PluginTraceViewDto[] = [];
 
     /**
      * Returns the number of open PluginTracesPanel instances.
@@ -88,7 +86,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     protected async handleMessage(message: PluginTracesPanelWebviewToHost): Promise<void> {
         switch (message.command) {
             case 'ready':
-                await this.initialize();
+                await this.initializePanel(this.daemon, this.panelId, PluginTracesPanel.instances.length > 1);
                 break;
             case 'refresh':
                 await this.loadTraces();
@@ -119,10 +117,16 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
                 this.setupAutoRefresh(message.intervalSeconds);
                 break;
             case 'requestEnvironmentList':
-                await this.handleEnvironmentPicker();
+                await this.handleEnvironmentPickerClick(this.daemon, this.panelId, PluginTracesPanel.instances.length > 1);
+                break;
+            case 'openInMaker':
+                await this.openInMaker();
+                break;
+            case 'exportTraces':
+                await this.exportTraces(message.format);
                 break;
             case 'copyToClipboard':
-                await vscode.env.clipboard.writeText(message.text);
+                this.handleCopyToClipboard(message.text);
                 break;
             case 'webviewError':
                 this.logWebviewError(message.error, message.stack);
@@ -146,55 +150,21 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         super.dispose();
     }
 
-    private async initialize(): Promise<void> {
-        try {
-            const who = await this.daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
-            }
-            this.environmentType = who.environment?.type ?? null;
-            if (this.environmentUrl) {
-                try {
-                    const config = await this.daemon.envConfigGet(this.environmentUrl);
-                    this.environmentColor = config.resolvedColor ?? null;
-                } catch {
-                    this.environmentColor = null;
-                }
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType, envColor: this.environmentColor });
-            await this.loadTraces();
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to initialize: ${msg}` });
-        }
+    protected override async onInitialized(): Promise<void> {
+        await this.loadTraces();
     }
 
-    private async handleEnvironmentPicker(): Promise<void> {
-        const result = await showEnvironmentPicker(this.daemon, this.environmentUrl);
-        if (result) {
-            this.environmentUrl = result.url;
-            this.environmentDisplayName = result.displayName;
-            this.environmentType = result.type;
-            try {
-                const config = await this.daemon.envConfigGet(result.url);
-                this.environmentColor = config.resolvedColor ?? null;
-            } catch {
-                this.environmentColor = null;
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type, envColor: this.environmentColor });
-            await this.loadTraces();
-        }
+    protected override async onEnvironmentChanged(): Promise<void> {
+        await this.loadTraces();
     }
 
-    private updatePanelTitle(): void {
-        if (!this.panel) return;
-        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
-        const suffix = PluginTracesPanel.instances.length > 1 ? ` ${this.panelId}` : '';
-        this.panel.title = context ? `${context} \u2014 Plugin Traces${suffix}` : `Plugin Traces${suffix}`;
+    private async openInMaker(): Promise<void> {
+        if (this.environmentId) {
+            const url = buildMakerUrl(this.environmentId, '/plugintraceloglist');
+            await vscode.env.openExternal(vscode.Uri.parse(url));
+        } else {
+            vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
+        }
     }
 
     private async loadTraces(isRetry = false): Promise<void> {
@@ -216,6 +186,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
                 correlationId: t.correlationId,
             }));
 
+            this.lastLoadedTraces = traces;
             this.postMessage({ command: 'tracesLoaded', traces });
 
             // Also check trace level to inform the user if tracing is Off
@@ -362,6 +333,65 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         }
     }
 
+    private tracesToCsv(traces: PluginTraceViewDto[]): string {
+        const headers = ['Time', 'Plugin', 'Entity', 'Message', 'Mode', 'Duration', 'Status'];
+        const csvEscape = (val: string): string => {
+            if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+                return '"' + val.replace(/"/g, '""') + '"';
+            }
+            return val;
+        };
+        const rows = traces.map(t => [
+            t.createdOn ?? '',
+            t.typeName,
+            t.primaryEntity ?? '',
+            t.messageName ?? '',
+            t.mode,
+            t.durationMs !== null ? String(t.durationMs) + 'ms' : '',
+            t.hasException ? 'Exception' : 'Success',
+        ].map(csvEscape).join(','));
+        return [headers.join(','), ...rows].join('\n');
+    }
+
+    private async exportTraces(format: string): Promise<void> {
+        const traces = this.lastLoadedTraces;
+        if (traces.length === 0) {
+            vscode.window.showInformationMessage('No traces to export.');
+            return;
+        }
+
+        if (format === 'clipboard') {
+            const csv = this.tracesToCsv(traces);
+            await vscode.env.clipboard.writeText(csv);
+            vscode.window.showInformationMessage(`${traces.length} trace(s) copied to clipboard as CSV.`);
+            return;
+        }
+
+        if (format === 'csv') {
+            const uri = await vscode.window.showSaveDialog({
+                filters: { 'CSV Files': ['csv'] },
+                defaultUri: vscode.Uri.file('plugin-traces.csv'),
+            });
+            if (!uri) return;
+            const csv = this.tracesToCsv(traces);
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf-8'));
+            vscode.window.showInformationMessage(`Exported ${traces.length} trace(s) to ${uri.fsPath}`);
+            return;
+        }
+
+        if (format === 'json') {
+            const uri = await vscode.window.showSaveDialog({
+                filters: { 'JSON Files': ['json'] },
+                defaultUri: vscode.Uri.file('plugin-traces.json'),
+            });
+            if (!uri) return;
+            const json = JSON.stringify(traces, null, 2);
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf-8'));
+            vscode.window.showInformationMessage(`Exported ${traces.length} trace(s) to ${uri.fsPath}`);
+            return;
+        }
+    }
+
     getHtmlContent(webview: vscode.Webview): string {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
@@ -403,6 +433,8 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     <vscode-button id="delete-btn" appearance="secondary" title="Delete traces">Delete</vscode-button>
     <vscode-button id="trace-level-btn" appearance="secondary" title="View/change trace level">Trace Level</vscode-button>
     <span id="trace-level-indicator" class="trace-level-indicator"></span>
+    <vscode-button id="export-btn" appearance="secondary" title="Export traces">Export</vscode-button>
+    <vscode-button id="maker-btn" appearance="secondary" title="Open Plugin Trace Logs in Maker Portal">Maker Portal</vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
@@ -433,6 +465,14 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         <div class="filter-field">
             <label>&nbsp;</label>
             <label><input type="checkbox" id="filter-exceptions" /> Exceptions only</label>
+        </div>
+        <div class="filter-field">
+            <label>From</label>
+            <input type="datetime-local" id="filter-start-date" />
+        </div>
+        <div class="filter-field">
+            <label>To</label>
+            <input type="datetime-local" id="filter-end-date" />
         </div>
     </div>
     <div class="quick-filters">
