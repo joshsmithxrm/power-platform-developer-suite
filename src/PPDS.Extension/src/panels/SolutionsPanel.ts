@@ -7,7 +7,7 @@ import { buildMakerUrl } from '../commands/browserCommands.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, ComponentGroupDto } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -18,12 +18,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
     private static readonly MAX_PANELS = 5;
 
-    private environmentUrl: string | undefined;
-    private environmentDisplayName: string | undefined;
-    private environmentType: string | null = null;
-    private environmentColor: string | null = null;
-    private environmentId: string | null = null;
-    private profileName: string | undefined;
+    protected readonly panelLabel = 'Solutions';
 
     /**
      * Returns the number of open SolutionsPanel instances.
@@ -81,10 +76,10 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     protected async handleMessage(message: SolutionsPanelWebviewToHost): Promise<void> {
         switch (message.command) {
             case 'ready':
-                await this.initialize();
+                await this.initializePanel(this.daemon, this.panelId, SolutionsPanel.instances.length > 1);
                 break;
             case 'requestEnvironmentList':
-                await this.handleEnvironmentPicker();
+                await this.handleEnvironmentPickerClick(this.daemon, this.panelId, SolutionsPanel.instances.length > 1);
                 break;
             case 'refresh':
                 await this.loadSolutions();
@@ -96,7 +91,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                 // No-op on host side; collapse is handled in webview JS
                 break;
             case 'copyToClipboard':
-                await vscode.env.clipboard.writeText(message.text);
+                this.handleCopyToClipboard(message.text);
                 break;
             case 'openInMaker': {
                 if (this.environmentId) {
@@ -128,91 +123,12 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
         super.dispose();
     }
 
-    private async initialize(): Promise<void> {
-        try {
-            // Always fetch profile name for the title
-            const who = await this.daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
-            }
-            this.environmentType = who.environment?.type ?? null;
-            if (who.environment?.environmentId) {
-                this.environmentId = who.environment.environmentId;
-            } else {
-                this.environmentId = await this.resolveEnvironmentId();
-            }
-            if (this.environmentUrl) {
-                try {
-                    const config = await this.daemon.envConfigGet(this.environmentUrl);
-                    this.environmentColor = config.resolvedColor ?? null;
-                    if (!this.environmentType) {
-                        this.environmentType = config.resolvedType ?? null;
-                    }
-                } catch (err) {
-                    // eslint-disable-next-line no-console -- non-critical: color accent unavailable
-                    console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
-                    this.environmentColor = null;
-                }
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType, envColor: this.environmentColor });
-            await this.loadSolutions();
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to initialize: ${msg}` });
-        }
+    protected override async onInitialized(): Promise<void> {
+        await this.loadSolutions();
     }
 
-    private async handleEnvironmentPicker(): Promise<void> {
-        const result = await showEnvironmentPicker(this.daemon, this.environmentUrl);
-        if (result) {
-            this.environmentUrl = result.url;
-            this.environmentDisplayName = result.displayName;
-            this.environmentType = result.type;
-            this.environmentId = await this.resolveEnvironmentId();
-            try {
-                const config = await this.daemon.envConfigGet(result.url);
-                this.environmentColor = config.resolvedColor ?? null;
-                if (!this.environmentType && config.resolvedType) {
-                    this.environmentType = config.resolvedType;
-                }
-            } catch (err) {
-                // eslint-disable-next-line no-console -- non-critical: color accent unavailable
-                console.warn(`[PPDS] Failed to fetch environment color: ${err instanceof Error ? err.message : String(err)}`);
-                this.environmentColor = null;
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: this.environmentType, envColor: this.environmentColor });
-            await this.loadSolutions();
-        }
-    }
-
-    /**
-     * Resolves the Power Platform environment ID from the current environment URL
-     * by looking it up in the environment list.
-     */
-    private async resolveEnvironmentId(): Promise<string | null> {
-        if (!this.environmentUrl) return null;
-        try {
-            const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
-            const targetUrl = normalise(this.environmentUrl);
-            const envResult = await this.daemon.envList();
-            const match = envResult.environments.find(
-                e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
-            );
-            return match?.environmentId ?? null;
-        } catch {
-            return null;
-        }
-    }
-
-    private updatePanelTitle(): void {
-        if (!this.panel) return;
-        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
-        const suffix = SolutionsPanel.instances.length > 1 ? ` ${this.panelId}` : '';
-        this.panel.title = context ? `${context} \u2014 Solutions${suffix}` : `Solutions${suffix}`;
+    protected override async onEnvironmentChanged(): Promise<void> {
+        await this.loadSolutions();
     }
 
     private async loadSolutions(isRetry = false): Promise<void> {

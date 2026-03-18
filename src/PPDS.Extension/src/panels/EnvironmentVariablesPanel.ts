@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
+import { buildMakerUrl } from '../commands/browserCommands.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { EnvironmentVariablesPanelWebviewToHost, EnvironmentVariablesPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -16,12 +17,8 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private static readonly MAX_PANELS = 5;
 
-    private environmentUrl: string | undefined;
-    private environmentDisplayName: string | undefined;
-    private environmentType: string | null = null;
-    private environmentColor: string | null = null;
-    private environmentId: string | null = null;
-    private profileName: string | undefined;
+    protected readonly panelLabel = 'Environment Variables';
+
     private solutionFilter: string | null = null;
 
     /**
@@ -80,7 +77,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     protected async handleMessage(message: EnvironmentVariablesPanelWebviewToHost): Promise<void> {
         switch (message.command) {
             case 'ready':
-                await this.initialize();
+                await this.initializePanel(this.daemon, this.panelId, EnvironmentVariablesPanel.instances.length > 1);
                 break;
             case 'refresh':
                 await this.loadEnvironmentVariables();
@@ -105,13 +102,13 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 await this.exportDeploymentSettings();
                 break;
             case 'requestEnvironmentList':
-                await this.handleEnvironmentPicker();
+                await this.handleEnvironmentPickerClick(this.daemon, this.panelId, EnvironmentVariablesPanel.instances.length > 1);
                 break;
             case 'openInMaker':
                 await this.openInMaker();
                 break;
             case 'copyToClipboard':
-                await vscode.env.clipboard.writeText(message.text);
+                this.handleCopyToClipboard(message.text);
                 break;
             case 'webviewError':
                 this.logWebviewError(message.error, message.stack);
@@ -131,76 +128,12 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
         super.dispose();
     }
 
-    private async initialize(): Promise<void> {
-        try {
-            const who = await this.daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
-            }
-            this.environmentType = who.environment?.type ?? null;
-            if (who.environment?.environmentId) {
-                this.environmentId = who.environment.environmentId;
-            } else {
-                this.environmentId = await this.resolveEnvironmentId();
-            }
-            if (this.environmentUrl) {
-                try {
-                    const config = await this.daemon.envConfigGet(this.environmentUrl);
-                    this.environmentColor = config.resolvedColor ?? null;
-                } catch {
-                    this.environmentColor = null;
-                }
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', envType: this.environmentType, envColor: this.environmentColor });
-            await this.loadEnvironmentVariables();
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to initialize: ${msg}` });
-        }
+    protected override async onInitialized(): Promise<void> {
+        await this.loadEnvironmentVariables();
     }
 
-    private async handleEnvironmentPicker(): Promise<void> {
-        const result = await showEnvironmentPicker(this.daemon, this.environmentUrl);
-        if (result) {
-            this.environmentUrl = result.url;
-            this.environmentDisplayName = result.displayName;
-            this.environmentType = result.type;
-            this.environmentId = await this.resolveEnvironmentId();
-            try {
-                const config = await this.daemon.envConfigGet(result.url);
-                this.environmentColor = config.resolvedColor ?? null;
-            } catch {
-                this.environmentColor = null;
-            }
-            this.updatePanelTitle();
-            this.postMessage({ command: 'updateEnvironment', name: result.displayName, envType: result.type, envColor: this.environmentColor });
-            await this.loadEnvironmentVariables();
-        }
-    }
-
-    private async resolveEnvironmentId(): Promise<string | null> {
-        if (!this.environmentUrl) return null;
-        try {
-            const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
-            const targetUrl = normalise(this.environmentUrl);
-            const envResult = await this.daemon.envList();
-            const match = envResult.environments.find(
-                e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
-            );
-            return match?.environmentId ?? null;
-        } catch {
-            return null;
-        }
-    }
-
-    private updatePanelTitle(): void {
-        if (!this.panel) return;
-        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
-        const suffix = EnvironmentVariablesPanel.instances.length > 1 ? ` ${this.panelId}` : '';
-        this.panel.title = context ? `${context} \u2014 Environment Variables${suffix}` : `Environment Variables${suffix}`;
+    protected override async onEnvironmentChanged(): Promise<void> {
+        await this.loadEnvironmentVariables();
     }
 
     private async loadEnvironmentVariables(isRetry = false): Promise<void> {
@@ -343,7 +276,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
 
     private async openInMaker(): Promise<void> {
         if (this.environmentId) {
-            const url = `https://make.powerapps.com/environments/${this.environmentId}/solutions/environmentvariables`;
+            const url = buildMakerUrl(this.environmentId, '/solutions/environmentvariables');
             await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
             vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');

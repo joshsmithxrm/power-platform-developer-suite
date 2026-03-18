@@ -198,6 +198,7 @@ export type PluginTracesPanelWebviewToHost =
     | { command: 'setTraceLevel'; level: string }
     | { command: 'setAutoRefresh'; intervalSeconds: number | null }
     | { command: 'requestEnvironmentList' }
+    | { command: 'openInMaker' }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
@@ -372,6 +373,7 @@ export type WebResourcesPanelWebviewToHost =
     | { command: 'openWebResource'; id: string; name: string; isTextType: boolean; webResourceType: number }
     | { command: 'publishSelected'; ids: string[] }
     | { command: 'openInMaker' }
+    | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Web Resources Panel webview. */

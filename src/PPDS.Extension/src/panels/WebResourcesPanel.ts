@@ -7,7 +7,7 @@ import type { WebResourceFileSystemProvider } from '../providers/WebResourceFile
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
-import { getEnvironmentPickerHtml, showEnvironmentPicker } from './environmentPicker.js';
+import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { WebResourcesPanelWebviewToHost, WebResourcesPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -18,12 +18,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
 
     private static readonly MAX_PANELS = 5;
 
-    private environmentUrl: string | undefined;
-    private environmentDisplayName: string | undefined;
-    private environmentType: string | null = null;
-    private environmentColor: string | null = null;
-    private environmentId: string | null = null;
-    private profileName: string | undefined;
+    protected readonly panelLabel = 'Web Resources';
 
     /** Solution filter state — persisted in globalState. */
     private solutionId: string | null = null;
@@ -114,10 +109,10 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     protected async handleMessage(message: WebResourcesPanelWebviewToHost): Promise<void> {
         switch (message.command) {
             case 'ready':
-                await this.initialize();
+                await this.initializePanel(this.daemon, this.panelId, WebResourcesPanel.instances.length > 1);
                 break;
             case 'requestEnvironmentList':
-                await this.handleEnvironmentPicker();
+                await this.handleEnvironmentPickerClick(this.daemon, this.panelId, WebResourcesPanel.instances.length > 1);
                 break;
             case 'requestSolutionList':
                 await this.loadSolutionList();
@@ -144,6 +139,9 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             case 'openInMaker':
                 await this.openInMaker();
                 break;
+            case 'copyToClipboard':
+                this.handleCopyToClipboard(message.text);
+                break;
             case 'webviewError':
                 this.logWebviewError(message.error, message.stack);
                 break;
@@ -162,105 +160,25 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         super.dispose();
     }
 
-    private async initialize(): Promise<void> {
-        try {
-            const who = await this.daemon.authWho();
-            this.profileName = who.name ?? `Profile ${who.index}`;
-            if (!this.environmentUrl && who.environment?.url) {
-                this.environmentUrl = who.environment.url;
-                this.environmentDisplayName = who.environment.displayName || who.environment.url;
-            }
-            this.environmentType = who.environment?.type ?? null;
-            if (who.environment?.environmentId) {
-                this.environmentId = who.environment.environmentId;
-            } else {
-                this.environmentId = await this.resolveEnvironmentId();
-            }
-            if (this.environmentUrl) {
-                try {
-                    const config = await this.daemon.envConfigGet(this.environmentUrl);
-                    this.environmentColor = config.resolvedColor ?? null;
-                    if (!this.environmentType) {
-                        this.environmentType = config.resolvedType ?? null;
-                    }
-                } catch {
-                    this.environmentColor = null;
-                }
-            }
-            // Register environment mapping for FSP
-            if (this.fsp && this.environmentId && this.environmentUrl) {
-                this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
-            }
-            this.updatePanelTitle();
-            this.postMessage({
-                command: 'updateEnvironment',
-                name: this.environmentDisplayName ?? 'No environment',
-                envType: this.environmentType,
-                envColor: this.environmentColor,
-            });
-            await this.loadSolutionList();
-            await this.loadWebResources();
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to initialize: ${msg}` });
+    protected override async onInitialized(): Promise<void> {
+        // Register environment mapping for FSP
+        if (this.fsp && this.environmentId && this.environmentUrl) {
+            this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
         }
+        await this.loadSolutionList();
+        await this.loadWebResources();
     }
 
-    private async handleEnvironmentPicker(): Promise<void> {
-        const result = await showEnvironmentPicker(this.daemon, this.environmentUrl);
-        if (result) {
-            this.environmentUrl = result.url;
-            this.environmentDisplayName = result.displayName;
-            this.environmentType = result.type;
-            this.environmentId = await this.resolveEnvironmentId();
-            try {
-                const config = await this.daemon.envConfigGet(result.url);
-                this.environmentColor = config.resolvedColor ?? null;
-                if (!this.environmentType && config.resolvedType) {
-                    this.environmentType = config.resolvedType;
-                }
-            } catch {
-                this.environmentColor = null;
-            }
-            // Register environment mapping for FSP
-            if (this.fsp && this.environmentId && this.environmentUrl) {
-                this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
-            }
-            this.updatePanelTitle();
-            this.postMessage({
-                command: 'updateEnvironment',
-                name: result.displayName,
-                envType: this.environmentType,
-                envColor: this.environmentColor,
-            });
-            // Reset solution filter on environment change
-            this.solutionId = null;
-            void this.context.globalState.update('ppds.webResources.solutionId', null);
-            await this.loadSolutionList();
-            await this.loadWebResources();
+    protected override async onEnvironmentChanged(): Promise<void> {
+        // Register environment mapping for FSP
+        if (this.fsp && this.environmentId && this.environmentUrl) {
+            this.fsp.registerEnvironment(this.environmentId, this.environmentUrl);
         }
-    }
-
-    private async resolveEnvironmentId(): Promise<string | null> {
-        if (!this.environmentUrl) return null;
-        try {
-            const normalise = (u: string): string => u.replace(/\/+$/, '').toLowerCase();
-            const targetUrl = normalise(this.environmentUrl);
-            const envResult = await this.daemon.envList();
-            const match = envResult.environments.find(
-                e => normalise(e.apiUrl) === targetUrl || (e.url && normalise(e.url) === targetUrl)
-            );
-            return match?.environmentId ?? null;
-        } catch {
-            return null;
-        }
-    }
-
-    private updatePanelTitle(): void {
-        if (!this.panel) return;
-        const ctx = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
-        const suffix = WebResourcesPanel.instances.length > 1 ? ` ${this.panelId}` : '';
-        this.panel.title = ctx ? `${ctx} \u2014 Web Resources${suffix}` : `Web Resources${suffix}`;
+        // Reset solution filter on environment change
+        this.solutionId = null;
+        void this.context.globalState.update('ppds.webResources.solutionId', null);
+        await this.loadSolutionList();
+        await this.loadWebResources();
     }
 
     private async loadSolutionList(): Promise<void> {
