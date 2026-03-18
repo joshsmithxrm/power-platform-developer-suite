@@ -61,21 +61,47 @@ Write `.workflow/state.json` in the worktree:
 }
 ```
 
-### 6. Open Windows Terminal Tab
+### 6. Transfer Session Context
+
+Copy the current session to the new worktree's project directory so the conversation
+continues with full context:
+
+1. Find the current session JSONL file:
+   ```bash
+   ls -t ~/.claude/projects/<current-project-path>/*.jsonl | head -1
+   ```
+   The current project path is derived from `$CLAUDE_PROJECT_DIR` with `/` and `\` replaced by `-` and `:` stripped
+   (e.g., `C--VS-ppdsw-ppds` for `C:\VS\ppdsw\ppds`).
+
+2. Determine the target project path encoding for the worktree
+   (e.g., `C--VS-ppdsw-ppds--worktrees-<name>`).
+
+3. Create the target directory and copy the session file:
+   ```bash
+   mkdir -p ~/.claude/projects/<target-project-path>
+   cp <source-session-file> ~/.claude/projects/<target-project-path>/
+   ```
+
+4. Extract the session ID (filename without `.jsonl` extension).
+
+### 7. Open Windows Terminal Tab
 
 ```bash
-wt -w 0 new-tab --title "<name>" -- pwsh -NoExit -Command "Set-Location '<absolute-worktree-path>' && claude"
+wt -w 0 new-tab --title "<name>" -d "<absolute-worktree-path>" -- pwsh -NoExit -Command "Set-Location '<absolute-worktree-path>' && claude --resume <session-id>"
 ```
 
 - `-w 0` adds the tab to the current window (not a new window)
 - `--title` shows the worktree name on the tab
+- `-d` sets the starting directory (backup for Set-Location)
 - `Set-Location` runs after the PowerShell profile loads (the profile may override `-d`)
-- `claude` launches Claude Code in the worktree automatically
+- `claude --resume <session-id>` continues this conversation with full context
 - Each worktree gets its own full-width tab
+- Use `&&` not `;` to chain commands (`;` is Windows Terminal's subcommand separator)
 
 If `wt` is not found, warn and continue:
 ```
-⚠ Windows Terminal (wt) not found. Worktree created at .worktrees/<name> — navigate manually.
+⚠ Windows Terminal (wt) not found. Worktree created at .worktrees/<name>.
+Resume manually: cd <path> && claude --resume <session-id>
 ```
 
 ### 7. Print Workflow Guidance
