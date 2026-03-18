@@ -1,12 +1,12 @@
 import { escapeHtml, escapeAttr } from './dom-utils.js';
 
-export interface SolutionOption {
+interface SolutionOption {
     id: string;
     uniqueName: string;
     friendlyName: string;
 }
 
-export interface SolutionFilterOptions {
+interface SolutionFilterOptions {
     onChange: (solutionId: string | null) => void;
     getState: () => Record<string, unknown> | undefined;
     setState: (state: Record<string, unknown>) => void;
