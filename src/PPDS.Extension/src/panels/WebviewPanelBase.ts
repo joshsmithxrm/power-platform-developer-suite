@@ -170,7 +170,9 @@ export abstract class WebviewPanelBase<
                     if (!this.environmentType) {
                         this.environmentType = config.resolvedType ?? null;
                     }
-                } catch {
+                } catch (err) {
+                    // eslint-disable-next-line no-console -- non-critical: color accent unavailable
+                    console.warn(`[PPDS] Failed to fetch environment config: ${err instanceof Error ? err.message : String(err)}`);
                     this.environmentColor = null;
                 }
             }

@@ -69,7 +69,7 @@ def main():
     # (spec updates and docs don't owe gates/verify/review)
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "main..HEAD"],
+            ["git", "diff", "--name-only", "main...HEAD"],
             cwd=project_dir,
             capture_output=True,
             text=True,
