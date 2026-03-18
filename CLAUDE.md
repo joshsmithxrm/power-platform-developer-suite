@@ -44,9 +44,8 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 ## Specs
 
-- Constitution: `specs/CONSTITUTION.md` — read before any work
+- Constitution: `specs/CONSTITUTION.md` — read before any work (includes Spec Laws SL1–SL5)
 - Template: `specs/SPEC-TEMPLATE.md`
-- Index: `specs/README.md`
 
 ## Extension Versioning
 
