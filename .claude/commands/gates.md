@@ -118,7 +118,7 @@ Fail: snapshot mismatch — report which snapshots differ
 
 **Gate 6: AC Verification** (if specs with ACs are relevant)
 
-Read `specs/README.md` to map changed files to specs. For each relevant spec with ACs:
+To find governing specs: grep all `specs/*.md` files for `**Code:**` lines. Match changed file paths against the code path prefixes in each spec's frontmatter. For each relevant spec with ACs:
 - Extract test method names from the AC table
 - For .NET tests: `dotnet test --filter "FullyQualifiedName~{method}" -v q --no-build`
 - For TypeScript tests: `npx vitest run -t "{method}" --prefix src/PPDS.Extension`

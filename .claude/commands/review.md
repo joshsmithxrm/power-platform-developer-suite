@@ -28,7 +28,7 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 ### Step 2: Load Spec Context (NO implementation context)
 
 - Read `specs/CONSTITUTION.md`
-- Map changed files to specs via `specs/README.md`
+- Map changed files to specs by grepping all `specs/*.md` files for `**Code:**` frontmatter lines. Match changed file paths against code path prefixes to find governing specs.
 - Read each relevant spec — extract ONLY the `## Acceptance Criteria` section
 - Do NOT read any plan files, task descriptions, or implementation notes
 

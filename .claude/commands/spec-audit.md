@@ -12,7 +12,6 @@ $ARGUMENTS = spec name for single audit (e.g., `connection-pooling`), or empty f
 
 Read these files:
 - `specs/CONSTITUTION.md` — principles to check against
-- `specs/README.md` — index of all specs and their code mappings
 
 ### Step 2: Determine Scope
 
@@ -21,7 +20,7 @@ Read these files:
 - Proceed to Step 3 with this one spec
 
 **Full audit** (`$ARGUMENTS` empty):
-- Read `specs/README.md` to get list of all specs
+- Glob `specs/*.md` (excluding CONSTITUTION.md, SPEC-TEMPLATE.md, README.md) to get the list of all specs
 - For each spec, dispatch a parallel subagent (use `Agent` tool with `subagent_type: "general-purpose"`) with the audit prompt below
 - Collect all results and produce a summary
 

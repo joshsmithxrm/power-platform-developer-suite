@@ -29,20 +29,10 @@ Before dispatching any agents, load the specification context that will be injec
 
 **A. Read Foundation**
 - Read `specs/CONSTITUTION.md` — full content will be injected into every subagent prompt
-- Read `specs/README.md` — maps code paths to specs
 
 **B. Identify Relevant Specs**
 - From the plan, identify which source directories/files will be touched
-- Map each to its spec using the README.md code column:
-  - `src/PPDS.Dataverse/Pooling/` → `specs/connection-pooling.md`
-  - `src/PPDS.Dataverse/Query/` → `specs/query.md`
-  - `src/PPDS.Cli/Tui/` → `specs/tui.md` + `specs/tui-foundation.md`
-  - `src/PPDS.Cli/Commands/` → `specs/cli.md`
-  - `src/PPDS.Mcp/` → `specs/mcp.md`
-  - `src/PPDS.Migration/` → `specs/migration.md`
-  - `src/PPDS.Auth/` → `specs/authentication.md`
-  - `src/PPDS.Extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
-  - `src/PPDS.Extension/` → check `specs/README.md` for extension-related specs
+- Grep all `specs/*.md` files for `**Code:**` frontmatter lines. Match each touched source directory against code path prefixes to find governing specs. This replaces hardcoded mappings and the README index.
 - Always include `specs/architecture.md`
 - Read each relevant spec and extract the `## Acceptance Criteria` section
 
@@ -61,6 +51,8 @@ Your implementation MUST satisfy these criteria. If your task conflicts
 with a spec or constitution principle, STOP and report the conflict
 to the orchestrator — do not silently deviate.
 ```
+
+**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec’s `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
 
 ### Step 3: Assess Current State
 - Check git status and current branch

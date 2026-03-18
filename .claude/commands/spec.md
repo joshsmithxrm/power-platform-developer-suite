@@ -11,9 +11,9 @@ $ARGUMENTS = spec name (e.g., `connection-pooling` for existing, `new-feature` f
 ### Step 1: Load Foundation
 
 Read these files before doing anything else:
-- `specs/CONSTITUTION.md` — non-negotiable principles
+- `specs/CONSTITUTION.md` — non-negotiable principles (includes Spec Laws SL1–SL5)
 - `specs/SPEC-TEMPLATE.md` — structural template
-- `specs/README.md` — index of all specs and their code mappings
+- Glob `specs/*.md` and grep each for `**Code:**` lines to build a code-path-to-spec map. This replaces the README index.
 
 ### Step 2: Determine Mode
 
@@ -31,14 +31,7 @@ Read these files before doing anything else:
 
 ### Step 3: Cross-Reference Related Specs
 
-Based on the spec's domain, read related specs:
-- Touches `src/PPDS.Dataverse/` → read `specs/connection-pooling.md`, `specs/architecture.md`
-- Touches `src/PPDS.Cli/Tui/` → read `specs/tui.md`, `specs/tui-foundation.md`
-- Touches `src/PPDS.Cli/Commands/` → read `specs/cli.md`
-- Touches `src/PPDS.Mcp/` → read `specs/mcp.md`
-- Touches `src/PPDS.Migration/` → read `specs/migration.md`
-- Touches `src/PPDS.Auth/` → read `specs/authentication.md`
-- Always read `specs/architecture.md` for cross-cutting patterns
+Use the code-path-to-spec map from Step 1 to find related specs. Match the spec's Code: paths against the directories being touched. Always include `specs/architecture.md` and `specs/CONSTITUTION.md`.
 
 ### Step 4: Author/Update Spec
 
@@ -64,7 +57,7 @@ If the user tries to skip ACs, remind them: Constitution I3 requires numbered ac
 ### Step 6: Finalize
 
 1. Write/update the spec file at `specs/$ARGUMENTS.md`
-2. Update `specs/README.md` if this is a new spec (add to appropriate table)
+2. Regenerate `specs/README.md` by running `python scripts/generate-spec-readme.py` (or manually scraping frontmatter from all specs if the script doesn't exist yet)
 3. Commit:
    ```
    docs(specs): add/update {spec-name} specification
@@ -74,7 +67,7 @@ If the user tries to skip ACs, remind them: Constitution I3 requires numbered ac
 
 ## Rules
 
-1. **Always read foundation first** — constitution, template, README. No exceptions.
+1. **Always read foundation first** — constitution and spec template. No exceptions.
 2. **Always cross-reference** — no spec exists in isolation.
 3. **ACs are mandatory** — the spec is incomplete without them.
 4. **One section at a time** — don't dump the entire spec at once.
