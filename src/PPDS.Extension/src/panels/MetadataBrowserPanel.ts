@@ -216,6 +216,12 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             <input type="text" id="entity-search" placeholder="Search entities..." />
             <span id="filter-count"></span>
         </div>
+        <div class="filter-toggle-container">
+            <label class="filter-toggle-label">
+                <input type="checkbox" id="hide-system-toggle" />
+                <span>Custom Only</span>
+            </label>
+        </div>
         <div class="entity-list" id="entity-list"></div>
     </div>
     <div class="entity-detail-pane" id="entity-detail-pane">

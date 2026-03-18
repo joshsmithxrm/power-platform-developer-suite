@@ -2,6 +2,22 @@
 
 /* ── Solutions Panel specific styles ──────────────────────────────────────── */
 
+.toolbar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.toolbar-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
 .content {
     flex: 1;
     overflow: auto;

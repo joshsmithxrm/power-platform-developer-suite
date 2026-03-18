@@ -29,6 +29,7 @@ const statusText = document.getElementById('status-text') as HTMLElement;
 const filterCount = document.getElementById('filter-count') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
+const hideSystemToggle = document.getElementById('hide-system-toggle') as HTMLInputElement;
 
 // ── State ──
 let allEntities: MetadataEntityViewDto[] = [];
@@ -36,6 +37,7 @@ let filteredEntities: MetadataEntityViewDto[] = [];
 let selectedEntityName: string | null = null;
 let currentEntity: MetadataEntityDetailDto | null = null;
 let activeTab = 'attributes';
+let hideSystem = false;
 
 const TAB_DEFS = [
     { id: 'attributes', label: 'Attributes' },
@@ -68,6 +70,11 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('reconnect-banner')!.style.display = 'none';
     vscode.postMessage({ command: 'refresh' });
+});
+
+hideSystemToggle.addEventListener('change', () => {
+    hideSystem = hideSystemToggle.checked;
+    applyFilter();
 });
 
 // ── Entity list rendering ──
@@ -121,17 +128,28 @@ entitySearchEl.addEventListener('input', () => {
 
 function applyFilter(): void {
     const term = entitySearchEl.value.toLowerCase().trim();
+    let base = allEntities;
+
+    if (hideSystem) {
+        base = base.filter(e => e.isCustomEntity);
+    }
+
     if (!term) {
-        filteredEntities = allEntities;
-        filterCount.textContent = '';
+        filteredEntities = base;
     } else {
-        filteredEntities = allEntities.filter(e =>
+        filteredEntities = base.filter(e =>
             e.displayName.toLowerCase().includes(term) ||
             e.logicalName.toLowerCase().includes(term) ||
             e.schemaName.toLowerCase().includes(term)
         );
-        filterCount.textContent = `${filteredEntities.length} of ${allEntities.length}`;
     }
+
+    if (filteredEntities.length !== allEntities.length) {
+        filterCount.textContent = `${filteredEntities.length} of ${allEntities.length}`;
+    } else {
+        filterCount.textContent = '';
+    }
+
     renderEntityList();
     updateStatusText();
 }
@@ -575,15 +593,12 @@ window.addEventListener('message', (event: MessageEvent<MetadataBrowserPanelHost
             break;
         case 'entitiesLoaded':
             allEntities = msg.entities;
-            filteredEntities = msg.entities;
             entitySearchEl.value = '';
-            filterCount.textContent = '';
-            renderEntityList();
+            applyFilter();
             renderTabBar();
             if (!currentEntity) {
                 tabContent.innerHTML = '<div class="empty-state">Select an entity to view details</div>';
             }
-            updateStatusText();
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';

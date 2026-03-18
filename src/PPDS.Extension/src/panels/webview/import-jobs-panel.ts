@@ -15,6 +15,7 @@ const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
+const searchInput = document.getElementById('search-input') as HTMLInputElement;
 const detailPane = document.getElementById('detail-pane') as HTMLElement;
 const detailContent = document.getElementById('detail-content') as HTMLElement;
 const detailClose = document.getElementById('detail-close') as HTMLElement;
@@ -28,6 +29,10 @@ envPickerBtn.addEventListener('click', () => {
 function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
 }
+
+// ── Search state ──
+let allJobs: ImportJobViewDto[] = [];
+let searchTerm = '';
 
 // ── Status badge helper ──
 function statusBadgeHtml(status: string): string {
@@ -75,6 +80,11 @@ const table = new DataTable<ImportJobViewDto>({
             render: (j) => escapeHtml(j.duration ?? '\u2014'),
             className: '90px',
         },
+        {
+            key: 'operationContext',
+            label: 'Operation Context',
+            render: (j) => escapeHtml(j.operationContext ?? '\u2014'),
+        },
     ],
     getRowId: (j) => j.id,
     onRowClick: (j) => {
@@ -87,7 +97,11 @@ const table = new DataTable<ImportJobViewDto>({
         const succeeded = items.filter(j => j.status === 'Succeeded').length;
         const failed = items.filter(j => j.status === 'Failed').length;
         const inProgress = items.filter(j => j.status === 'In Progress').length;
-        const parts = [items.length + ' import job' + (items.length !== 1 ? 's' : '')];
+        const isFiltered = searchTerm.length > 0 && items.length !== allJobs.length;
+        const countLabel = isFiltered
+            ? items.length + ' of ' + allJobs.length + ' import jobs'
+            : items.length + ' import job' + (items.length !== 1 ? 's' : '');
+        const parts = [countLabel];
         if (succeeded > 0) parts.push(succeeded + ' succeeded');
         if (failed > 0) parts.push(failed + ' failed');
         if (inProgress > 0) parts.push(inProgress + ' in progress');
@@ -107,6 +121,28 @@ makerBtn.addEventListener('click', () => {
 
 detailClose.addEventListener('click', () => {
     detailPane.style.display = 'none';
+});
+
+// ── Search filter ──
+function applySearchFilter(): void {
+    const term = searchTerm.toLowerCase();
+    const filtered = term.length === 0
+        ? allJobs
+        : allJobs.filter(j =>
+            (j.solutionName ?? '').toLowerCase().includes(term)
+            || (j.createdBy ?? '').toLowerCase().includes(term)
+            || (j.operationContext ?? '').toLowerCase().includes(term)
+        );
+    table.setItems(filtered);
+}
+
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        searchTerm = searchInput.value.trim();
+        applySearchFilter();
+    }, 300);
 });
 
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
@@ -150,7 +186,8 @@ window.addEventListener('message', (event: MessageEvent<ImportJobsPanelHostToWeb
             }
             break;
         case 'importJobsLoaded':
-            table.setItems(msg.jobs);
+            allJobs = msg.jobs;
+            applySearchFilter();
             detailPane.style.display = 'none';
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');

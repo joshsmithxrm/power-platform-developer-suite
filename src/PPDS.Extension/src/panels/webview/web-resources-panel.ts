@@ -115,6 +115,16 @@ const table = new DataTable<WebResourceInfoDto>({
             className: '100px',
         },
         {
+            key: 'createdBy',
+            label: 'Created By',
+            render: (r) => escapeHtml(r.createdBy ?? '\u2014'),
+        },
+        {
+            key: 'createdOn',
+            label: 'Created On',
+            render: (r) => escapeHtml(r.createdOn ?? '\u2014'),
+        },
+        {
             key: 'modifiedBy',
             label: 'Modified By',
             render: (r) => escapeHtml(r.modifiedBy ?? '\u2014'),

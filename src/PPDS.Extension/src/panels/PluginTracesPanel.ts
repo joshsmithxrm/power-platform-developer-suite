@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import type { DaemonClient } from '../daemonClient.js';
 import type { TraceFilterDto } from '../types.js';
 import { handleAuthError } from '../utils/errorUtils.js';
-import { buildMakerUrl } from '../commands/browserCommands.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
@@ -159,11 +158,11 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     }
 
     private async openInMaker(): Promise<void> {
-        if (this.environmentId) {
-            const url = buildMakerUrl(this.environmentId, '/plugintraceloglist');
+        if (this.environmentUrl) {
+            const url = `${this.environmentUrl}/main.aspx?pagetype=entitylist&etn=plugintracelog`;
             await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
-            vscode.window.showInformationMessage('Environment ID not available \u2014 cannot open Maker Portal.');
+            vscode.window.showInformationMessage('Environment URL not available \u2014 cannot open Plugin Trace Logs.');
         }
     }
 
@@ -436,6 +435,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     <vscode-button id="export-btn" appearance="secondary" title="Export traces">Export</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Plugin Trace Logs in Maker Portal">Maker Portal</vscode-button>
     <span class="toolbar-spacer"></span>
+    <input type="text" id="search-input" class="toolbar-search" placeholder="Search traces..." title="Filter traces by plugin name, entity, or message" />
     ${getEnvironmentPickerHtml()}
 </div>
 

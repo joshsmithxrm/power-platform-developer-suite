@@ -87,7 +87,9 @@ public record SolutionInfo(
     string? Description,
     DateTime? CreatedOn,
     DateTime? ModifiedOn,
-    DateTime? InstalledOn);
+    DateTime? InstalledOn,
+    bool IsVisible = true,
+    bool IsApiManaged = false);
 
 /// <summary>
 /// Information about a solution component.

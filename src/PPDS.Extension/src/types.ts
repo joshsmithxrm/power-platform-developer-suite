@@ -167,6 +167,8 @@ export interface SolutionInfoDto {
     createdOn: string | null;
     modifiedOn: string | null;
     installedOn: string | null;
+    isVisible: boolean;
+    isApiManaged: boolean;
 }
 
 export interface SolutionComponentsResponse {
@@ -408,6 +410,7 @@ export interface ImportJobInfoDto {
     startedOn: string | null;
     completedOn: string | null;
     duration: string | null;
+    operationContext: string | null;
 }
 
 export interface ImportJobDetailDto extends ImportJobInfoDto {
