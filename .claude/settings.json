@@ -1,7 +1,4 @@
 {
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": false
-  },
   "permissions": {
     "allow": [
       "Bash(ls:*)",
@@ -205,7 +202,7 @@
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash(gh pr create:*)",
         "hooks": [
           {
             "type": "command",
@@ -244,7 +241,7 @@
           {
             "type": "command",
             "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-stop-workflow.py\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

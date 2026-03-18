@@ -19,22 +19,36 @@ VS Code silently drops inline `<script>` tags exceeding ~32KB. External scripts 
 src/panels/
   QueryPanel.ts                    ← host-side panel (extends WebviewPanelBase<TIn, TOut>)
   SolutionsPanel.ts                ← host-side panel
-  WebviewPanelBase.ts              ← abstract base with typed postMessage + AbortSignal
+  ImportJobsPanel.ts               ← host-side panel
+  ConnectionReferencesPanel.ts     ← host-side panel
+  EnvironmentVariablesPanel.ts     ← host-side panel
+  MetadataBrowserPanel.ts          ← host-side panel
+  PluginTracesPanel.ts             ← host-side panel
+  WebResourcesPanel.ts             ← host-side panel
+  WebviewPanelBase.ts              ← abstract base: lifecycle, env picker, Maker URL, clipboard
   environmentPicker.ts             ← shared HTML generator + QuickPick helper
   monacoUtils.ts                   ← detectLanguage, mapCompletionKind, mapCompletionItems
   querySelectionUtils.ts           ← getSelectionRect, isSingleCell, sanitizeValue, buildTsv
-  webviewUtils.ts                  ← shared webview helper utilities
+  webviewUtils.ts                  ← shared webview helper utilities (getNonce)
   monaco-entry.ts                  ← Monaco editor browser entry (IIFE bundle)
   monaco-worker.ts                 ← Monaco editor worker entry
 
   webview/                         ← browser-side TypeScript (tsconfig.webview.json)
     query-panel.ts                 ← Query Panel webview entry point
     solutions-panel.ts             ← Solutions Panel webview entry point
+    import-jobs-panel.ts           ← Import Jobs Panel webview entry point
+    connection-references-panel.ts ← Connection References Panel webview entry point
+    environment-variables-panel.ts ← Environment Variables Panel webview entry point
+    metadata-browser-panel.ts      ← Metadata Browser Panel webview entry point
+    plugin-traces-panel.ts         ← Plugin Traces Panel webview entry point
+    web-resources-panel.ts         ← Web Resources Panel webview entry point
     shared/
       message-types.ts             ← discriminated unions for ALL panel messages
       dom-utils.ts                 ← escapeHtml, escapeAttr, cssEscape, formatDate, sanitizeValue
       error-handler.ts             ← centralized webview error handler (onerror, unhandledrejection)
       filter-bar.ts                ← generic FilterBar<T> — debounced text filtering with count
+      data-table.ts                ← reusable DataTable<T> — sorting, selection, status formatting
+      solution-filter.ts           ← SolutionFilter component — solution picker with persistence
       selection-utils.ts           ← getSelectionRect, isSingleCell, sanitizeValue, buildTsv
       vscode-api.ts                ← typed getVsCodeApi<T>() wrapper
       assert-never.ts              ← exhaustive switch helper
@@ -43,6 +57,12 @@ src/panels/
     shared.css                     ← common styles (toolbar, status bar, spinner, env picker)
     query-panel.css                ← @import './shared.css' + Query Panel specific
     solutions-panel.css            ← @import './shared.css' + Solutions Panel specific
+    import-jobs-panel.css          ← @import './shared.css' + Import Jobs specific
+    connection-references-panel.css ← @import './shared.css' + Connection References specific
+    environment-variables-panel.css ← @import './shared.css' + Environment Variables specific
+    metadata-browser-panel.css     ← @import './shared.css' + Metadata Browser specific
+    plugin-traces-panel.css        ← @import './shared.css' + Plugin Traces specific
+    web-resources-panel.css        ← @import './shared.css' + Web Resources specific
 
 esbuild.js                         ← builds host + webview TS + CSS entry points
 dist/

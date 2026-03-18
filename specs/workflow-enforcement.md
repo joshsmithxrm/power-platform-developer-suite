@@ -84,7 +84,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 
 ### Workflow State File
 
-**Location:** `.claude/workflow-state.json` (added to `.gitignore`)
+**Location:** `.workflow/state.json` (added to `.gitignore`)
 
 **Schema:**
 
@@ -133,7 +133,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 **Trigger:** Session start on any branch.
 
 **Behavior:**
-1. Read `.claude/workflow-state.json` if it exists.
+1. Read `.workflow/state.json` if it exists.
 2. Read current branch name.
 3. Determine workflow state: which steps have been completed, which are stale, which are pending.
 4. Inject into AI context:
@@ -162,7 +162,7 @@ WORKFLOW STATE for branch feature/import-jobs:
 
 **Added behavior (workflow state warning):**
 1. Check if files under `src/` are staged.
-2. If yes, read `.claude/workflow-state.json`.
+2. If yes, read `.workflow/state.json`.
 3. If `gates.commit_ref` does not match the current staging state (i.e., code has changed since gates last ran), emit a warning.
 4. **The workflow state warning does not block the commit.** The existing build/test/lint validation continues to block on failure. This is a soft gate — WIP commits during implementation are expected.
 
@@ -176,7 +176,7 @@ WORKFLOW STATE for branch feature/import-jobs:
 **Trigger:** PostToolUse on `Bash(git commit:*)`.
 
 **Behavior:**
-1. Read `.claude/workflow-state.json` if it exists.
+1. Read `.workflow/state.json` if it exists.
 2. Clear `gates.passed` (set to `null`) — the codebase has changed since gates last ran.
 3. Update `last_commit` to current HEAD.
 4. Write updated state file.
@@ -190,7 +190,7 @@ This is the component responsible for state invalidation on commit (Core Require
 **Trigger:** PreToolUse on `Bash(gh pr create:*)`.
 
 **Behavior:**
-1. Read `.claude/workflow-state.json`.
+1. Read `.workflow/state.json`.
 2. Verify ALL of the following:
    - `gates.commit_ref` matches current HEAD (gates ran against the current code).
    - `verify` has at least one surface with a timestamp (visual verification happened).
@@ -214,7 +214,7 @@ Run these before creating a PR.
 **Trigger:** Session end (Stop event).
 
 **Behavior:**
-1. Read `.claude/workflow-state.json` if it exists.
+1. Read `.workflow/state.json` if it exists.
 2. Check for uncommitted changes (`git status`).
 3. Emit a workflow completion summary.
 4. **Cannot block session end.** The user always has the right to stop.
@@ -234,7 +234,7 @@ SESSION END — Workflow status for feature/import-jobs:
 
 #### Existing Skills — Workflow State Integration
 
-Each skill writes its own entry to `.claude/workflow-state.json` upon successful completion:
+Each skill writes its own entry to `.workflow/state.json` upon successful completion:
 
 | Skill | Writes to state |
 |-------|----------------|
@@ -268,7 +268,7 @@ Each skill writes its own entry to `.claude/workflow-state.json` upon successful
 | `/write-skill` | Author new skills following PPDS conventions. | Encodes naming convention (`{action}` or `{action}-{qualifier}`, kebab-case). Encodes directory structure (skills/ with SKILL.md + supporting files). Encodes frontmatter patterns. Encodes description writing for AI discoverability. Encodes integration with workflow state (when and how to write state entries). |
 | `/mcp-verify` | How to verify MCP tools. | Supporting knowledge for `/verify` and `/qa`. Documents: MCP Inspector usage, direct tool invocation patterns, response validation, session option testing. |
 | `/cli-verify` | How to verify CLI commands. | Supporting knowledge for `/verify` and `/qa`. Documents: build and run patterns, stdout (data) vs stderr (status), exit code validation, pipe testing. |
-| `/status` | Display current workflow state. | Reads `.claude/workflow-state.json` and displays the same summary as SessionStart hook. On-demand visibility into what's been done and what's pending. No state writes. |
+| `/status` | Display current workflow state. | Reads `.workflow/state.json` and displays the same summary as SessionStart hook. On-demand visibility into what's been done and what's pending. No state writes. |
 | `/start` | Bootstrap a feature worktree. | Accepts feature name, creates worktree at `.worktrees/<name>` with branch `feature/<name>`, initializes `workflow-state.json` with `branch` and `started` fields, opens new tab in current Windows Terminal window via `wt -w 0 new-tab`, prints required workflow sequence. Handles: existing branch (no `-b`), existing worktree (offer switch), missing `wt` (warn + skip). |
 
 ### Main Branch Bootstrap
@@ -368,7 +368,7 @@ After all skills in this spec are implemented:
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | Workflow state file is created when `/gates` runs and contains `gates.passed` timestamp and `gates.commit_ref` matching HEAD | Manual: run `/gates`, read `.claude/workflow-state.json` | 🔲 |
+| AC-01 | Workflow state file is created when `/gates` runs and contains `gates.passed` timestamp and `gates.commit_ref` matching HEAD | Manual: run `/gates`, read `.workflow/state.json` | 🔲 |
 | AC-02 | Workflow state file is created when `/verify ext` runs and contains `verify.ext` timestamp | Manual: run `/verify ext`, read state file | 🔲 |
 | AC-03 | Workflow state file is created when `/qa` runs and contains `qa.{surface}` timestamp | Manual: run `/qa`, read state file | 🔲 |
 | AC-04 | Workflow state file is created when `/review` runs and contains `review.passed` timestamp | Manual: run `/review`, read state file | 🔲 |
@@ -394,7 +394,7 @@ After all skills in this spec are implemented:
 | AC-24 | Post-Commit Hook clears `gates.passed` after a successful commit | Manual: run `/gates`, commit, verify `gates.passed` is null in state file | 🔲 |
 | AC-25 | `/converge` clears `gates.passed` on fix cycle start | Manual: run `/converge` with findings, verify state cleared before fixes | 🔲 |
 | AC-26 | `/converge` writes fresh `gates.passed` and `gates.commit_ref` after final cycle passes | Manual: complete `/converge`, verify state file has fresh gates matching HEAD | 🔲 |
-| AC-27 | `.claude/workflow-state.json` is listed in `.gitignore` and not tracked by git | Verify `.gitignore` contains entry, `git status` does not show state file | 🔲 |
+| AC-27 | `.workflow/state.json` is listed in `.gitignore` and not tracked by git | Verify `.gitignore` contains entry, `git status` does not show state file | 🔲 |
 | AC-28 | `/implement` contains no superpowers references after rewrite | Read `/implement` skill content, grep for "superpowers" — zero matches | 🔲 |
 | AC-29 | `/review` dispatches reviewer without superpowers dependency | Run `/review`, verify subagent launches as general-purpose with isolation constraints | 🔲 |
 | AC-30 | `/pr` stops polling after 15 minutes with graceful timeout message | Manual: create PR with slow CI, verify timeout behavior | 🔲 |
@@ -420,7 +420,7 @@ After all skills in this spec are implemented:
 | User runs `/gates` but doesn't commit — runs `/gates` again | Second run overwrites the first timestamp. No accumulation issues. |
 | WIP commit during implementation | Pre-commit warns (soft gate). PR gate is not triggered. Workflow continues. |
 | `/converge` fix cycle introduces new commits | `/converge` clears `gates.passed` on start. Post-Commit Hook clears on each fix commit. `/converge` runs final `/gates` after last fix, writing fresh state. No deadlock. |
-| Multiple worktrees active simultaneously | Each worktree has its own `.claude/workflow-state.json`. State files are independent — no cross-worktree interference. |
+| Multiple worktrees active simultaneously | Each worktree has its own `.workflow/state.json`. State files are independent — no cross-worktree interference. |
 | `/pr` CI or Gemini review takes longer than 15 minutes | `/pr` stops polling, reports current status and what's still pending. User can re-check later with natural language. |
 
 ---

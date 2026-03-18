@@ -48,7 +48,7 @@ Thumbs.db
 # Claude Code settings (local)
 .claude/settings.local.json
 *.local.json
-.claude/workflow-state.json
+.workflow/
 
 # Temporary artifacts (testing, exports, logs)
 tmp/
@@ -87,6 +87,11 @@ node_modules/
 src/PPDS.Extension/test-results/
 src/PPDS.Extension/playwright-report/
 .vscode-test/
+
+# CDP tool session files (multi-instance)
+src/PPDS.Extension/tools/.webview-cdp-session-*.json
+src/PPDS.Extension/tools/.webview-cdp-console-*.log
+src/PPDS.Extension/tools/.webview-cdp-profile-*/
 
 # TUI verify tool session/log files
 .tui-verify-session.json

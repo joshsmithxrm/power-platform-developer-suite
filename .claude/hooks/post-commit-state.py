@@ -17,7 +17,8 @@ def main():
         pass
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
     # Skip if no state file exists
     if not os.path.exists(state_path):

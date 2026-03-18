@@ -223,7 +223,7 @@ Screenshot: $TEMP/qa-4.png
 
 ## Workflow State
 
-After QA passes for a surface (verdict is PASS — all checks green), update `.claude/workflow-state.json`:
+After QA passes for a surface (verdict is PASS — all checks green), update `.workflow/state.json`:
 1. Read the file (create `{}` if missing)
 2. Set `qa.{surface}` to the current ISO 8601 timestamp
 3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`

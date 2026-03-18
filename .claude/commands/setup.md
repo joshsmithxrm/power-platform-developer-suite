@@ -274,7 +274,7 @@ Tools installed:
   - Extension VSIX: installed (Windows) / skipped (Linux)
 
 AI Tooling:
-  - Superpowers: installed / NOT INSTALLED (see instructions above)
+  - Workflow hooks: configured
 
 Developer tools configured:
   - VS Code workspace: {base}/ppds.code-workspace
@@ -322,7 +322,7 @@ Non-interactive. Operates on the repo at the current working directory. No quest
 | npm node_modules exists | `npm install` updates if needed |
 | .NET packages restored | `dotnet restore` is a no-op |
 | CLI already installed | Script uninstalls and reinstalls |
-| Superpowers installed | Skip check, no message |
+| Workflow hooks present | Skip check, no message |
 | Dev container exists | Note in summary, don't modify |
 
 ## Repository URLs

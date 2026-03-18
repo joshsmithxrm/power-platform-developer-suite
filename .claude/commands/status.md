@@ -8,7 +8,7 @@ Display current workflow enforcement state for the active branch.
 
 ## Process
 
-1. Read `.claude/workflow-state.json` in the repo root.
+1. Read `.workflow/state.json` in the repo root.
 2. If the file does not exist, output: "No workflow state tracked. Start with /gates, /verify, /qa, or /review to begin tracking."
 3. If the file exists, read it and display the following:
 
@@ -45,5 +45,5 @@ List what the PR gate hook would block on:
 
 ## Notes
 
-- This command does NOT write to `workflow-state.json`. It is read-only.
+- This command does NOT write to `.workflow/state.json`. It is read-only.
 - On `main` branch: output "On main branch — workflow enforcement applies to feature branches only."

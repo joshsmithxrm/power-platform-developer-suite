@@ -61,7 +61,7 @@ Establishes the workflow state infrastructure and skill authoring conventions th
 
 ### Task 1.1: Add gitignore entry
 
-- [ ] Add `.claude/workflow-state.json` to `.gitignore`
+- [ ] Add `.workflow/state.json` to `.gitignore`
 - [ ] **AC-27**
 
 ### Task 1.2: Create `/write-skill`
@@ -80,7 +80,7 @@ Create `.claude/skills/write-skill/SKILL.md` with:
 
 Create `.claude/commands/status.md` (simple command, no supporting files needed):
 
-- [ ] Read `.claude/workflow-state.json`
+- [ ] Read `.workflow/state.json`
 - [ ] Display same format as SessionStart hook output (see spec lines 146-153)
 - [ ] Annotate stale entries (gates.commit_ref vs HEAD mismatch)
 - [ ] Handle missing file gracefully ("No workflow state. Run /gates, /verify, /qa, /review to begin tracking.")
@@ -92,13 +92,13 @@ Create `.claude/commands/status.md` (simple command, no supporting files needed)
 
 ## Phase 2: Hooks
 
-Python hook scripts + settings.json wiring. All hooks read/write `.claude/workflow-state.json`.
+Python hook scripts + settings.json wiring. All hooks read/write `.workflow/state.json`.
 
 ### Task 2.1: Post-Commit Hook (`post-commit-state.py`)
 
 Create `.claude/hooks/post-commit-state.py`:
 
-- [ ] Read `.claude/workflow-state.json` (graceful skip if missing or invalid JSON)
+- [ ] Read `.workflow/state.json` (graceful skip if missing or invalid JSON)
 - [ ] Clear `gates.passed` (set to `null`)
 - [ ] Update `last_commit` to current HEAD (`git rev-parse HEAD`)
 - [ ] Write updated state file
@@ -118,7 +118,7 @@ Modify existing `.claude/hooks/pre-commit-validate.py`:
 
 Create `.claude/hooks/pr-gate.py`:
 
-- [ ] Read `.claude/workflow-state.json` (if missing or corrupt: exit 2 with "No workflow state found")
+- [ ] Read `.workflow/state.json` (if missing or corrupt: exit 2 with "No workflow state found")
 - [ ] Check `gates.commit_ref` matches current HEAD
 - [ ] Check `verify` has at least one surface with timestamp
 - [ ] Check `qa` has at least one surface with timestamp
@@ -132,7 +132,7 @@ Create `.claude/hooks/pr-gate.py`:
 
 Create `.claude/hooks/session-start-workflow.py` (or `.cmd` wrapper):
 
-- [ ] Read `.claude/workflow-state.json` if it exists
+- [ ] Read `.workflow/state.json` if it exists
 - [ ] Read current branch name
 - [ ] Compare `gates.commit_ref` to HEAD for staleness
 - [ ] Output formatted workflow state summary (spec lines 146-153)
@@ -144,7 +144,7 @@ Create `.claude/hooks/session-start-workflow.py` (or `.cmd` wrapper):
 
 Create `.claude/hooks/session-stop-workflow.py` (or `.cmd` wrapper):
 
-- [ ] Read `.claude/workflow-state.json` if it exists
+- [ ] Read `.workflow/state.json` if it exists
 - [ ] Check for uncommitted changes (`git status --porcelain`)
 - [ ] Output formatted completion summary (spec lines 222-230)
 - [ ] If no state file: no output (normal for non-feature work)
@@ -172,7 +172,7 @@ Add workflow state writes to existing skills. Remove superpowers dependencies.
 
 Edit `.claude/commands/gates.md`:
 
-- [ ] After all gates pass, add instruction: write `gates.passed` (ISO timestamp) and `gates.commit_ref` (current HEAD) to `.claude/workflow-state.json`
+- [ ] After all gates pass, add instruction: write `gates.passed` (ISO timestamp) and `gates.commit_ref` (current HEAD) to `.workflow/state.json`
 - [ ] If any gate fails, do NOT write state (failed gates are not "passed")
 - [ ] **AC-01**
 
@@ -180,7 +180,7 @@ Edit `.claude/commands/gates.md`:
 
 Edit `.claude/commands/verify.md`:
 
-- [ ] After verification passes for a surface, add instruction: write `verify.{surface}` (ISO timestamp) to `.claude/workflow-state.json`
+- [ ] After verification passes for a surface, add instruction: write `verify.{surface}` (ISO timestamp) to `.workflow/state.json`
 - [ ] Surface key matches mode argument: `ext`, `tui`, `mcp`, `cli`
 - [ ] **AC-02**
 
@@ -188,14 +188,14 @@ Edit `.claude/commands/verify.md`:
 
 Edit `.claude/commands/qa.md`:
 
-- [ ] After QA passes for a surface, add instruction: write `qa.{surface}` (ISO timestamp) to `.claude/workflow-state.json`
+- [ ] After QA passes for a surface, add instruction: write `qa.{surface}` (ISO timestamp) to `.workflow/state.json`
 - [ ] **AC-03**
 
 ### Task 3.4: Update `/review`
 
 Edit `.claude/commands/review.md`:
 
-- [ ] After review completes, add instruction: write `review.passed` (ISO timestamp) and `review.findings` (count) to `.claude/workflow-state.json`
+- [ ] After review completes, add instruction: write `review.passed` (ISO timestamp) and `review.findings` (count) to `.workflow/state.json`
 - [ ] Remove `subagent_type: 'superpowers:code-reviewer'` — dispatch as general-purpose subagent with same isolation constraints (diff + constitution + ACs only, no implementation context)
 - [ ] **AC-04, AC-29**
 
@@ -203,7 +203,7 @@ Edit `.claude/commands/review.md`:
 
 Edit `.claude/commands/converge.md`:
 
-- [ ] At start of fix cycle: clear `gates.passed` in `.claude/workflow-state.json`
+- [ ] At start of fix cycle: clear `gates.passed` in `.workflow/state.json`
 - [ ] After final cycle passes: run `/gates`, which writes fresh state
 - [ ] Retain all existing convergence tracking, cycle evaluation, stall detection
 - [ ] **AC-25, AC-26**

@@ -38,7 +38,7 @@ def main():
         _show_main_guidance(project_dir)
         sys.exit(0)
 
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
 
     if not os.path.exists(state_path):
         # No state file — inject workflow reminder
@@ -58,7 +58,7 @@ def main():
     except (json.JSONDecodeError, OSError):
         print(
             f"WORKFLOW STATE for branch {branch}:\n"
-            "  ⚠ State file is corrupted. Delete .claude/workflow-state.json and re-run steps.",
+            "  ⚠ State file is corrupted. Delete .workflow/state.json and re-run steps.",
             file=sys.stderr,
         )
         sys.exit(0)

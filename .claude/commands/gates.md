@@ -158,7 +158,7 @@ Gates are necessary but NOT sufficient. After gates pass:
 
 ## Workflow State
 
-After all gates pass (verdict is PASS), update `.claude/workflow-state.json`:
+After all gates pass (verdict is PASS), update `.workflow/state.json`:
 1. Read the file (create `{}` if missing)
 2. Set `gates.passed` to the current ISO 8601 timestamp
 3. Set `gates.commit_ref` to current HEAD SHA (from `git rev-parse HEAD`)

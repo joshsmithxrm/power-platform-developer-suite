@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -7,11 +7,19 @@ import { createServer } from 'node:http';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const SESSION_FILE = resolve(__dirname, '.webview-cdp-session.json');
-const LOG_FILE = resolve(__dirname, '.webview-cdp-console.log');
-const PROFILE_DIR = resolve(__dirname, '.webview-cdp-profile');
+// Session-scoped file paths (supports multiple concurrent instances)
+function sessionFile(name = 'default') {
+  return resolve(__dirname, `.webview-cdp-session-${name}.json`);
+}
+function logFile(name = 'default') {
+  return resolve(__dirname, `.webview-cdp-console-${name}.log`);
+}
+function profileDir(name = 'default') {
+  return resolve(__dirname, `.webview-cdp-profile-${name}`);
+}
+
 const VALID_COMMANDS = ['launch', 'close', 'connect', 'command', 'wait',
-  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs', 'text', 'notebook'];
+  'screenshot', 'eval', 'click', 'type', 'select', 'key', 'mouse', 'logs', 'text', 'notebook', 'download'];
 const VALID_MODIFIERS = ['ctrl', 'shift', 'alt', 'meta'];
 const VALID_MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup'];
 
@@ -46,85 +54,116 @@ export function parseArgs(argv) {
 
   const rest = argv.slice(1);
 
+  // Extract --session from any command
+  let session = 'default';
+  const filteredRest = [];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--session' && i + 1 < rest.length) { session = rest[++i]; }
+    else { filteredRest.push(rest[i]); }
+  }
+
   // Simple commands with no interaction flags
   if (command === 'launch') {
-    let workspace, build = false;
-    for (const arg of rest) {
+    let workspace, build = false, vsix;
+    for (const arg of filteredRest) {
       if (arg === '--build') build = true;
+      else if (arg.startsWith('--vsix')) { /* handled below */ }
       else if (!workspace) workspace = arg;
     }
-    return { command, workspace, build };
+    // Re-scan for --vsix (needs value)
+    for (let i = 0; i < filteredRest.length; i++) {
+      if (filteredRest[i] === '--vsix' && i + 1 < filteredRest.length) { vsix = filteredRest[++i]; }
+    }
+    return { command, workspace, build, vsix, session };
   }
-  if (command === 'close' || command === 'connect') {
-    return { command };
+  if (command === 'close') {
+    const all = filteredRest.includes('--all');
+    return { command, all, session };
+  }
+  if (command === 'connect') {
+    return { command, session };
+  }
+  if (command === 'download') {
+    return { command, args: filteredRest, session };
   }
   if (command === 'command') {
-    return { command, args: rest };
+    return { command, args: filteredRest, session };
   }
   if (command === 'wait') {
     let timeout = 30000, ext;
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === '--ext' && i + 1 < rest.length) { ext = rest[++i]; }
-      else { const n = parseInt(rest[i], 10); if (!isNaN(n)) timeout = n; }
+    for (let i = 0; i < filteredRest.length; i++) {
+      if (filteredRest[i] === '--ext' && i + 1 < filteredRest.length) { ext = filteredRest[++i]; }
+      else { const n = parseInt(filteredRest[i], 10); if (!isNaN(n)) timeout = n; }
     }
-    return { command, timeout, ext };
+    return { command, timeout, ext, session };
   }
   if (command === 'logs') {
     let channel, level;
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === '--channel' && i + 1 < rest.length) { channel = rest[++i]; }
-      else if (rest[i] === '--level' && i + 1 < rest.length) { level = rest[++i]; }
+    for (let i = 0; i < filteredRest.length; i++) {
+      if (filteredRest[i] === '--channel' && i + 1 < filteredRest.length) { channel = filteredRest[++i]; }
+      else if (filteredRest[i] === '--level' && i + 1 < filteredRest.length) { level = filteredRest[++i]; }
     }
-    return { command, channel, level };
+    return { command, channel, level, session };
   }
   if (command === 'notebook') {
     const NOTEBOOK_SUBCOMMANDS = ['run', 'run-all'];
-    const subcommand = rest[0];
+    const subcommand = filteredRest[0];
     if (!subcommand) throw new Error('notebook requires a subcommand: ' + NOTEBOOK_SUBCOMMANDS.join(', '));
     if (!NOTEBOOK_SUBCOMMANDS.includes(subcommand)) throw new Error(`Unknown notebook subcommand: ${subcommand}. Valid: ${NOTEBOOK_SUBCOMMANDS.join(', ')}`);
-    return { command, subcommand };
+    return { command, subcommand, session };
   }
 
   // Interaction commands: click, eval, type, select, screenshot, mouse, key
   let target, ext, right = false, page = false;
   const args = [];
-  for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--target' && i + 1 < rest.length) {
-      const val = rest[++i];
+  for (let i = 0; i < filteredRest.length; i++) {
+    if (filteredRest[i] === '--target' && i + 1 < filteredRest.length) {
+      const val = filteredRest[++i];
       target = val === 'active' ? 'active' : parseInt(val, 10);
     }
-    else if (rest[i] === '--ext' && i + 1 < rest.length) { ext = rest[++i]; }
-    else if (rest[i] === '--right') { right = true; }
-    else if (rest[i] === '--page') { page = true; }
-    else { args.push(rest[i]); }
+    else if (filteredRest[i] === '--ext' && i + 1 < filteredRest.length) { ext = filteredRest[++i]; }
+    else if (filteredRest[i] === '--right') { right = true; }
+    else if (filteredRest[i] === '--page') { page = true; }
+    else { args.push(filteredRest[i]); }
   }
 
   // key command: only has args and page (no target/ext/right)
   if (command === 'key') {
-    return { command, args, page };
+    return { command, args, page, session };
   }
   // click: has right flag
   if (command === 'click') {
-    return { command, args, page, right, target, ext };
+    return { command, args, page, right, target, ext, session };
   }
   // all others: args, page, target, ext
-  return { command, args, page, target, ext };
+  return { command, args, page, target, ext, session };
 }
 
 // ── Session file I/O ───────────────────────────────────────────────
 
-function readSession() {
-  if (!existsSync(SESSION_FILE))
-    throw new Error('No session found. Run `webview-cdp launch` first.');
-  return JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
+function readSession(name = 'default') {
+  const f = sessionFile(name);
+  if (!existsSync(f))
+    throw new Error(`No session '${name}' found. Run \`webview-cdp launch --session ${name}\` first.`);
+  return JSON.parse(readFileSync(f, 'utf-8'));
 }
 
-function writeSession(data) {
-  writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+function writeSession(data, name = 'default') {
+  writeFileSync(sessionFile(name), JSON.stringify(data, null, 2));
 }
 
-function deleteSession() {
-  if (existsSync(SESSION_FILE)) unlinkSync(SESSION_FILE);
+function deleteSession(name = 'default') {
+  const f = sessionFile(name);
+  if (existsSync(f)) unlinkSync(f);
+}
+
+function listSessions() {
+  try {
+    const files = readdirSync(__dirname);
+    return files
+      .filter(f => f.startsWith('.webview-cdp-session-') && f.endsWith('.json'))
+      .map(f => f.replace('.webview-cdp-session-', '').replace('.json', ''));
+  } catch { return []; }
 }
 
 // ── HTTP Client (caller mode) ──────────────────────────────────────
@@ -143,28 +182,61 @@ async function sendToDaemon(session, action, params = {}) {
 
 // ── Daemon Mode ────────────────────────────────────────────────────
 
-async function runDaemon(workspace) {
+async function runDaemon(workspace, sessionName = 'default', vsixPath = null) {
+  const SESSION_PROFILE_DIR = profileDir(sessionName);
+  const SESSION_LOG_FILE = logFile(sessionName);
+
   // Dynamic import — callers don't need Playwright
   const { _electron: electron } = await import('@playwright/test');
   const { downloadAndUnzipVSCode } = await import('@vscode/test-electron');
 
   const execPath = await downloadAndUnzipVSCode();
-  const extensionPath = resolve(__dirname, '..');
+
+  // Build VS Code launch args based on mode
+  const launchArgs = [
+    '--user-data-dir=' + SESSION_PROFILE_DIR,
+    '--no-sandbox',
+    '--disable-gpu',
+    '--log=trace',
+    '--disable-workspace-trust',
+    '--skip-release-notes',
+    '--disable-telemetry',
+    '--disable-crash-reporter',
+  ];
+
+  if (vsixPath) {
+    // VSIX mode: install extension into a clean extensions dir
+    const extDir = resolve(SESSION_PROFILE_DIR, 'extensions');
+    const extractDir = resolve(extDir, '_vsix_extract');
+    mkdirSync(extractDir, { recursive: true });
+    // VSIX files are ZIP archives — extract using tar (handles ZIP on all modern platforms)
+    execSync(`tar -xf "${vsixPath}" -C "${extractDir}"`, { timeout: 60000 });
+    // The VSIX contains an 'extension/' subfolder — rename to VS Code's expected format
+    const innerDir = resolve(extractDir, 'extension');
+    if (existsSync(innerDir)) {
+      const pkgPath = resolve(innerDir, 'package.json');
+      if (existsSync(pkgPath)) {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        const extFolderName = `${pkg.publisher}.${pkg.name}-${pkg.version}`;
+        const finalDir = resolve(extDir, extFolderName);
+        if (!existsSync(finalDir)) {
+          const { renameSync } = await import('node:fs');
+          renameSync(innerDir, finalDir);
+        }
+      }
+    }
+    launchArgs.push('--extensions-dir=' + extDir);
+  } else {
+    // Dev mode: load extension from source
+    const extensionPath = resolve(__dirname, '..');
+    launchArgs.push('--extensionDevelopmentPath=' + extensionPath);
+  }
+
+  launchArgs.push(workspace);
 
   const electronApp = await electron.launch({
     executablePath: execPath,
-    args: [
-      '--extensionDevelopmentPath=' + extensionPath,
-      '--user-data-dir=' + PROFILE_DIR,
-      '--no-sandbox',
-      '--disable-gpu',
-      '--log=trace',
-      '--disable-workspace-trust',
-      '--skip-release-notes',
-      '--disable-telemetry',
-      '--disable-crash-reporter',
-      workspace,
-    ],
+    args: launchArgs,
   });
 
   const page = await electronApp.firstWindow();
@@ -183,15 +255,15 @@ async function runDaemon(workspace) {
   }
 
   // Console capture
-  if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
+  if (existsSync(SESSION_LOG_FILE)) unlinkSync(SESSION_LOG_FILE);
   page.on('console', msg => {
-    appendFileSync(LOG_FILE, JSON.stringify({
+    appendFileSync(SESSION_LOG_FILE, JSON.stringify({
       level: msg.type(), message: msg.text(),
       source: 'main', timestamp: new Date().toISOString(),
     }) + '\n');
   });
   page.on('pageerror', err => {
-    appendFileSync(LOG_FILE, JSON.stringify({
+    appendFileSync(SESSION_LOG_FILE, JSON.stringify({
       level: 'error', message: 'Uncaught: ' + err.message,
       source: 'main', timestamp: new Date().toISOString(),
     }) + '\n');
@@ -484,7 +556,7 @@ async function runDaemon(workspace) {
       }
       case 'logs': {
         if (params.channel) {
-          const logsDir = resolve(PROFILE_DIR, 'logs');
+          const logsDir = resolve(SESSION_PROFILE_DIR, 'logs');
           if (!existsSync(logsDir)) return { logs: 'No log directory found' };
           // Search log files using pure Node.js (no shell — CONSTITUTION S2)
           const { readdirSync, statSync } = await import('node:fs');
@@ -510,8 +582,8 @@ async function runDaemon(workspace) {
           const logContent = matching.map(f => readFileSync(f, 'utf-8')).join('\n');
           return { logs: logContent };
         }
-        if (!existsSync(LOG_FILE)) return { logs: '' };
-        return { logs: readFileSync(LOG_FILE, 'utf-8') };
+        if (!existsSync(SESSION_LOG_FILE)) return { logs: '' };
+        return { logs: readFileSync(SESSION_LOG_FILE, 'utf-8') };
       }
       default:
         throw new Error(`Unknown action: ${action}`);
@@ -555,13 +627,13 @@ async function runDaemon(workspace) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const daemonPort = server.address().port;
 
-  writeSession({ daemonPort, daemonPid: process.pid, userDataDir: PROFILE_DIR, logFile: LOG_FILE });
-  console.error(`Daemon ready on port ${daemonPort}`);
+  writeSession({ daemonPort, daemonPid: process.pid, userDataDir: SESSION_PROFILE_DIR, logFile: SESSION_LOG_FILE }, sessionName);
+  console.error(`Daemon '${sessionName}' ready on port ${daemonPort}`);
 
   async function cleanup() {
     try { await electronApp.close(); } catch {}
-    deleteSession();
-    if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
+    deleteSession(sessionName);
+    if (existsSync(SESSION_LOG_FILE)) unlinkSync(SESSION_LOG_FILE);
     server.close();
     process.exit(0);
   }
@@ -573,7 +645,9 @@ async function runDaemon(workspace) {
 // ── Caller command handlers ────────────────────────────────────────
 
 async function cmdLaunch(parsed) {
-  if (parsed.build) {
+  const sName = parsed.session;
+
+  if (parsed.build && !parsed.vsix) {
     const extDir = resolve(__dirname, '..');
     const repoRoot = resolve(extDir, '..', '..');
     console.log('Building extension...');
@@ -591,21 +665,29 @@ async function cmdLaunch(parsed) {
     console.log('Build complete');
   }
 
-  if (existsSync(SESSION_FILE)) {
-    const session = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'));
+  const sf = sessionFile(sName);
+  if (existsSync(sf)) {
+    const session = JSON.parse(readFileSync(sf, 'utf-8'));
     try {
       await fetch(`http://localhost:${session.daemonPort}/health`);
-      console.log('VS Code is already running. Run `close` first.');
+      console.log(`Session '${sName}' is already running. Run \`close --session ${sName}\` first.`);
       return;
     } catch {
       // Stale session — clean up
       try { process.kill(session.daemonPid); } catch {}
-      deleteSession();
+      deleteSession(sName);
     }
   }
 
+  if (parsed.vsix && !existsSync(parsed.vsix)) {
+    throw new Error(`VSIX file not found: ${parsed.vsix}`);
+  }
+
   const workspace = parsed.workspace || process.cwd();
-  const child = spawn(process.execPath, [__filename, '--daemon', workspace], {
+  const daemonArgs = [__filename, '--daemon', workspace, '--session', sName];
+  if (parsed.vsix) daemonArgs.push('--vsix', resolve(parsed.vsix));
+
+  const child = spawn(process.execPath, daemonArgs, {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore'],
   });
@@ -613,9 +695,9 @@ async function cmdLaunch(parsed) {
 
   const start = Date.now();
   while (Date.now() - start < 90000) {
-    if (existsSync(SESSION_FILE)) {
-      const session = readSession();
-      console.log(`VS Code launched (daemon PID ${session.daemonPid}, port ${session.daemonPort})`);
+    if (existsSync(sf)) {
+      const session = readSession(sName);
+      console.log(`VS Code launched (session '${sName}', daemon PID ${session.daemonPid}, port ${session.daemonPort})`);
       return;
     }
     await new Promise(r => setTimeout(r, 500));
@@ -623,8 +705,28 @@ async function cmdLaunch(parsed) {
   throw new Error('Timeout: daemon did not start within 90 seconds');
 }
 
-async function cmdClose() {
-  const session = readSession();
+async function cmdClose(parsed) {
+  if (parsed.all) {
+    const sessions = listSessions();
+    if (sessions.length === 0) {
+      console.log('No active sessions');
+      return;
+    }
+    for (const sName of sessions) {
+      await closeSession(sName);
+    }
+    return;
+  }
+  await closeSession(parsed.session);
+}
+
+async function closeSession(sName) {
+  const sf = sessionFile(sName);
+  if (!existsSync(sf)) {
+    console.log(`No session '${sName}' found`);
+    return;
+  }
+  const session = JSON.parse(readFileSync(sf, 'utf-8'));
   try {
     await fetch(`http://localhost:${session.daemonPort}/shutdown`);
   } catch {
@@ -632,22 +734,23 @@ async function cmdClose() {
   }
   const start = Date.now();
   while (Date.now() - start < 10000) {
-    if (!existsSync(SESSION_FILE)) {
-      console.log('VS Code closed');
+    if (!existsSync(sf)) {
+      console.log(`Session '${sName}' closed`);
       return;
     }
     await new Promise(r => setTimeout(r, 200));
   }
   // Force cleanup
   try { process.kill(session.daemonPid); } catch {}
-  deleteSession();
-  if (existsSync(LOG_FILE)) unlinkSync(LOG_FILE);
-  console.log('VS Code closed (forced)');
+  deleteSession(sName);
+  const lf = logFile(sName);
+  if (existsSync(lf)) unlinkSync(lf);
+  console.log(`Session '${sName}' closed (forced)`);
 }
 
 async function cmdScreenshot(parsed) {
   if (!parsed.args[0]) throw new Error('Usage: screenshot <file>');
-  const session = readSession();
+  const session = readSession(parsed.session);
   const result = await sendToDaemon(session, 'screenshot', {
     file: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
@@ -656,7 +759,7 @@ async function cmdScreenshot(parsed) {
 
 async function cmdEval(parsed) {
   if (!parsed.args[0]) throw new Error('Empty expression');
-  const session = readSession();
+  const session = readSession(parsed.session);
   const result = await sendToDaemon(session, 'eval', {
     expression: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
@@ -665,7 +768,7 @@ async function cmdEval(parsed) {
 
 async function cmdText(parsed) {
   if (!parsed.args[0]) throw new Error('Usage: text <selector>');
-  const session = readSession();
+  const session = readSession(parsed.session);
   const result = await sendToDaemon(session, 'text', {
     selector: parsed.args[0], page: parsed.page, target: parsed.target, ext: parsed.ext,
   });
@@ -674,7 +777,7 @@ async function cmdText(parsed) {
 
 async function cmdClick(parsed) {
   if (!parsed.args[0]) throw new Error('Empty selector');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'click', {
     selector: parsed.args[0], right: parsed.right, page: parsed.page,
     target: parsed.target, ext: parsed.ext,
@@ -683,7 +786,7 @@ async function cmdClick(parsed) {
 
 async function cmdType(parsed) {
   if (!parsed.args[0] || parsed.args[1] === undefined) throw new Error('Usage: type <selector> <text>');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'type', {
     selector: parsed.args[0], text: parsed.args[1], page: parsed.page,
     target: parsed.target, ext: parsed.ext,
@@ -692,7 +795,7 @@ async function cmdType(parsed) {
 
 async function cmdSelect(parsed) {
   if (!parsed.args[0] || parsed.args[1] === undefined) throw new Error('Usage: select <selector> <value>');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'select', {
     selector: parsed.args[0], value: parsed.args[1], page: parsed.page,
     target: parsed.target, ext: parsed.ext,
@@ -701,7 +804,7 @@ async function cmdSelect(parsed) {
 
 async function cmdKey(parsed) {
   if (!parsed.args[0]) throw new Error('Empty key combo');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'key', { combo: parsed.args[0], page: parsed.page });
 }
 
@@ -711,24 +814,24 @@ async function cmdMouse(parsed) {
   const y = parseFloat(parsed.args[2]);
   if (!VALID_MOUSE_EVENTS.includes(event)) throw new Error('Invalid mouse event. Must be: mousedown, mousemove, mouseup');
   if (isNaN(x) || isNaN(y) || x < 0 || y < 0) throw new Error('Invalid coordinates');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'mouse', { event, x, y, page: parsed.page, target: parsed.target, ext: parsed.ext });
 }
 
 async function cmdCommand(parsed) {
   if (!parsed.args[0]) throw new Error('Empty command');
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'command', { text: parsed.args[0] });
 }
 
 async function cmdWait(parsed) {
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'wait', { timeout: parsed.timeout, ext: parsed.ext, target: parsed.target });
   console.log('Webview ready');
 }
 
-async function cmdConnect() {
-  const session = readSession();
+async function cmdConnect(parsed) {
+  const session = readSession(parsed.session);
   const result = await sendToDaemon(session, 'connect', {});
   if (result.targets.length === 0) {
     throw new Error('No webview found. Is a webview panel open?');
@@ -741,25 +844,50 @@ async function cmdConnect() {
 }
 
 async function cmdLogs(parsed) {
-  const session = readSession();
+  const session = readSession(parsed.session);
   const result = await sendToDaemon(session, 'logs', { channel: parsed.channel, level: parsed.level });
   console.log(result.logs);
 }
 
 async function cmdNotebook(parsed) {
-  const session = readSession();
+  const session = readSession(parsed.session);
   await sendToDaemon(session, 'notebook', { subcommand: parsed.subcommand });
   console.log(`notebook ${parsed.subcommand}: done`);
 }
 
 // ── Main dispatch ──────────────────────────────────────────────────
 
+async function cmdDownload(parsed) {
+  if (parsed.args.length < 2) throw new Error('Usage: download <publisher.extension-name> <version>');
+  const extensionId = parsed.args[0];
+  const version = parsed.args[1];
+  const [publisher, name] = extensionId.includes('.') ? extensionId.split('.', 2) : [null, null];
+  if (!publisher || !name) throw new Error('Extension ID must be in format: publisher.extension-name');
+
+  const url = `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
+  const outputFile = resolve(`${publisher}.${name}-${version}.vsix`);
+
+  console.log(`Downloading ${extensionId} v${version}...`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed (HTTP ${res.status}). Check extension ID and version.`);
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  writeFileSync(outputFile, buffer);
+  console.log(`Saved: ${outputFile}`);
+}
+
 async function main() {
   // Daemon mode
   if (process.argv.includes('--daemon')) {
     const daemonIdx = process.argv.indexOf('--daemon');
     const workspace = process.argv[daemonIdx + 1] || process.cwd();
-    await runDaemon(workspace);
+    // Parse --session and --vsix from daemon args
+    let sessionName = 'default', vsixPath = null;
+    for (let i = 0; i < process.argv.length; i++) {
+      if (process.argv[i] === '--session' && i + 1 < process.argv.length) sessionName = process.argv[++i];
+      if (process.argv[i] === '--vsix' && i + 1 < process.argv.length) vsixPath = process.argv[++i];
+    }
+    await runDaemon(workspace, sessionName, vsixPath);
     return;
   }
 
@@ -767,8 +895,9 @@ async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   switch (parsed.command) {
     case 'launch': await cmdLaunch(parsed); break;
-    case 'close': await cmdClose(); break;
+    case 'close': await cmdClose(parsed); break;
     case 'connect': await cmdConnect(parsed); break;
+    case 'download': await cmdDownload(parsed); break;
     case 'command': await cmdCommand(parsed); break;
     case 'wait': await cmdWait(parsed); break;
     case 'screenshot': await cmdScreenshot(parsed); break;

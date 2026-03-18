@@ -38,7 +38,8 @@ def main():
     if branch in ("main", "master", "unknown"):
         sys.exit(0)
 
-    state_path = os.path.join(project_dir, ".claude", "workflow-state.json")
+    state_path = os.path.join(project_dir, ".workflow", "state.json")
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
 
     # No state file — no workflow tracked, allow stop
     if not os.path.exists(state_path):
@@ -129,15 +130,18 @@ def main():
         else:
             missing.append("/gates")
 
-    # Verify (at least one surface)
+    # Valid surface keys
+    valid_surfaces = ("ext", "tui", "mcp", "cli")
+
+    # Verify (at least one valid surface)
     verify = state.get("verify", {})
-    verified = [k for k, v in verify.items() if v]
+    verified = [k for k, v in verify.items() if v and k in valid_surfaces]
     if not verified:
         missing.append("/verify (no surfaces verified)")
 
-    # QA (at least one surface)
+    # QA (at least one valid surface)
     qa = state.get("qa", {})
-    qa_done = [k for k, v in qa.items() if v]
+    qa_done = [k for k, v in qa.items() if v and k in valid_surfaces]
     if not qa_done:
         missing.append("/qa")
 
@@ -190,8 +194,9 @@ def main():
             lines.append(f"  → {step}")
         lines.append("")
         lines.append(
-            "Complete these steps before stopping. "
-            "Run them in order: /gates → /verify → /qa → /review → /pr"
+            "YOU MUST complete the remaining steps before stopping. "
+            "Do NOT present a summary and wait — execute the next step immediately.\n"
+            "Run in order: /gates → /verify → /qa → /review → /pr"
         )
 
         output = {
