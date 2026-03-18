@@ -234,12 +234,12 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="maker-portal-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
-    <input id="search-input" type="text" placeholder="Filter solutions..." style="flex: 1; min-width: 120px; max-width: 300px; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 12px; outline: none;" />
+    <input id="search-input" type="text" placeholder="Filter solutions..." class="toolbar-search" />
     <label class="toolbar-checkbox" title="Show managed solutions">
         <input type="checkbox" id="include-managed-cb" checked />
         <span>Include Managed</span>
     </label>
-    <select id="sort-select" title="Sort solutions" style="padding: 3px 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 12px;">
+    <select id="sort-select" title="Sort solutions" class="toolbar-select">
         <option value="name">Sort: Name</option>
         <option value="version">Sort: Version</option>
         <option value="publisher">Sort: Publisher</option>

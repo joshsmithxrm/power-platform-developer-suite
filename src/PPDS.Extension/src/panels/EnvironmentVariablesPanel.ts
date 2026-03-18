@@ -320,7 +320,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings">Sync Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Environment Variables in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
-    <input id="search-input" type="text" placeholder="Filter variables..." style="flex: 1; min-width: 120px; max-width: 300px; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 12px; outline: none;" />
+    <input id="search-input" type="text" placeholder="Filter variables..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
