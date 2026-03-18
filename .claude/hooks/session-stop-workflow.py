@@ -65,19 +65,36 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Planning phase: if no commits beyond main, skip enforcement
-    # (design discussions don't owe gates/verify/review)
+    # Planning/spec phase: skip enforcement if no source code changes beyond main
+    # (spec updates and docs don't owe gates/verify/review)
     try:
         result = subprocess.run(
-            ["git", "log", "main..HEAD", "--oneline"],
+            ["git", "diff", "--name-only", "main..HEAD"],
             cwd=project_dir,
             capture_output=True,
             text=True,
             timeout=10,
         )
-        if result.returncode == 0 and not result.stdout.strip():
-            # Zero commits beyond main — still in planning phase
-            sys.exit(0)
+        if result.returncode == 0:
+            changed_files = [
+                f
+                for f in result.stdout.strip().split("\n")
+                if f.strip()
+            ]
+            # Prefixes that don't require workflow enforcement
+            non_code_prefixes = (
+                "specs/",
+                "docs/",
+                ".claude/",
+                "README",
+                "CLAUDE.md",
+            )
+            has_code_changes = any(
+                not f.startswith(non_code_prefixes) for f in changed_files
+            )
+            if not has_code_changes:
+                # Only spec/docs/config changes — no gates needed
+                sys.exit(0)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
