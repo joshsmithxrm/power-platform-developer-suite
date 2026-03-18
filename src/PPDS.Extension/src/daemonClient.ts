@@ -36,8 +36,8 @@ import type {
     ProfilesInvalidateResponse,
     SolutionsListResponse,
     SolutionComponentsResponse,
-    SchemaEntitiesResponse,
-    SchemaAttributesResponse,
+    MetadataEntitiesResponse,
+    MetadataEntityResponse,
     ImportJobsListResponse,
     ImportJobsGetResponse,
     PluginTracesListResponse,
@@ -825,35 +825,40 @@ export class DaemonClient implements vscode.Disposable {
         return result;
     }
 
-    // ── Schema ──────────────────────────────────────────────────────────────
+    // ── Metadata ────────────────────────────────────────────────────────────
 
-    /**
-     * Lists all entities in the active Dataverse environment.
-     * Used for IntelliSense entity completion.
-     */
-    async schemaEntities(): Promise<SchemaEntitiesResponse> {
+    async metadataEntities(environmentUrl?: string): Promise<MetadataEntitiesResponse> {
         await this.ensureConnected();
 
-        this.log.debug('Calling schema/entities...');
-        const result = await this.connection!.sendRequest<SchemaEntitiesResponse>('schema/entities');
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.debug('Calling metadata/entities...');
+        const result = await this.connection!.sendRequest<MetadataEntitiesResponse>(
+            'metadata/entities',
+            params
+        );
         this.log.debug(`Got ${result.entities.length} entities`);
 
         return result;
     }
 
-    /**
-     * Lists attributes for a specific entity in the active Dataverse environment.
-     * Used for IntelliSense attribute completion.
-     */
-    async schemaAttributes(entity: string): Promise<SchemaAttributesResponse> {
+    async metadataEntity(
+        logicalName: string,
+        includeGlobalOptionSets = false,
+        environmentUrl?: string,
+    ): Promise<MetadataEntityResponse> {
         await this.ensureConnected();
 
-        this.log.debug(`Calling schema/attributes for "${entity}"...`);
-        const result = await this.connection!.sendRequest<SchemaAttributesResponse>(
-            'schema/attributes',
-            { entity }
+        const params: Record<string, unknown> = { logicalName, includeGlobalOptionSets };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.debug(`Calling metadata/entity for "${logicalName}"...`);
+        const result = await this.connection!.sendRequest<MetadataEntityResponse>(
+            'metadata/entity',
+            params
         );
-        this.log.debug(`Got ${result.attributes.length} attributes for ${result.entityName}`);
+        this.log.debug(`Got entity "${logicalName}" with ${result.entity.attributes.length} attributes`);
 
         return result;
     }

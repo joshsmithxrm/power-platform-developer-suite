@@ -51,6 +51,10 @@ public class CachedMetadataProviderTests
             bool includeKeys = true, bool includePrivileges = true, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<(EntityMetadataDto Entity, IReadOnlyList<OptionSetMetadataDto> GlobalOptionSets)> GetEntityWithGlobalOptionSetsAsync(
+            string logicalName, bool includeGlobalOptionSets = false, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public async Task<IReadOnlyList<AttributeMetadataDto>> GetAttributesAsync(
             string entityLogicalName, string? attributeType = null, CancellationToken cancellationToken = default)
         {

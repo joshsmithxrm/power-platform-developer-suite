@@ -1,0 +1,231 @@
+@import './shared.css';
+
+/* ── Metadata Browser Panel specific styles ────────────────────────────── */
+
+.split-pane {
+    display: flex;
+    height: calc(100vh - 70px);
+}
+
+.entity-list-pane {
+    width: 280px;
+    min-width: 200px;
+    border-right: 1px solid var(--vscode-panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.entity-detail-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.search-container {
+    padding: 6px;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+#entity-search {
+    flex: 1;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+#entity-search:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+#filter-count {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
+.entity-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.entity-row {
+    padding: 4px 8px;
+    cursor: pointer;
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    font-size: 13px;
+}
+
+.entity-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.entity-row.selected {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+.entity-icon {
+    opacity: 0.7;
+    font-size: 11px;
+}
+
+.entity-display-name {
+    font-weight: 500;
+}
+
+.entity-logical-name {
+    opacity: 0.7;
+    font-size: 12px;
+    margin-left: auto;
+}
+
+/* ── Tab bar ───────────────────────────────────────────────────────────── */
+
+.tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    padding: 0 8px;
+}
+
+.tab-button {
+    padding: 6px 12px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--vscode-foreground);
+    opacity: 0.7;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+}
+
+.tab-button:hover {
+    opacity: 1;
+}
+
+.tab-button.active {
+    opacity: 1;
+    border-bottom-color: var(--vscode-focusBorder);
+}
+
+/* ── Tab content ───────────────────────────────────────────────────────── */
+
+.tab-content {
+    flex: 1;
+    overflow: auto;
+    padding: 0;
+}
+
+/* ── DataTable (reused from shared) ────────────────────────────────────── */
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.data-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--vscode-editor-background);
+}
+
+.data-table th {
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.data-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.data-table th.sortable:hover {
+    color: var(--vscode-foreground);
+}
+
+.data-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-table-row {
+    cursor: pointer;
+}
+
+.data-table-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.data-table-row:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+.data-table-row.selected {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* ── Choices section ───────────────────────────────────────────────────── */
+
+.choices-section {
+    margin: 8px 0;
+}
+
+.choices-section-header {
+    padding: 6px 8px;
+    font-weight: 600;
+    font-size: 13px;
+    opacity: 0.8;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.option-values-row {
+    display: none;
+}
+
+.option-values-row.expanded {
+    display: table-row;
+}
+
+.option-values-row td {
+    padding: 4px 24px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.option-values-table {
+    table-layout: auto;
+}
+
+.option-values-table th,
+.option-values-table td {
+    white-space: nowrap;
+}
+
+.color-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-right: 4px;
+}

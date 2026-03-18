@@ -248,6 +248,12 @@
         "icon": "$(debug-stackframe)"
       },
       {
+        "command": "ppds.openMetadataBrowser",
+        "title": "Open Metadata Browser",
+        "category": "PPDS",
+        "icon": "$(symbol-class)"
+      },
+      {
         "command": "ppds.copyEnvironmentUrl",
         "title": "Copy URL",
         "icon": "$(copy)"

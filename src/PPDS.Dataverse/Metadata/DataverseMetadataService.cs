@@ -152,6 +152,60 @@ public class DataverseMetadataService : IMetadataService
     }
 
     /// <inheritdoc />
+    public async Task<(EntityMetadataDto Entity, IReadOnlyList<OptionSetMetadataDto> GlobalOptionSets)> GetEntityWithGlobalOptionSetsAsync(
+        string logicalName,
+        bool includeGlobalOptionSets = false,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalName);
+
+        var entity = await GetEntityAsync(
+            logicalName,
+            includeAttributes: true,
+            includeRelationships: true,
+            includeKeys: true,
+            includePrivileges: true,
+            cancellationToken: cancellationToken);
+
+        if (!includeGlobalOptionSets)
+        {
+            return (entity, Array.Empty<OptionSetMetadataDto>());
+        }
+
+        var globalOptionSetNames = entity.Attributes
+            .Where(a => a.IsGlobalOptionSet && !string.IsNullOrEmpty(a.OptionSetName))
+            .Select(a => a.OptionSetName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (globalOptionSetNames.Count == 0)
+        {
+            return (entity, Array.Empty<OptionSetMetadataDto>());
+        }
+
+        var optionSetTasks = globalOptionSetNames
+            .Select(async name =>
+            {
+                try
+                {
+                    return await GetOptionSetAsync(name, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogWarning(ex, "Failed to retrieve global option set {OptionSetName} for entity {EntityLogicalName}", name, logicalName);
+                    return null;
+                }
+            });
+
+        var optionSets = (await Task.WhenAll(optionSetTasks).ConfigureAwait(false))
+            .Where(os => os is not null)
+            .Select(os => os!)
+            .ToList();
+
+        return (entity, optionSets);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<AttributeMetadataDto>> GetAttributesAsync(
         string entityLogicalName,
         string? attributeType = null,

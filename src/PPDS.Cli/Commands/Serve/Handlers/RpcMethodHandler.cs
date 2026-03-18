@@ -776,66 +776,217 @@ public class RpcMethodHandler : IDisposable
 
     #endregion
 
-    #region Schema Methods
+    #region Metadata Methods
 
     /// <summary>
     /// Lists all entities in the environment with summary metadata.
-    /// Used by VS Code extension for IntelliSense entity completion.
+    /// Used by the Metadata Browser panel in VS Code.
     /// </summary>
-    [JsonRpcMethod("schema/entities")]
-    public async Task<SchemaEntitiesResponse> SchemaEntitiesAsync(
+    [JsonRpcMethod("metadata/entities")]
+    public async Task<MetadataEntitiesResponse> MetadataEntitiesAsync(
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
             var entities = await metadataProvider.GetEntitiesAsync(ct);
 
-            return new SchemaEntitiesResponse
+            return new MetadataEntitiesResponse
             {
-                Entities = entities.Select(e => new EntitySummaryDto
-                {
-                    LogicalName = e.LogicalName,
-                    DisplayName = e.DisplayName,
-                    IsCustom = e.IsCustomEntity
-                }).ToList()
+                Entities = entities.Select(MapEntitySummaryToRpc).ToList()
             };
         }, cancellationToken);
     }
 
     /// <summary>
-    /// Lists attributes for a specific entity.
-    /// Used by VS Code extension for IntelliSense attribute completion.
+    /// Gets full metadata for a specific entity including attributes, relationships,
+    /// keys, privileges, and optionally global option set values.
+    /// Used by the Metadata Browser panel in VS Code.
     /// </summary>
-    [JsonRpcMethod("schema/attributes")]
-    public async Task<SchemaAttributesResponse> SchemaAttributesAsync(
-        string entity,
+    [JsonRpcMethod("metadata/entity")]
+    public async Task<MetadataEntityResponse> MetadataEntityAsync(
+        string logicalName,
+        bool includeGlobalOptionSets = false,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(entity))
+        if (string.IsNullOrWhiteSpace(logicalName))
         {
             throw new RpcException(
                 ErrorCodes.Validation.RequiredField,
-                "The 'entity' parameter is required");
+                "The 'logicalName' parameter is required");
         }
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
-            var attributes = await metadataProvider.GetAttributesAsync(entity, ct);
+            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var (entity, globalOptionSets) = await metadataService.GetEntityWithGlobalOptionSetsAsync(
+                logicalName,
+                includeGlobalOptionSets,
+                ct);
 
-            return new SchemaAttributesResponse
+            return new MetadataEntityResponse
             {
-                EntityName = entity,
-                Attributes = attributes.Select(a => new AttributeSummaryDto
-                {
-                    LogicalName = a.LogicalName,
-                    DisplayName = a.DisplayName,
-                    DataType = a.AttributeType,
-                    IsCustom = a.IsCustomAttribute
-                }).ToList()
+                Entity = MapEntityDetailToRpc(entity, globalOptionSets)
             };
         }, cancellationToken);
+    }
+
+    private static MetadataEntitySummaryDto MapEntitySummaryToRpc(EntitySummary e)
+    {
+        return new MetadataEntitySummaryDto
+        {
+            LogicalName = e.LogicalName,
+            SchemaName = e.SchemaName,
+            DisplayName = e.DisplayName,
+            IsCustomEntity = e.IsCustomEntity,
+            IsManaged = e.IsManaged,
+            OwnershipType = e.OwnershipType,
+            ObjectTypeCode = e.ObjectTypeCode,
+            Description = e.Description
+        };
+    }
+
+    private static MetadataEntityDetailDto MapEntityDetailToRpc(
+        EntityMetadataDto entity,
+        IReadOnlyList<OptionSetMetadataDto> globalOptionSets)
+    {
+        return new MetadataEntityDetailDto
+        {
+            LogicalName = entity.LogicalName,
+            SchemaName = entity.SchemaName,
+            DisplayName = entity.DisplayName,
+            IsCustomEntity = entity.IsCustomEntity,
+            IsManaged = entity.IsManaged,
+            OwnershipType = entity.OwnershipType,
+            ObjectTypeCode = entity.ObjectTypeCode,
+            Description = entity.Description,
+            PrimaryIdAttribute = entity.PrimaryIdAttribute,
+            PrimaryNameAttribute = entity.PrimaryNameAttribute,
+            EntitySetName = entity.EntitySetName,
+            IsActivity = entity.IsActivity,
+            Attributes = entity.Attributes.Select(MapAttributeToRpc).ToList(),
+            OneToManyRelationships = entity.OneToManyRelationships.Select(MapRelationshipToRpc).ToList(),
+            ManyToOneRelationships = entity.ManyToOneRelationships.Select(MapRelationshipToRpc).ToList(),
+            ManyToManyRelationships = entity.ManyToManyRelationships.Select(MapManyToManyToRpc).ToList(),
+            Keys = entity.Keys.Select(MapKeyToRpc).ToList(),
+            Privileges = entity.Privileges.Select(MapPrivilegeToRpc).ToList(),
+            GlobalOptionSets = globalOptionSets.Select(MapOptionSetToRpc).ToList()
+        };
+    }
+
+    private static MetadataAttributeDto MapAttributeToRpc(AttributeMetadataDto a)
+    {
+        return new MetadataAttributeDto
+        {
+            LogicalName = a.LogicalName,
+            DisplayName = a.DisplayName,
+            SchemaName = a.SchemaName,
+            AttributeType = a.AttributeType,
+            AttributeTypeName = a.AttributeTypeName,
+            IsPrimaryId = a.IsPrimaryId,
+            IsPrimaryName = a.IsPrimaryName,
+            IsCustomAttribute = a.IsCustomAttribute,
+            RequiredLevel = a.RequiredLevel,
+            MaxLength = a.MaxLength,
+            MinValue = a.MinValue,
+            MaxValue = a.MaxValue,
+            Precision = a.Precision,
+            Targets = a.Targets,
+            OptionSetName = a.OptionSetName,
+            IsGlobalOptionSet = a.IsGlobalOptionSet,
+            Options = a.Options?.Select(MapOptionValueToRpc).ToList(),
+            Format = a.Format,
+            DateTimeBehavior = a.DateTimeBehavior,
+            SourceType = a.SourceType,
+            IsSecured = a.IsSecured,
+            Description = a.Description,
+            AutoNumberFormat = a.AutoNumberFormat
+        };
+    }
+
+    private static MetadataRelationshipDto MapRelationshipToRpc(RelationshipMetadataDto r)
+    {
+        return new MetadataRelationshipDto
+        {
+            SchemaName = r.SchemaName,
+            RelationshipType = r.RelationshipType,
+            ReferencedEntity = r.ReferencedEntity,
+            ReferencedAttribute = r.ReferencedAttribute,
+            ReferencingEntity = r.ReferencingEntity,
+            ReferencingAttribute = r.ReferencingAttribute,
+            CascadeAssign = r.CascadeAssign,
+            CascadeDelete = r.CascadeDelete,
+            CascadeMerge = r.CascadeMerge,
+            CascadeReparent = r.CascadeReparent,
+            CascadeShare = r.CascadeShare,
+            CascadeUnshare = r.CascadeUnshare,
+            IsHierarchical = r.IsHierarchical
+        };
+    }
+
+    private static MetadataManyToManyDto MapManyToManyToRpc(ManyToManyRelationshipDto r)
+    {
+        return new MetadataManyToManyDto
+        {
+            SchemaName = r.SchemaName,
+            Entity1LogicalName = r.Entity1LogicalName,
+            Entity1IntersectAttribute = r.Entity1IntersectAttribute,
+            Entity2LogicalName = r.Entity2LogicalName,
+            Entity2IntersectAttribute = r.Entity2IntersectAttribute,
+            IntersectEntityName = r.IntersectEntityName
+        };
+    }
+
+    private static MetadataKeyDto MapKeyToRpc(EntityKeyDto k)
+    {
+        return new MetadataKeyDto
+        {
+            SchemaName = k.SchemaName,
+            LogicalName = k.LogicalName,
+            DisplayName = k.DisplayName,
+            KeyAttributes = k.KeyAttributes,
+            EntityKeyIndexStatus = k.EntityKeyIndexStatus,
+            IsManaged = k.IsManaged
+        };
+    }
+
+    private static MetadataPrivilegeDto MapPrivilegeToRpc(PrivilegeDto p)
+    {
+        return new MetadataPrivilegeDto
+        {
+            PrivilegeId = p.PrivilegeId,
+            Name = p.Name,
+            PrivilegeType = p.PrivilegeType,
+            CanBeLocal = p.CanBeLocal,
+            CanBeDeep = p.CanBeDeep,
+            CanBeGlobal = p.CanBeGlobal,
+            CanBeBasic = p.CanBeBasic
+        };
+    }
+
+    private static MetadataOptionSetDto MapOptionSetToRpc(OptionSetMetadataDto os)
+    {
+        return new MetadataOptionSetDto
+        {
+            Name = os.Name,
+            DisplayName = os.DisplayName,
+            OptionSetType = os.OptionSetType,
+            IsGlobal = os.IsGlobal,
+            Options = os.Options.Select(MapOptionValueToRpc).ToList()
+        };
+    }
+
+    private static MetadataOptionValueDto MapOptionValueToRpc(OptionValueDto o)
+    {
+        return new MetadataOptionValueDto
+        {
+            Value = o.Value,
+            Label = o.Label,
+            Color = o.Color,
+            Description = o.Description
+        };
     }
 
     #endregion
@@ -3138,44 +3289,6 @@ public class SolutionComponentInfoDto
 }
 
 /// <summary>
-/// Response for schema/entities method.
-/// </summary>
-public class SchemaEntitiesResponse
-{
-    [JsonPropertyName("entities")] public List<EntitySummaryDto> Entities { get; set; } = [];
-}
-
-/// <summary>
-/// Entity summary for schema/entities response.
-/// </summary>
-public class EntitySummaryDto
-{
-    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
-    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
-    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
-}
-
-/// <summary>
-/// Response for schema/attributes method.
-/// </summary>
-public class SchemaAttributesResponse
-{
-    [JsonPropertyName("entityName")] public string EntityName { get; set; } = "";
-    [JsonPropertyName("attributes")] public List<AttributeSummaryDto> Attributes { get; set; } = [];
-}
-
-/// <summary>
-/// Attribute summary for schema/attributes response.
-/// </summary>
-public class AttributeSummaryDto
-{
-    [JsonPropertyName("logicalName")] public string LogicalName { get; set; } = "";
-    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
-    [JsonPropertyName("dataType")] public string DataType { get; set; } = "";
-    [JsonPropertyName("isCustom")] public bool IsCustom { get; set; }
-}
-
-/// <summary>
 /// Response for query/complete method.
 /// </summary>
 public class QueryCompleteResponse
@@ -3581,6 +3694,350 @@ public class TraceFilterDto
     [JsonPropertyName("endDate")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EndDate { get; set; }
+}
+
+// ── Metadata DTOs ────────────────────────────────────────────────────────
+
+public class MetadataEntitiesResponse
+{
+    [JsonPropertyName("entities")]
+    public List<MetadataEntitySummaryDto> Entities { get; set; } = [];
+}
+
+public class MetadataEntitySummaryDto
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("isCustomEntity")]
+    public bool IsCustomEntity { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("ownershipType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnershipType { get; set; }
+
+    [JsonPropertyName("objectTypeCode")]
+    public int ObjectTypeCode { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+}
+
+public class MetadataEntityResponse
+{
+    [JsonPropertyName("entity")]
+    public MetadataEntityDetailDto Entity { get; set; } = null!;
+}
+
+public class MetadataEntityDetailDto
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("isCustomEntity")]
+    public bool IsCustomEntity { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("ownershipType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnershipType { get; set; }
+
+    [JsonPropertyName("objectTypeCode")]
+    public int ObjectTypeCode { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("primaryIdAttribute")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryIdAttribute { get; set; }
+
+    [JsonPropertyName("primaryNameAttribute")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryNameAttribute { get; set; }
+
+    [JsonPropertyName("entitySetName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntitySetName { get; set; }
+
+    [JsonPropertyName("isActivity")]
+    public bool IsActivity { get; set; }
+
+    [JsonPropertyName("attributes")]
+    public List<MetadataAttributeDto> Attributes { get; set; } = [];
+
+    [JsonPropertyName("oneToManyRelationships")]
+    public List<MetadataRelationshipDto> OneToManyRelationships { get; set; } = [];
+
+    [JsonPropertyName("manyToOneRelationships")]
+    public List<MetadataRelationshipDto> ManyToOneRelationships { get; set; } = [];
+
+    [JsonPropertyName("manyToManyRelationships")]
+    public List<MetadataManyToManyDto> ManyToManyRelationships { get; set; } = [];
+
+    [JsonPropertyName("keys")]
+    public List<MetadataKeyDto> Keys { get; set; } = [];
+
+    [JsonPropertyName("privileges")]
+    public List<MetadataPrivilegeDto> Privileges { get; set; } = [];
+
+    [JsonPropertyName("globalOptionSets")]
+    public List<MetadataOptionSetDto> GlobalOptionSets { get; set; } = [];
+}
+
+public class MetadataAttributeDto
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("attributeType")]
+    public string AttributeType { get; set; } = "";
+
+    [JsonPropertyName("attributeTypeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttributeTypeName { get; set; }
+
+    [JsonPropertyName("isPrimaryId")]
+    public bool IsPrimaryId { get; set; }
+
+    [JsonPropertyName("isPrimaryName")]
+    public bool IsPrimaryName { get; set; }
+
+    [JsonPropertyName("isCustomAttribute")]
+    public bool IsCustomAttribute { get; set; }
+
+    [JsonPropertyName("requiredLevel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequiredLevel { get; set; }
+
+    [JsonPropertyName("maxLength")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxLength { get; set; }
+
+    [JsonPropertyName("minValue")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? MinValue { get; set; }
+
+    [JsonPropertyName("maxValue")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? MaxValue { get; set; }
+
+    [JsonPropertyName("precision")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Precision { get; set; }
+
+    [JsonPropertyName("targets")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Targets { get; set; }
+
+    [JsonPropertyName("optionSetName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OptionSetName { get; set; }
+
+    [JsonPropertyName("isGlobalOptionSet")]
+    public bool IsGlobalOptionSet { get; set; }
+
+    [JsonPropertyName("options")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MetadataOptionValueDto>? Options { get; set; }
+
+    [JsonPropertyName("format")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Format { get; set; }
+
+    [JsonPropertyName("dateTimeBehavior")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DateTimeBehavior { get; set; }
+
+    [JsonPropertyName("sourceType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SourceType { get; set; }
+
+    [JsonPropertyName("isSecured")]
+    public bool IsSecured { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("autoNumberFormat")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AutoNumberFormat { get; set; }
+}
+
+public class MetadataRelationshipDto
+{
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("relationshipType")]
+    public string RelationshipType { get; set; } = "";
+
+    [JsonPropertyName("referencedEntity")]
+    public string ReferencedEntity { get; set; } = "";
+
+    [JsonPropertyName("referencedAttribute")]
+    public string ReferencedAttribute { get; set; } = "";
+
+    [JsonPropertyName("referencingEntity")]
+    public string ReferencingEntity { get; set; } = "";
+
+    [JsonPropertyName("referencingAttribute")]
+    public string ReferencingAttribute { get; set; } = "";
+
+    [JsonPropertyName("cascadeAssign")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeAssign { get; set; }
+
+    [JsonPropertyName("cascadeDelete")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeDelete { get; set; }
+
+    [JsonPropertyName("cascadeMerge")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeMerge { get; set; }
+
+    [JsonPropertyName("cascadeReparent")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeReparent { get; set; }
+
+    [JsonPropertyName("cascadeShare")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeShare { get; set; }
+
+    [JsonPropertyName("cascadeUnshare")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CascadeUnshare { get; set; }
+
+    [JsonPropertyName("isHierarchical")]
+    public bool IsHierarchical { get; set; }
+}
+
+public class MetadataManyToManyDto
+{
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("entity1LogicalName")]
+    public string Entity1LogicalName { get; set; } = "";
+
+    [JsonPropertyName("entity1IntersectAttribute")]
+    public string Entity1IntersectAttribute { get; set; } = "";
+
+    [JsonPropertyName("entity2LogicalName")]
+    public string Entity2LogicalName { get; set; } = "";
+
+    [JsonPropertyName("entity2IntersectAttribute")]
+    public string Entity2IntersectAttribute { get; set; } = "";
+
+    [JsonPropertyName("intersectEntityName")]
+    public string IntersectEntityName { get; set; } = "";
+}
+
+public class MetadataKeyDto
+{
+    [JsonPropertyName("schemaName")]
+    public string SchemaName { get; set; } = "";
+
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("keyAttributes")]
+    public List<string> KeyAttributes { get; set; } = [];
+
+    [JsonPropertyName("entityKeyIndexStatus")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntityKeyIndexStatus { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+}
+
+public class MetadataPrivilegeDto
+{
+    [JsonPropertyName("privilegeId")]
+    public Guid PrivilegeId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("privilegeType")]
+    public string PrivilegeType { get; set; } = "";
+
+    [JsonPropertyName("canBeLocal")]
+    public bool CanBeLocal { get; set; }
+
+    [JsonPropertyName("canBeDeep")]
+    public bool CanBeDeep { get; set; }
+
+    [JsonPropertyName("canBeGlobal")]
+    public bool CanBeGlobal { get; set; }
+
+    [JsonPropertyName("canBeBasic")]
+    public bool CanBeBasic { get; set; }
+}
+
+public class MetadataOptionSetDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("optionSetType")]
+    public string OptionSetType { get; set; } = "";
+
+    [JsonPropertyName("isGlobal")]
+    public bool IsGlobal { get; set; }
+
+    [JsonPropertyName("options")]
+    public List<MetadataOptionValueDto> Options { get; set; } = [];
+}
+
+public class MetadataOptionValueDto
+{
+    [JsonPropertyName("value")]
+    public int Value { get; set; }
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("color")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Color { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
 }
 
 #endregion
