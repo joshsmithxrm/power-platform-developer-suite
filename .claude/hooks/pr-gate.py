@@ -97,15 +97,18 @@ def main():
             f"(last ran against {gates_ref[:8]}, HEAD is {head_sha[:8]})"
         )
 
-    # 2. At least one surface verified
+    # Valid surface keys
+    valid_surfaces = ("ext", "tui", "mcp", "cli")
+
+    # 2. At least one valid surface verified
     verify = state.get("verify", {})
-    verified_surfaces = [k for k, v in verify.items() if v]
+    verified_surfaces = [k for k, v in verify.items() if v and k in valid_surfaces]
     if not verified_surfaces:
         missing.append("/verify not completed for any surface")
 
-    # 3. At least one surface QA'd
+    # 3. At least one valid surface QA'd
     qa = state.get("qa", {})
-    qa_surfaces = [k for k, v in qa.items() if v]
+    qa_surfaces = [k for k, v in qa.items() if v and k in valid_surfaces]
     if not qa_surfaces:
         missing.append("/qa not completed for any surface")
 
