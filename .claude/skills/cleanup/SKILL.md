@@ -114,7 +114,7 @@ Use `-d` as a safety check — git will refuse if the branch is not actually mer
 git branch -D <branch-name>
 ```
 
-Use `-D` because git cannot see squash-merge ancestry, so `-d` will always refuse. The pruned-remote heuristic already confirmed the PR was merged.
+Use `-D` because git cannot see squash-merge ancestry, so `-d` will always refuse. The pruned-remote heuristic provides a strong signal that the branch is safe to delete.
 
 If either command fails, log the error and continue.
 
