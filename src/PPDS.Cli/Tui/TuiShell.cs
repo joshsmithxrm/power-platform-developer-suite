@@ -281,6 +281,8 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("SQL Query", "Run SQL queries against Dataverse", () => NavigateToSqlQuery()),
             new("Solutions", "Browse Dataverse solutions", () => NavigateToSolutions()),
             new("Import Jobs", "View solution import jobs", () => NavigateToImportJobs()),
+            new("Connection References", "View connection references", () => NavigateToConnectionReferences()),
+            new("Environment Variables", "View and edit environment variables", () => NavigateToEnvironmentVariables()),
             new("Plugin Traces", "Browse plugin trace logs", () => NavigateToPluginTraces()),
             new("Metadata Browser", "Browse entity metadata", () => NavigateToMetadataBrowser()),
             new("", "", () => {}, null, null, Key.Null), // Separator
@@ -481,6 +483,56 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _contentArea.Remove(loadingLabel);
 
             var screen = new ImportJobsScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToConnectionReferences()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Connection References...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new ConnectionReferencesScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToEnvironmentVariables()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Environment Variables...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new EnvironmentVariablesScreen(_session);
             NavigateTo(screen);
 
             return false;

@@ -30,7 +30,7 @@ exports[`SQL Query Keyboard Navigation › Tab cycles through controls | 1`] = S
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: [2] (3b039cb2-3e2f-4cfd-83a…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -65,7 +65,7 @@ exports[`SQL Query Screen › Ctrl+E without results shows error message | 1`] =
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: [2] (3b039cb2-3e2f-4cfd-83a…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -100,7 +100,7 @@ exports[`SQL Query Screen › SQL Query screen snapshot for visual regression | 
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: [2] (3b039cb2-3e2f-4cfd-83a…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -135,7 +135,7 @@ exports[`SQL Query Screen › Tools menu opens SQL Query screen | 1`] = String.r
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: [2] (3b039cb2-3e2f-4cfd-83a…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;

@@ -489,3 +489,90 @@ export interface TraceFilterDto {
     startDate?: string;
     endDate?: string;
 }
+
+// ── Connection References ───────────────────────────────────────────────
+
+export interface ConnectionReferencesListResponse {
+    references: ConnectionReferenceInfoDto[];
+}
+
+export interface ConnectionReferencesGetResponse {
+    reference: ConnectionReferenceDetailDto;
+}
+
+export interface ConnectionReferencesAnalyzeResponse {
+    orphanedReferences: OrphanedReferenceDto[];
+    orphanedFlows: OrphanedFlowDto[];
+    totalReferences: number;
+    totalFlows: number;
+}
+
+export interface ConnectionReferenceInfoDto {
+    logicalName: string;
+    displayName: string | null;
+    connectorId: string | null;
+    connectionId: string | null;
+    isManaged: boolean;
+    modifiedOn: string | null;
+    connectionStatus: string;
+    connectorDisplayName: string | null;
+}
+
+export interface ConnectionReferenceDetailDto extends ConnectionReferenceInfoDto {
+    description: string | null;
+    isBound: boolean;
+    createdOn: string | null;
+    flows: FlowReferenceDto[];
+    connectionOwner: string | null;
+    connectionIsShared: boolean | null;
+}
+
+export interface FlowReferenceDto {
+    uniqueName: string;
+    displayName: string | null;
+    state: string | null;
+}
+
+export interface OrphanedReferenceDto {
+    logicalName: string;
+    displayName: string | null;
+    connectorId: string | null;
+}
+
+export interface OrphanedFlowDto {
+    uniqueName: string;
+    displayName: string | null;
+    missingReference: string | null;
+}
+
+// ── Environment Variables ───────────────────────────────────────────────
+
+export interface EnvironmentVariablesListResponse {
+    variables: EnvironmentVariableInfoDto[];
+}
+
+export interface EnvironmentVariablesGetResponse {
+    variable: EnvironmentVariableDetailDto;
+}
+
+export interface EnvironmentVariablesSetResponse {
+    success: boolean;
+}
+
+export interface EnvironmentVariableInfoDto {
+    schemaName: string;
+    displayName: string | null;
+    type: string;
+    defaultValue: string | null;
+    currentValue: string | null;
+    isManaged: boolean;
+    isRequired: boolean;
+    modifiedOn: string | null;
+    hasOverride: boolean;
+    isMissing: boolean;
+}
+
+export interface EnvironmentVariableDetailDto extends EnvironmentVariableInfoDto {
+    description: string | null;
+    createdOn: string | null;
+}

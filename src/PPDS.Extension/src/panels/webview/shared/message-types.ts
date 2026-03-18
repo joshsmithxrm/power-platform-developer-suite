@@ -245,3 +245,116 @@ export type MetadataBrowserPanelHostToWebview =
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
+
+// ── Connection References Panel ──────────────────────────────────────────
+
+/** Connection reference info as sent to the webview for table display. */
+export interface ConnectionReferenceViewDto {
+    logicalName: string;
+    displayName: string | null;
+    connectorId: string | null;
+    connectionId: string | null;
+    isManaged: boolean;
+    modifiedOn: string | null;
+    connectionStatus: string;
+    connectorDisplayName: string | null;
+}
+
+/** Connection reference detail sent when a row is selected. */
+export interface ConnectionReferenceDetailViewDto extends ConnectionReferenceViewDto {
+    description: string | null;
+    isBound: boolean;
+    createdOn: string | null;
+    flows: { uniqueName: string; displayName: string | null; state: string | null }[];
+    connectionOwner: string | null;
+    connectionIsShared: boolean | null;
+}
+
+/** Analysis result sent after running orphan analysis. */
+export interface ConnectionReferencesAnalyzeViewDto {
+    orphanedReferences: { logicalName: string; displayName: string | null; connectorId: string | null }[];
+    orphanedFlows: { uniqueName: string; displayName: string | null; missingReference: string | null }[];
+    totalReferences: number;
+    totalFlows: number;
+}
+
+/** Solution option used by the solution filter dropdown. */
+export interface SolutionOptionDto {
+    id: string;
+    uniqueName: string;
+    friendlyName: string;
+}
+
+/** Messages the Connection References Panel webview sends to the extension host. */
+export type ConnectionReferencesPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'selectReference'; logicalName: string }
+    | { command: 'analyze' }
+    | { command: 'filterBySolution'; solutionId: string | null }
+    | { command: 'requestSolutionList' }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'openInMaker' }
+    | { command: 'copyToClipboard'; text: string }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Connection References Panel webview. */
+export type ConnectionReferencesPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'loading' }
+    | { command: 'connectionReferencesLoaded'; references: ConnectionReferenceViewDto[] }
+    | { command: 'connectionReferenceDetailLoaded'; detail: ConnectionReferenceDetailViewDto }
+    | { command: 'analyzeResult'; result: ConnectionReferencesAnalyzeViewDto }
+    | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
+
+// ── Environment Variables Panel ──────────────────────────────────────────
+
+/** Environment variable info as sent to the webview for table display. */
+export interface EnvironmentVariableViewDto {
+    schemaName: string;
+    displayName: string | null;
+    type: string;
+    defaultValue: string | null;
+    currentValue: string | null;
+    isManaged: boolean;
+    isRequired: boolean;
+    modifiedOn: string | null;
+    hasOverride: boolean;
+    isMissing: boolean;
+}
+
+/** Environment variable detail sent when a row is selected. */
+export interface EnvironmentVariableDetailViewDto extends EnvironmentVariableViewDto {
+    description: string | null;
+    createdOn: string | null;
+}
+
+/** Messages the Environment Variables Panel webview sends to the extension host. */
+export type EnvironmentVariablesPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'refresh' }
+    | { command: 'selectVariable'; schemaName: string }
+    | { command: 'editVariable'; schemaName: string }
+    | { command: 'saveVariable'; schemaName: string; value: string }
+    | { command: 'filterBySolution'; solutionId: string | null }
+    | { command: 'requestSolutionList' }
+    | { command: 'exportDeploymentSettings' }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'openInMaker' }
+    | { command: 'copyToClipboard'; text: string }
+    | { command: 'webviewError'; error: string; stack?: string };
+
+/** Messages the extension host sends to the Environment Variables Panel webview. */
+export type EnvironmentVariablesPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'loading' }
+    | { command: 'environmentVariablesLoaded'; variables: EnvironmentVariableViewDto[] }
+    | { command: 'environmentVariableDetailLoaded'; detail: EnvironmentVariableDetailViewDto }
+    | { command: 'editVariableDialog'; schemaName: string; displayName: string | null; type: string; currentValue: string | null }
+    | { command: 'variableSaved'; schemaName: string; success: boolean }
+    | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
+    | { command: 'deploymentSettingsExported'; filePath: string }
+    | { command: 'error'; message: string }
+    | { command: 'daemonReconnected' };
