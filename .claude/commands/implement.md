@@ -190,7 +190,7 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 3. **Parallel by default** - if tasks don't depend on each other, run them simultaneously
 4. **Sequential when required** - respect phase gates and dependency chains
 5. **One commit per phase** - each phase gate produces exactly one commit with a clear message
-6. **Review before commit** - always use code-reviewer agent before committing phase work
+6. **Review before commit** - invoke `/review` before committing phase work
 7. **Fix before advancing** - if build fails, tests fail, or review finds issues, fix them BEFORE committing. Dispatch fix agents rather than debugging yourself.
 8. **Never skip verification** - always build + test + review before declaring a phase complete
 9. **Continue until done** - execute ALL phases in the plan, don't stop early and ask permission
