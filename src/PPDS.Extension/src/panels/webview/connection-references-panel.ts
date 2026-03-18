@@ -256,7 +256,7 @@ function insertInlineDetailLoading(logicalName: string): void {
     const existing = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
     if (existing) existing.remove();
 
-    const colCount = table.getItems().length > 0 ? 8 : 7; // chevron + 6 data columns
+    const colCount = 7; // chevron + 6 data columns
     const tr = document.createElement('tr');
     tr.className = 'cr-inline-detail';
     tr.setAttribute('data-for', logicalName);

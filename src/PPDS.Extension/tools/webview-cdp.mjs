@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 
@@ -212,9 +212,12 @@ async function runDaemon(workspace, sessionName = 'default', vsixPath = null) {
     // VSIX files are ZIP archives — extract using platform-appropriate tool
     if (process.platform === 'win32') {
       // bsdtar on Windows can't handle C: drive prefixes — use pwsh
-      execSync(`pwsh -NoProfile -Command "Expand-Archive -Path '${vsixPath}' -DestinationPath '${extractDir}' -Force"`, { timeout: 60000 });
+      // Escape single quotes in paths to prevent PowerShell injection
+      const safeVsix = vsixPath.replace(/'/g, "''");
+      const safeDest = extractDir.replace(/'/g, "''");
+      execSync(`pwsh -NoProfile -Command "Expand-Archive -Path '${safeVsix}' -DestinationPath '${safeDest}' -Force"`, { timeout: 60000 });
     } else {
-      execSync(`tar -xf "${vsixPath}" -C "${extractDir}"`, { timeout: 60000 });
+      execFileSync('tar', ['-xf', vsixPath, '-C', extractDir], { timeout: 60000 });
     }
     // The VSIX contains an 'extension/' subfolder — rename to VS Code's expected format
     const innerDir = resolve(extractDir, 'extension');
