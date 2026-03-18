@@ -155,7 +155,7 @@
       },
       {
         "command": "ppds.dataExplorer",
-        "title": "Data Explorer",
+        "title": "Open Data Explorer",
         "category": "PPDS",
         "icon": "$(database)"
       },
@@ -238,7 +238,7 @@
       },
       {
         "command": "ppds.openPluginTraces",
-        "title": "Plugin Traces",
+        "title": "Open Plugin Traces",
         "category": "PPDS",
         "icon": "$(debug-stackframe)"
       },
