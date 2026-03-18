@@ -15,8 +15,12 @@ import sys
 
 def extract_frontmatter(filepath):
     """Extract metadata from a spec file's frontmatter and overview."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read()
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Warning: cannot read {filepath}: {e}", file=sys.stderr)
+        return None
 
     lines = content.split("\n")
 

@@ -21,7 +21,7 @@ The Environment Dashboard provides an at-a-glance view of environment administra
 
 ### Non-Goals
 
-- Solution-level component management (handled by [tui-solutions.md](./tui-solutions.md))
+- Solution-level component management (handled by [solutions.md](./solutions.md))
 - Security role creation or deletion (use Power Platform admin center)
 - Flow editing or design (use Power Automate designer)
 - Metadata/schema browsing (future sub-view)
@@ -502,7 +502,7 @@ public void EnvVarEditDialog_CapturesSecretFlag()
 
 - [dataverse-services.md](./dataverse-services.md) — `IUserService`, `IRoleService`, `IFlowService`, `IEnvironmentVariableService`, `IConnectionReferenceService`
 - [tui.md](./tui.md) — `ITuiScreen`, `TuiDialog`, `DataTableView`, `IHotkeyRegistry`, `ITuiErrorService`, state capture
-- [tui-solutions.md](./tui-solutions.md) — navigate from solution components to environment dashboard sub-views
+- [solutions.md](./solutions.md) — navigate from solution components to environment dashboard sub-views
 - [architecture.md](./architecture.md) — Application Service boundary pattern
 
 ---

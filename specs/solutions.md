@@ -689,8 +689,8 @@ No new RPC methods. New fields are nullable and additive — no breaking changes
 - [dataverse-services.md](./dataverse-services.md) — ISolutionService, IImportJobService, IMetadataService
 - [connection-pooling.md](./connection-pooling.md) — Connection pool used for batch queries
 - [tui.md](./tui.md) — TUI framework: ITuiScreen, DataTableView, state capture
-- [tui-plugin-registration.md](./tui-plugin-registration.md) — Navigate from solution component to plugin registrations
-- [tui-environment-dashboard.md](./tui-environment-dashboard.md) — Navigate from solution component to env vars, flows
+- [plugins.md](./plugins.md) — Navigate from solution component to plugin registrations
+- [environment-dashboard.md](./environment-dashboard.md) — Navigate from solution component to env vars, flows
 - [architecture.md](./architecture.md) — Application Service boundary pattern
 - [per-panel-environment-scoping.md](./per-panel-environment-scoping.md) — Environment picker pattern for Extension
 

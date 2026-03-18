@@ -494,8 +494,7 @@ All configuration is via CLI arguments. No config files beyond the session file.
 
 ## Related Specs
 
-- [vscode-data-explorer-selection-copy.md](./vscode-data-explorer-selection-copy.md) - Selection and copy features verifiable via this tool
-- [vscode-data-explorer-monaco-editor.md](./vscode-data-explorer-monaco-editor.md) - Monaco editor integration testable via this tool
+- [data-explorer.md](./data-explorer.md) - Selection, copy, and Monaco editor features verifiable via this tool
 
 ---
 

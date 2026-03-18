@@ -507,7 +507,7 @@ Selection & Copy edge cases:
 - TUI copy implementation: `src/PPDS.Cli/Tui/Helpers/TableCopyHelper.cs`
 - Daemon endpoint: `query/complete` in `RpcMethodHandler.cs`
 - Extension client: `daemonClient.queryComplete()` in `daemonClient.ts`
-- [vscode-persistence-and-solutions-polish.md](./vscode-persistence-and-solutions-polish.md) — Parallel work on the same extension
+- [solutions.md](./solutions.md) — Solutions panel (absorbed from persistence-and-solutions-polish spec)
 
 ---
 
