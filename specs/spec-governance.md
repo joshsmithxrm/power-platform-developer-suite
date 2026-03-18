@@ -3,7 +3,7 @@
 **Status:** Draft
 **Last Updated:** 2026-03-18
 **Surfaces:** All
-**Code:** [specs/](../specs/) | [.claude/commands/](../.claude/commands/) | [.claude/skills/](../.claude/skills/)
+**Code:** System-wide
 
 ---
 

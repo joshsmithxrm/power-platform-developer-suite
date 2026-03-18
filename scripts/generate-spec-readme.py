@@ -73,6 +73,12 @@ def extract_frontmatter(filepath):
             purpose = sentence
             break
 
+    # Escape pipe characters to prevent breaking markdown table
+    status = status.replace("|", "\\|")
+    surfaces = surfaces.replace("|", "\\|")
+    code = code.replace("|", "\\|")
+    purpose = purpose.replace("|", "\\|")
+
     return {
         "title": title,
         "status": status,
