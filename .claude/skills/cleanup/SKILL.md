@@ -36,7 +36,25 @@ git merge --ff-only origin/main
 
 If `merge --ff-only` fails, main has local commits not on origin. STOP and report — do not force-reset main.
 
-### 3. Identify Merged Branches
+### 3. Prune Stale Remotes and Classify Branches
+
+Prune first so we know which remote branches were deleted (indicating merged PRs):
+
+```bash
+git remote prune origin --dry-run   # capture what will be pruned (lines like "* [would prune] origin/feature/foo")
+```
+
+If `--dry-run` mode is **not** active, execute the actual prune:
+
+```bash
+git remote prune origin             # actually prune
+```
+
+If `--dry-run` mode **is** active, skip the actual prune — use the `--dry-run` output for classification only.
+
+Save the list of pruned refs (extract the ref name after `[would prune]`, e.g., `origin/feature/foo`) for squash-merge detection below.
+
+Now identify merged branches:
 
 ```bash
 # Machine-parseable worktree list
@@ -54,15 +72,18 @@ git log main..<branch> --oneline
 
 If this produces **no output**, the branch has zero commits beyond main — it was created for future work or was fast-forward merged. Remove it from the merged list and classify it as **"not started"** (to be skipped).
 
-Build four lists:
-- **Merged worktrees:** worktrees whose branch appears in the merged list (after filtering)
-- **Active worktrees:** worktrees whose branch does NOT appear in the merged list
-- **Not started:** branches/worktrees removed from the merged list by the divergence check — report as skipped
+**Squash-merge detection:** For each local branch (whether or not it has a worktree) that is NOT in the merged list **and NOT classified as "not started"**, check if `origin/<branch>` appears as an exact match in the pruned refs list. If so, the PR was likely squash-merged on GitHub and the remote branch was deleted — classify the branch as **"squash-merged."** Note: a pruned remote could also mean the branch was manually deleted or the PR was closed without merging. The `-D` deletion in step 5 is the consequence, so the report should flag squash-merged branches clearly so the user can intervene if needed. Treat squash-merged the same as merged for worktree removal, but track separately for branch deletion (step 5).
+
+Build five lists:
+- **Merged:** branches in the `--merged` list (after filtering) — with or without worktrees
+- **Squash-merged:** branches detected via the pruned-remote heuristic — with or without worktrees
+- **Active:** branches NOT merged, NOT squash-merged, NOT "not started"
+- **Not started:** branches removed from the merged list by the divergence check — report as skipped
 - **Locked worktrees:** worktrees with `locked` attribute in porcelain output — skip regardless of merge status
 
 ### 4. Remove Merged Worktrees
 
-For each merged worktree (not locked, not the main worktree):
+For each merged or squash-merged worktree (not locked, not the main worktree):
 
 ```bash
 git worktree remove --force .worktrees/<name>
@@ -75,25 +96,29 @@ git worktree remove --force .worktrees/<name>
 - Skip locked worktrees — report them as skipped with reason
 - Report any removal failures and continue with the next worktree
 
-### 5. Delete Merged Local Branches
+### 5. Delete Local Branches
 
 After worktrees are removed, delete their local branches:
+
+**Regular-merged branches** (detected by `--merged`):
 
 ```bash
 git branch -d <branch-name>
 ```
 
-Use `-d` (not `-D`) as a safety check — git will refuse if the branch is not actually merged. If `-d` fails, log the error and continue.
+Use `-d` as a safety check — git will refuse if the branch is not actually merged.
 
-### 6. Prune Stale Remote Tracking Branches
+**Squash-merged branches** (detected by pruned-remote heuristic):
 
 ```bash
-git remote prune origin
+git branch -D <branch-name>
 ```
 
-Capture output to report which remote refs were pruned.
+Use `-D` because git cannot see squash-merge ancestry, so `-d` will always refuse. The pruned-remote heuristic provides a strong signal that the branch is safe to delete.
 
-### 7. Rebase Active Worktrees
+If either command fails, log the error and continue.
+
+### 6. Rebase Active Worktrees
 
 For each remaining (non-locked) active worktree:
 
@@ -108,7 +133,7 @@ If rebase produces conflicts:
 
 Do NOT leave any worktree in a mid-rebase state.
 
-### 8. Final Report
+### 7. Final Report
 
 Present a summary:
 
@@ -116,14 +141,14 @@ Present a summary:
 ## Cleanup Report
 
 ### Removed (merged)
-| Worktree | Branch | Forced? |
-|----------|--------|---------|
-| .worktrees/foo | feature/foo | No |
-| .worktrees/bar | feature/bar | Yes (uncommitted changes) |
+| Worktree | Branch | Merge Type | Forced? |
+|----------|--------|------------|---------|
+| .worktrees/foo | feature/foo | regular | No |
+| .worktrees/bar | feature/bar | squash (used -D) | Yes (uncommitted changes) |
 
 ### Deleted Branches (no worktree)
-- feature/old-thing
-- fix/stale-fix
+- feature/old-thing (regular → -d)
+- fix/stale-fix (squash → -D)
 
 ### Pruned Remote Refs
 - origin/feature/old-thing
@@ -142,7 +167,7 @@ Present a summary:
 | .worktrees/prep | feature/prep | No divergent commits (not started) |
 
 ### Summary
-- Removed: N worktrees, N branches
+- Removed: N worktrees (N regular, N squash-merged), N branches
 - Pruned: N remote refs
 - Rebased: N OK, N conflicts
 - Skipped: N locked, N not started
@@ -155,8 +180,11 @@ If `--dry-run` was specified, prefix the report title with `[DRY RUN]` and note 
 | Error | Recovery |
 |-------|----------|
 | `merge --ff-only` fails on main | STOP — report that main has diverged, do not proceed |
+| `git remote prune origin` fails | Log warning, continue — classification will still work via `--merged` |
 | Worktree removal fails | Log error, continue with next worktree |
-| `branch -d` fails | Log error — branch may not actually be merged, skip it |
+| `branch -d` fails (regular-merged) | Log error — branch may not actually be merged, skip it |
+| `branch -D` fails (squash-merged) | Log error — unexpected, report for manual investigation |
 | Rebase conflict | `git rebase --abort`, record in report, continue |
 | Locked worktree | Skip with note in report |
 | Not on main branch | `git checkout main` before starting |
+| Branch has no remote tracking ref and is not in `--merged` | Classify as active — no signal to determine merge status |
