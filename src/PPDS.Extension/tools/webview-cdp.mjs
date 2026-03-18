@@ -209,8 +209,13 @@ async function runDaemon(workspace, sessionName = 'default', vsixPath = null) {
     const extDir = resolve(SESSION_PROFILE_DIR, 'extensions');
     const extractDir = resolve(extDir, '_vsix_extract');
     mkdirSync(extractDir, { recursive: true });
-    // VSIX files are ZIP archives — extract using tar (handles ZIP on all modern platforms)
-    execSync(`tar -xf "${vsixPath}" -C "${extractDir}"`, { timeout: 60000 });
+    // VSIX files are ZIP archives — extract using platform-appropriate tool
+    if (process.platform === 'win32') {
+      // bsdtar on Windows can't handle C: drive prefixes — use pwsh
+      execSync(`pwsh -NoProfile -Command "Expand-Archive -Path '${vsixPath}' -DestinationPath '${extractDir}' -Force"`, { timeout: 60000 });
+    } else {
+      execSync(`tar -xf "${vsixPath}" -C "${extractDir}"`, { timeout: 60000 });
+    }
     // The VSIX contains an 'extension/' subfolder — rename to VS Code's expected format
     const innerDir = resolve(extractDir, 'extension');
     if (existsSync(innerDir)) {
