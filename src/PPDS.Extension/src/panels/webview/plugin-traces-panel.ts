@@ -585,6 +585,13 @@ refreshBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'refresh' });
 });
 
+const makerBtn = document.getElementById('maker-btn');
+if (makerBtn) {
+    makerBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'openInMaker' });
+    });
+}
+
 autoRefreshSelect.addEventListener('change', () => {
     const value = autoRefreshSelect.value;
     const interval = value ? parseInt(value, 10) : null;

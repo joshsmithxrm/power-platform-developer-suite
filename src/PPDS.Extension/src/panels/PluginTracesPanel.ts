@@ -434,6 +434,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     <vscode-button id="trace-level-btn" appearance="secondary" title="View/change trace level">Trace Level</vscode-button>
     <span id="trace-level-indicator" class="trace-level-indicator"></span>
     <vscode-button id="export-btn" appearance="secondary" title="Export traces">Export</vscode-button>
+    <vscode-button id="maker-btn" appearance="secondary" title="Open Plugin Trace Logs in Maker Portal">Maker Portal</vscode-button>
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
