@@ -71,18 +71,18 @@ VS Code panels communicate through the daemon (JSON-RPC over stdio). TUI, MCP, a
 
 ### Shared Patterns (All Panels)
 
-| Pattern | Description |
-|---------|-------------|
-| Virtual table | `DataTable` component — sortable columns, row selection, keyboard nav (`data-table.ts`) |
-| Environment picker | Toolbar dropdown with environment theming via `data-env-type` / `data-env-color` CSS attributes |
-| Solution filter | `SolutionFilter` component — dropdown with `storageKey`-based persistence (`solution-filter.ts`) |
-| Panel lifecycle | `WebviewPanelBase.initializePanel()` — auth, environment resolution, title update, initial data load |
-| Environment switching | `WebviewPanelBase.handleEnvironmentPickerClick()` — picker, state update, reload |
-| Environment ID resolution | `WebviewPanelBase.resolveEnvironmentId()` — maps environment URL to GUID for Maker Portal links |
-| Maker URL construction | `buildMakerUrl(environmentId)` from `browserCommands.ts` — all panels use this, never inline URL construction |
-| RPC method convention | `{domain}/{operation}` with typed request/response DTOs |
-| MCP tool convention | `ppds_{domain}_{operation}` with structured input/output |
-| TUI hotkey convention | Ctrl+R (refresh), Enter (detail), Ctrl+O (open in Maker), Ctrl+F (filter) |
+| Pattern | Description | Status |
+|---------|-------------|--------|
+| Virtual table | `DataTable` component — sortable columns, row selection, keyboard nav (`data-table.ts`) | ✅ |
+| Environment picker | Toolbar dropdown with environment theming via `data-env-type` / `data-env-color` CSS attributes | ✅ |
+| Solution filter | `SolutionFilter` component — dropdown with `storageKey`-based persistence (`solution-filter.ts`) | ✅ (ConnRefs, EnvVars); 🔲 WebResources uses raw `<select>` |
+| Panel lifecycle | `WebviewPanelBase.initializePanel()` — auth, environment resolution, title update, initial data load | 🔲 Phase 3 — currently duplicated in each panel's local `initialize()` |
+| Environment switching | `WebviewPanelBase.handleEnvironmentPickerClick()` — picker, state update, reload | 🔲 Phase 3 — currently duplicated in each panel |
+| Environment ID resolution | `WebviewPanelBase.resolveEnvironmentId()` — maps environment URL to GUID for Maker Portal links | 🔲 Phase 3 — currently local in 5 panels, missing from PluginTraces |
+| Maker URL construction | `buildMakerUrl(environmentId, path?)` from `browserCommands.ts` | 🔲 Phase 3 — only WebResources uses it; 5 panels construct inline |
+| RPC method convention | `{domain}/{operation}` with typed request/response DTOs | ✅ |
+| MCP tool convention | `ppds_{domain}_{operation}` with structured input/output | ✅ |
+| TUI hotkey convention | Ctrl+R (refresh), Enter (detail), Ctrl+O (open in Maker), Ctrl+F (filter) | ✅ |
 
 ### Dependencies
 
@@ -613,8 +613,8 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | AC-CC-04 | `WebviewPanelBase.updatePanelTitle()` sets panel title with profile and environment — all 6 panels use it | TBD | 🔲 |
 | AC-CC-05 | All panels use `config.resolvedType` fallback for environment type resolution | TBD | 🔲 |
 | AC-CC-06 | All panels support `copyToClipboard` message handler | TBD | 🔲 |
-| AC-CC-07 | TUI environment selector has Open in Maker and Open in Dynamics actions (#597) | TBD | 🔲 |
-| AC-CC-08 | TUI keyboard shortcuts dialog scrolls to show all bindings including screen-specific (#595) | TBD | 🔲 |
+| AC-CC-07 | TUI environment selector has Open in Maker and Open in Dynamics actions (#597) | `EnvironmentSelectorDialog.cs:225-237` | ✅ |
+| AC-CC-08 | TUI keyboard shortcuts dialog scrolls to show all bindings including screen-specific (#595) | `KeyboardShortcutsDialog.cs:42` (scrollable `TextView`) | ✅ |
 
 ---
 
@@ -665,8 +665,6 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | #623 | Date range filter for Plugin Traces | AC-PT-17 | 🔲 Open |
 | #624 | Search input for Web Resources | AC-WR-19 | 🔲 Open |
 | #625 | publishAll UI button (RPC exists) | AC-WR-22, AC-WR-23 | 🔲 Open |
-| #595 | TUI keyboard shortcuts scroll | AC-CC-08 | 🔲 Open |
-| #597 | TUI env selector Maker/Dynamics actions | AC-CC-07 | 🔲 Open |
 
 ### Stale Issues — Close After Verification
 
@@ -681,6 +679,8 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | #591 | MCP: Plugin traces delete tool | `PluginTracesDeleteTool.cs` exists | Close |
 | #593 | IWebResourceService extraction | `IWebResourceService.cs` + `WebResourceService.cs` in `PPDS.Dataverse/Services/` | Close |
 | #626 | PublishCoordinator | Per-env `SemaphoreSlim` in `PooledClientExtensions.cs:22` | Close |
+| #595 | TUI keyboard shortcuts scroll | `KeyboardShortcutsDialog.cs:42` uses scrollable `TextView` | Close |
+| #597 | TUI env selector Maker/Dynamics actions | `EnvironmentSelectorDialog.cs:225-237` has both buttons | Close |
 
 ### Consistency Fixes (No Dedicated Issues)
 
