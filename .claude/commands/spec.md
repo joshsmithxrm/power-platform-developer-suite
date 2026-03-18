@@ -1,6 +1,6 @@
 # Spec
 
-Create or update a specification following PPDS conventions. Ensures consistency, cross-references related specs, and enforces numbered acceptance criteria.
+Create, update, or reconcile a specification following PPDS conventions. Three modes: forward (create new), update (modify existing), reconcile (align spec with code). Ensures consistency, cross-references related specs, and enforces numbered acceptance criteria.
 
 ## Input
 
@@ -17,17 +17,32 @@ Read these files before doing anything else:
 
 ### Step 2: Determine Mode
 
-**If spec exists** (`specs/$ARGUMENTS.md` found):
+**Forward mode** — spec does not exist (`specs/$ARGUMENTS.md` not found):
+- Search existing specs for overlapping scope — check that this isn't already covered
+- If overlap found, ask user: update existing spec or create new one?
+- Proceed to authoring (Step 4)
+
+**Update mode** — spec exists, user requests specific changes:
 - Read the existing spec
 - Read the code files referenced in the spec's `Code:` header line
 - Identify drift: does the code match what the spec describes?
 - Identify missing ACs: does the spec have numbered acceptance criteria?
 - Present findings to user before making changes
+- Proceed to authoring (Step 4)
 
-**If spec is new** (`specs/$ARGUMENTS.md` not found):
-- Search existing specs for overlapping scope — check that this isn't already covered
-- If overlap found, ask user: update existing spec or create new one?
-- Proceed to authoring
+**Reconcile mode** — spec exists, user wants to align spec with code (`/spec <name> --reconcile` or when significant code divergence is detected):
+- Read the existing spec and extract all ACs, Code paths, and type descriptions
+- Read the code at the spec's `Code:` paths
+- Enumerate public types, methods, and behaviors in the code
+- Compare against existing ACs:
+  - **Missing ACs:** Code behavior with no corresponding AC → propose new ACs
+  - **Stale ACs:** AC describes behavior the code no longer has → flag for removal
+  - **Status drift:** AC references a test that now passes/fails differently → flag for update
+- **Member-count verification:** Count public types/methods in code, count ACs. Report the delta. If ACs cover less than 90% of public surface area, warn explicitly. This prevents the known LLM summarization problem (capturing ~70-80% and missing the rest).
+- Compare spec prose (Architecture, Core Requirements) against actual code structure
+- Present all proposed changes to user for approval before writing
+- After writing: regenerate README, append to Changelog
+- Skip to Step 6 (reconcile does not go through the authoring flow)
 
 ### Step 3: Cross-Reference Related Specs
 
