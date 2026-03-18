@@ -13,6 +13,7 @@ import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable } from './shared/data-table.js';
+import { SolutionFilter } from './shared/solution-filter.js';
 
 const vscode = getVsCodeApi<WebResourcesPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as WebResourcesPanelWebviewToHost));
@@ -22,7 +23,7 @@ const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const publishBtn = document.getElementById('publish-btn') as HTMLButtonElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
-const solutionSelect = document.getElementById('solution-select') as HTMLSelectElement;
+const solutionFilterContainer = document.getElementById('solution-filter-container') as HTMLElement;
 const textOnlyCb = document.getElementById('text-only-cb') as HTMLInputElement;
 const searchInput = document.getElementById('wr-search') as HTMLInputElement;
 const publishAllBtn = document.getElementById('publish-all-btn') as HTMLElement;
@@ -188,10 +189,17 @@ makerBtn.addEventListener('click', () => {
 });
 
 // ── Solution filter ──
-solutionSelect.addEventListener('change', () => {
-    const val = solutionSelect.value || null;
-    vscode.postMessage({ command: 'selectSolution', solutionId: val });
+const solutionFilter = new SolutionFilter(solutionFilterContainer, {
+    onChange: (solutionId) => {
+        vscode.postMessage({ command: 'selectSolution', solutionId });
+    },
+    getState: () => vscode.getState() as Record<string, unknown> | undefined,
+    setState: (state) => vscode.setState(state),
+    storageKey: 'webResources.solutionFilter',
 });
+
+// Request solution list on load
+vscode.postMessage({ command: 'requestSolutionList' });
 
 // ── Text-only toggle ──
 textOnlyCb.addEventListener('change', () => {
@@ -299,25 +307,11 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
 
 // ── Solution dropdown population ──
 function populateSolutionDropdown(solutions: SolutionOptionDto[]): void {
-    // Preserve current selection
-    const currentValue = solutionSelect.value;
-
-    // Clear all options except "All Solutions"
-    while (solutionSelect.options.length > 1) {
-        solutionSelect.remove(1);
-    }
-
-    for (const sol of solutions) {
-        const option = document.createElement('option');
-        option.value = sol.id;
-        option.textContent = sol.friendlyName;
-        solutionSelect.appendChild(option);
-    }
-
-    // Restore selection if it still exists
-    if (currentValue && [...solutionSelect.options].some(o => o.value === currentValue)) {
-        solutionSelect.value = currentValue;
-    }
+    solutionFilter.setSolutions(solutions.map(s => ({
+        id: s.id,
+        uniqueName: s.uniqueName,
+        friendlyName: s.friendlyName,
+    })));
 }
 
 // Signal ready

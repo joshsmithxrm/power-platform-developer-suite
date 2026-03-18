@@ -320,9 +320,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     <vscode-button id="maker-btn" appearance="secondary" title="Open Web Resources in Maker Portal">Maker Portal</vscode-button>
     <div class="solution-filter">
         <span class="solution-filter-label">Solution:</span>
-        <select id="solution-select" class="solution-filter-select" title="Filter by solution">
-            <option value="">All Solutions</option>
-        </select>
+        <div id="solution-filter-container"></div>
     </div>
     <label class="text-only-toggle" title="Show only text-based web resources (JS, CSS, HTML, XML)">
         <input type="checkbox" id="text-only-cb" checked>

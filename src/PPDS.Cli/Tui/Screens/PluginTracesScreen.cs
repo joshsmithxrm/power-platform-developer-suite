@@ -73,6 +73,9 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         RegisterHotkey(registry, Key.CtrlMask | Key.L, "Trace Level", () =>
             ErrorService.FireAndForget(ShowTraceLevelAsync(), "PluginTraces.TraceLevel"));
+
+        RegisterHotkey(registry, Key.CtrlMask | Key.E, "Export", () =>
+            ErrorService.FireAndForget(ExportTracesAsync(), "PluginTraces.Export"));
     }
 
     private async Task LoadTracesAsync()
@@ -182,6 +185,99 @@ internal sealed class PluginTracesScreen : TuiScreenBase
         if (errors > 0) statusParts.Add($"{errors} with errors");
         if (_currentFilter != null) statusParts.Add("filtered");
         _statusLabel.Text = string.Join(" \u2014 ", statusParts);
+    }
+
+    private async Task ExportTracesAsync()
+    {
+        if (_traces.Count == 0)
+        {
+            Application.MainLoop?.Invoke(() => { _statusLabel.Text = "No traces to export."; });
+            return;
+        }
+
+        var formatDialog = new Dialog("Export Format", 40, 8);
+        var csvBtn = new Button("CSV") { X = 4, Y = 1 };
+        var jsonBtn = new Button("JSON") { X = 14, Y = 1 };
+        var cancelBtn = new Button("Cancel") { X = 25, Y = 1 };
+
+        var selectedFormat = "";
+        csvBtn.Clicked += () => { selectedFormat = "csv"; Application.RequestStop(); };
+        jsonBtn.Clicked += () => { selectedFormat = "json"; Application.RequestStop(); };
+        cancelBtn.Clicked += () => Application.RequestStop();
+
+        formatDialog.Add(csvBtn, jsonBtn, cancelBtn);
+        Application.Run(formatDialog);
+        formatDialog.Dispose();
+
+        if (string.IsNullOrEmpty(selectedFormat)) return;
+
+        var saveDialog = new SaveDialog("Export Traces", $"traces.{selectedFormat}");
+        Application.Run(saveDialog);
+        var filePath = saveDialog.FilePath?.ToString();
+        saveDialog.Dispose();
+
+        if (string.IsNullOrEmpty(filePath)) return;
+
+        try
+        {
+            string content;
+            if (selectedFormat == "csv")
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("Time,Duration (ms),Plugin,Entity,Message,Depth,Mode,Status");
+                foreach (var t in _traces)
+                {
+                    sb.AppendLine(string.Join(",",
+                        CsvEscape(t.CreatedOn.ToString("O")),
+                        t.DurationMs?.ToString() ?? "",
+                        CsvEscape(t.TypeName),
+                        CsvEscape(t.PrimaryEntity ?? ""),
+                        CsvEscape(t.MessageName ?? ""),
+                        t.Depth.ToString(),
+                        t.Mode == PluginTraceMode.Synchronous ? "Sync" : "Async",
+                        t.HasException ? "Error" : "OK"));
+                }
+                content = sb.ToString();
+            }
+            else
+            {
+                var items = _traces.Select(t => new
+                {
+                    t.Id,
+                    CreatedOn = t.CreatedOn.ToString("O"),
+                    t.DurationMs,
+                    t.TypeName,
+                    t.PrimaryEntity,
+                    t.MessageName,
+                    t.Depth,
+                    Mode = t.Mode == PluginTraceMode.Synchronous ? "Sync" : "Async",
+                    Status = t.HasException ? "Error" : "OK",
+                });
+                content = System.Text.Json.JsonSerializer.Serialize(items, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+
+            await File.WriteAllTextAsync(filePath, content, ScreenCancellation);
+
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = $"Exported {_traces.Count} traces to {Path.GetFileName(filePath)}";
+            });
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ErrorService.ReportError("Failed to export traces", ex, "PluginTraces.Export");
+                _statusLabel.Text = "Export failed";
+            });
+        }
+    }
+
+    private static string CsvEscape(string value)
+    {
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        return value;
     }
 
     private void OnCellActivated(TableView.CellActivatedEventArgs args)
