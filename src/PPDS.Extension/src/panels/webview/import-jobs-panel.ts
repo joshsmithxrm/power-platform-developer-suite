@@ -34,6 +34,19 @@ function updateEnvironmentDisplay(name: string | null): void {
 let allJobs: ImportJobViewDto[] = [];
 let searchTerm = '';
 
+// ── Format date/time helper ──
+function formatDateTime(isoString: string | null | undefined): string {
+    if (!isoString) return '\u2014';
+    try {
+        return new Date(isoString).toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+    } catch {
+        return isoString;
+    }
+}
+
 // ── Status badge helper ──
 function statusBadgeHtml(status: string): string {
     const lower = status.toLowerCase();
@@ -72,7 +85,7 @@ const table = new DataTable<ImportJobViewDto>({
         {
             key: 'createdOn',
             label: 'Created On',
-            render: (j) => escapeHtml(j.createdOn ?? '\u2014'),
+            render: (j) => escapeHtml(formatDateTime(j.createdOn)),
         },
         {
             key: 'duration',

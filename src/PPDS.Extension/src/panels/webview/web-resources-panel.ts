@@ -45,6 +45,19 @@ let lastRequestId = 0;
 let allResources: WebResourceInfoDto[] = [];
 let searchTerm = '';
 
+// ── Format date/time helper ──
+function formatDateTime(isoString: string | null | undefined): string {
+    if (!isoString) return '\u2014';
+    try {
+        return new Date(isoString).toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+    } catch {
+        return isoString;
+    }
+}
+
 // ── Type badge helper ──
 function typeBadgeHtml(typeName: string): string {
     const lower = typeName.toLowerCase();
@@ -122,7 +135,7 @@ const table = new DataTable<WebResourceInfoDto>({
         {
             key: 'createdOn',
             label: 'Created On',
-            render: (r) => escapeHtml(r.createdOn ?? '\u2014'),
+            render: (r) => escapeHtml(formatDateTime(r.createdOn)),
         },
         {
             key: 'modifiedBy',
@@ -132,7 +145,7 @@ const table = new DataTable<WebResourceInfoDto>({
         {
             key: 'modifiedOn',
             label: 'Modified On',
-            render: (r) => escapeHtml(r.modifiedOn ?? '\u2014'),
+            render: (r) => escapeHtml(formatDateTime(r.modifiedOn)),
         },
     ],
     getRowId: (r) => r.id,
