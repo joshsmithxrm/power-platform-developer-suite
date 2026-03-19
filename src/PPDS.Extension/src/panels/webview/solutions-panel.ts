@@ -15,7 +15,13 @@ const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
+const makerPortalBtn = document.getElementById('maker-portal-btn') as HTMLElement;
+const includeManagedCb = document.getElementById('include-managed-cb') as HTMLInputElement;
+const sortSelect = document.getElementById('sort-select') as HTMLSelectElement;
 
+/** All solutions as received from host (unfiltered). */
+let allSolutions: SolutionViewDto[] = [];
+/** Currently displayed solutions (after managed filter + sort). */
 let solutions: SolutionViewDto[] = [];
 const expandedSolutions = new Set<string>();
 const expandedGroups = new Set<string>();
@@ -35,10 +41,60 @@ refreshBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'refresh' });
 });
 
+makerPortalBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'openInMaker' });
+});
+
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('reconnect-banner')!.style.display = 'none';
     vscode.postMessage({ command: 'refresh' });
+});
+
+// ── Sort & filter controls ──
+type SortKey = 'name' | 'version' | 'publisher' | 'modifiedOn';
+let currentSort: SortKey = 'name';
+
+function sortSolutions(sols: SolutionViewDto[]): SolutionViewDto[] {
+    const sorted = [...sols];
+    switch (currentSort) {
+        case 'name':
+            sorted.sort((a, b) => (a.friendlyName || a.uniqueName).localeCompare(b.friendlyName || b.uniqueName));
+            break;
+        case 'version':
+            sorted.sort((a, b) => (a.version || '').localeCompare(b.version || '', undefined, { numeric: true }));
+            break;
+        case 'publisher':
+            sorted.sort((a, b) => (a.publisherName || '').localeCompare(b.publisherName || ''));
+            break;
+        case 'modifiedOn':
+            sorted.sort((a, b) => {
+                const da = a.modifiedOn ? new Date(a.modifiedOn).getTime() : 0;
+                const db = b.modifiedOn ? new Date(b.modifiedOn).getTime() : 0;
+                return db - da; // newest first
+            });
+            break;
+    }
+    return sorted;
+}
+
+function applyManagedFilterAndSort(): void {
+    const includeManaged = includeManagedCb.checked;
+    let filtered = allSolutions;
+    if (!includeManaged) {
+        filtered = allSolutions.filter(s => !s.isManaged);
+    }
+    solutions = sortSolutions(filtered);
+    renderSolutionsList();
+}
+
+sortSelect.addEventListener('change', () => {
+    currentSort = sortSelect.value as SortKey;
+    applyManagedFilterAndSort();
+});
+
+includeManagedCb.addEventListener('change', () => {
+    applyManagedFilterAndSort();
 });
 
 // Dummy element — FilterBar needs a countEl but solutions panel manages status text itself
@@ -65,7 +121,7 @@ const solutionsFilter = new FilterBar<SolutionViewDto>({
         if (isFiltered) {
             statusText.textContent = filtered.length + ' of ' + total + ' solution' + (total !== 1 ? 's' : '');
         } else {
-            statusText.textContent = total + ' solution' + (total !== 1 ? 's' : '');
+            updateStatusBar(solutions);
         }
 
         if (isFiltered && filtered.length === 0) {
@@ -172,6 +228,12 @@ function updateSolutionExpansion(uniqueName: string, expanded: boolean): void {
     }
 }
 
+function updateStatusBar(sols: SolutionViewDto[]): void {
+    const managedCount = sols.filter(s => s.isManaged).length;
+    const unmanagedCount = sols.length - managedCount;
+    statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${unmanagedCount} unmanaged, ${managedCount} managed)`;
+}
+
 // ── Message handling ──
 window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebview>) => {
     const msg = event.data;
@@ -226,17 +288,33 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
 });
 
 function renderSolutions(sols: SolutionViewDto[]): void {
-    solutions = sols;
+    allSolutions = sols;
     searchInput.value = '';
 
-    if (sols.length === 0) {
-        content.innerHTML = '<div class="empty-state">No solutions found</div>';
+    // Apply managed filter and sort, then render
+    const includeManaged = includeManagedCb.checked;
+    let filtered = sols;
+    if (!includeManaged) {
+        filtered = sols.filter(s => !s.isManaged);
+    }
+    solutions = sortSolutions(filtered);
+    renderSolutionsList();
+}
+
+/** Renders the current `solutions` array into the DOM. */
+function renderSolutionsList(): void {
+    if (solutions.length === 0) {
+        if (allSolutions.length > 0 && !includeManagedCb.checked) {
+            content.innerHTML = '<div class="empty-state">No unmanaged solutions found. Check "Include Managed" to see all.</div>';
+        } else {
+            content.innerHTML = '<div class="empty-state">No solutions found</div>';
+        }
         statusText.textContent = 'No solutions';
         return;
     }
 
     let html = '<ul class="solution-list">';
-    for (const sol of sols) {
+    for (const sol of solutions) {
         const isExpanded = expandedSolutions.has(sol.uniqueName);
         html += '<li>';
         html += '<div class="solution-row" data-unique-name="' + escapeAttr(sol.uniqueName) + '">';
@@ -258,12 +336,14 @@ function renderSolutions(sols: SolutionViewDto[]): void {
         html += '<div class="detail-card">';
         html += '<span class="detail-label">Unique Name</span><span class="detail-value">' + escapeHtml(sol.uniqueName) + '</span>';
         html += '<span class="detail-label">Publisher</span><span class="detail-value">' + escapeHtml(sol.publisherName || '\u2014') + '</span>';
-        html += '<span class="detail-label">Type</span><span class="detail-value">' + (sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
+        html += '<span class="detail-label">Type</span><span class="detail-value">' + escapeHtml(sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
+        html += '<span class="detail-label">Visible</span><span class="detail-value">' + escapeHtml(sol.isVisible ? 'Yes' : 'No') + '</span>';
+        html += '<span class="detail-label">API Managed</span><span class="detail-value">' + escapeHtml(sol.isApiManaged ? 'Yes' : 'No') + '</span>';
         if (sol.installedOn) {
-            html += '<span class="detail-label">Installed</span><span class="detail-value">' + formatDate(sol.installedOn) + '</span>';
+            html += '<span class="detail-label">Installed</span><span class="detail-value">' + escapeHtml(formatDate(sol.installedOn)) + '</span>';
         }
         if (sol.modifiedOn) {
-            html += '<span class="detail-label">Modified</span><span class="detail-value">' + formatDate(sol.modifiedOn) + '</span>';
+            html += '<span class="detail-label">Modified</span><span class="detail-value">' + escapeHtml(formatDate(sol.modifiedOn)) + '</span>';
         }
         if (sol.description) {
             html += '<div class="detail-description">' + escapeHtml(sol.description) + '</div>';
@@ -277,16 +357,14 @@ function renderSolutions(sols: SolutionViewDto[]): void {
     content.innerHTML = html;
 
     // Initialize filter with the new data set (resets filter input and DOM visibility)
-    solutionsFilter.setItems(sols);
+    solutionsFilter.setItems(solutions);
 
-    // Override status with the more detailed managed/unmanaged breakdown
-    const managedCount = sols.filter(s => s.isManaged).length;
-    const unmanagedCount = sols.length - managedCount;
-    statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${unmanagedCount} unmanaged, ${managedCount} managed)`;
+    // Update status bar with managed/unmanaged breakdown
+    updateStatusBar(solutions);
 
     // Re-expand solutions that were previously expanded and re-request components
     for (const uniqueName of expandedSolutions) {
-        const found = sols.find(s => s.uniqueName === uniqueName);
+        const found = solutions.find(s => s.uniqueName === uniqueName);
         if (found) {
             vscode.postMessage({ command: 'expandSolution', uniqueName });
         }
@@ -345,8 +423,8 @@ function renderComponents(uniqueName: string, groups: ComponentGroupDto[]): void
                 html += '<span class="detail-label">Schema Name</span><span class="detail-value">' + (comp.schemaName ? escapeHtml(comp.schemaName) : '\u2014') + '</span>';
                 html += '<span class="detail-label">Display Name</span><span class="detail-value">' + (comp.displayName ? escapeHtml(comp.displayName) : '\u2014') + '</span>';
             }
-            html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + comp.rootComponentBehavior + '</span>';
-            html += '<span class="detail-label">Metadata</span><span class="detail-value">' + (comp.isMetadata ? 'Yes' : 'No') + '</span>';
+            html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + escapeHtml(String(comp.rootComponentBehavior)) + '</span>';
+            html += '<span class="detail-label">Metadata</span><span class="detail-value">' + escapeHtml(comp.isMetadata ? 'Yes' : 'No') + '</span>';
             html += '</div>';
         }
         html += '</div>';

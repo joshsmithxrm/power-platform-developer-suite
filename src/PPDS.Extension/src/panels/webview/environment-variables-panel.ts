@@ -2,7 +2,8 @@
 // External webview script for the Environment Variables panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, formatDate } from './shared/dom-utils.js';
+import { FilterBar } from './shared/filter-bar.js';
 import type {
     EnvironmentVariablesPanelWebviewToHost,
     EnvironmentVariablesPanelHostToWebview,
@@ -21,7 +22,9 @@ const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const exportBtn = document.getElementById('export-btn') as HTMLElement;
+const syncBtn = document.getElementById('sync-btn') as HTMLElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
+const searchInput = document.getElementById('search-input') as HTMLInputElement;
 const detailPane = document.getElementById('detail-pane') as HTMLElement;
 const detailContent = document.getElementById('detail-content') as HTMLElement;
 const detailClose = document.getElementById('detail-close') as HTMLElement;
@@ -103,6 +106,12 @@ const table = new DataTable<EnvironmentVariableViewDto>({
             render: renderCurrentValue,
         },
         {
+            key: 'modifiedOn',
+            label: 'Modified On',
+            render: (v) => escapeHtml(formatDate(v.modifiedOn)),
+            className: '120px',
+        },
+        {
             key: 'isManaged',
             label: 'Managed',
             render: (v) => escapeHtml(v.isManaged ? 'Yes' : 'No'),
@@ -136,6 +145,10 @@ exportBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'exportDeploymentSettings' });
 });
 
+syncBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'syncDeploymentSettings' });
+});
+
 makerBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'openInMaker' });
 });
@@ -148,6 +161,22 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('reconnect-banner')!.style.display = 'none';
     vscode.postMessage({ command: 'refresh' });
+});
+
+// ── Search filter ──
+const searchFilterCount = document.createElement('span');
+const searchFilter = new FilterBar<EnvironmentVariableViewDto>({
+    input: searchInput,
+    countEl: searchFilterCount,
+    itemLabel: 'variables',
+    getSearchableText: (v) => [
+        v.schemaName,
+        v.displayName ?? '',
+        v.currentValue ?? '',
+    ],
+    onFilter: (filtered) => {
+        table.setItems(filtered);
+    },
 });
 
 // ── Edit dialog handlers ──
@@ -310,7 +339,7 @@ window.addEventListener('message', (event: MessageEvent<EnvironmentVariablesPane
             }
             break;
         case 'environmentVariablesLoaded':
-            table.setItems(msg.variables);
+            searchFilter.setItems(msg.variables);
             detailPane.style.display = 'none';
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');

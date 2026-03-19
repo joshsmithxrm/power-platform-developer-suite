@@ -85,6 +85,9 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             case 'selectReference':
                 await this.loadConnectionReferenceDetail(message.logicalName);
                 break;
+            case 'getDetail':
+                await this.loadConnectionReferenceDetail(message.logicalName);
+                break;
             case 'analyze':
                 await this.runAnalysis();
                 break;
@@ -100,6 +103,9 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 break;
             case 'openInMaker':
                 await this.openInMaker();
+                break;
+            case 'syncDeploymentSettings':
+                vscode.window.showInformationMessage('Sync Deployment Settings coming soon');
                 break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
@@ -279,22 +285,16 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh connection references">Refresh</vscode-button>
     <vscode-button id="analyze-btn" appearance="secondary" title="Analyze orphaned references">Analyze</vscode-button>
+    <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings for connection references">Sync Deployment Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Connections in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
+    <input id="search-input" type="text" placeholder="Search connection references..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 
 <div class="content" id="content">
     <div class="empty-state" id="empty-state">Loading connection references...</div>
-</div>
-
-<div class="detail-pane" id="detail-pane" style="display: none;">
-    <div class="detail-header">
-        <span id="detail-title">Connection Reference Detail</span>
-        <button class="detail-close-btn" id="detail-close" title="Close detail">\u00D7</button>
-    </div>
-    <div class="detail-content" id="detail-content"></div>
 </div>
 
 <div class="status-bar">

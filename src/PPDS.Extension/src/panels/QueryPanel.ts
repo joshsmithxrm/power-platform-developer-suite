@@ -604,6 +604,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 <div class="toolbar">
     <vscode-button id="execute-btn" appearance="primary">Execute</vscode-button>
     <vscode-button id="cancel-btn" appearance="secondary" style="display:none;" title="Cancel query (Escape)">Cancel</vscode-button>
+    <vscode-button id="clear-btn" appearance="secondary" title="Clear editor and results">Clear</vscode-button>
+    <vscode-button id="import-btn" appearance="secondary" title="Import query from file">Import</vscode-button>
     <vscode-button id="export-btn" appearance="secondary" title="Export results or save query">Export \u25BE</vscode-button>
     <vscode-button id="history-btn" appearance="secondary" title="Query history (Ctrl+Shift+H)">History</vscode-button>
     <vscode-button id="more-btn" appearance="icon" title="More actions">

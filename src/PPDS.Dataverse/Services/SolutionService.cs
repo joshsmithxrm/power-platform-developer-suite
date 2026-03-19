@@ -171,7 +171,9 @@ public class SolutionService : ISolutionService
                 Solution.Fields.Description,
                 Solution.Fields.CreatedOn,
                 Solution.Fields.ModifiedOn,
-                Solution.Fields.InstalledOn),
+                Solution.Fields.InstalledOn,
+                Solution.Fields.IsVisible,
+                Solution.Fields.IsApiManaged),
             Orders = { new OrderExpression(Solution.Fields.FriendlyName, OrderType.Ascending) }
         };
 
@@ -226,7 +228,9 @@ public class SolutionService : ISolutionService
                 Solution.Fields.Description,
                 Solution.Fields.CreatedOn,
                 Solution.Fields.ModifiedOn,
-                Solution.Fields.InstalledOn),
+                Solution.Fields.InstalledOn,
+                Solution.Fields.IsVisible,
+                Solution.Fields.IsApiManaged),
             TopCount = 1
         };
 
@@ -265,7 +269,9 @@ public class SolutionService : ISolutionService
                 Solution.Fields.Description,
                 Solution.Fields.CreatedOn,
                 Solution.Fields.ModifiedOn,
-                Solution.Fields.InstalledOn),
+                Solution.Fields.InstalledOn,
+                Solution.Fields.IsVisible,
+                Solution.Fields.IsApiManaged),
             TopCount = 1
         };
 
@@ -550,6 +556,8 @@ public class SolutionService : ISolutionService
             entity.GetAttributeValue<string>(Solution.Fields.Description),
             entity.GetAttributeValue<DateTime?>(Solution.Fields.CreatedOn),
             entity.GetAttributeValue<DateTime?>(Solution.Fields.ModifiedOn),
-            entity.GetAttributeValue<DateTime?>(Solution.Fields.InstalledOn));
+            entity.GetAttributeValue<DateTime?>(Solution.Fields.InstalledOn),
+            entity.GetAttributeValue<bool?>(Solution.Fields.IsVisible) ?? true,
+            entity.GetAttributeValue<bool?>(Solution.Fields.IsApiManaged) ?? false);
     }
 }

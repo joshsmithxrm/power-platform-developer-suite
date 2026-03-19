@@ -39,6 +39,9 @@ const detailTabMessageBlock = document.getElementById('tab-message-block') as HT
 const detailTabConfig = document.getElementById('tab-config') as HTMLElement;
 const detailTabTimeline = document.getElementById('tab-timeline') as HTMLElement;
 
+// ── Search input ─────────────────────────────────────────────────────────
+const searchInput = document.getElementById('search-input') as HTMLInputElement;
+
 // ── Environment picker ──────────────────────────────────────────────────
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
 const envPickerName = document.getElementById('env-picker-name') as HTMLElement;
@@ -186,10 +189,13 @@ const table = new DataTable<PluginTraceViewDto>({
     columns: [
         {
             key: 'status',
-            label: '',
-            render: (item) => '<span class="trace-status-icon ' + escapeAttr(item.hasException ? 'exception' : 'success') + '"></span>',
-            className: '40px',
-            sortable: false,
+            label: 'Status',
+            render: (item) => '<span class="trace-status-cell">'
+                + '<span class="trace-status-icon ' + escapeAttr(item.hasException ? 'exception' : 'success') + '"></span>'
+                + '<span class="trace-status-label">' + escapeHtml(item.hasException ? 'Exception' : 'Success') + '</span>'
+                + '</span>',
+            className: '100px',
+            sortable: true,
         },
         {
             key: 'createdOn',
@@ -256,6 +262,22 @@ const table = new DataTable<PluginTraceViewDto>({
     },
     emptyMessage: 'No plugin traces found',
 });
+
+/** Apply client-side search filter and re-render the table. */
+function applySearchFilter(): void {
+    const query = searchInput.value.trim().toLowerCase();
+    if (!query) {
+        table.setItems(currentTraces);
+    } else {
+        const filtered = currentTraces.filter(t =>
+            t.typeName.toLowerCase().includes(query)
+            || (t.primaryEntity && t.primaryEntity.toLowerCase().includes(query))
+            || (t.messageName && t.messageName.toLowerCase().includes(query))
+        );
+        table.setItems(filtered);
+    }
+    applyRowClasses();
+}
 
 function applyRowClasses(): void {
     tablePane.querySelectorAll<HTMLElement>('.data-table-row').forEach(row => {
@@ -501,8 +523,8 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             currentTraces = msg.traces;
             {
                 const previousSelectedId = selectedTraceId;
-                table.setItems(msg.traces);
-                applyRowClasses();
+                // Apply search filter (renders filtered subset or all traces)
+                applySearchFilter();
                 // Preserve selection if the trace still exists
                 if (previousSelectedId) {
                     const stillExists = msg.traces.some(t => t.id === previousSelectedId);
@@ -541,14 +563,23 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             break;
 
         case 'traceLevelLoaded':
+            traceLevelBtn.textContent = 'Trace Level: ' + msg.level;
             traceLevelIndicator.textContent = msg.level;
             if (msg.levelValue === 0) {
                 traceLevelIndicator.title = 'Trace level is Off \u2014 no new traces will be recorded';
-                traceLevelIndicator.style.opacity = '0.6';
+                traceLevelIndicator.className = 'trace-level-indicator trace-level-off';
             } else {
                 traceLevelIndicator.title = 'Trace level: ' + msg.level;
-                traceLevelIndicator.style.opacity = '1';
+                traceLevelIndicator.className = 'trace-level-indicator trace-level-on';
             }
+            // Highlight the active level in the dropdown
+            traceLevelDropdown.querySelectorAll<HTMLElement>('.trace-level-dropdown-item').forEach(item => {
+                if (item.dataset.level === msg.level) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
             break;
 
         case 'deleteComplete':
@@ -603,6 +634,15 @@ autoRefreshSelect.addEventListener('change', () => {
     } else {
         autoRefreshSelect.classList.remove('auto-refresh-active');
     }
+});
+
+// ── Search input handler ──────────────────────────────────────────────────
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        applySearchFilter();
+    }, 200);
 });
 
 // ── Delete dropdown menu ─────────────────────────────────────────────────
@@ -689,6 +729,36 @@ exportDropdown.addEventListener('click', (e) => {
     }
 });
 
+// ── Trace Level dropdown menu ─────────────────────────────────────────────
+const traceLevelDropdown = document.createElement('div');
+traceLevelDropdown.className = 'trace-level-dropdown';
+traceLevelDropdown.style.display = 'none';
+traceLevelDropdown.innerHTML = [
+    '<button class="trace-level-dropdown-item" data-level="Off">Off</button>',
+    '<button class="trace-level-dropdown-item" data-level="Exception">Exception</button>',
+    '<button class="trace-level-dropdown-item" data-level="All">All</button>',
+].join('');
+traceLevelBtn.parentElement!.style.position = 'relative';
+traceLevelBtn.insertAdjacentElement('afterend', traceLevelDropdown);
+
+// Keep the indicator after the dropdown in the DOM (move it)
+traceLevelDropdown.insertAdjacentElement('afterend', traceLevelIndicator);
+
+traceLevelBtn.addEventListener('click', () => {
+    // Request fresh trace level data, then show the dropdown
+    vscode.postMessage({ command: 'requestTraceLevel' });
+    const isVisible = traceLevelDropdown.style.display !== 'none';
+    traceLevelDropdown.style.display = isVisible ? 'none' : '';
+});
+
+traceLevelDropdown.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>('.trace-level-dropdown-item');
+    if (target?.dataset.level) {
+        traceLevelDropdown.style.display = 'none';
+        vscode.postMessage({ command: 'setTraceLevel', level: target.dataset.level });
+    }
+});
+
 // Close dropdowns when clicking elsewhere
 document.addEventListener('click', (e) => {
     if (!deleteBtn.contains(e.target as Node) && !deleteDropdown.contains(e.target as Node)) {
@@ -697,10 +767,9 @@ document.addEventListener('click', (e) => {
     if (!exportBtn.contains(e.target as Node) && !exportDropdown.contains(e.target as Node)) {
         exportDropdown.style.display = 'none';
     }
-});
-
-traceLevelBtn.addEventListener('click', () => {
-    vscode.postMessage({ command: 'requestTraceLevel' });
+    if (!traceLevelBtn.contains(e.target as Node) && !traceLevelDropdown.contains(e.target as Node)) {
+        traceLevelDropdown.style.display = 'none';
+    }
 });
 
 // Reconnect banner refresh

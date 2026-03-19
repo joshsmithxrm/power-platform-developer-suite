@@ -60,6 +60,8 @@ export interface SolutionViewDto {
     createdOn: string | null;
     modifiedOn: string | null;
     installedOn: string | null;
+    isVisible: boolean;
+    isApiManaged: boolean;
 }
 
 /** Component group sent after expanding a solution. */
@@ -109,6 +111,7 @@ export interface ImportJobViewDto {
     startedOn: string | null;
     completedOn: string | null;
     duration: string | null;
+    operationContext: string | null;
 }
 
 /** Messages the Import Jobs Panel webview sends to the extension host. */
@@ -292,11 +295,13 @@ export type ConnectionReferencesPanelWebviewToHost =
     | { command: 'ready' }
     | { command: 'refresh' }
     | { command: 'selectReference'; logicalName: string }
+    | { command: 'getDetail'; logicalName: string }
     | { command: 'analyze' }
     | { command: 'filterBySolution'; solutionId: string | null }
     | { command: 'requestSolutionList' }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
+    | { command: 'syncDeploymentSettings' }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
@@ -343,6 +348,7 @@ export type EnvironmentVariablesPanelWebviewToHost =
     | { command: 'filterBySolution'; solutionId: string | null }
     | { command: 'requestSolutionList' }
     | { command: 'exportDeploymentSettings' }
+    | { command: 'syncDeploymentSettings' }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
     | { command: 'copyToClipboard'; text: string }

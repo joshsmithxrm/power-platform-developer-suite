@@ -1,12 +1,12 @@
 import { escapeHtml, escapeAttr } from './dom-utils.js';
 
-export interface SolutionOption {
+interface SolutionOption {
     id: string;
     uniqueName: string;
     friendlyName: string;
 }
 
-export interface SolutionFilterOptions {
+interface SolutionFilterOptions {
     onChange: (solutionId: string | null) => void;
     getState: () => Record<string, unknown> | undefined;
     setState: (state: Record<string, unknown>) => void;
@@ -37,7 +37,7 @@ export class SolutionFilter {
     setSolutions(solutions: SolutionOption[]): void {
         this.solutions = solutions;
         // Validate persisted selection still exists
-        if (this.selectedId && !solutions.find(s => s.uniqueName === this.selectedId)) {
+        if (this.selectedId && !solutions.find(s => s.id === this.selectedId)) {
             this.selectedId = null;
             this.persist();
         }
@@ -52,8 +52,8 @@ export class SolutionFilter {
         let html = '<select class="solution-filter-select" title="Filter by solution">';
         html += '<option value="">' + escapeHtml('All Solutions') + '</option>';
         for (const s of this.solutions) {
-            const selected = s.uniqueName === this.selectedId ? ' selected' : '';
-            html += '<option value="' + escapeAttr(s.uniqueName) + '"' + selected + '>'
+            const selected = s.id === this.selectedId ? ' selected' : '';
+            html += '<option value="' + escapeAttr(s.id) + '"' + selected + '>'
                 + escapeHtml(s.friendlyName) + '</option>';
         }
         html += '</select>';

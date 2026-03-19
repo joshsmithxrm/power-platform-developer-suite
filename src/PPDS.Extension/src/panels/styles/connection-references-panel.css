@@ -49,7 +49,6 @@
     text-align: left;
     padding: 6px 8px;
     font-size: 11px;
-    text-transform: uppercase;
     color: var(--vscode-descriptionForeground);
     border-bottom: 1px solid var(--vscode-panel-border);
 }
@@ -89,6 +88,20 @@
     color: var(--vscode-list-activeSelectionForeground);
 }
 
+/* ── Chevron toggle for expandable rows ──────────────────────────────── */
+
+.cr-chevron {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s ease;
+    color: var(--vscode-descriptionForeground);
+    user-select: none;
+}
+
+.cr-chevron.expanded {
+    transform: rotate(90deg);
+}
+
 /* ── Status badges ──────────────────────────────────────────────────── */
 
 .status-badge {
@@ -111,6 +124,100 @@
 .status-na {
     background: color-mix(in srgb, var(--vscode-descriptionForeground) 15%, transparent);
     color: var(--vscode-descriptionForeground);
+}
+
+.status-unknown {
+    background: color-mix(in srgb, var(--vscode-descriptionForeground) 15%, transparent);
+    color: var(--vscode-descriptionForeground);
+    cursor: help;
+}
+
+.status-unbound {
+    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 20%, transparent);
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    cursor: help;
+}
+
+.status-unbound-text {
+    color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* ── Inline expandable detail card ──────────────────────────────────── */
+
+.cr-inline-detail td {
+    padding: 0;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: color-mix(in srgb, var(--vscode-editor-background) 95%, var(--vscode-list-hoverBackground));
+}
+
+.cr-detail-card {
+    padding: 10px 16px;
+    font-size: 12px;
+}
+
+.cr-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 24px;
+    margin-bottom: 8px;
+}
+
+.cr-detail-item {
+    padding: 2px 0;
+}
+
+.cr-detail-item .detail-label {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 500;
+    margin-right: 4px;
+}
+
+.cr-detail-full {
+    grid-column: 1 / -1;
+}
+
+.cr-detail-flows {
+    border-top: 1px solid var(--vscode-panel-border);
+    padding-top: 8px;
+    margin-top: 4px;
+}
+
+.cr-flow-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.cr-flow-item {
+    padding: 2px 0 2px 12px;
+    font-size: 12px;
+}
+
+.cr-flow-name {
+    color: var(--vscode-foreground);
+}
+
+.cr-flow-state {
+    font-size: 11px;
+    margin-left: 6px;
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.cr-flow-state-active {
+    background: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 15%, transparent);
+    color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.cr-flow-state-inactive {
+    background: color-mix(in srgb, var(--vscode-descriptionForeground) 15%, transparent);
+    color: var(--vscode-descriptionForeground);
+}
+
+.cr-no-flows {
+    font-style: italic;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
 }
 
 /* ── Detail pane ────────────────────────────────────────────────────── */
@@ -239,4 +346,27 @@
     font-style: italic;
     color: var(--vscode-testing-iconPassed, #73c991);
     padding: 8px 0;
+}
+
+/* ── Toolbar Search ──────────────────────────────────────────── */
+.toolbar-search {
+    flex: 1;
+    min-width: 120px;
+    max-width: 300px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 3px 8px;
+    border-radius: 2px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    outline: none;
+}
+
+.toolbar-search:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.toolbar-search::placeholder {
+    color: var(--vscode-input-placeholderForeground);
 }

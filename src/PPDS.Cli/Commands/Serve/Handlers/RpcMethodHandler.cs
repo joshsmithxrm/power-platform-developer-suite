@@ -2060,7 +2060,9 @@ public class RpcMethodHandler : IDisposable
                     Description = s.Description,
                     CreatedOn = s.CreatedOn,
                     ModifiedOn = s.ModifiedOn,
-                    InstalledOn = s.InstalledOn
+                    InstalledOn = s.InstalledOn,
+                    IsVisible = s.IsVisible,
+                    IsApiManaged = s.IsApiManaged
                 }).ToList()
             };
         }, cancellationToken);
@@ -2196,7 +2198,8 @@ public class RpcMethodHandler : IDisposable
             CreatedOn = job.CreatedOn?.ToString("o"),
             StartedOn = job.StartedOn?.ToString("o"),
             CompletedOn = job.CompletedOn?.ToString("o"),
-            Duration = job.FormattedDuration
+            Duration = job.FormattedDuration,
+            OperationContext = job.OperationContext
         };
     }
 
@@ -2213,6 +2216,7 @@ public class RpcMethodHandler : IDisposable
             StartedOn = job.StartedOn?.ToString("o"),
             CompletedOn = job.CompletedOn?.ToString("o"),
             Duration = job.FormattedDuration,
+            OperationContext = job.OperationContext,
             Data = data
         };
     }
@@ -3777,6 +3781,18 @@ public class SolutionInfoDto
     [JsonPropertyName("installedOn")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? InstalledOn { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the solution is visible.
+    /// </summary>
+    [JsonPropertyName("isVisible")]
+    public bool IsVisible { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the solution is API managed.
+    /// </summary>
+    [JsonPropertyName("isApiManaged")]
+    public bool IsApiManaged { get; set; }
 }
 
 /// <summary>
@@ -4076,6 +4092,10 @@ public class ImportJobInfoDto
     [JsonPropertyName("duration")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Duration { get; set; }
+
+    [JsonPropertyName("operationContext")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationContext { get; set; }
 }
 
 public class ImportJobDetailDto : ImportJobInfoDto

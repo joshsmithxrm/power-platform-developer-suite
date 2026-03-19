@@ -135,6 +135,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
                     startedOn: j.startedOn,
                     completedOn: j.completedOn,
                     duration: j.duration,
+                    operationContext: j.operationContext ?? null,
                 })),
             });
         } catch (error) {
@@ -202,6 +203,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh import jobs">Refresh</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Solution History in Maker Portal">Maker Portal</vscode-button>
+    <input id="search-input" type="text" placeholder="Search import jobs..." title="Filter by solution name" class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>

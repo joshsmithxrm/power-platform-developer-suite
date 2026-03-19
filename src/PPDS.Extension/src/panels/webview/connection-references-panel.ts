@@ -2,7 +2,7 @@
 // External webview script for the Connection References panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, cssEscape } from './shared/dom-utils.js';
 import type {
     ConnectionReferencesPanelWebviewToHost,
     ConnectionReferencesPanelHostToWebview,
@@ -15,6 +15,7 @@ import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
 import { DataTable } from './shared/data-table.js';
 import { SolutionFilter } from './shared/solution-filter.js';
+import { FilterBar } from './shared/filter-bar.js';
 
 const vscode = getVsCodeApi<ConnectionReferencesPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as ConnectionReferencesPanelWebviewToHost));
@@ -22,10 +23,9 @@ const content = document.getElementById('content') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const analyzeBtn = document.getElementById('analyze-btn') as HTMLElement;
+const syncBtn = document.getElementById('sync-btn') as HTMLElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
-const detailPane = document.getElementById('detail-pane') as HTMLElement;
-const detailContent = document.getElementById('detail-content') as HTMLElement;
-const detailClose = document.getElementById('detail-close') as HTMLElement;
+const searchInput = document.getElementById('search-input') as HTMLInputElement;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -51,20 +51,65 @@ const solutionFilter = new SolutionFilter(solutionFilterContainer, {
 // Request solution list on load
 vscode.postMessage({ command: 'requestSolutionList' });
 
+// ── Expandable row state ──
+const expandedRows = new Set<string>();
+const rowDetails = new Map<string, ConnectionReferenceDetailViewDto>();
+
 // ── Status badge helper ──
-function statusBadgeHtml(status: string): string {
+function statusBadgeHtml(status: string, connectionId: string | null | undefined): string {
     const lower = status.toLowerCase();
     let cls = 'status-badge';
-    if (lower === 'connected') cls += ' status-connected';
-    else if (lower === 'error') cls += ' status-error';
-    else cls += ' status-na';
-    return '<span class="' + cls + '">' + escapeHtml(status) + '</span>';
+    let label = status;
+    let tooltip = '';
+
+    if (lower === 'connected') {
+        cls += ' status-connected';
+    } else if (lower === 'error') {
+        cls += ' status-error';
+    } else if (lower === 'n/a') {
+        cls += ' status-unknown';
+        label = 'Unknown';
+        tooltip = ' title="Status information is not available. This may be due to limited access permissions."';
+    } else {
+        cls += ' status-na';
+    }
+
+    // Show "Unbound" for CRs with no connectionId regardless of reported status
+    if (!connectionId) {
+        cls = 'status-badge status-unbound';
+        label = 'Unbound';
+        tooltip = ' title="No connection is bound to this connection reference."';
+    }
+
+    return '<span class="' + cls + '"' + tooltip + '>' + escapeHtml(label) + '</span>';
+}
+
+// ── Format date/time helper ──
+function formatDateTime(isoString: string | null | undefined): string {
+    if (!isoString) return '\u2014';
+    try {
+        const d = new Date(isoString);
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    } catch {
+        return isoString;
+    }
 }
 
 // ── DataTable setup ──
 const table = new DataTable<ConnectionReferenceViewDto>({
     container: content,
     columns: [
+        {
+            key: '_chevron',
+            label: '',
+            render: (r) => {
+                const expanded = expandedRows.has(r.logicalName);
+                return '<span class="cr-chevron' + (expanded ? ' expanded' : '') + '" data-logical-name="' + escapeAttr(r.logicalName) + '">&#9654;</span>';
+            },
+            sortable: false,
+            className: '28px',
+        },
         {
             key: 'displayName',
             label: 'Display Name',
@@ -83,7 +128,7 @@ const table = new DataTable<ConnectionReferenceViewDto>({
         {
             key: 'connectionStatus',
             label: 'Status',
-            render: (r) => statusBadgeHtml(r.connectionStatus),
+            render: (r) => statusBadgeHtml(r.connectionStatus, r.connectionId),
         },
         {
             key: 'isManaged',
@@ -94,18 +139,18 @@ const table = new DataTable<ConnectionReferenceViewDto>({
         {
             key: 'modifiedOn',
             label: 'Modified On',
-            render: (r) => escapeHtml(r.modifiedOn ?? '\u2014'),
+            render: (r) => escapeHtml(formatDateTime(r.modifiedOn)),
         },
     ],
     getRowId: (r) => r.logicalName,
     onRowClick: (r) => {
-        vscode.postMessage({ command: 'selectReference', logicalName: r.logicalName });
+        toggleRowExpansion(r.logicalName);
     },
     defaultSortKey: 'logicalName',
     defaultSortDirection: 'asc',
     statusEl: statusText,
     formatStatus: (items) => {
-        const bound = items.filter(r => r.connectionStatus.toLowerCase() === 'connected').length;
+        const bound = items.filter(r => !!r.connectionId).length;
         const unbound = items.length - bound;
         const parts = [items.length + ' connection reference' + (items.length !== 1 ? 's' : '')];
         if (bound > 0) parts.push(bound + ' bound');
@@ -114,6 +159,193 @@ const table = new DataTable<ConnectionReferenceViewDto>({
     },
     emptyMessage: 'No connection references found',
 });
+
+// ── Search / Filter ──
+// Dummy element for count since we manage status text ourselves
+const _filterCountSink = document.createElement('span');
+
+const searchFilter = new FilterBar<ConnectionReferenceViewDto>({
+    input: searchInput,
+    countEl: _filterCountSink,
+    getSearchableText: (r) => [
+        r.displayName || '',
+        r.logicalName,
+        r.connectorDisplayName || '',
+        r.connectorId || '',
+    ],
+    onFilter: (filtered, total) => {
+        const rows = content.querySelectorAll<HTMLElement>('.data-table-row');
+        const isFiltered = searchInput.value.trim().length > 0;
+        const filteredIds = new Set(filtered.map(r => r.logicalName));
+
+        rows.forEach(row => {
+            const id = row.dataset.id;
+            if (!id) return;
+            const visible = filteredIds.has(id);
+            row.style.display = visible ? '' : 'none';
+            // Also hide any expanded detail card beneath the row
+            const detailCard = row.nextElementSibling as HTMLElement | null;
+            if (detailCard && detailCard.classList.contains('cr-inline-detail')) {
+                detailCard.style.display = visible ? '' : 'none';
+            }
+        });
+
+        if (isFiltered) {
+            statusText.textContent = filtered.length + ' of ' + total + ' connection reference' + (total !== 1 ? 's' : '');
+        } else {
+            const bound = filtered.filter(r => !!r.connectionId).length;
+            const unbound = filtered.length - bound;
+            const parts = [filtered.length + ' connection reference' + (filtered.length !== 1 ? 's' : '')];
+            if (bound > 0) parts.push(bound + ' bound');
+            if (unbound > 0) parts.push(unbound + ' unbound');
+            statusText.textContent = parts.join(' \u2014 ');
+        }
+
+        if (isFiltered && filtered.length === 0) {
+            let emptyEl = content.querySelector('.filter-empty');
+            if (!emptyEl) {
+                emptyEl = document.createElement('div');
+                emptyEl.className = 'empty-state filter-empty';
+                emptyEl.textContent = 'No connection references match filter';
+                content.appendChild(emptyEl);
+            }
+        } else {
+            const emptyEl = content.querySelector('.filter-empty');
+            if (emptyEl) emptyEl.remove();
+        }
+    },
+    itemLabel: 'connection references',
+});
+
+// ── Expandable row logic ──
+function toggleRowExpansion(logicalName: string): void {
+    if (expandedRows.has(logicalName)) {
+        // Collapse
+        expandedRows.delete(logicalName);
+        const card = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
+        if (card) card.remove();
+        // Update chevron
+        const chevron = content.querySelector<HTMLElement>('.cr-chevron[data-logical-name="' + cssEscape(logicalName) + '"]');
+        if (chevron) chevron.classList.remove('expanded');
+    } else {
+        // Expand — request detail from host
+        expandedRows.add(logicalName);
+        // Update chevron
+        const chevron = content.querySelector<HTMLElement>('.cr-chevron[data-logical-name="' + cssEscape(logicalName) + '"]');
+        if (chevron) chevron.classList.add('expanded');
+
+        // If we already have cached detail, show it immediately
+        const cached = rowDetails.get(logicalName);
+        if (cached) {
+            insertInlineDetail(logicalName, cached);
+        } else {
+            // Insert a loading placeholder
+            insertInlineDetailLoading(logicalName);
+        }
+
+        // Always fetch fresh detail from the host
+        vscode.postMessage({ command: 'getDetail', logicalName });
+    }
+}
+
+function insertInlineDetailLoading(logicalName: string): void {
+    const row = content.querySelector<HTMLElement>('.data-table-row[data-id="' + cssEscape(logicalName) + '"]');
+    if (!row) return;
+
+    // Remove existing card if any
+    const existing = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
+    if (existing) existing.remove();
+
+    const colCount = 7; // chevron + 6 data columns
+    const tr = document.createElement('tr');
+    tr.className = 'cr-inline-detail';
+    tr.setAttribute('data-for', logicalName);
+    const td = document.createElement('td');
+    td.colSpan = colCount;
+    td.innerHTML = '<div class="cr-detail-card"><div class="loading-state"><div class="spinner"></div><div>Loading details...</div></div></div>';
+    tr.appendChild(td);
+    row.after(tr);
+}
+
+function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDetailViewDto): void {
+    const row = content.querySelector<HTMLElement>('.data-table-row[data-id="' + cssEscape(logicalName) + '"]');
+    if (!row) return;
+
+    // Remove existing card if any
+    const existing = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
+    if (existing) existing.remove();
+
+    const colCount = 7; // chevron + 6 data columns
+    const tr = document.createElement('tr');
+    tr.className = 'cr-inline-detail';
+    tr.setAttribute('data-for', logicalName);
+    const td = document.createElement('td');
+    td.colSpan = colCount;
+
+    let html = '<div class="cr-detail-card">';
+    html += '<div class="cr-detail-grid">';
+
+    // Connection info
+    const connectionLabel = detail.isBound
+        ? escapeHtml(detail.connectionOwner ? detail.connectionOwner : 'Bound')
+        : escapeHtml('Unbound');
+    const connectionClass = detail.isBound ? '' : ' class="status-unbound-text"';
+    html += '<div class="cr-detail-item"><span class="detail-label">Connection:</span> <span' + connectionClass + '>' + connectionLabel + '</span></div>';
+
+    // Connector
+    html += '<div class="cr-detail-item"><span class="detail-label">Connector:</span> <span>' + escapeHtml(detail.connectorDisplayName ?? detail.connectorId ?? '\u2014') + '</span></div>';
+
+    // Status
+    html += '<div class="cr-detail-item"><span class="detail-label">Status:</span> ' + statusBadgeHtml(detail.connectionStatus, detail.connectionId) + '</div>';
+
+    // Managed
+    html += '<div class="cr-detail-item"><span class="detail-label">Managed:</span> <span>' + escapeHtml(detail.isManaged ? 'Yes' : 'No') + '</span></div>';
+
+    // Shared
+    if (detail.connectionIsShared !== null) {
+        html += '<div class="cr-detail-item"><span class="detail-label">Shared:</span> <span>' + escapeHtml(detail.connectionIsShared ? 'Yes' : 'No') + '</span></div>';
+    }
+
+    // Description
+    if (detail.description) {
+        html += '<div class="cr-detail-item cr-detail-full"><span class="detail-label">Description:</span> <span>' + escapeHtml(detail.description) + '</span></div>';
+    }
+
+    // Dates
+    if (detail.createdOn) {
+        html += '<div class="cr-detail-item"><span class="detail-label">Created:</span> <span>' + escapeHtml(formatDateTime(detail.createdOn)) + '</span></div>';
+    }
+    if (detail.modifiedOn) {
+        html += '<div class="cr-detail-item"><span class="detail-label">Modified:</span> <span>' + escapeHtml(formatDateTime(detail.modifiedOn)) + '</span></div>';
+    }
+
+    html += '</div>';
+
+    // Flows section
+    if (detail.flows.length > 0) {
+        html += '<div class="cr-detail-flows">';
+        html += '<div class="detail-section-title">Flows using this CR (' + detail.flows.length + ')</div>';
+        html += '<ul class="cr-flow-list">';
+        for (const flow of detail.flows) {
+            html += '<li class="cr-flow-item">';
+            html += '<span class="cr-flow-name">' + escapeHtml(flow.displayName ?? flow.uniqueName) + '</span>';
+            if (flow.state) {
+                const stateClass = flow.state.toLowerCase() === 'activated' ? 'cr-flow-state-active' : 'cr-flow-state-inactive';
+                html += ' <span class="cr-flow-state ' + stateClass + '">' + escapeHtml(flow.state) + '</span>';
+            }
+            html += '</li>';
+        }
+        html += '</ul>';
+        html += '</div>';
+    } else {
+        html += '<div class="cr-detail-flows"><div class="cr-no-flows">No flows use this connection reference.</div></div>';
+    }
+
+    html += '</div>';
+    td.innerHTML = html;
+    tr.appendChild(td);
+    row.after(tr);
+}
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
@@ -124,12 +356,12 @@ analyzeBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'analyze' });
 });
 
-makerBtn.addEventListener('click', () => {
-    vscode.postMessage({ command: 'openInMaker' });
+syncBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'syncDeploymentSettings' });
 });
 
-detailClose.addEventListener('click', () => {
-    detailPane.style.display = 'none';
+makerBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'openInMaker' });
 });
 
 document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
@@ -137,57 +369,6 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     document.getElementById('reconnect-banner')!.style.display = 'none';
     vscode.postMessage({ command: 'refresh' });
 });
-
-// ── Keyboard shortcuts ──
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && detailPane.style.display !== 'none') {
-        detailPane.style.display = 'none';
-    }
-});
-
-// ── Detail rendering ──
-function renderDetail(detail: ConnectionReferenceDetailViewDto): void {
-    let html = '<div class="detail-section">';
-    html += '<div class="detail-row"><span class="detail-label">Logical Name:</span> <span class="detail-value">' + escapeHtml(detail.logicalName) + '</span></div>';
-    html += '<div class="detail-row"><span class="detail-label">Display Name:</span> <span class="detail-value">' + escapeHtml(detail.displayName ?? '\u2014') + '</span></div>';
-    html += '<div class="detail-row"><span class="detail-label">Connector:</span> <span class="detail-value">' + escapeHtml(detail.connectorDisplayName ?? detail.connectorId ?? '\u2014') + '</span></div>';
-    html += '<div class="detail-row"><span class="detail-label">Status:</span> <span class="detail-value">' + statusBadgeHtml(detail.connectionStatus) + '</span></div>';
-    html += '<div class="detail-row"><span class="detail-label">Bound:</span> <span class="detail-value">' + escapeHtml(detail.isBound ? 'Yes' : 'No') + '</span></div>';
-    html += '<div class="detail-row"><span class="detail-label">Managed:</span> <span class="detail-value">' + escapeHtml(detail.isManaged ? 'Yes' : 'No') + '</span></div>';
-    if (detail.connectionOwner) {
-        html += '<div class="detail-row"><span class="detail-label">Owner:</span> <span class="detail-value">' + escapeHtml(detail.connectionOwner) + '</span></div>';
-    }
-    if (detail.connectionIsShared !== null) {
-        html += '<div class="detail-row"><span class="detail-label">Shared:</span> <span class="detail-value">' + escapeHtml(detail.connectionIsShared ? 'Yes' : 'No') + '</span></div>';
-    }
-    if (detail.description) {
-        html += '<div class="detail-row"><span class="detail-label">Description:</span> <span class="detail-value">' + escapeHtml(detail.description) + '</span></div>';
-    }
-    if (detail.createdOn) {
-        html += '<div class="detail-row"><span class="detail-label">Created On:</span> <span class="detail-value">' + escapeHtml(detail.createdOn) + '</span></div>';
-    }
-    if (detail.modifiedOn) {
-        html += '<div class="detail-row"><span class="detail-label">Modified On:</span> <span class="detail-value">' + escapeHtml(detail.modifiedOn) + '</span></div>';
-    }
-    html += '</div>';
-
-    if (detail.flows.length > 0) {
-        html += '<div class="detail-section">';
-        html += '<div class="detail-section-title">Flows (' + detail.flows.length + ')</div>';
-        for (const flow of detail.flows) {
-            html += '<div class="detail-flow-item">';
-            html += '<span class="detail-flow-name">' + escapeHtml(flow.displayName ?? flow.uniqueName) + '</span>';
-            if (flow.state) {
-                html += ' <span class="detail-flow-state">' + escapeHtml(flow.state) + '</span>';
-            }
-            html += '</div>';
-        }
-        html += '</div>';
-    }
-
-    detailContent.innerHTML = html;
-    detailPane.style.display = '';
-}
 
 // ── Analysis rendering ──
 function renderAnalysis(result: ConnectionReferencesAnalyzeViewDto): void {
@@ -255,15 +436,22 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
             }
             break;
         case 'connectionReferencesLoaded':
+            expandedRows.clear();
+            rowDetails.clear();
             table.setItems(msg.references);
-            detailPane.style.display = 'none';
+            searchFilter.setItems(msg.references);
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
             }
             break;
         case 'connectionReferenceDetailLoaded':
-            renderDetail(msg.detail);
+            // Cache the detail
+            rowDetails.set(msg.detail.logicalName, msg.detail);
+            // If the row is expanded, update its inline detail card
+            if (expandedRows.has(msg.detail.logicalName)) {
+                insertInlineDetail(msg.detail.logicalName, msg.detail);
+            }
             break;
         case 'analyzeResult':
             renderAnalysis(msg.result);

@@ -64,7 +64,8 @@ public record ImportJobInfo(
     DateTime? CompletedOn,
     DateTime? CreatedOn,
     bool IsComplete,
-    string? CreatedByName = null)
+    string? CreatedByName = null,
+    string? OperationContext = null)
 {
     /// <summary>
     /// Computed status: Succeeded, Failed, or In Progress.

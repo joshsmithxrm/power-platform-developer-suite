@@ -5,6 +5,12 @@
     "src/panels/monaco-worker.ts",
     "src/panels/webview/query-panel.ts",
     "src/panels/webview/solutions-panel.ts",
+    "src/panels/webview/connection-references-panel.ts",
+    "src/panels/webview/environment-variables-panel.ts",
+    "src/panels/webview/import-jobs-panel.ts",
+    "src/panels/webview/metadata-browser-panel.ts",
+    "src/panels/webview/plugin-traces-panel.ts",
+    "src/panels/webview/web-resources-panel.ts",
     "src/panels/webview/shared/vscode-api.ts"
   ],
   "ignore": [

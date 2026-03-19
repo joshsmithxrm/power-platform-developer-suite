@@ -38,6 +38,8 @@ export class ToolsTreeDataProvider
         { label: 'Notebooks', commandId: 'ppds.openNotebooks', icon: 'notebook' },
         { label: 'Solutions', commandId: 'ppds.openSolutions', icon: 'package' },
         { label: 'Import Jobs', commandId: 'ppds.openImportJobs', icon: 'history' },
+        { label: 'Connection References', commandId: 'ppds.openConnectionReferences', icon: 'plug' },
+        { label: 'Environment Variables', commandId: 'ppds.openEnvironmentVariables', icon: 'symbol-variable' },
         { label: 'Plugin Traces', commandId: 'ppds.openPluginTraces', icon: 'debug-stackframe' },
         { label: 'Metadata Browser', commandId: 'ppds.openMetadataBrowser', icon: 'symbol-class' },
         { label: 'Web Resources', commandId: 'ppds.openWebResources', icon: 'file-code' },

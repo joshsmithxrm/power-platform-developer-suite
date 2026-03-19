@@ -2,6 +2,22 @@
 
 /* ── Solutions Panel specific styles ──────────────────────────────────────── */
 
+.toolbar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.toolbar-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
 .content {
     flex: 1;
     overflow: auto;
@@ -223,4 +239,42 @@
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* ── Toolbar Search ──────────────────────────────────────────── */
+.toolbar-search {
+    flex: 1;
+    min-width: 120px;
+    max-width: 300px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 3px 8px;
+    border-radius: 2px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    outline: none;
+}
+
+.toolbar-search:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.toolbar-search::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+/* ── Toolbar Select ──────────────────────────────────────────── */
+.toolbar-select {
+    padding: 3px 6px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+}
+
+.toolbar-select:focus {
+    outline: 1px solid var(--vscode-focusBorder);
 }

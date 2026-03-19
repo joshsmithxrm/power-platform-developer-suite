@@ -1,7 +1,7 @@
 import { escapeHtml, escapeAttr } from './dom-utils.js';
 
 /** Column definition for the DataTable. */
-export interface DataTableColumn<T> {
+interface DataTableColumn<T> {
     key: string;
     label: string;
     render: (item: T) => string;
@@ -9,9 +9,9 @@ export interface DataTableColumn<T> {
     sortable?: boolean;
 }
 
-export type SortDirection = 'asc' | 'desc';
+type SortDirection = 'asc' | 'desc';
 
-export interface DataTableOptions<T> {
+interface DataTableOptions<T> {
     container: HTMLElement;
     columns: DataTableColumn<T>[];
     getRowId: (item: T) => string;

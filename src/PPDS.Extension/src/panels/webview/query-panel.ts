@@ -90,6 +90,8 @@ document.addEventListener('mouseup', () => {
 
 const executeBtn = document.getElementById('execute-btn') as HTMLElement;
 const cancelBtn = document.getElementById('cancel-btn') as HTMLElement;
+const clearBtn = document.getElementById('clear-btn') as HTMLElement;
+const importBtn = document.getElementById('import-btn') as HTMLElement;
 const exportBtn = document.getElementById('export-btn') as HTMLElement;
 const historyBtn = document.getElementById('history-btn') as HTMLElement;
 const moreBtn = document.getElementById('more-btn') as HTMLElement;
@@ -444,6 +446,35 @@ executeBtn.addEventListener('click', () => {
 });
 historyBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'showHistory' });
+});
+
+// ── Clear button ──
+clearBtn.addEventListener('click', () => {
+    if (editor) editor.setValue('');
+    manualOverride = false;
+    allRows = [];
+    columns = [];
+    displayedRows = [];
+    pagingCookie = null;
+    currentPage = 1;
+    moreRecords = false;
+    sortColumn = -1;
+    lastEntityName = null;
+    lastIsAggregate = false;
+    clearSelection();
+    resultsFilter.clear();
+    resultsWrapper.innerHTML = '<div class="empty-state">Run a query to see results</div>';
+    loadMoreBar.style.display = 'none';
+    filterBar.classList.remove('visible');
+    dataSourceBanner.style.display = 'none';
+    statusText.textContent = 'Ready';
+    rowCountEl.textContent = '';
+    executionTimeEl.textContent = '';
+});
+
+// ── Import button ──
+importBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'loadQueryFromFile' });
 });
 
 // ── Dropdown menu helper ──
