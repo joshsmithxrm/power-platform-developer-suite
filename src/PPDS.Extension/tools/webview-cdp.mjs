@@ -215,7 +215,7 @@ async function runDaemon(workspace, sessionName = 'default', vsixPath = null) {
       // Escape single quotes in paths to prevent PowerShell injection
       const safeVsix = vsixPath.replace(/'/g, "''");
       const safeDest = extractDir.replace(/'/g, "''");
-      execSync(`pwsh -NoProfile -Command "Expand-Archive -Path '${safeVsix}' -DestinationPath '${safeDest}' -Force"`, { timeout: 60000 });
+      execFileSync('pwsh', ['-NoProfile', '-Command', `Expand-Archive -Path '${safeVsix}' -DestinationPath '${safeDest}' -Force`], { timeout: 60000 });
     } else {
       execFileSync('tar', ['-xf', vsixPath, '-C', extractDir], { timeout: 60000 });
     }

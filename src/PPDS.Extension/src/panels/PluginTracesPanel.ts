@@ -159,7 +159,8 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
 
     private async openInMaker(): Promise<void> {
         if (this.environmentUrl) {
-            const url = `${this.environmentUrl}/main.aspx?pagetype=entitylist&etn=plugintracelog`;
+            const baseUrl = this.environmentUrl.replace(/\/+$/, '');
+            const url = `${baseUrl}/main.aspx?pagetype=entitylist&etn=plugintracelog`;
             await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
             vscode.window.showInformationMessage('Environment URL not available \u2014 cannot open Plugin Trace Logs.');

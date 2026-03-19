@@ -336,9 +336,9 @@ function renderSolutionsList(): void {
         html += '<div class="detail-card">';
         html += '<span class="detail-label">Unique Name</span><span class="detail-value">' + escapeHtml(sol.uniqueName) + '</span>';
         html += '<span class="detail-label">Publisher</span><span class="detail-value">' + escapeHtml(sol.publisherName || '\u2014') + '</span>';
-        html += '<span class="detail-label">Type</span><span class="detail-value">' + (sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
-        html += '<span class="detail-label">Visible</span><span class="detail-value">' + (sol.isVisible ? 'Yes' : 'No') + '</span>';
-        html += '<span class="detail-label">API Managed</span><span class="detail-value">' + (sol.isApiManaged ? 'Yes' : 'No') + '</span>';
+        html += '<span class="detail-label">Type</span><span class="detail-value">' + escapeHtml(sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
+        html += '<span class="detail-label">Visible</span><span class="detail-value">' + escapeHtml(sol.isVisible ? 'Yes' : 'No') + '</span>';
+        html += '<span class="detail-label">API Managed</span><span class="detail-value">' + escapeHtml(sol.isApiManaged ? 'Yes' : 'No') + '</span>';
         if (sol.installedOn) {
             html += '<span class="detail-label">Installed</span><span class="detail-value">' + formatDate(sol.installedOn) + '</span>';
         }
@@ -423,8 +423,8 @@ function renderComponents(uniqueName: string, groups: ComponentGroupDto[]): void
                 html += '<span class="detail-label">Schema Name</span><span class="detail-value">' + (comp.schemaName ? escapeHtml(comp.schemaName) : '\u2014') + '</span>';
                 html += '<span class="detail-label">Display Name</span><span class="detail-value">' + (comp.displayName ? escapeHtml(comp.displayName) : '\u2014') + '</span>';
             }
-            html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + comp.rootComponentBehavior + '</span>';
-            html += '<span class="detail-label">Metadata</span><span class="detail-value">' + (comp.isMetadata ? 'Yes' : 'No') + '</span>';
+            html += '<span class="detail-label">Root Behavior</span><span class="detail-value">' + escapeHtml(String(comp.rootComponentBehavior)) + '</span>';
+            html += '<span class="detail-label">Metadata</span><span class="detail-value">' + escapeHtml(comp.isMetadata ? 'Yes' : 'No') + '</span>';
             html += '</div>';
         }
         html += '</div>';

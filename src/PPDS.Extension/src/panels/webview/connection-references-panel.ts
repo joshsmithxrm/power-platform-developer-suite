@@ -288,7 +288,7 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
     // Connection info
     const connectionLabel = detail.isBound
         ? escapeHtml(detail.connectionOwner ? detail.connectionOwner : 'Bound')
-        : 'Unbound';
+        : escapeHtml('Unbound');
     const connectionClass = detail.isBound ? '' : ' class="status-unbound-text"';
     html += '<div class="cr-detail-item"><span class="detail-label">Connection:</span> <span' + connectionClass + '>' + connectionLabel + '</span></div>';
 
