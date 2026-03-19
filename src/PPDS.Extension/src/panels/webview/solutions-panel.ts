@@ -340,10 +340,10 @@ function renderSolutionsList(): void {
         html += '<span class="detail-label">Visible</span><span class="detail-value">' + escapeHtml(sol.isVisible ? 'Yes' : 'No') + '</span>';
         html += '<span class="detail-label">API Managed</span><span class="detail-value">' + escapeHtml(sol.isApiManaged ? 'Yes' : 'No') + '</span>';
         if (sol.installedOn) {
-            html += '<span class="detail-label">Installed</span><span class="detail-value">' + formatDate(sol.installedOn) + '</span>';
+            html += '<span class="detail-label">Installed</span><span class="detail-value">' + escapeHtml(formatDate(sol.installedOn)) + '</span>';
         }
         if (sol.modifiedOn) {
-            html += '<span class="detail-label">Modified</span><span class="detail-value">' + formatDate(sol.modifiedOn) + '</span>';
+            html += '<span class="detail-label">Modified</span><span class="detail-value">' + escapeHtml(formatDate(sol.modifiedOn)) + '</span>';
         }
         if (sol.description) {
             html += '<div class="detail-description">' + escapeHtml(sol.description) + '</div>';
