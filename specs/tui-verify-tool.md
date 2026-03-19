@@ -81,7 +81,7 @@ Same reason as webview-cdp: the `@microsoft/tui-test` `Terminal` object owns the
 - **npm:** `@microsoft/tui-test` (already a dev dependency in `tests/PPDS.Tui.E2eTests/`)
 - **Transitive:** `@homebridge/node-pty-prebuilt-multiarch` (PTY management, pulled in by tui-test), `@xterm/headless` (terminal emulation, pulled in by tui-test)
 - Depends on: [tui-foundation spec](./tui.md) (TUI architecture)
-- Mirrors: [webview-cdp spec](./vscode-webview-cdp-tool.md) (architecture pattern)
+- Mirrors: [ext-verify-tool spec](./ext-verify-tool.md) (architecture pattern)
 
 ---
 
@@ -604,7 +604,7 @@ Also update the mode detection in Step 2: change `src/PPDS.Cli/Tui/` from "TUI m
 ## Related Specs
 
 - [tui.md](./tui.md) — TUI foundation architecture
-- [vscode-webview-cdp-tool.md](./vscode-webview-cdp-tool.md) — Reference implementation (same daemon pattern)
+- [ext-verify-tool.md](./ext-verify-tool.md) — Reference implementation (same daemon pattern)
 
 ---
 

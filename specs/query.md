@@ -1,9 +1,9 @@
 # Query
 
 **Status:** Implemented
-**Version:** 1.0
-**Last Updated:** 2026-01-23
-**Code:** [src/PPDS.Dataverse/Query/](../src/PPDS.Dataverse/Query/), [src/PPDS.Dataverse/Sql/](../src/PPDS.Dataverse/Sql/), [src/PPDS.Cli/Services/Query/](../src/PPDS.Cli/Services/Query/), [src/PPDS.Cli/Services/History/](../src/PPDS.Cli/Services/History/)
+**Last Updated:** 2026-03-18
+**Surfaces:** CLI, TUI, Extension, MCP
+**Code:** [src/PPDS.Dataverse/Query/](../src/PPDS.Dataverse/Query/), [src/PPDS.Dataverse/Sql/](../src/PPDS.Dataverse/Sql/), [src/PPDS.Cli/Services/Query/](../src/PPDS.Cli/Services/Query/), [src/PPDS.Cli/Services/History/](../src/PPDS.Cli/Services/History/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Extension/src/](../src/PPDS.Extension/src/)
 
 ---
 
@@ -20,76 +20,71 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 
 ### Non-Goals
 
-- Full SQL compatibility (subqueries, UNION, HAVING not supported)
-- Query optimization (FetchXML is passed directly to Dataverse)
-- Cross-environment queries (one connection pool per environment)
+- Full SQL compatibility (subqueries, UNION not yet supported; see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md) for planned phases)
+- Query optimization beyond plan-layer routing (FetchXML pushdown is maximized; client-side operators are fallbacks)
 - OData query generation (FetchXML is the target format)
 
 ---
 
 ## Architecture
 
+All interfaces (CLI, TUI, VS Code Extension via daemon, MCP) use `SqlQueryService` as the single code path (Constitution A2). The daemon's RPC handlers are thin wrappers that map requests/responses — no bespoke query pipelines.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CLI Commands                                    │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────────────┐   │
-│  │ ppds query sql   │  │ ppds query fetch │  │ ppds query history *    │   │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────────┬────────────┘   │
-│           │                     │                          │                │
-└───────────┼─────────────────────┼──────────────────────────┼────────────────┘
-            │                     │                          │
-            ▼                     │                          ▼
-┌───────────────────────────────┐ │           ┌──────────────────────────────┐
-│      ISqlQueryService         │ │           │   IQueryHistoryService       │
-│  ┌──────────────────────────┐ │ │           │  ┌─────────────────────────┐ │
-│  │ TranspileSql()           │ │ │           │  │ ~/.ppds/history/{hash}  │ │
-│  │ ExecuteAsync()           │ │ │           │  │ Max 200 entries/env     │ │
-│  └───────────┬──────────────┘ │ │           │  └─────────────────────────┘ │
-│              │                │ │           └──────────────────────────────┘
-│              ▼                │ │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                        SQL Processing Pipeline                         │ │
-│  │  ┌─────────────┐   ┌──────────────┐   ┌─────────────────────────┐    │ │
-│  │  │  SqlLexer   │──▶│  SqlParser   │──▶│ SqlToFetchXmlTranspiler │    │ │
-│  │  │  (tokens)   │   │    (AST)     │   │  (FetchXML + virtuals)  │    │ │
-│  │  └─────────────┘   └──────────────┘   └─────────────────────────┘    │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│              │                                                             │
-│              ▼                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                        IQueryExecutor                                  │ │
-│  │  ExecuteFetchXmlAsync() ───▶ IDataverseConnectionPool                 │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│              │                                                             │
-│              ▼                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                    SqlQueryResultExpander                              │ │
-│  │  Adds *name columns for lookups, optionsets, booleans                 │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-└───────────────────────────────────────────────────────────────────────────┘
-            │
-            ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                           QueryResult                                      │
-│  Records, Columns, Paging (cookie, moreRecords), ExecutionTime            │
-└───────────────────────────────────────────────────────────────────────────┘
+CLI ─────┐
+TUI ─────┤
+Daemon ──┤
+MCP ─────┘
+    │
+    ▼
+SqlQueryService.PrepareExecutionAsync()
+    │
+    ├─ Parse (QueryParser)
+    ├─ Extract hints (QueryHintParser)
+    ├─ DML Safety (DmlSafetyGuard)
+    ├─ Build plan (ExecutionPlanBuilder)
+    │    ├─ Cross-env → RemoteScanNode
+    │    ├─ TDS → TdsScanNode
+    │    ├─ Aggregates → partitioned plan
+    │    └─ Standard → FetchXmlScanNode → ProjectNode
+    ├─ Execute plan (with hint-influenced options)
+    └─ Expand results (virtual columns via SqlQueryResultExpander)
+    │
+    ▼
+SqlQueryResult (with DataSources metadata, ExecutionMode)
+
+                ┌──────────────────────────────┐
+                │   IQueryHistoryService        │
+                │  ~/.ppds/history/{hash}.json  │
+                │  Max 200 entries/env          │
+                └──────────────────────────────┘
 ```
+
+The plan-based pipeline (introduced by the v2 execution plan layer) replaces the original straight-line `parse → transpile → execute → expand` flow. The `QueryPlanner` builds a tree of `IQueryPlanNode` operators that are executed lazily (Volcano/iterator model via `IAsyncEnumerable<QueryRow>`). Phase 0 nodes (`FetchXmlScanNode`, `ProjectNode`) reproduce the original behavior; subsequent nodes add client-side evaluation, parallel execution, and DML support.
 
 ### Components
 
 | Component | Responsibility |
 |-----------|----------------|
 | `SqlLexer` | Tokenizes SQL input, preserves comments |
-| `SqlParser` | Recursive descent parser producing `SqlSelectStatement` AST |
+| `SqlParser` | Recursive descent parser producing `ISqlStatement` AST hierarchy |
 | `SqlToFetchXmlTranspiler` | Converts AST to FetchXML, detects virtual columns |
-| `QueryExecutor` | Executes FetchXML via connection pool, maps results |
-| `SqlQueryService` | Orchestrates parse → transpile → execute → expand |
+| `ExecutionPlanBuilder` | Builds `IQueryPlanNode` tree from parsed AST and plan options |
+| `FetchXmlScanNode` | Plan node: executes FetchXML via `IQueryExecutor`, yields rows page-by-page |
+| `ProjectNode` | Plan node: column selection, renaming, expression evaluation |
+| `ExpressionEvaluator` | Evaluates `ISqlExpression` trees against `QueryRow` data |
+| `QueryExecutor` | Executes FetchXML via connection pool, maps SDK entities to `QueryValue` |
+| `SqlQueryService` | Orchestrates parse → hints → safety → plan → execute → expand |
 | `SqlQueryResultExpander` | Adds formatted value columns to results |
 | `QueryHistoryService` | Persists and retrieves query history per environment |
+| `QueryHintParser` | Extracts `-- ppds:*` comments and `OPTION()` hints from parsed AST |
+| `DmlSafetyGuard` | Blocks unsafe DML (no-WHERE DELETE/UPDATE), enforces row caps |
+| `RemoteExecutorFactory` | Creates `IQueryExecutor` instances for cross-environment `[LABEL].entity` queries |
 
 ### Dependencies
 
 - Depends on: [connection-pooling.md](./connection-pooling.md) for `IDataverseConnectionPool`
+- Depends on: [per-panel-environment-scoping.md](./per-panel-environment-scoping.md) for per-panel environment model (Extension surface)
 - Uses patterns from: [architecture.md](./architecture.md) for Application Services
 - Consumed by: [mcp.md](./mcp.md) for AI assistant query tools
 
@@ -125,21 +120,24 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 
 ### Unsupported SQL Features
 
-- Subqueries (`SELECT * FROM (SELECT...)`)
-- UNION/INTERSECT/EXCEPT
-- HAVING clause
-- Complex expressions (`revenue * 1.1`, `CASE WHEN`)
-- Functions (`CONCAT()`, `UPPER()`)
+- Subqueries (`SELECT * FROM (SELECT...)`) — planned, see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md)
+- UNION/INTERSECT/EXCEPT — planned
+- Complex expressions (`revenue * 1.1`, `CASE WHEN`) — planned
+- Functions (`CONCAT()`, `UPPER()`) — planned
+
+> **Note:** HAVING is now supported via client-side filtering (`ClientFilterNode` after aggregate `FetchXmlScanNode`). Cross-environment queries are supported via `RemoteExecutorFactory` and `[LABEL].entity` syntax.
 
 ### Primary Flows
 
-**SQL Query Execution:**
+**SQL Query Execution (plan-based pipeline):**
 
-1. **Parse**: `SqlLexer` tokenizes input → `SqlParser` builds `SqlSelectStatement` AST
-2. **Transpile**: `SqlToFetchXmlTranspiler` converts AST to FetchXML, detecting virtual columns
-3. **Execute**: `QueryExecutor.ExecuteFetchXmlAsync()` runs against Dataverse via pool
-4. **Expand**: `SqlQueryResultExpander` adds `*name` columns from formatted values
-5. **Return**: `SqlQueryResult` with original SQL, transpiled FetchXML, and expanded `QueryResult`
+1. **Parse**: `SqlLexer` tokenizes input → `SqlParser` builds `ISqlStatement` AST
+2. **Extract hints**: `QueryHintParser.Parse(fragment)` extracts `-- ppds:*` hints
+3. **DML safety**: `DmlSafetyGuard.Check()` blocks unsafe DML (no-WHERE DELETE/UPDATE)
+4. **Plan**: `ExecutionPlanBuilder` builds `IQueryPlanNode` tree (FetchXmlScanNode → ProjectNode for standard queries; RemoteScanNode for cross-env; TdsScanNode for TDS)
+5. **Execute plan**: Walk plan tree, dispatching to appropriate executors
+6. **Expand**: `SqlQueryResultExpander` adds `*name` columns from formatted values
+7. **Return**: `SqlQueryResult` with original SQL, transpiled FetchXML, expanded `QueryResult`, `DataSources` metadata, and `ExecutionMode`
 
 **Query History:**
 
@@ -156,6 +154,67 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 | FROM entity | Must be valid Dataverse entity | Dataverse returns entity not found |
 | Column names | Must exist on entity | Dataverse returns attribute not found |
 | TOP value | Positive integer | `SqlParseException` |
+
+### Query Hints
+
+The query system supports 8 inline hints via SQL comments (`-- ppds:HINT_NAME [value]`) or `OPTION()` clause. Hints allow per-query control of execution behavior across all interfaces.
+
+**Supported Hints:**
+
+| Hint | Category | Effect |
+|------|----------|--------|
+| `USE_TDS` | Plan-level | Routes query through TDS Endpoint (SQL Server wire protocol against read replica) |
+| `MAX_ROWS` | Plan-level | Overrides caller-provided row limit |
+| `MAXDOP` | Plan-level | Caps parallelism (cannot exceed pool capacity) |
+| `HASH_GROUP` | Plan-level | Forces aggregate queries to client-side hash grouping |
+| `NOLOCK` | FetchXML-level | Injects `<fetch no-lock="true">` on root element |
+| `BYPASS_PLUGINS` | Execution-level | Sets `BypassCustomPluginExecution = true` on `OrganizationRequest` |
+| `BYPASS_FLOWS` | Execution-level | Sets `SuppressCallbackRegistrationExpanderJob = true` on `OrganizationRequest` |
+| `BATCH_SIZE` | DML-level | Overrides default batch size for bulk DML operations |
+
+**Hint syntax:**
+```sql
+-- ppds:NOLOCK
+-- ppds:BYPASS_PLUGINS
+-- ppds:MAX_ROWS 100
+SELECT * FROM account
+```
+
+**Parsing:** `QueryHintParser.Parse(fragment)` extracts hints after SQL parsing. Hints produce `QueryHintOverrides` (nullable bag — null means "use default"), which are merged into `QueryPlanOptions` (plan-level) and `QueryExecutionOptions` (execution-level).
+
+**Precedence:** Inline hints (from SQL comments) override caller-provided settings. If the RPC sends `useTds=false` but the SQL contains `-- ppds:USE_TDS`, the hint wins. Rationale: the query text is the user's explicit intent for that specific query.
+
+**Error handling:** Malformed hint values (e.g., `-- ppds:BATCH_SIZE abc`) and unrecognized hint names are silently ignored — the hint is skipped, the query proceeds normally. This matches SQL Server behavior for unrecognized hints.
+
+### Cross-Environment Queries
+
+Queries can reference tables in other configured environments using `[LABEL].entity` syntax:
+
+```sql
+SELECT * FROM [QA].account WHERE name LIKE '%Contoso%'
+```
+
+**Components:**
+
+| Component | Responsibility |
+|-----------|----------------|
+| `RemoteExecutorFactory` | Creates `IQueryExecutor` instances for remote environments, resolved by label |
+| `ProfileResolutionService` | Resolves environment labels to connection profiles via `EnvironmentConfigStore` |
+| `RemoteScanNode` | Plan node that executes FetchXML against a remote environment's executor |
+
+**Label resolution:** Labels are configured via `ppds env config` and stored in `EnvironmentConfigStore`. The `ProfileResolutionService` maps a label string to a resolved environment config, from which a remote `IQueryExecutor` is created. The special label `dbo` is treated as standard SQL schema and executes locally.
+
+**Data source attribution:** `SqlQueryResult` includes a `DataSources` property — a list of `QueryDataSource` entries identifying which environments contributed data. After plan building, the plan tree is walked to collect `RemoteScanNode.RemoteLabel` values. The local environment is always present. Remote labels are collected from any `RemoteScanNode` in the plan.
+
+### Extension Surface
+
+The VS Code extension surfaces query capabilities through webview panels served by the daemon's RPC handlers.
+
+**Environment colors:** The webview toolbar renders a 4px left border in the environment's configured color. Colors map terminal color names (Red, Green, Yellow, Cyan, Blue, Gray, Brown, White, Bright* variants) to CSS values. When no explicit color is configured, type-based defaults apply (Production=Red, Sandbox=Brown, Development=Green, Test=Yellow, Trial=Cyan, Unknown=Gray).
+
+**Data source banner:** When a query touches 2+ environments, a banner appears above results showing each source label styled with its environment color (e.g., "Data from: PPDS Dev (local) / QA (remote)"). Single-environment queries show no banner.
+
+**TDS Read Replica toggle:** The query panel menu includes a TDS Read Replica toggle. When enabled, queries route through the TDS Endpoint. The status text reflects the actual execution mode ("via TDS" or "via Dataverse") based on `SqlQueryResult.ExecutionMode`, not the toggle state.
 
 ---
 
@@ -260,7 +319,43 @@ public interface ISqlQueryService
 }
 ```
 
-The implementation ([`SqlQueryService.cs:42-80`](../src/PPDS.Cli/Services/Query/SqlQueryService.cs#L42-L80)) orchestrates parsing, transpilation with virtual column detection, execution, and result expansion in a single operation.
+The implementation ([`SqlQueryService.cs:42-80`](../src/PPDS.Cli/Services/Query/SqlQueryService.cs#L42-L80)) orchestrates parsing, hint extraction, safety checks, plan building, execution, and result expansion.
+
+### QueryExecutionOptions
+
+Execution-level options threaded from hint parsing to `IQueryExecutor`. Separate from `QueryPlanOptions` because these affect HOW the query is sent to Dataverse, not how the plan is built.
+
+```csharp
+public sealed record QueryExecutionOptions
+{
+    public bool BypassPlugins { get; init; }
+    public bool BypassFlows { get; init; }
+}
+```
+
+### QueryDataSource
+
+Identifies an environment that contributed data to a query result.
+
+```csharp
+public sealed record QueryDataSource
+{
+    public required string Label { get; init; }
+    public bool IsRemote { get; init; }
+}
+```
+
+### QueryExecutionMode
+
+Identifies the actual execution path used for a query. Set by `SqlQueryService` after plan execution.
+
+```csharp
+public enum QueryExecutionMode
+{
+    Dataverse,  // FetchXML against Dataverse Web API
+    Tds         // TDS Endpoint (SQL Server wire protocol)
+}
+```
 
 ### IQueryHistoryService
 
@@ -304,6 +399,11 @@ The implementation ([`QueryHistoryService.cs:52-98`](../src/PPDS.Cli/Services/Hi
 | `FaultException` | Dataverse execution error | Map to `PpdsException`, show entity/attribute |
 | `ThrottleException` | Service protection limits | Automatic retry via connection pool |
 | `FileNotFoundException` | History file missing | Return empty list |
+| `PpdsException(DmlBlocked)` | DML without WHERE clause | Block execution, tell user to add WHERE or use `ppds truncate` |
+| `PpdsException(DmlConfirmationRequired)` | DML affects many rows | Require `--confirm` flag or interactive confirmation |
+| `PpdsException(TdsIncompatible)` | TDS requested but query can't use TDS | Fail with reason (DML, incompatible entity, unsupported feature) |
+| `PpdsException(TdsConnectionFailed)` | TDS endpoint disabled or unreachable | Fail with clear error, suggest disabling TDS mode |
+| Unknown environment label | `[LABEL].entity` where label not in `EnvironmentConfigStore` | Error: "No environment found matching label '{label}'" |
 
 ### SqlParseException Details
 
@@ -428,6 +528,16 @@ public sealed class SqlParseException : Exception
 - [ ] Paging works across multiple pages with cookies
 - [ ] History deduplicates on normalized SQL
 - [ ] Parse errors include line/column information
+- [ ] All interfaces (CLI, TUI, Extension, MCP) use `SqlQueryService` — no bespoke query pipelines
+- [ ] `-- ppds:NOLOCK` hint produces `<fetch no-lock="true">` in executed FetchXML
+- [ ] `-- ppds:BYPASS_PLUGINS` sets `BypassCustomPluginExecution` header
+- [ ] `-- ppds:BYPASS_FLOWS` sets `SuppressCallbackRegistrationExpanderJob` header
+- [ ] `-- ppds:USE_TDS` routes query through TDS endpoint
+- [ ] Inline hints override caller-provided settings
+- [ ] `[LABEL].entity` syntax works for cross-environment queries
+- [ ] VS Code webview toolbar shows environment color as 4px left border
+- [ ] Cross-environment query results include `DataSources` metadata
+- [ ] TDS requested + incompatible query fails with clear error, no silent fallback
 
 ### Edge Cases
 
@@ -437,6 +547,14 @@ public sealed class SqlParseException : Exception
 | Unknown operator | `SELECT * FROM account WHERE name ~ 'test'` | Parse error at `~` |
 | Large result set | SELECT on 50k record entity | Paging with 5000-record pages |
 | Comment preservation | `-- get accounts\nSELECT *` | Comment in FetchXML output |
+| Unknown environment label | `SELECT * FROM [UNKNOWN].account` | Error: "No environment found matching label 'UNKNOWN'" |
+| "dbo" as label | `SELECT * FROM [dbo].account` | Treated as standard SQL schema, executes locally |
+| Multiple hints on one query | `-- ppds:NOLOCK` + `-- ppds:BYPASS_PLUGINS` | Both hints applied |
+| Hint on TDS query | `-- ppds:NOLOCK` + `-- ppds:USE_TDS` | TDS wins; NOLOCK irrelevant for TDS |
+| BATCH_SIZE on SELECT | `-- ppds:BATCH_SIZE 500` on SELECT | Hint has no effect, no error |
+| Malformed hint value | `-- ppds:BATCH_SIZE abc` | Hint silently ignored, query proceeds |
+| TDS + DML | `DELETE FROM account` with `useTds=true` | Error: DML not supported via TDS |
+| Empty environment color | No color configured, type is Sandbox | Toolbar shows Brown (Sandbox default) |
 
 ### Test Coverage
 
@@ -474,15 +592,26 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 ## Related Specs
 
 - [connection-pooling.md](./connection-pooling.md) - Query execution uses pooled connections
+- [per-panel-environment-scoping.md](./per-panel-environment-scoping.md) - Per-panel environment model extended with color rendering
 - [architecture.md](./architecture.md) - `ISqlQueryService` follows Application Services pattern
 - [mcp.md](./mcp.md) - MCP tools expose query capabilities to AI assistants
 - [cli.md](./cli.md) - CLI commands for `ppds query sql|fetch|history`
+- [CONSTITUTION.md](./CONSTITUTION.md) - A2 (Application Services single code path) motivates shared `SqlQueryService`
 
 ---
 
 ## Roadmap
 
 - **Query builder TUI**: Interactive query construction with autocomplete
-- **Explain plan**: Show how FetchXML will be executed
+- **Explain plan**: Show how FetchXML will be executed (`ExplainAsync()` infrastructure exists)
 - **Query templates**: Parameterized saved queries
-- **Cross-entity unions**: Combine results from multiple entity queries
+- **Advanced SQL features**: Subqueries, UNION, CASE, functions, window functions — see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md)
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Absorbed query-parity.md (daemon alignment, hints, cross-env, Extension surface) and query-engine-v2.md Phase 0 (plan layer) per SL1/SL2 |
+| 2026-01-23 | Initial spec |

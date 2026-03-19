@@ -4,14 +4,13 @@ Clear workflow state for the current branch.
 
 ## Usage
 
-`/reset` — Delete `.workflow/state.json` and start fresh.
+`/reset` — Delete workflow state and start fresh.
 
 ## Process
 
-1. Check if `.workflow/state.json` exists
-2. If it exists, delete it
-3. Print confirmation: "Workflow state cleared. Run /gates to begin tracking."
-4. If it doesn't exist, print: "No workflow state to clear."
+```bash
+python scripts/workflow-state.py delete
+```
 
 ## When to Use
 

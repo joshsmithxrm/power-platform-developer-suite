@@ -1,9 +1,9 @@
 # Bulk Operations
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Dataverse/BulkOperations/](../src/PPDS.Dataverse/BulkOperations/)
+**Surfaces:** CLI, TUI, MCP
 
 ---
 
@@ -529,6 +529,12 @@ public async Task Progress_ReportsAfterEachBatch()
 - [migration.md](./migration.md) - Uses bulk operations for data import
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

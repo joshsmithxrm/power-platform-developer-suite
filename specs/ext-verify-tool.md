@@ -1,9 +1,9 @@
-# VS Code Webview CDP Tool
+# Extension Verify Tool
 
 **Status:** Draft
-**Version:** 2.0
 **Last Updated:** 2026-03-15
 **Code:** [src/PPDS.Extension/tools/](../src/PPDS.Extension/tools/) | None
+**Surfaces:** Extension
 
 ---
 
@@ -494,8 +494,15 @@ All configuration is via CLI arguments. No config files beyond the session file.
 
 ## Related Specs
 
-- [vscode-data-explorer-selection-copy.md](./vscode-data-explorer-selection-copy.md) - Selection and copy features verifiable via this tool
-- [vscode-data-explorer-monaco-editor.md](./vscode-data-explorer-monaco-editor.md) - Monaco editor integration testable via this tool
+- [data-explorer.md](./data-explorer.md) - Selection, copy, and Monaco editor features verifiable via this tool
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Renamed from vscode-webview-cdp-tool.md per SL1 |
 
 ---
 

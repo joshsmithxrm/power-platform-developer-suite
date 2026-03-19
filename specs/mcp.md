@@ -1,9 +1,9 @@
 # MCP Server
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Mcp/](../src/PPDS.Mcp/)
+**Surfaces:** MCP
 
 ---
 
@@ -510,6 +510,12 @@ public async Task GetOrCreatePoolAsync_ConcurrentCalls_SingleCreation()
 - [dataverse-services.md](./dataverse-services.md) - Metadata and plugin trace services
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

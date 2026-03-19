@@ -28,11 +28,12 @@ Cycle | Gate | Review Critical | Review Important | Regressions | Verdict
 ### Step 2: Run Cycle
 
 **A. Clear Stale State**
-Before running gates, clear the previous gate result in `.workflow/state.json`:
-1. Read the file (create `{}` if missing)
-2. Set `gates.passed` to `null`
-3. Set `gates.commit_ref` to `null`
-4. Write the file back
+Before running gates, clear the previous gate result:
+
+```bash
+python scripts/workflow-state.py set-null gates.passed
+python scripts/workflow-state.py set-null gates.commit_ref
+```
 
 This ensures that a fix cycle cannot accidentally rely on a stale gate pass.
 

@@ -28,7 +28,7 @@ If $ARGUMENTS specifies a scope, filter the diff to those paths only.
 ### Step 2: Load Spec Context (NO implementation context)
 
 - Read `specs/CONSTITUTION.md`
-- Map changed files to specs via `specs/README.md`
+- Map changed files to specs by grepping all `specs/*.md` files for `**Code:**` frontmatter lines. Match changed file paths against code path prefixes to find governing specs.
 - Read each relevant spec — extract ONLY the `## Acceptance Criteria` section
 - Do NOT read any plan files, task descriptions, or implementation notes
 
@@ -106,11 +106,14 @@ Include total counts and a clear verdict:
 
 ## Workflow State
 
-After review completes (all findings evaluated and verdict rendered), update `.workflow/state.json`:
-1. Read the file (create `{}` if missing)
-2. Set `review.passed` to the current ISO 8601 timestamp
-3. Set `review.findings` to the total count of findings (critical + important + suggestion)
-4. Write the file back
+After review completes (all findings evaluated and verdict rendered), run:
+
+```bash
+python scripts/workflow-state.py set review.passed now
+python scripts/workflow-state.py set review.findings {count}
+```
+
+Where `{count}` is the total findings (critical + important + suggestion).
 
 ## Rules
 

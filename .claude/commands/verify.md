@@ -178,13 +178,13 @@ Present structured results:
 
 ## Workflow State
 
-After verification passes for a surface (verdict is PASS), update `.workflow/state.json`:
-1. Read the file (create `{}` if missing)
-2. Set `verify.{surface}` to the current ISO 8601 timestamp
-3. Surface key matches mode: `ext`, `tui`, `mcp`, `cli`
-4. Write the file back
+After verification passes for a surface (verdict is PASS), run:
 
-Example: after `/verify extension` passes, set `verify.ext` to the timestamp.
+```bash
+python scripts/workflow-state.py set verify.{surface} now
+```
+
+Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extension` → `verify.ext`.
 
 ## Rules
 

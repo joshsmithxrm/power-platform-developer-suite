@@ -52,13 +52,10 @@ git branch --list "feature/<name>"
 
 ### 5. Initialize Workflow State
 
-Write `.workflow/state.json` in the worktree:
+Initialize workflow state in the worktree:
 
-```json
-{
-  "branch": "feature/<name>",
-  "started": "<ISO 8601 timestamp>"
-}
+```bash
+python scripts/workflow-state.py init "feature/<name>"
 ```
 
 ### 6. Transfer Session Context

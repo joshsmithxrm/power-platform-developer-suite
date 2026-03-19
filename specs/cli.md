@@ -1,9 +1,9 @@
 # CLI
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Cli/Commands/](../src/PPDS.Cli/Commands/)
+**Surfaces:** CLI
 
 ---
 
@@ -514,6 +514,12 @@ public async Task ExitCode_IsAuthError_WhenProfileNotFound()
 - [mcp.md](./mcp.md) - MCP server shares Application Services with CLI
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

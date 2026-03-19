@@ -1,9 +1,9 @@
 # Plugin System
 
 **Status:** Implemented
-**Version:** 2.0
 **Last Updated:** 2026-01-28
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/)
+**Surfaces:** CLI, TUI
 
 ---
 
@@ -601,6 +601,86 @@ ppds plugins clean --config registrations.json --dry-run
 
 ---
 
+## TUI Surface
+
+### PluginRegistrationScreen
+
+The TUI provides a hierarchical browser for Dataverse plugin registrations — the TUI equivalent of the Plugin Registration Tool. It uses a master-detail layout: a `TreeView<PluginTreeNode>` on the left navigates the Package/Assembly → Type → Step → Image hierarchy with lazy-loaded children; a `FrameView` detail panel on the right shows all properties of the selected node.
+
+The screen is accessed via Tools > Plugin Registration in the TuiShell menu.
+
+**Scope:** Browse and manage existing registrations only. Deployment from `registrations.json` and assembly extraction remain CLI-only.
+
+### Tree View Hierarchy
+
+Nodes load children lazily on first expand to handle large environments (hundreds of assemblies, thousands of types). Children are cached per session; F5 clears the cache and reloads from root.
+
+```
+├─ Package A
+│  └─ Assembly A1
+│     ├─ Type T1
+│     │  ├─ Step S1
+│     │  │  └─ Image I1
+│     │  └─ Step S2
+│     └─ Type T2
+├─ Assembly B          ← standalone (not package-deployed)
+└─ Package C
+```
+
+Root load: `ListPackagesAsync()` + `ListAssembliesAsync()` (standalone only). Managed components (IsManaged=true) display dimmed and block unregistration.
+
+### Key Hotkeys and Dialogs
+
+| Hotkey | Action |
+|--------|--------|
+| Space | Toggle step enabled/disabled (`UpdateStepAsync`) |
+| Delete | Open `ConfirmDestructiveActionDialog` with cascade preview |
+| Ctrl+D | Download assembly or package binary |
+| F5 | Refresh tree from root |
+
+`ConfirmDestructiveActionDialog` is a shared reusable dialog used across TUI screens. It has two severity modes:
+
+- `Normal` — OK/Cancel buttons
+- `High` — user must type "DELETE" to confirm (used for assembly/package unregistration)
+
+The dialog accepts a configurable `impactSummary` string populated from `UnregisterResult` counts (e.g., "Will delete: 3 types, 8 steps, 4 images").
+
+### Core TUI Types
+
+**PluginRegistrationScreen** implements `ITuiScreen` and `ITuiStateCapture<PluginRegistrationScreenState>`. Title is "Plugin Registration - {environment}".
+
+**PluginRegistrationScreenState** captures: `PackageCount`, `AssemblyCount`, `ExpandedNodeCount`, `SelectedNodeType` (nullable `PluginNodeType`), `SelectedNodeId`, `SelectedNodeName`, `IsLoading`, `IncludeHidden`, `IncludeMicrosoft`, `ErrorMessage`.
+
+**PluginTreeNode** — internal tree node with: `NodeType` (PluginNodeType enum), `Id`, `DisplayName`, `IsManaged`, `IsEnabled` (steps only), `IsLoaded` (children fetched?), `Info` (underlying Info record).
+
+**PluginNodeType** enum: `Package`, `Assembly`, `Type`, `Step`, `Image`.
+
+**ConfirmDestructiveActionDialog** — reusable across all TUI screens. Accepts `title`, `message`, `impactSummary?`, `severity`, `session?`. Exposes `IsConfirmed` and state capture.
+
+### Key Flows
+
+**Browse:** Expand nodes to lazy-load children. Selecting any node updates the detail panel immediately. Node type determines detail layout (7 properties for Package up to 22 for Step).
+
+**Toggle step:** Select step node → Space → `UpdateStepAsync(stepId, new StepUpdateRequest(...))` on background thread → tree icon and detail panel refresh.
+
+**Unregister:** Select node → Delete → `ConfirmDestructiveActionDialog` shows cascade preview → confirm → `Unregister*Async(id, force: true)` → node removed from tree. High severity (assembly/package) requires typing "DELETE".
+
+**Download binary:** Select assembly or package → Ctrl+D → save-path prompt (defaults to `{name}.dll` / `{name}.nupkg`) → `DownloadAssemblyAsync` or `DownloadPackageAsync` → progress in status line.
+
+### TUI Acceptance Criteria
+
+- [ ] Screen loads root packages and standalone assemblies on activation
+- [ ] Expanding each level lazy-loads the next (Package → Assembly → Type → Step → Image)
+- [ ] Selecting a node shows type-appropriate detail panel
+- [ ] Space on a step node toggles enabled state
+- [ ] Delete key opens `ConfirmDestructiveActionDialog` with cascade preview
+- [ ] High severity confirmation requires typing "DELETE"
+- [ ] Managed components cannot be unregistered (action blocked with message)
+- [ ] F5 refreshes tree from root
+- [ ] State capture returns accurate `PluginRegistrationScreenState`
+
+---
+
 ## Error Handling
 
 ### Error Types
@@ -896,3 +976,14 @@ public async Task Deploy_IdempotentOnSecondRun()
 - Workflow assembly support (custom workflow activities)
 - Plugin dependency graph visualization
 - Assembly signature validation before deployment
+- TUI: inline step editing (filtering attributes, execution order) without separate dialog
+- TUI: drag-and-drop reordering of step execution order
+- TUI: direct navigation from step to its trace history (link to PluginTraceScreen with filter)
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Merged TUI surface content from tui-plugin-registration.md per SL3 |

@@ -453,7 +453,7 @@ When designing a new panel or feature, design across all four PPDS surfaces: Dae
 Read before doing anything:
 - `specs/CONSTITUTION.md` — A1, A2 govern multi-surface design (services are single code path, UI is thin wrapper)
 - `specs/architecture.md` — cross-cutting patterns
-- Domain-relevant specs via `specs/README.md`
+- Domain-relevant specs via frontmatter grep — search `specs/*.md` for `**Code:**` lines matching `src/PPDS.Extension/`
 
 ### Inventory Existing Infrastructure
 

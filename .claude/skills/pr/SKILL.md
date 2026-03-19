@@ -130,24 +130,16 @@ Awaiting your review.
 ### 6. Write Workflow State
 
 After PR is created:
-```json
-{
-  "pr": {
-    "url": "https://github.com/...",
-    "created": "2026-03-16T17:00:00Z"
-  }
-}
+
+```bash
+python scripts/workflow-state.py set pr.url "{pr-url}"
+python scripts/workflow-state.py set pr.created now
 ```
 
-After Gemini comments are triaged (step 4 complete), update workflow state:
-```json
-{
-  "pr": {
-    "url": "https://github.com/...",
-    "created": "2026-03-16T17:00:00Z",
-    "gemini_triaged": true
-  }
-}
+After Gemini comments are triaged (step 4 complete):
+
+```bash
+python scripts/workflow-state.py set pr.gemini_triaged true
 ```
 
 The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 4.

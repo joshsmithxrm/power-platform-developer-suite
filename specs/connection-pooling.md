@@ -1,9 +1,9 @@
 # Connection Pooling
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Dataverse/Pooling/](../src/PPDS.Dataverse/Pooling/), [src/PPDS.Dataverse/Resilience/](../src/PPDS.Dataverse/Resilience/)
+**Surfaces:** All
 
 ---
 
@@ -513,6 +513,12 @@ public async Task ThrottleAwareStrategy_SkipsThrottledConnection()
 - [authentication.md](./authentication.md) - Credential providers create connection sources
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

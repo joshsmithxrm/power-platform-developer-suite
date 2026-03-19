@@ -118,7 +118,7 @@ Fail: snapshot mismatch — report which snapshots differ
 
 **Gate 6: AC Verification** (if specs with ACs are relevant)
 
-Read `specs/README.md` to map changed files to specs. For each relevant spec with ACs:
+To find governing specs: grep all `specs/*.md` files for `**Code:**` lines. Match changed file paths against the code path prefixes in each spec's frontmatter. For each relevant spec with ACs:
 - Extract test method names from the AC table
 - For .NET tests: `dotnet test --filter "FullyQualifiedName~{method}" -v q --no-build`
 - For TypeScript tests: `npx vitest run -t "{method}" --prefix src/PPDS.Extension`
@@ -158,11 +158,12 @@ Gates are necessary but NOT sufficient. After gates pass:
 
 ## Workflow State
 
-After all gates pass (verdict is PASS), update `.workflow/state.json`:
-1. Read the file (create `{}` if missing)
-2. Set `gates.passed` to the current ISO 8601 timestamp
-3. Set `gates.commit_ref` to current HEAD SHA (from `git rev-parse HEAD`)
-4. Write the file back
+After all gates pass (verdict is PASS), run:
+
+```bash
+python scripts/workflow-state.py set gates.passed now
+python scripts/workflow-state.py set gates.commit_ref "$(git rev-parse HEAD)"
+```
 
 ## Rules
 

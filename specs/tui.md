@@ -1,9 +1,9 @@
 # TUI
 
 **Status:** Implemented
-**Version:** 1.0
 **Last Updated:** 2026-01-23
 **Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
+**Surfaces:** TUI
 
 ---
 
@@ -603,6 +603,12 @@ public void ErrorService_StoresRecent_NewestFirst()
 - [mcp.md](./mcp.md) - MCP server shares Application Services with TUI
 
 ---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
 

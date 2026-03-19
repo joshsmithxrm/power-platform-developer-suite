@@ -29,20 +29,10 @@ Before dispatching any agents, load the specification context that will be injec
 
 **A. Read Foundation**
 - Read `specs/CONSTITUTION.md` — full content will be injected into every subagent prompt
-- Read `specs/README.md` — maps code paths to specs
 
 **B. Identify Relevant Specs**
 - From the plan, identify which source directories/files will be touched
-- Map each to its spec using the README.md code column:
-  - `src/PPDS.Dataverse/Pooling/` → `specs/connection-pooling.md`
-  - `src/PPDS.Dataverse/Query/` → `specs/query.md`
-  - `src/PPDS.Cli/Tui/` → `specs/tui.md` + `specs/tui-foundation.md`
-  - `src/PPDS.Cli/Commands/` → `specs/cli.md`
-  - `src/PPDS.Mcp/` → `specs/mcp.md`
-  - `src/PPDS.Migration/` → `specs/migration.md`
-  - `src/PPDS.Auth/` → `specs/authentication.md`
-  - `src/PPDS.Extension/src/panels/` → `specs/per-panel-environment-scoping.md` (if panels) or relevant spec
-  - `src/PPDS.Extension/` → check `specs/README.md` for extension-related specs
+- Grep all `specs/*.md` files for `**Code:**` frontmatter lines. Match each touched source directory against code path prefixes to find governing specs. This replaces hardcoded mappings and the README index.
 - Always include `specs/architecture.md`
 - Read each relevant spec and extract the `## Acceptance Criteria` section
 
@@ -62,6 +52,8 @@ with a spec or constitution principle, STOP and report the conflict
 to the orchestrator — do not silently deviate.
 ```
 
+**Note:** When creating new code paths for a spec (new directories, new files in new locations), update the spec’s `**Code:**` frontmatter to include the new paths. This ensures frontmatter grep continues to discover the correct specs.
+
 ### Step 3: Assess Current State
 - Check git status and current branch
 - Search for any existing work (worktrees, branches) related to this plan
@@ -71,13 +63,14 @@ to the orchestrator — do not silently deviate.
 
 ### Step 3.5: Initialize Workflow State
 
-Update `.workflow/state.json` to record that implementation has started:
-1. Read the file (create `{}` if missing)
-2. Set `branch` to the current branch name
-3. Set `spec` to the path of the primary spec associated with the plan
-4. Set `plan` to the plan file path ($ARGUMENTS)
-5. Set `started` to the current ISO 8601 timestamp
-6. Write the file back
+Record that implementation has started:
+
+```bash
+python scripts/workflow-state.py set branch "$(git rev-parse --abbrev-ref HEAD)"
+python scripts/workflow-state.py set spec "{spec-path}"
+python scripts/workflow-state.py set plan "$ARGUMENTS"
+python scripts/workflow-state.py set started now
+```
 
 ### Step 4: Create Task Tracking
 - Use TaskCreate to build a task list from the plan phases
@@ -198,7 +191,7 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 3. **Parallel by default** - if tasks don't depend on each other, run them simultaneously
 4. **Sequential when required** - respect phase gates and dependency chains
 5. **One commit per phase** - each phase gate produces exactly one commit with a clear message
-6. **Review before commit** - always use code-reviewer agent before committing phase work
+6. **Review before commit** - invoke `/review` before committing phase work
 7. **Fix before advancing** - if build fails, tests fail, or review finds issues, fix them BEFORE committing. Dispatch fix agents rather than debugging yourself.
 8. **Never skip verification** - always build + test + review before declaring a phase complete
 9. **Continue until done** - execute ALL phases in the plan, don't stop early and ask permission

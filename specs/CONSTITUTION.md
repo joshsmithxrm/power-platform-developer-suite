@@ -57,3 +57,15 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 **R2.** `CancellationToken` must be threaded through the entire async call chain — never accepted as a parameter and then ignored. If a method accepts a token, it must pass it to every async call it makes.
 
 **R3.** Event handlers and subscriptions must be cleaned up in `Dispose`. Every `+=` needs a corresponding `-=`. Every `.subscribe()` needs an `.unsubscribe()` or disposal mechanism.
+
+## Spec Laws
+
+**SL1.** One spec per domain concept, named after the thing — not the project, surface, or enhancement. `plugin-traces.md` not `tui-plugin-traces.md`. `data-explorer.md` not `vscode-data-explorer-monaco-editor.md`. Cross-cutting architectural patterns are legitimate standalone specs.
+
+**SL2.** Specs are living documents — updated as the feature evolves. Plans (`docs/plans/`) are ephemeral and consumed by implementation. Project coordination documents (parity, polish, audit) are plans, not specs.
+
+**SL3.** Surface-specific behavior (TUI screen layout, Extension panel wiring, MCP tool schema) lives in surface sections within the domain spec, not in separate spec files.
+
+**SL4.** Spec frontmatter `**Code:**` must contain grep-friendly path prefixes, not prose like "Multiple (see spec)". Every spec with an implementation must have at least one code path. System-wide specs (architecture, governance) use `**Code:** System-wide`.
+
+**SL5.** Specs for removed features are deleted. No archival, no deprecation ceremony, no tombstones.
