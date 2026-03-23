@@ -299,7 +299,7 @@
     padding: 6px 12px;
     cursor: pointer;
     transition: background 0.15s ease;
-    animation: tl-fadeIn 0.3s ease-out;
+    animation: tl-fade-in 0.3s ease-out;
 }
 
 .timeline-item:hover {
@@ -394,9 +394,16 @@
     100% { transform: translateX(100%); }
 }
 
-@keyframes tl-fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
+@keyframes tl-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* Timeline metadata row */
@@ -423,11 +430,34 @@
 }
 
 /* Depth-based left-border colors */
-.timeline-depth-0 { border-left: 3px solid #4a9eff; padding-left: 12px; }
-.timeline-depth-1 { border-left: 3px solid #9b59b6; padding-left: 12px; margin-left: 16px; }
-.timeline-depth-2 { border-left: 3px solid #1abc9c; padding-left: 12px; margin-left: 32px; }
-.timeline-depth-3 { border-left: 3px solid #f1c40f; padding-left: 12px; margin-left: 48px; }
-.timeline-depth-4 { border-left: 3px solid #95a5a6; padding-left: 12px; margin-left: 64px; }
+.timeline-depth-0 {
+    border-left: 3px solid #4a9eff;
+    padding-left: 12px;
+}
+
+.timeline-depth-1 {
+    border-left: 3px solid #9b59b6;
+    padding-left: 12px;
+    margin-left: 16px;
+}
+
+.timeline-depth-2 {
+    border-left: 3px solid #1abc9c;
+    padding-left: 12px;
+    margin-left: 32px;
+}
+
+.timeline-depth-3 {
+    border-left: 3px solid #f1c40f;
+    padding-left: 12px;
+    margin-left: 48px;
+}
+
+.timeline-depth-4 {
+    border-left: 3px solid #95a5a6;
+    padding-left: 12px;
+    margin-left: 64px;
+}
 
 /* Legend */
 .timeline-legend {
@@ -664,7 +694,7 @@
     background: var(--vscode-input-background);
     border: 1px solid var(--vscode-input-border, transparent);
     border-radius: 4px;
-    animation: tl-fadeIn 0.2s ease;
+    animation: tl-fade-in 0.2s ease;
 }
 
 .filter-condition-row:hover {
@@ -684,9 +714,18 @@
     font-family: var(--vscode-font-family);
 }
 
-.filter-condition-row .condition-field { flex: 0 0 120px; }
-.filter-condition-row .condition-operator { flex: 0 0 110px; }
-.filter-condition-row .condition-value { flex: 1; min-width: 0; }
+.filter-condition-row .condition-field {
+    flex: 0 0 120px;
+}
+
+.filter-condition-row .condition-operator {
+    flex: 0 0 110px;
+}
+
+.filter-condition-row .condition-value {
+    flex: 1;
+    min-width: 0;
+}
 
 .filter-condition-row .condition-enabled {
     flex-shrink: 0;

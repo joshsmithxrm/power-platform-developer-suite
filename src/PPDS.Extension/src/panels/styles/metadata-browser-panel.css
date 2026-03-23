@@ -412,7 +412,7 @@
 
 .prop-value {
     padding: 4px 12px 4px 8px;
-    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .prop-section-header {

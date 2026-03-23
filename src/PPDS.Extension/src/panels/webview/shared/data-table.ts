@@ -381,14 +381,6 @@ export class DataTable<T> {
 // ── Shared utility functions ─────────────────────────────────────────────────
 
 /**
- * Test whether a table row's text content matches a search term.
- * Useful for panels that filter externally rather than using FilterBar.
- */
-export function matchesSearch(row: HTMLElement, term: string): boolean {
-    return row.textContent?.toLowerCase().includes(term.toLowerCase()) ?? false;
-}
-
-/**
  * Format a status count string for the "X of Y" pattern (Constitution I4 compliance).
  *
  * Returns:

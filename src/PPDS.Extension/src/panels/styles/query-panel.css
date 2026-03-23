@@ -290,7 +290,7 @@ tbody.all-selected td {
 .transpile-warning-banner {
     padding: 6px 12px;
     font-size: 12px;
-    color: var(--vscode-editorWarning-foreground, #cc9900);
+    color: var(--vscode-editorWarning-foreground, #c90);
     background: var(--vscode-inputValidation-warningBackground, rgba(204, 153, 0, 0.12));
     border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, rgba(204, 153, 0, 0.4));
     display: flex;
@@ -311,7 +311,7 @@ tbody.all-selected td {
 .transpile-warning-banner .warning-dismiss {
     background: none;
     border: none;
-    color: var(--vscode-editorWarning-foreground, #cc9900);
+    color: var(--vscode-editorWarning-foreground, #c90);
     cursor: pointer;
     padding: 0 2px;
     opacity: 0.7;
