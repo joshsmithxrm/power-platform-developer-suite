@@ -349,8 +349,7 @@ namespace PPDS.Migration.Import
             }
             catch (Exception ex)
             {
-                // Role lookup failed - this is expected when source role ID doesn't exist in target
-                _logger?.LogDebug(ex, "Role lookup by ID {RoleId} failed (expected for cross-environment migrations)", sourceRoleId);
+                _logger?.LogWarning(ex, "Role lookup by ID {RoleId} failed — role may not exist in target environment", sourceRoleId);
             }
 
             // Role doesn't exist with source ID - this is the common case
