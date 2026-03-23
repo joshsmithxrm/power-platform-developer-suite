@@ -38,6 +38,8 @@ function updateEnvironmentDisplay(name: string | null): void {
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -259,6 +261,8 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             }
             break;
         case 'solutionsLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             renderSolutions(msg.solutions);
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
@@ -276,6 +280,8 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

@@ -520,6 +520,8 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             break;
 
         case 'tracesLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             currentTraces = msg.traces;
             {
                 const previousSelectedId = selectedTraceId;
@@ -595,6 +597,8 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             break;
 
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             tablePane.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;
@@ -613,6 +617,8 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
 
 // ── Toolbar handlers ────────────────────────────────────────────────────
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 

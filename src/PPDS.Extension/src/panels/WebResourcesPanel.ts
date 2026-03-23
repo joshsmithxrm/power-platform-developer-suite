@@ -84,7 +84,8 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: false,
+                enableFindWidget: true,
+                retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
                     vscode.Uri.joinPath(extensionUri, 'dist'),
@@ -333,7 +334,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         <input type="checkbox" id="text-only-cb" checked>
         Text only
     </label>
-    <input type="text" id="wr-search" class="search-input" placeholder="Search web resources..." title="Filter by name" />
+    <input type="text" id="wr-search" class="toolbar-search" placeholder="Search web resources..." title="Filter by name" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>

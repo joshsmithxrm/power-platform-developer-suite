@@ -58,7 +58,8 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: false,
+                enableFindWidget: true,
+                retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
                     vscode.Uri.joinPath(extensionUri, 'dist'),

@@ -59,6 +59,8 @@ function updateEnvironmentDisplay(name: string | null): void {
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -592,6 +594,8 @@ window.addEventListener('message', (event: MessageEvent<MetadataBrowserPanelHost
             }
             break;
         case 'entitiesLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             allEntities = msg.entities;
             entitySearchEl.value = '';
             applyFilter();
@@ -618,6 +622,8 @@ window.addEventListener('message', (event: MessageEvent<MetadataBrowserPanelHost
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             tabContent.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

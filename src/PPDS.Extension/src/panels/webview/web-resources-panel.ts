@@ -198,6 +198,8 @@ content.addEventListener('click', (e) => {
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -294,6 +296,8 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             // Discard stale responses
             if (msg.requestId < lastRequestId) break;
             lastRequestId = msg.requestId;
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             selectedIds.clear();
             updatePublishButton();
             allResources = msg.resources;
@@ -308,6 +312,8 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

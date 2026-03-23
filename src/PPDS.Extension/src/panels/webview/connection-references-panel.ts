@@ -349,6 +349,8 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -436,6 +438,8 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
             }
             break;
         case 'connectionReferencesLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             expandedRows.clear();
             rowDetails.clear();
             table.setItems(msg.references);
@@ -464,6 +468,8 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

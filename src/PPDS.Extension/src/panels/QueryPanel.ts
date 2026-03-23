@@ -77,6 +77,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
+                enableFindWidget: true,
                 retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),

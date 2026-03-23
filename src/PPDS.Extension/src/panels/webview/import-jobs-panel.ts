@@ -125,6 +125,8 @@ const table = new DataTable<ImportJobViewDto>({
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -199,6 +201,8 @@ window.addEventListener('message', (event: MessageEvent<ImportJobsPanelHostToWeb
             }
             break;
         case 'importJobsLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             allJobs = msg.jobs;
             applySearchFilter();
             detailPane.style.display = 'none';
@@ -217,6 +221,8 @@ window.addEventListener('message', (event: MessageEvent<ImportJobsPanelHostToWeb
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;
