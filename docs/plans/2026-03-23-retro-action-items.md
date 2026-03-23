@@ -10,7 +10,7 @@
 
 **Dependencies:**
 ```
-Task 1 (CLAUDE.md trim)          ─┐
+Task 1 (CLAUDE.md cleanup)     ─┐
 Task 2 (/implement enhancements) ─┤
 Task 3 (/design handoff)         ─┤─── all independent, parallelize freely
 Task 4 (retro skill fix)         ─┤
@@ -27,40 +27,55 @@ Task 6 (CDP code) ──► Task 7 (ext-verify docs)   ── sequential
 
 ---
 
-### Task 1: CLAUDE.md — Delete Workflow Section
+### Task 1: CLAUDE.md Cleanup
 
-The entire Workflow section (lines 58-101) is redundant with skills and hooks that enforce it. Skills are in the system prompt catalog. Hooks fire at the runtime level. `/design` hands off to `/implement`. `/implement` runs the full pipeline. Stop hook blocks if steps are skipped. CLAUDE.md doesn't need to know about any of it.
-
-Delete the workflow section. Keep only what skills/hooks can't cover: coding rules, tech stack, key files, testing commands, architecture, gotchas.
+Single pass over CLAUDE.md addressing all drift and reinforcement items.
 
 **Files:**
-- Modify: `CLAUDE.md:58-101` (delete Workflow section)
-- Modify: `CLAUDE.md:102-104` (fix Git Hooks description — currently only mentions TS gates, not .NET)
+- Modify: `CLAUDE.md:71` (/implement mandatory)
+- Modify: `CLAUDE.md:73-77` (skill type confusion → /verify surface)
+- Modify: `CLAUDE.md:99-100` (pipeline chaining reinforcement)
 
-- [ ] **Step 1: Delete the Workflow section**
-
-Delete lines 58-101 (from `## Workflow (REQUIRED SEQUENCE)` through the end of `### Pipeline chaining`).
-
-- [ ] **Step 2: Fix Git Hooks description**
+- [ ] **Step 1: Fix skill invocation at lines 73-77**
 
 Replace:
 ```markdown
-## Git Hooks
-
-Pre-commit hook (`scripts/hooks/`) runs `typecheck:all` + `eslint --quiet` on extension TS changes. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
+   - Extension changed → /ext-verify (screenshots required)
+   - TUI changed → /tui-verify (PTY interaction required)
+   - MCP changed → /mcp-verify (tool invocation required)
+   - CLI changed → /cli-verify (run the command)
 ```
 with:
 ```markdown
-## Git Hooks
-
-Pre-commit hook (`scripts/hooks/`) runs dotnet build, dotnet test, and extension typecheck + eslint. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
+   - Extension changed → /verify extension (screenshots required)
+   - TUI changed → /verify tui (PTY interaction required)
+   - MCP changed → /verify mcp (tool invocation required)
+   - CLI changed → /verify cli (run the command)
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Make /implement mandatory at line 71**
+
+Replace:
+```markdown
+4. /implement <plan-path>
+```
+with:
+```markdown
+4. /implement <plan-path> — MANDATORY once a plan exists, even in the same session. The plan is the handoff boundary: everything before is design, everything after is structured execution.
+```
+
+- [ ] **Step 3: Reinforce pipeline chaining after line 100**
+
+After the existing pipeline chaining paragraph, add a new line:
+```markdown
+After completing implementation commits, proceed IMMEDIATELY to gates. Do NOT stop to present a summary table of what was committed. The commit messages already document the work. Your next action after the last commit is `/gates`.
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md
-git commit -m "fix: CLAUDE.md — delete workflow section (skills + hooks cover it)"
+git commit -m "fix: CLAUDE.md cleanup — verify invocation, /implement mandatory, pipeline chaining"
 ```
 
 ---
