@@ -55,53 +55,9 @@ Odd/even minor convention: odd minor = pre-release, even minor = stable. See `do
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
 
-## Workflow (REQUIRED SEQUENCE)
-
-### Starting work
-Before any implementation, ensure you're on a feature branch:
-- New work: `/start <feature-name>` (creates worktree + branch + workflow state)
-- Existing work: switch to the relevant worktree
-- Planning and exploration can happen on main; implementation cannot.
-- Commits on main are blocked by the pre-commit hook.
-
-### New feature or non-trivial change
-1. /spec (or verify spec exists with numbered ACs)
-2. /spec-audit (verify spec matches codebase reality)
-3. Write implementation plan → user approves
-4. /implement <plan-path>
-5. /gates — STOP on failure, fix before proceeding
-6. /verify for EVERY affected surface — you MUST use the product:
-   - Extension changed → /ext-verify (screenshots required)
-   - TUI changed → /tui-verify (PTY interaction required)
-   - MCP changed → /mcp-verify (tool invocation required)
-   - CLI changed → /cli-verify (run the command)
-7. /qa for at least one affected surface (blind verification)
-8. /review → /converge until 0 critical, 0 important
-9. /pr (rebase, create PR, monitor CI + reviews)
-
-### Bug fix or small change
-1. /gates before committing
-2. If UI/output changed → /verify for affected surface
-3. /pr when ready
-
-### Commits and enforcement
-Commit after each GitHub issue fixed or plan task completed — don't ask, just do it. One commit per fix.
-Steps 5-8 enforced by hooks. PR gate blocks `gh pr create` if incomplete. Run /status to check.
-
-### STOP conditions
-- DO NOT skip steps 5-8 because "tests pass." Tests are necessary, not sufficient.
-- DO NOT declare work complete without visual verification of affected surfaces.
-
-### Autonomy scope
-"Don't ask, just do it" applies to: committing, gates, verification, QA, review, triaging review comments (fix valid, dismiss invalid w/ rationale). Does NOT apply to: skipping workflow steps, filing/closing issues, PRs without passing gates.
-After external review: respond to EACH PR comment individually with action taken. Include summary in status report.
-
-### Pipeline chaining
-After completing each workflow step, proceed to the next step without asking for permission. The sequence gates → verify → qa → review → pr is a pipeline — execute it end-to-end unless a step fails. Do NOT stop between steps to present a summary and wait. The stop hook will block the session from ending if steps are incomplete.
-
 ## Git Hooks
 
-Pre-commit hook (`scripts/hooks/`) runs `typecheck:all` + `eslint --quiet` on extension TS changes. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
+Pre-commit hook (`scripts/hooks/`) runs dotnet build, dotnet test, and extension typecheck + eslint. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
 
 ## Gotchas
 
