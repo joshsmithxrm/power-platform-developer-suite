@@ -84,8 +84,9 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
             case 'refresh':
                 await this.loadImportJobs();
                 break;
-            case 'selectJob':
-                await this.loadJobDetail(message.id);
+            case 'viewImportLog':
+                // IJ-02: Open the import log XML in a VS Code editor tab.
+                await this.openImportLog(message.id);
                 break;
             case 'openInMaker':
                 await this.openInMaker();
@@ -126,6 +127,8 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
 
             this.postMessage({
                 command: 'importJobsLoaded',
+                // P2-IJ-01: Wire totalCount from the RPC response (ListResult<T> added in Step 1).
+                totalCount: result.totalCount,
                 jobs: result.jobs.map(j => ({
                     id: j.id,
                     solutionName: j.solutionName,
@@ -150,17 +153,25 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
         }
     }
 
-    private async loadJobDetail(id: string): Promise<void> {
+    /**
+     * IJ-02: Fetch the raw XML data for an import job and open it in a VS Code
+     * editor tab with XML language mode. The XML is prettified before display.
+     */
+    private async openImportLog(id: string): Promise<void> {
         try {
             const result = await this.daemon.importJobsGet(id, this.environmentUrl);
-            this.postMessage({
-                command: 'importJobDetailLoaded',
-                id,
-                data: result.job.data,
-            });
+            const raw = result.job.data;
+            if (!raw) {
+                void vscode.window.showInformationMessage('No import log data available for this job.');
+                return;
+            }
+
+            const pretty = prettifyXml(raw);
+            const doc = await vscode.workspace.openTextDocument({ content: pretty, language: 'xml' });
+            await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to load job detail: ${msg}` });
+            void vscode.window.showErrorMessage(`Failed to open import log: ${msg}`);
         }
     }
 
@@ -204,21 +215,13 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh import jobs">Refresh</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Solution History in Maker Portal">Maker Portal</vscode-button>
-    <input id="search-input" type="text" placeholder="Search import jobs..." title="Filter by solution name" class="toolbar-search" />
+    <input id="search-input" type="text" placeholder="Search import jobs..." title="Filter by solution name, status, created by" class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>
 
 <div class="content" id="content">
     <div class="empty-state" id="empty-state">Loading import jobs...</div>
-</div>
-
-<div class="detail-pane" id="detail-pane" style="display: none;">
-    <div class="detail-header">
-        <span id="detail-title">Import Job Detail</span>
-        <button class="detail-close-btn" id="detail-close" title="Close detail">\u00D7</button>
-    </div>
-    <pre class="detail-content" id="detail-content"></pre>
 </div>
 
 <div class="status-bar">
@@ -228,5 +231,50 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
 <script nonce="${nonce}" src="${panelJsUri}"></script>
 </body>
 </html>`;
+    }
+}
+
+/**
+ * Prettify XML by adding indentation. Falls back to returning the original
+ * string if parsing fails. This is a minimal implementation that handles
+ * well-formed XML without external dependencies.
+ */
+function prettifyXml(xml: string): string {
+    try {
+        const INDENT = '  ';
+        let result = '';
+        let depth = 0;
+        // Tokenize into tags and text
+        const tokens = xml.split(/(<[^>]+>)/);
+
+        for (const token of tokens) {
+            if (!token.trim()) continue;
+
+            if (token.startsWith('</')) {
+                // Closing tag — decrease depth before printing
+                depth = Math.max(0, depth - 1);
+                result += INDENT.repeat(depth) + token + '\n';
+            } else if (token.startsWith('<?') || token.startsWith('<!')) {
+                // Processing instruction / declaration
+                result += INDENT.repeat(depth) + token + '\n';
+            } else if (token.startsWith('<') && token.endsWith('/>')) {
+                // Self-closing tag
+                result += INDENT.repeat(depth) + token + '\n';
+            } else if (token.startsWith('<')) {
+                // Opening tag — print then increase depth
+                result += INDENT.repeat(depth) + token + '\n';
+                depth++;
+            } else {
+                // Text content — only output non-whitespace text
+                const text = token.trim();
+                if (text) {
+                    result += INDENT.repeat(depth) + text + '\n';
+                }
+            }
+        }
+
+        return result.trim();
+    } catch {
+        return xml;
     }
 }

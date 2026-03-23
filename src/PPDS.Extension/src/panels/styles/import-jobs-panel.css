@@ -66,6 +66,18 @@
     color: var(--vscode-list-activeSelectionForeground);
 }
 
+/* ── Solution link (IJ-01) ──────────────────────────────────────────────── */
+
+a.solution-link {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+a.solution-link:hover {
+    text-decoration: underline;
+}
+
 /* ── Status badges ──────────────────────────────────────────────────────── */
 
 .status-badge {
@@ -90,52 +102,21 @@
     color: var(--vscode-textLink-foreground, #3794ff);
 }
 
-/* ── Detail pane ────────────────────────────────────────────────────────── */
+/* IJ-15: Additional badge styles for Cancelled, Queued, Completed with Errors */
 
-.detail-pane {
-    border-top: 1px solid var(--vscode-panel-border);
-    max-height: 40vh;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
+.status-cancelled {
+    background: color-mix(in srgb, var(--vscode-descriptionForeground, #8c8c8c) 20%, transparent);
+    color: var(--vscode-descriptionForeground, #8c8c8c);
 }
 
-.detail-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    background: var(--vscode-editor-background);
+.status-queued {
+    background: color-mix(in srgb, var(--vscode-symbolIcon-colorForeground, #75beff) 20%, transparent);
+    color: var(--vscode-symbolIcon-colorForeground, #75beff);
 }
 
-.detail-close-btn {
-    background: none;
-    border: none;
-    font-size: 16px;
-    cursor: pointer;
-    color: var(--vscode-foreground);
-    padding: 0 4px;
-    line-height: 1;
-}
-
-.detail-close-btn:hover {
-    color: var(--vscode-textLink-foreground);
-}
-
-.detail-content {
-    flex: 1;
-    overflow: auto;
-    padding: 8px 12px;
-    margin: 0;
-    font-family: var(--vscode-editor-font-family, monospace);
-    font-size: var(--vscode-editor-font-size, 13px);
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
-    color: var(--vscode-foreground);
-    background: var(--vscode-editor-background);
+.status-completed-errors {
+    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 20%, transparent);
+    color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 /* ── Toolbar Search ──────────────────────────────────────────── */
