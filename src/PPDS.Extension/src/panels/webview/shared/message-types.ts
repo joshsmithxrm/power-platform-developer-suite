@@ -356,6 +356,7 @@ export type ConnectionReferencesPanelHostToWebview =
     | { command: 'connectionReferenceDetailLoaded'; detail: ConnectionReferenceDetailViewDto; environmentId: string | null }
     | { command: 'analyzeResult'; result: ConnectionReferencesAnalyzeViewDto }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
+    | { command: 'deploymentSettingsSynced'; filePath: string; envVars: DeploymentSettingsSyncStatsDto; connectionRefs: DeploymentSettingsSyncStatsDto }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
 

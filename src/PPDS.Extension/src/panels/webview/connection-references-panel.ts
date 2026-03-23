@@ -553,6 +553,20 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;
+        case 'deploymentSettingsSynced':
+            (syncBtn as HTMLButtonElement).disabled = false;
+            syncBtn.textContent = 'Sync Deployment Settings';
+            {
+                const ev = msg.envVars;
+                const cr = msg.connectionRefs;
+                const summary = [
+                    'Sync complete.',
+                    'Env vars: +' + ev.added + ' -' + ev.removed + ' =' + ev.preserved,
+                    'Connection refs: +' + cr.added + ' -' + cr.removed + ' =' + cr.preserved,
+                ].join('  ');
+                statusText.textContent = summary;
+            }
+            break;
         case 'daemonReconnected':
             document.getElementById('reconnect-banner')!.style.display = '';
             break;

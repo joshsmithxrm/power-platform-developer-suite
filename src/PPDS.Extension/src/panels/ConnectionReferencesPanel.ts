@@ -123,7 +123,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 await vscode.env.openExternal(vscode.Uri.parse(message.url));
                 break;
             case 'syncDeploymentSettings':
-                vscode.window.showInformationMessage('Sync Deployment Settings coming soon');
+                await this.syncDeploymentSettings();
                 break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
@@ -290,6 +290,40 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load solutions: ${msg}` });
+        }
+    }
+
+    private async syncDeploymentSettings(): Promise<void> {
+        if (!this.solutionFilter) {
+            vscode.window.showWarningMessage('Please select a solution before syncing deployment settings.');
+            return;
+        }
+
+        try {
+            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+                filters: { 'JSON Files': ['json'] },
+                title: 'Sync Deployment Settings \u2014 Save To',
+            });
+
+            if (!uri) return;
+
+            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
+                this.solutionFilter,
+                uri.fsPath,
+                this.environmentUrl,
+            );
+
+            this.postMessage({
+                command: 'deploymentSettingsSynced',
+                filePath: result.filePath,
+                envVars: result.environmentVariables,
+                connectionRefs: result.connectionReferences,
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
         }
     }
 
