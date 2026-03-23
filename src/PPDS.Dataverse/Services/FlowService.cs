@@ -42,6 +42,7 @@ public class FlowService : IFlowService
     public async Task<ListResult<FlowInfo>> ListAsync(
         string? solutionName = null,
         FlowState? state = null,
+        bool includeClassic = false,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -65,12 +66,15 @@ public class FlowService : IFlowService
 
         var filtersApplied = new List<string>();
 
-        // Filter to only cloud flows (ModernFlow=5 or DesktopFlow=6) — excludes classic workflows
-        var categoryFilter = new FilterExpression(LogicalOperator.Or);
-        categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, ModernFlowCategory);
-        categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, DesktopFlowCategory);
-        query.Criteria.AddFilter(categoryFilter);
-        filtersApplied.Add("cloud flows only");
+        if (!includeClassic)
+        {
+            // Filter to only cloud flows (ModernFlow=5 or DesktopFlow=6) — excludes classic workflows
+            var categoryFilter = new FilterExpression(LogicalOperator.Or);
+            categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, ModernFlowCategory);
+            categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, DesktopFlowCategory);
+            query.Criteria.AddFilter(categoryFilter);
+            filtersApplied.Add("cloud flows only");
+        }
 
         // Filter by state if specified
         if (state.HasValue)

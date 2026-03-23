@@ -42,6 +42,7 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         var envVars = envVarsResult.Items;
         var connectionRefs = connectionRefsResult.Items;
 
+        var secretCount = envVars.Count(ev => ev.Type == "Secret");
         var settings = new DeploymentSettingsFile
         {
             EnvironmentVariables = envVars
@@ -66,9 +67,10 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         };
 
         _logger.LogDebug(
-            "Generated settings: {EnvVarCount} environment variables, {CRCount} connection references",
+            "Generated settings: {EnvVarCount} environment variables, {CRCount} connection references, {SecretCount} secrets excluded",
             settings.EnvironmentVariables.Count,
-            settings.ConnectionReferences.Count);
+            settings.ConnectionReferences.Count,
+            secretCount);
 
         return settings;
     }
@@ -86,6 +88,13 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         var currentConnectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
         var currentEnvVars = currentEnvVarsResult.Items;
         var currentConnectionRefs = currentConnectionRefsResult.Items;
+
+        // Count secrets excluded before building the schema name set
+        var secretCount = currentEnvVars.Count(ev => ev.Type == "Secret");
+        if (secretCount > 0)
+        {
+            _logger.LogDebug("{SecretCount} secrets excluded from sync", secretCount);
+        }
 
         // Build current schema names sets
         var currentEnvVarNames = currentEnvVars
@@ -181,9 +190,10 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         };
 
         _logger.LogDebug(
-            "Sync complete - EnvVars: +{EVAdded} -{EVRemoved} ={EVPreserved}, CRs: +{CRAdded} -{CRRemoved} ={CRPreserved}",
+            "Sync complete - EnvVars: +{EVAdded} -{EVRemoved} ={EVPreserved}, CRs: +{CRAdded} -{CRRemoved} ={CRPreserved}, {SecretCount} secrets excluded",
             evStats.Added, evStats.Removed, evStats.Preserved,
-            crStats.Added, crStats.Removed, crStats.Preserved);
+            crStats.Added, crStats.Removed, crStats.Preserved,
+            secretCount);
 
         return new DeploymentSettingsSyncResult
         {

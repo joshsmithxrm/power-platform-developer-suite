@@ -87,7 +87,7 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var flowsResult = await flowService.ListAsync(solution, state, cancellationToken);
+            var flowsResult = await flowService.ListAsync(solution, state, cancellationToken: cancellationToken);
             var flows = flowsResult.Items;
 
             if (globalOptions.IsJsonMode)
