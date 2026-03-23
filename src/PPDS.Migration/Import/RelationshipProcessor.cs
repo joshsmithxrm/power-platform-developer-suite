@@ -30,6 +30,11 @@ namespace PPDS.Migration.Import
         private ConcurrentDictionary<string, string>? _relationshipNameCache;
 
         /// <summary>
+        /// Tracks whether the metadata cache load failed, for surfacing to callers.
+        /// </summary>
+        private bool _metadataCacheLoadFailed;
+
+        /// <summary>
         /// Tracks the last reported progress count for throttling.
         /// Thread-safe via Interlocked operations.
         /// </summary>
@@ -281,9 +286,14 @@ namespace PPDS.Migration.Import
                     successCount, stopwatch.ElapsedMilliseconds, parallelism);
             }
 
+            if (_metadataCacheLoadFailed)
+            {
+                _logger?.LogError("M2M relationship metadata cache failed to load — relationship name resolution may have used unresolved names");
+            }
+
             return new PhaseResult
             {
-                Success = failureCount == 0,
+                Success = failureCount == 0 && !_metadataCacheLoadFailed,
                 RecordsProcessed = successCount + failureCount,
                 SuccessCount = successCount,
                 FailureCount = failureCount,
@@ -430,8 +440,8 @@ namespace PPDS.Migration.Import
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to load M2M relationship metadata - relationship name resolution may fail");
-                // Don't throw - we'll try with the original names
+                _logger?.LogError(ex, "Failed to load M2M relationship metadata - relationship name resolution may fail");
+                _metadataCacheLoadFailed = true;
             }
         }
 
