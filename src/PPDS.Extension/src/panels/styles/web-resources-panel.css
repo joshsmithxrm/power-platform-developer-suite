@@ -193,3 +193,36 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ── WR-03: Server-search banner ───────────────────────────────────────── */
+
+.server-search-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: var(--vscode-inputValidation-infoBackground, #063b49);
+    color: var(--vscode-foreground);
+    font-size: 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.server-search-banner-text {
+    flex: 1;
+    color: var(--vscode-descriptionForeground);
+}
+
+.server-search-btn {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-button-border, transparent);
+    padding: 2px 10px;
+    border-radius: 2px;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.server-search-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
