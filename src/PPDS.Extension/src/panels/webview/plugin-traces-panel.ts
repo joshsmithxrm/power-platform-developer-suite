@@ -303,14 +303,6 @@ function renderOverviewTab(trace: PluginTraceDetailViewDto): void {
     label.textContent = trace.hasException ? 'Exception' : 'Success';
     badge.appendChild(label);
 
-    const meta = document.createElement('span');
-    meta.style.marginLeft = '12px';
-    meta.style.fontSize = '12px';
-    meta.style.color = 'var(--vscode-descriptionForeground)';
-    meta.textContent = escapeHtml(trace.typeName) + ' / ' + escapeHtml(trace.messageName || '\u2014')
-        + ' (' + escapeHtml(trace.primaryEntity || '\u2014') + ') \u2014 '
-        + formatDuration(trace.durationMs);
-    // Use textContent for meta to avoid XSS
     const metaEl = document.createElement('span');
     metaEl.style.marginLeft = '12px';
     metaEl.style.fontSize = '12px';

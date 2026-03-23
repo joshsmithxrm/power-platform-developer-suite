@@ -39,16 +39,21 @@ public class PluginTraceService : IPluginTraceService
         int top = 100,
         CancellationToken cancellationToken = default)
     {
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        List<PluginTraceInfo> items;
 
-        var query = BuildListQuery(filter, top);
+        // D2: get, use, dispose pooled client within a single scope
+        await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+        {
+            var query = BuildListQuery(filter, top);
 
-        _logger.LogDebug("Querying plugin traces with top: {Top}", top);
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
-        var items = result.Entities.Select(MapToPluginTraceInfo).ToList();
+            _logger.LogDebug("Querying plugin traces with top: {Top}", top);
+            var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            items = result.Entities.Select(MapToPluginTraceInfo).ToList();
+        }
 
-        // Wire existing CountAsync into TotalCount for I4 transparency
-        // CountAsync may fail with certain filter combinations on mocked contexts;
+        // Wire existing CountAsync into TotalCount for I4 transparency.
+        // CountAsync acquires its own pooled client — safe now that the first is disposed.
+        // May fail with certain filter combinations on mocked contexts;
         // fall back to items.Count so ListAsync remains usable.
         int totalCount;
         try
