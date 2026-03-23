@@ -21,6 +21,11 @@ namespace PPDS.Migration.Import
         public int TiersProcessed { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of records in the source data file.
+        /// </summary>
+        public int SourceRecordCount { get; set; }
+
+        /// <summary>
         /// Gets or sets the number of records imported.
         /// </summary>
         public int RecordsImported { get; set; }

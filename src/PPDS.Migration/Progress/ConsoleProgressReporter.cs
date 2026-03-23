@@ -181,12 +181,21 @@ namespace PPDS.Migration.Progress
             }
             Console.ResetColor();
 
-            // Summary line: "    42,366 records in 00:00:08 (4,774.5 rec/s)"
+            // Summary line: "    42,366 record(s) in 00:00:08 (4,774.5 rec/s)"
             // Include M2M breakdown if present: "... [42,000 entities + 366 M2M]"
             var m2mBreakdown = result.M2MCount.HasValue && result.M2MCount.Value > 0
                 ? $" [{result.SuccessCount - result.M2MCount.Value:N0} entities + {result.M2MCount.Value:N0} M2M]"
                 : "";
             Console.Error.WriteLine($"    {result.SuccessCount:N0} record(s) in {result.Duration:hh\\:mm\\:ss} ({result.RecordsPerSecond:F1} rec/s){m2mBreakdown}");
+
+            // Source vs imported comparison when there's a difference
+            if (result.SourceRecordCount.HasValue && result.SourceRecordCount.Value != result.SuccessCount)
+            {
+                var entitySuccessCount = result.M2MCount.HasValue
+                    ? result.SuccessCount - result.M2MCount.Value
+                    : result.SuccessCount;
+                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {entitySuccessCount:N0} | Failed: {result.FailureCount:N0}");
+            }
 
             // Show created/updated breakdown for upsert operations
             if (result.CreatedCount.HasValue && result.UpdatedCount.HasValue)

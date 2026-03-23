@@ -179,7 +179,7 @@ namespace PPDS.Migration.Import
 
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,
-                    totalImported, deferredResult, relationshipResult,
+                    totalImported, data.TotalRecordCount, deferredResult, relationshipResult,
                     stopwatch.Elapsed, phase1Duration, phase2Duration, phase3Duration,
                     options, progress);
             }
@@ -190,7 +190,7 @@ namespace PPDS.Migration.Import
 
                 return BuildFailureResult(
                     plan, entityResults, errors, warnings,
-                    totalImported, stopwatch.Elapsed, ex, options, progress);
+                    totalImported, data.TotalRecordCount, stopwatch.Elapsed, ex, options, progress);
             }
             finally
             {
@@ -462,6 +462,7 @@ namespace PPDS.Migration.Import
             ConcurrentBag<MigrationError> errors,
             IWarningCollector warnings,
             int totalImported,
+            int sourceRecordCount,
             PhaseResult deferredResult,
             PhaseResult relationshipResult,
             TimeSpan duration,
@@ -475,6 +476,7 @@ namespace PPDS.Migration.Import
             {
                 Success = errors.IsEmpty,
                 TiersProcessed = plan.TierCount,
+                SourceRecordCount = sourceRecordCount,
                 RecordsImported = totalImported,
                 RecordsUpdated = deferredResult.SuccessCount,
                 RelationshipsProcessed = relationshipResult.SuccessCount,
@@ -518,6 +520,7 @@ namespace PPDS.Migration.Import
             progress?.Complete(new MigrationResult
             {
                 Success = result.Success,
+                SourceRecordCount = sourceRecordCount,
                 RecordsProcessed = result.RecordsImported + result.RecordsUpdated + totalFailureCount + relationshipResult.SuccessCount,
                 SuccessCount = result.RecordsImported + result.RecordsUpdated + relationshipResult.SuccessCount,
                 FailureCount = totalFailureCount,
@@ -540,6 +543,7 @@ namespace PPDS.Migration.Import
             ConcurrentBag<MigrationError> errors,
             IWarningCollector warnings,
             int totalImported,
+            int sourceRecordCount,
             TimeSpan duration,
             Exception ex,
             ImportOptions options,
@@ -560,6 +564,7 @@ namespace PPDS.Migration.Import
             {
                 Success = false,
                 TiersProcessed = plan.TierCount,
+                SourceRecordCount = sourceRecordCount,
                 RecordsImported = totalImported,
                 Duration = duration,
                 EntityResults = entityResults.ToArray(),

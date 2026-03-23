@@ -250,6 +250,7 @@ namespace PPDS.Migration.Progress
                 Success = result.Success,
                 Duration = result.Duration,
                 TiersProcessed = result.TiersProcessed,
+                SourceRecordCount = result.SourceRecordCount,
                 RecordsImported = result.RecordsImported,
                 RecordsUpdated = result.RecordsUpdated,
                 RecordsFailed = _errorCount,
@@ -413,6 +414,9 @@ namespace PPDS.Migration.Progress
 
             [JsonPropertyName("tiersProcessed")]
             public int TiersProcessed { get; set; }
+
+            [JsonPropertyName("sourceRecordCount")]
+            public int SourceRecordCount { get; set; }
 
             [JsonPropertyName("recordsImported")]
             public int RecordsImported { get; set; }
