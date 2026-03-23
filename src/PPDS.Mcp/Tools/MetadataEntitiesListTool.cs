@@ -46,7 +46,7 @@ public sealed class MetadataEntitiesListTool
             .GetRequiredService<IMetadataService>();
 
         var entities = await metadataService
-            .GetEntitiesAsync(customOnly, filter, cancellationToken)
+            .GetEntitiesAsync(customOnly, filter, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         return new MetadataEntitiesResult

@@ -787,16 +787,78 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("metadata/entities")]
     public async Task<MetadataEntitiesResponse> MetadataEntitiesAsync(
         string? environmentUrl = null,
+        bool includeIntersect = false,
         CancellationToken cancellationToken = default)
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
-            var metadataProvider = sp.GetRequiredService<ICachedMetadataProvider>();
-            var entities = await metadataProvider.GetEntitiesAsync(ct);
+            var metadataService = sp.GetRequiredService<IMetadataService>();
+
+            // Fetch entities with requested includeIntersect setting
+            var entities = await metadataService.GetEntitiesAsync(includeIntersect: includeIntersect, cancellationToken: ct).ConfigureAwait(false);
+            var intersectHiddenCount = 0;
+
+            if (!includeIntersect)
+            {
+                // Fetch total count (with intersect) to compute how many were hidden
+                var allEntities = await metadataService.GetEntitiesAsync(includeIntersect: true, cancellationToken: ct).ConfigureAwait(false);
+                intersectHiddenCount = allEntities.Count - entities.Count;
+            }
 
             return new MetadataEntitiesResponse
             {
-                Entities = entities.Select(MapEntitySummaryToRpc).ToList()
+                Entities = entities.Select(MapEntitySummaryToRpc).ToList(),
+                IntersectHiddenCount = intersectHiddenCount,
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists all global option sets in the environment.
+    /// Used by the Metadata Browser panel CHOICES section in VS Code.
+    /// </summary>
+    [JsonRpcMethod("metadata/globalOptionSets")]
+    public async Task<MetadataGlobalOptionSetsResponse> MetadataGlobalOptionSetsAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var optionSets = await metadataService.GetGlobalOptionSetsAsync(cancellationToken: ct).ConfigureAwait(false);
+
+            return new MetadataGlobalOptionSetsResponse
+            {
+                OptionSets = optionSets.Select(MapOptionSetSummaryToRpc).ToList(),
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the full details of a specific global option set including all values.
+    /// Used when a global choice is selected in the Metadata Browser CHOICES tree.
+    /// </summary>
+    [JsonRpcMethod("metadata/globalOptionSet")]
+    public async Task<MetadataGlobalOptionSetDetailResponse> MetadataGlobalOptionSetAsync(
+        string name,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'name' parameter is required");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var metadataService = sp.GetRequiredService<IMetadataService>();
+            var optionSet = await metadataService.GetOptionSetAsync(name, ct).ConfigureAwait(false);
+
+            return new MetadataGlobalOptionSetDetailResponse
+            {
+                OptionSet = MapOptionSetToRpc(optionSet),
             };
         }, cancellationToken);
     }
@@ -977,6 +1039,20 @@ public class RpcMethodHandler : IDisposable
             OptionSetType = os.OptionSetType,
             IsGlobal = os.IsGlobal,
             Options = os.Options.Select(MapOptionValueToRpc).ToList()
+        };
+    }
+
+    private static MetadataGlobalChoiceSummaryDto MapOptionSetSummaryToRpc(OptionSetSummary os)
+    {
+        return new MetadataGlobalChoiceSummaryDto
+        {
+            Name = os.Name,
+            DisplayName = os.DisplayName,
+            OptionSetType = os.OptionSetType,
+            IsCustomOptionSet = os.IsCustomOptionSet,
+            IsManaged = os.IsManaged,
+            OptionCount = os.OptionCount,
+            Description = os.Description,
         };
     }
 
@@ -2045,11 +2121,13 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
-            var solutions = await solutionService.ListAsync(filter, includeManaged, ct);
+            var result = await solutionService.ListAsync(filter, includeManaged, cancellationToken: ct);
 
             return new SolutionsListResponse
             {
-                Solutions = solutions.Select(s => new SolutionInfoDto
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Solutions = result.Items.Select(s => new SolutionInfoDto
                 {
                     Id = s.Id,
                     UniqueName = s.UniqueName,
@@ -2135,18 +2213,18 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("importJobs/list")]
     public async Task<ImportJobsListResponse> ImportJobsListAsync(
-        int top = 50,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var importJobService = sp.GetRequiredService<IImportJobService>();
-            var jobs = await importJobService.ListAsync(top: top, cancellationToken: ct);
+            var result = await importJobService.ListAsync(cancellationToken: ct);
 
             return new ImportJobsListResponse
             {
-                Jobs = jobs.Select(MapImportJobToDto).ToList()
+                TotalCount = result.TotalCount,
+                Jobs = result.Items.Select(MapImportJobToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2240,11 +2318,12 @@ public class RpcMethodHandler : IDisposable
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var serviceFilter = MapTraceFilterFromDto(filter);
-            var traces = await traceService.ListAsync(serviceFilter, top, ct);
+            var result = await traceService.ListAsync(serviceFilter, top, ct);
 
             return new PluginTracesListResponse
             {
-                Traces = traces.Select(MapTraceInfoToDto).ToList()
+                TotalCount = result.TotalCount,
+                Traces = result.Items.Select(MapTraceInfoToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2492,7 +2571,17 @@ public class RpcMethodHandler : IDisposable
             MessageBlock = detail.MessageBlock,
             Configuration = detail.Configuration,
             SecureConfiguration = detail.SecureConfiguration,
-            RequestId = detail.RequestId?.ToString()
+            RequestId = detail.RequestId?.ToString(),
+            // Additional fields (PT-01 through PT-09)
+            Stage = detail.OperationType.ToString(),
+            ConstructorStartTime = detail.ConstructorStartTime?.ToString("o"),
+            IsSystemCreated = detail.IsSystemCreated,
+            CreatedById = detail.CreatedById?.ToString(),
+            CreatedOnBehalfById = detail.CreatedOnBehalfById?.ToString(),
+            PluginStepId = detail.PluginStepId?.ToString(),
+            PersistenceKey = detail.PersistenceKey?.ToString(),
+            OrganizationId = detail.OrganizationId?.ToString(),
+            Profile = detail.Profile
         };
     }
 
@@ -2526,12 +2615,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<ConnectionReferencesListResponse> ConnectionReferencesListAsync(
         string? solutionId = null,
         string? environmentUrl = null,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default)
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
-            var references = await connRefService.ListAsync(solutionName: solutionId, cancellationToken: ct);
+            var result = await connRefService.ListAsync(solutionName: solutionId, includeInactive: includeInactive, cancellationToken: ct);
 
             // Try to enrich with connection status from Power Platform API
             Dictionary<string, ConnectionInfo>? connectionMap = null;
@@ -2548,7 +2638,9 @@ public class RpcMethodHandler : IDisposable
 
             return new ConnectionReferencesListResponse
             {
-                References = references.Select(r => MapConnectionReferenceToDto(r, connectionMap)).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                References = result.Items.Select(r => MapConnectionReferenceToDto(r, connectionMap)).ToList()
             };
         }, cancellationToken);
     }
@@ -2694,6 +2786,7 @@ public class RpcMethodHandler : IDisposable
             CreatedOn = r.CreatedOn?.ToString("o"),
             Flows = flows.Select(f => new FlowReferenceDto
             {
+                FlowId = f.Id.ToString(),
                 UniqueName = f.UniqueName,
                 DisplayName = f.DisplayName,
                 State = f.State.ToString()
@@ -2715,16 +2808,19 @@ public class RpcMethodHandler : IDisposable
     public async Task<EnvironmentVariablesListResponse> EnvironmentVariablesListAsync(
         string? solutionId = null,
         string? environmentUrl = null,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default)
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var envVarService = sp.GetRequiredService<IEnvironmentVariableService>();
-            var variables = await envVarService.ListAsync(solutionName: solutionId, cancellationToken: ct);
+            var result = await envVarService.ListAsync(solutionName: solutionId, includeInactive: includeInactive, cancellationToken: ct);
 
             return new EnvironmentVariablesListResponse
             {
-                Variables = variables.Select(MapEnvironmentVariableToDto).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Variables = result.Items.Select(MapEnvironmentVariableToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2799,6 +2895,86 @@ public class RpcMethodHandler : IDisposable
         }, cancellationToken);
     }
 
+    private static readonly System.Text.Json.JsonSerializerOptions DeploymentSettingsReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static readonly System.Text.Json.JsonSerializerOptions DeploymentSettingsWriteOptions = new()
+    {
+        WriteIndented = true
+    };
+
+    /// <summary>
+    /// Syncs a deployment settings file with the current solution state.
+    /// Reads an existing file if present, merges with current environment, and writes the result.
+    /// </summary>
+    [JsonRpcMethod("environmentVariables/syncDeploymentSettings")]
+    public async Task<EnvironmentVariablesSyncDeploymentSettingsResponse> EnvironmentVariablesSyncDeploymentSettingsAsync(
+        string solutionId,
+        string filePath,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(solutionId))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'solutionId' parameter is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new RpcException(
+                ErrorCodes.Validation.RequiredField,
+                "The 'filePath' parameter is required");
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var settingsService = sp.GetRequiredService<IDeploymentSettingsService>();
+
+            // Load existing settings if file already exists
+            DeploymentSettingsFile? existingSettings = null;
+            var fullPath = System.IO.Path.GetFullPath(filePath);
+
+            if (System.IO.File.Exists(fullPath))
+            {
+                var existingJson = await System.IO.File.ReadAllTextAsync(fullPath, ct);
+                existingSettings = System.Text.Json.JsonSerializer.Deserialize<DeploymentSettingsFile>(
+                    existingJson, DeploymentSettingsReadOptions);
+            }
+
+            var result = await settingsService.SyncAsync(solutionId, existingSettings, ct);
+
+            // Write the synced file
+            var json = System.Text.Json.JsonSerializer.Serialize(result.Settings, DeploymentSettingsWriteOptions);
+            var directory = System.IO.Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
+            }
+            await System.IO.File.WriteAllTextAsync(fullPath, json, ct);
+
+            return new EnvironmentVariablesSyncDeploymentSettingsResponse
+            {
+                FilePath = fullPath,
+                EnvironmentVariables = new SyncStatisticsDto
+                {
+                    Added = result.EnvironmentVariables.Added,
+                    Removed = result.EnvironmentVariables.Removed,
+                    Preserved = result.EnvironmentVariables.Preserved
+                },
+                ConnectionReferences = new SyncStatisticsDto
+                {
+                    Added = result.ConnectionReferences.Added,
+                    Removed = result.ConnectionReferences.Removed,
+                    Preserved = result.ConnectionReferences.Preserved
+                }
+            };
+        }, cancellationToken);
+    }
+
     private static EnvironmentVariableInfoDto MapEnvironmentVariableToDto(EnvironmentVariableInfo v)
     {
         return new EnvironmentVariableInfoDto
@@ -2847,7 +3023,6 @@ public class RpcMethodHandler : IDisposable
     public async Task<WebResourcesListResponse> WebResourcesListAsync(
         string? solutionId = null,
         bool textOnly = true,
-        int top = 5000,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
@@ -2866,11 +3041,13 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            var resources = await webResourceService.ListAsync(parsedSolutionId, textOnly, top, ct);
+            var result = await webResourceService.ListAsync(parsedSolutionId, textOnly, ct);
 
             return new WebResourcesListResponse
             {
-                Resources = resources.Select(MapWebResourceToDto).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Resources = result.Items.Select(MapWebResourceToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -3709,6 +3886,15 @@ public class SolutionsListResponse
     /// </summary>
     [JsonPropertyName("solutions")]
     public List<SolutionInfoDto> Solutions { get; set; } = [];
+
+    /// <summary>Gets or sets the total count of records matching the query.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    /// <summary>Gets or sets the filters that were applied.</summary>
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 /// <summary>
@@ -4050,6 +4236,9 @@ public class ImportJobsListResponse
 {
     [JsonPropertyName("jobs")]
     public List<ImportJobInfoDto> Jobs { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 public class ImportJobsGetResponse
@@ -4111,6 +4300,9 @@ public class PluginTracesListResponse
 {
     [JsonPropertyName("traces")]
     public List<PluginTraceInfoDto> Traces { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 public class PluginTracesGetResponse
@@ -4215,6 +4407,42 @@ public class PluginTraceDetailDto : PluginTraceInfoDto
     [JsonPropertyName("requestId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RequestId { get; set; }
+
+    // Additional fields (PT-01 through PT-09)
+    [JsonPropertyName("stage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Stage { get; set; }
+
+    [JsonPropertyName("constructorStartTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConstructorStartTime { get; set; }
+
+    [JsonPropertyName("isSystemCreated")]
+    public bool IsSystemCreated { get; set; }
+
+    [JsonPropertyName("createdById")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedById { get; set; }
+
+    [JsonPropertyName("createdOnBehalfById")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOnBehalfById { get; set; }
+
+    [JsonPropertyName("pluginStepId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginStepId { get; set; }
+
+    [JsonPropertyName("persistenceKey")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PersistenceKey { get; set; }
+
+    [JsonPropertyName("organizationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OrganizationId { get; set; }
+
+    [JsonPropertyName("profile")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Profile { get; set; }
 }
 
 public class TimelineNodeDto
@@ -4297,6 +4525,46 @@ public class MetadataEntitiesResponse
 {
     [JsonPropertyName("entities")]
     public List<MetadataEntitySummaryDto> Entities { get; set; } = [];
+
+    [JsonPropertyName("intersectHiddenCount")]
+    public int IntersectHiddenCount { get; set; }
+}
+
+public class MetadataGlobalOptionSetsResponse
+{
+    [JsonPropertyName("optionSets")]
+    public List<MetadataGlobalChoiceSummaryDto> OptionSets { get; set; } = [];
+}
+
+public class MetadataGlobalOptionSetDetailResponse
+{
+    [JsonPropertyName("optionSet")]
+    public MetadataOptionSetDto OptionSet { get; set; } = null!;
+}
+
+public class MetadataGlobalChoiceSummaryDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("optionSetType")]
+    public string OptionSetType { get; set; } = "";
+
+    [JsonPropertyName("isCustomOptionSet")]
+    public bool IsCustomOptionSet { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("optionCount")]
+    public int OptionCount { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
 }
 
 public class MetadataEntitySummaryDto
@@ -4641,6 +4909,13 @@ public class ConnectionReferencesListResponse
 {
     [JsonPropertyName("references")]
     public List<ConnectionReferenceInfoDto> References { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class ConnectionReferencesGetResponse
@@ -4724,6 +4999,9 @@ public class ConnectionReferenceDetailDto : ConnectionReferenceInfoDto
 
 public class FlowReferenceDto
 {
+    [JsonPropertyName("flowId")]
+    public string FlowId { get; set; } = "";
+
     [JsonPropertyName("uniqueName")]
     public string UniqueName { get; set; } = "";
 
@@ -4769,6 +5047,13 @@ public class EnvironmentVariablesListResponse
 {
     [JsonPropertyName("variables")]
     public List<EnvironmentVariableInfoDto> Variables { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class EnvironmentVariablesGetResponse
@@ -4831,6 +5116,30 @@ public class EnvironmentVariableDetailDto : EnvironmentVariableInfoDto
     public string? CreatedOn { get; set; }
 }
 
+public class SyncStatisticsDto
+{
+    [JsonPropertyName("added")]
+    public int Added { get; set; }
+
+    [JsonPropertyName("removed")]
+    public int Removed { get; set; }
+
+    [JsonPropertyName("preserved")]
+    public int Preserved { get; set; }
+}
+
+public class EnvironmentVariablesSyncDeploymentSettingsResponse
+{
+    [JsonPropertyName("filePath")]
+    public string FilePath { get; set; } = "";
+
+    [JsonPropertyName("environmentVariables")]
+    public SyncStatisticsDto EnvironmentVariables { get; set; } = new();
+
+    [JsonPropertyName("connectionReferences")]
+    public SyncStatisticsDto ConnectionReferences { get; set; } = new();
+}
+
 // ── Web Resources DTOs ──────────────────────────────────────────────────────
 
 #region Web Resources DTOs
@@ -4839,6 +5148,13 @@ public class WebResourcesListResponse
 {
     [JsonPropertyName("resources")]
     public List<WebResourceInfoDto> Resources { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class WebResourcesGetResponse

@@ -26,7 +26,7 @@ try {
     editor = monaco.editor.create(document.getElementById('sql-editor')!, {
         language: 'sql',
         theme: monacoTheme,
-        value: '',
+        value: '-- Enter your SQL query here\n',
         minimap: { enabled: false },
         lineNumbers: 'off',
         scrollBeyondLastLine: false,
@@ -99,6 +99,7 @@ const langToggle = document.getElementById('lang-toggle') as HTMLElement;
 const filterBar = document.getElementById('filter-bar') as HTMLElement;
 const filterInput = document.getElementById('filter-input') as HTMLInputElement;
 const filterCount = document.getElementById('filter-count') as HTMLElement;
+const transpileWarningBanner = document.getElementById('transpile-warning-banner') as HTMLElement;
 const dataSourceBanner = document.getElementById('data-source-banner') as HTMLElement;
 const resultsWrapper = document.getElementById('results-wrapper') as HTMLElement;
 const loadMoreBar = document.getElementById('load-more-bar') as HTMLElement;
@@ -116,6 +117,8 @@ let sortColumn = -1;
 let sortAsc = true;
 let useTds = false;
 let isExecuting = false;
+let topN: number | null = null;
+let useDistinct = false;
 
 // ── Record URL state ──
 let lastEntityName: string | null = null;
@@ -264,6 +267,33 @@ function updateSelectionVisuals(): void {
     updateCopyHint();
 }
 
+// ── Top N / DISTINCT query modifier ──
+function applyQueryModifiers(sql: string): string {
+    if (!sql || currentLanguage === 'xml') return sql;
+    let modified = sql;
+    // Strip any existing modifier injected by this function (idempotent re-run)
+    modified = modified.replace(/^SELECT\s+DISTINCT\s+TOP\s+\d+\s+/i, 'SELECT ');
+    modified = modified.replace(/^SELECT\s+DISTINCT\s+/i, 'SELECT ');
+    modified = modified.replace(/^SELECT\s+TOP\s+\d+\s+/i, 'SELECT ');
+
+    const hasDistinct = useDistinct;
+    const hasTopN = topN !== null && topN > 0;
+
+    if (!hasDistinct && !hasTopN) return modified;
+
+    // Rebuild SELECT prefix
+    let prefix = 'SELECT ';
+    if (hasDistinct && hasTopN) {
+        prefix += 'DISTINCT TOP ' + topN + ' ';
+    } else if (hasDistinct) {
+        prefix += 'DISTINCT ';
+    } else {
+        prefix += 'TOP ' + topN + ' ';
+    }
+
+    return modified.replace(/^SELECT\s+/i, prefix);
+}
+
 // ── Language auto-detection ──
 function detectLang(content: string): string {
     const trimmed = content.trimStart();
@@ -373,7 +403,7 @@ if (editor) editor.addAction({
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
     run: () => {
         const sql = editor.getValue().trim();
-        if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
+        if (sql) vscode.postMessage({ command: 'executeQuery', sql: applyQueryModifiers(sql), useTds, language: currentLanguage });
     },
 });
 
@@ -442,7 +472,7 @@ if (typeof monaco !== 'undefined') {
 // ── Button handlers ──
 executeBtn.addEventListener('click', () => {
     const sql = editor ? editor.getValue().trim() : '';
-    if (sql) vscode.postMessage({ command: 'executeQuery', sql, useTds, language: currentLanguage });
+    if (sql) vscode.postMessage({ command: 'executeQuery', sql: applyQueryModifiers(sql), useTds, language: currentLanguage });
 });
 historyBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'showHistory' });
@@ -466,6 +496,7 @@ clearBtn.addEventListener('click', () => {
     resultsWrapper.innerHTML = '<div class="empty-state">Run a query to see results</div>';
     loadMoreBar.style.display = 'none';
     filterBar.classList.remove('visible');
+    transpileWarningBanner.style.display = 'none';
     dataSourceBanner.style.display = 'none';
     statusText.textContent = 'Ready';
     rowCountEl.textContent = '';
@@ -540,6 +571,9 @@ moreBtn.addEventListener('click', (e) => {
         { label: 'Explain Query', action: 'explain' },
         { label: '', action: 'separator' },
         { label: 'TDS Read Replica', action: 'toggleTds', checked: useTds },
+        { label: '', action: 'separator' },
+        { label: 'DISTINCT', action: 'toggleDistinct', checked: useDistinct },
+        { label: topN !== null ? 'Top N: ' + topN + '\u2026' : 'Top N\u2026', action: 'setTopN', checked: topN !== null },
     ]);
 });
 
@@ -574,6 +608,23 @@ document.addEventListener('click', (e) => {
         case 'toggleTds':
             useTds = !useTds;
             break;
+        case 'toggleDistinct':
+            useDistinct = !useDistinct;
+            break;
+        case 'setTopN': {
+            const input = prompt(topN !== null ? 'Top N rows (leave blank to clear):' : 'Top N rows:', topN !== null ? String(topN) : '');
+            if (input === null) break; // cancelled
+            const trimmed = input.trim();
+            if (trimmed === '') {
+                topN = null;
+            } else {
+                const parsed = parseInt(trimmed, 10);
+                if (!isNaN(parsed) && parsed > 0) {
+                    topN = parsed;
+                }
+            }
+            break;
+        }
     }
 });
 
@@ -607,8 +658,8 @@ resultsWrapper.addEventListener('mousedown', (e) => {
         sortAndRender();
         return;
     }
-    // Skip selection when clicking a link — let the click handler open it
-    if (target.closest('a[href]')) return;
+    // Skip selection when clicking a link or the hover copy button
+    if (target.closest('a[href]') || target.closest('.cell-copy-btn')) return;
 
     const td = target.closest<HTMLElement>('td[data-row]');
     if (!td) return;
@@ -653,8 +704,26 @@ resultsWrapper.addEventListener('mousedown', (e) => {
 // ── Link click handler ──
 // VS Code webviews block external navigations by default.
 // Intercept <a> clicks in the results table and open via the extension host.
+// Also handles the hover copy button on record link cells.
 resultsWrapper.addEventListener('click', (e) => {
-    const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
+    const target = e.target as HTMLElement;
+
+    // Hover copy button on record link cells
+    const copyBtn = target.closest<HTMLElement>('.cell-copy-btn');
+    if (copyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const val = copyBtn.dataset['copyValue'] ?? '';
+        vscode.postMessage({ command: 'copyToClipboard', text: val });
+        if (copyHintEl) {
+            const truncated = val.length > 40 ? val.substring(0, 40) + '...' : val;
+            copyHintEl.textContent = 'Copied: ' + truncated;
+            setTimeout(() => { updateCopyHint(); }, 2000);
+        }
+        return;
+    }
+
+    const link = target.closest<HTMLAnchorElement>('a[href]');
     if (link) {
         e.preventDefault();
         e.stopPropagation();
@@ -870,6 +939,23 @@ function handleQueryResult(data: QueryResultResponse): void {
     loadMoreBar.style.display = moreRecords ? '' : 'none';
     filterBar.classList.add('visible');
 
+    if (data.warnings && data.warnings.length > 0) {
+        const msgs = data.warnings.map(w => escapeHtml(w)).join('<br>');
+        transpileWarningBanner.innerHTML =
+            '<span class="warning-icon codicon codicon-warning"></span>' +
+            '<span class="warning-messages">' + msgs + '</span>' +
+            '<button class="warning-dismiss" title="Dismiss" aria-label="Dismiss warnings">\u00D7</button>';
+        transpileWarningBanner.style.display = '';
+        const dismissBtn = transpileWarningBanner.querySelector('.warning-dismiss');
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', () => {
+                transpileWarningBanner.style.display = 'none';
+            }, { once: true });
+        }
+    } else {
+        transpileWarningBanner.style.display = 'none';
+    }
+
     if (data.dataSources && data.dataSources.length > 1) {
         const parts = data.dataSources.map(ds => {
             const tag = ds.isRemote ? 'remote' : 'local';
@@ -936,7 +1022,14 @@ function renderTable(rows: Record<string, unknown>[]): void {
         columns.forEach((_col, colIdx) => {
             const rich = getCellRichValue(row, colIdx);
             if (rich.url) {
-                html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '"><a href="' + escapeAttr(rich.url) + '" target="_blank">' + escapeHtml(rich.text) + '</a></td>';
+                // Copy value is the GUID/entity ID if available, otherwise the display text
+                const copyVal = rich.entityId ?? rich.text;
+                html += '<td class="cell-has-link" data-row="' + rowIdx + '" data-col="' + colIdx + '">' +
+                    '<a href="' + escapeAttr(rich.url) + '" target="_blank">' + escapeHtml(rich.text) + '</a>' +
+                    '<button class="cell-copy-btn" data-copy-value="' + escapeAttr(copyVal) + '" title="Copy ' + escapeAttr(copyVal) + '" tabindex="-1">' +
+                    '<span class="codicon codicon-copy" style="font-size:10px;"></span>' +
+                    '</button>' +
+                    '</td>';
             } else {
                 html += '<td data-row="' + rowIdx + '" data-col="' + colIdx + '">' + escapeHtml(rich.text) + '</td>';
             }

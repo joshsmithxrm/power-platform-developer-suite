@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -16,7 +17,7 @@ public interface IRoleService
     /// <param name="filter">Optional filter string (matches name).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of role info.</returns>
-    Task<List<RoleInfo>> ListAsync(
+    Task<ListResult<RoleInfo>> ListAsync(
         string? filter = null,
         CancellationToken cancellationToken = default);
 

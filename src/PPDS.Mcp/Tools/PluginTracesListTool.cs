@@ -62,11 +62,12 @@ public sealed class PluginTracesListTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
-        var traces = await traceService.ListAsync(filter, maxRows, cancellationToken).ConfigureAwait(false);
+        var result = await traceService.ListAsync(filter, maxRows, cancellationToken).ConfigureAwait(false);
 
         return new PluginTracesListResult
         {
-            Traces = traces.Select(t => new PluginTraceSummary
+            TotalCount = result.TotalCount,
+            Traces = result.Items.Select(t => new PluginTraceSummary
             {
                 Id = t.Id,
                 TypeName = t.TypeName,
@@ -79,7 +80,7 @@ public sealed class PluginTracesListTool
                 HasException = t.HasException,
                 CorrelationId = t.CorrelationId
             }).ToList(),
-            Count = traces.Count
+            Count = result.Items.Count
         };
     }
 }
@@ -100,6 +101,10 @@ public sealed class PluginTracesListResult
     /// </summary>
     [JsonPropertyName("count")]
     public int Count { get; set; }
+
+    /// <summary>Total count of traces matching the filter (before top limit).</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

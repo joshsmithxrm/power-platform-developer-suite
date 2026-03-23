@@ -2,7 +2,7 @@
 // External webview script for the Solutions panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, escapeAttr, cssEscape, formatDate } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, cssEscape, formatDateTime } from './shared/dom-utils.js';
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, SolutionViewDto, ComponentGroupDto } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
@@ -23,6 +23,8 @@ const sortSelect = document.getElementById('sort-select') as HTMLSelectElement;
 let allSolutions: SolutionViewDto[] = [];
 /** Currently displayed solutions (after managed filter + sort). */
 let solutions: SolutionViewDto[] = [];
+/** Total count from the server (before any client-side filtering). */
+let serverTotalCount = 0;
 const expandedSolutions = new Set<string>();
 const expandedGroups = new Set<string>();
 
@@ -36,8 +38,22 @@ function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
 }
 
+// ── Visibility filter segmented control ──
+const visibilityFilterEl = document.getElementById('visibility-filter') as HTMLElement;
+visibilityFilterEl.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.seg-btn');
+    if (!btn) return;
+    const value = btn.dataset.value;
+    if (!value) return;
+    visibilityFilterEl.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    vscode.postMessage({ command: 'setVisibilityFilter', includeInternal: value === 'all' });
+});
+
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -231,7 +247,12 @@ function updateSolutionExpansion(uniqueName: string, expanded: boolean): void {
 function updateStatusBar(sols: SolutionViewDto[]): void {
     const managedCount = sols.filter(s => s.isManaged).length;
     const unmanagedCount = sols.length - managedCount;
-    statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${unmanagedCount} unmanaged, ${managedCount} managed)`;
+    const baseLabel = `${unmanagedCount} unmanaged, ${managedCount} managed`;
+    if (serverTotalCount > 0 && sols.length < serverTotalCount) {
+        statusText.textContent = `${sols.length} of ${serverTotalCount} solution${serverTotalCount !== 1 ? 's' : ''} (${baseLabel})`;
+    } else {
+        statusText.textContent = `${sols.length} solution${sols.length !== 1 ? 's' : ''} (${baseLabel})`;
+    }
 }
 
 // ── Message handling ──
@@ -259,6 +280,9 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             }
             break;
         case 'solutionsLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
+            serverTotalCount = msg.totalCount;
             renderSolutions(msg.solutions);
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
@@ -276,6 +300,8 @@ window.addEventListener('message', (event: MessageEvent<SolutionsPanelHostToWebv
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;
@@ -316,20 +342,48 @@ function renderSolutionsList(): void {
     let html = '<ul class="solution-list">';
     for (const sol of solutions) {
         const isExpanded = expandedSolutions.has(sol.uniqueName);
+
+        // S-03: Build secondary info parts
+        const secondaryParts: string[] = [];
+        if (sol.installedOn) {
+            secondaryParts.push('Installed: ' + formatDateTime(sol.installedOn));
+        }
+        if (sol.modifiedOn) {
+            secondaryParts.push('Modified: ' + formatDateTime(sol.modifiedOn));
+        }
+        if (sol.isVisible) {
+            secondaryParts.push('Visible');
+        }
+        if (sol.isApiManaged) {
+            secondaryParts.push('API Managed');
+        }
+
         html += '<li>';
         html += '<div class="solution-row" data-unique-name="' + escapeAttr(sol.uniqueName) + '">';
         html += '<span class="chevron' + (isExpanded ? ' expanded' : '') + '">&#9654;</span>';
         html += '<span class="icon">' + (sol.isManaged ? '&#128274;' : '&#128230;') + '</span>';
-        html += '<span class="name">' + escapeHtml(sol.uniqueName) + (sol.friendlyName !== sol.uniqueName ? ' (' + escapeHtml(sol.friendlyName) + ')' : '') + '</span>';
+        html += '<span class="solution-row-info">';
+        // Primary line: S-02 friendlyName first, uniqueName in parentheses, version, publisher
+        html += '<span class="solution-primary">';
+        html += '<span class="name">' + escapeHtml(sol.friendlyName || sol.uniqueName);
+        if (sol.friendlyName && sol.friendlyName !== sol.uniqueName) {
+            html += ' <span class="schema-name">(' + escapeHtml(sol.uniqueName) + ')</span>';
+        }
+        html += '</span>';
         if (sol.version) {
-            html += '<span class="version">(' + escapeHtml(sol.version) + ')</span>';
+            html += ' <span class="version">(' + escapeHtml(sol.version) + ')</span>';
         }
         if (sol.publisherName) {
-            html += '<span class="publisher">' + escapeHtml('\u2014 ' + sol.publisherName) + '</span>';
+            html += ' <span class="publisher">' + escapeHtml('\u2014 ' + sol.publisherName) + '</span>';
         }
-        if (sol.isManaged) {
-            html += '<span class="managed-badge">managed</span>';
+        html += '</span>';
+        // S-03: Secondary text line
+        if (secondaryParts.length > 0) {
+            html += '<span class="solution-secondary">' + escapeHtml(secondaryParts.join(' \u00b7 ')) + '</span>';
         }
+        html += '</span>';
+        // S-11: Show managed OR unmanaged badge on ALL solutions
+        html += '<span class="solution-badge ' + (sol.isManaged ? 'managed-badge' : 'unmanaged-badge') + '">' + (sol.isManaged ? 'managed' : 'unmanaged') + '</span>';
         html += '<button class="open-maker-btn" data-solution-id="' + escapeAttr(sol.id || '') + '" title="Open in Maker Portal">\uD83D\uDD17</button>';
         html += '</div>';
         html += '<div class="components-container' + (isExpanded ? ' expanded' : '') + '" id="components-' + escapeAttr(sol.uniqueName) + '">';
@@ -339,11 +393,15 @@ function renderSolutionsList(): void {
         html += '<span class="detail-label">Type</span><span class="detail-value">' + escapeHtml(sol.isManaged ? 'Managed' : 'Unmanaged') + '</span>';
         html += '<span class="detail-label">Visible</span><span class="detail-value">' + escapeHtml(sol.isVisible ? 'Yes' : 'No') + '</span>';
         html += '<span class="detail-label">API Managed</span><span class="detail-value">' + escapeHtml(sol.isApiManaged ? 'Yes' : 'No') + '</span>';
+        // S-10: Add createdOn to detail card
+        if (sol.createdOn) {
+            html += '<span class="detail-label">Created</span><span class="detail-value">' + escapeHtml(formatDateTime(sol.createdOn)) + '</span>';
+        }
         if (sol.installedOn) {
-            html += '<span class="detail-label">Installed</span><span class="detail-value">' + escapeHtml(formatDate(sol.installedOn)) + '</span>';
+            html += '<span class="detail-label">Installed</span><span class="detail-value">' + escapeHtml(formatDateTime(sol.installedOn)) + '</span>';
         }
         if (sol.modifiedOn) {
-            html += '<span class="detail-label">Modified</span><span class="detail-value">' + escapeHtml(formatDate(sol.modifiedOn)) + '</span>';
+            html += '<span class="detail-label">Modified</span><span class="detail-value">' + escapeHtml(formatDateTime(sol.modifiedOn)) + '</span>';
         }
         if (sol.description) {
             html += '<div class="detail-description">' + escapeHtml(sol.description) + '</div>';

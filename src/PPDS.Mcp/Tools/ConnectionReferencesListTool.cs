@@ -40,11 +40,12 @@ public sealed class ConnectionReferencesListTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IConnectionReferenceService>();
 
-        var references = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new ConnectionReferencesListResult
         {
-            ConnectionReferences = references.Select(r => new ConnectionReferenceSummary
+            TotalCount = result.TotalCount,
+            ConnectionReferences = result.Items.Select(r => new ConnectionReferenceSummary
             {
                 LogicalName = r.LogicalName,
                 DisplayName = r.DisplayName,
@@ -69,6 +70,10 @@ public sealed class ConnectionReferencesListResult
     /// </summary>
     [JsonPropertyName("connectionReferences")]
     public List<ConnectionReferenceSummary> ConnectionReferences { get; set; } = [];
+
+    /// <summary>Total count of records.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

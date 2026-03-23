@@ -134,7 +134,10 @@ export abstract class WebviewPanelBase<
     }
 
     /**
-     * Update the panel title bar with profile name, environment, and panel label.
+     * Single source of truth for panel titles. Do not override — all panels use this format.
+     *
+     * Produces: `profileName · envName — PanelLabel` (or `PanelLabel #N` for multi-instance panels).
+     *
      * @param panelId Numeric instance ID for multi-panel suffix
      * @param multipleInstances Whether to show the ` #N` suffix
      */

@@ -33,18 +33,17 @@ public sealed class ImportJobsListTool
     [McpServerTool(Name = "ppds_import_jobs_list")]
     [Description("List recent solution import jobs for the current environment. Shows import status, progress, solution name, and timing. Use this to check if a solution import succeeded or failed.")]
     public async Task<ImportJobsListResult> ExecuteAsync(
-        [Description("Maximum number of results to return (default 50)")]
-        int top = 50,
         CancellationToken cancellationToken = default)
     {
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IImportJobService>();
 
-        var jobs = await service.ListAsync(top: top, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var result = await service.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new ImportJobsListResult
         {
-            Jobs = jobs.Select(j => new ImportJobSummary
+            TotalCount = result.TotalCount,
+            Jobs = result.Items.Select(j => new ImportJobSummary
             {
                 Id = j.Id.ToString(),
                 SolutionName = j.SolutionName,
@@ -69,6 +68,10 @@ public sealed class ImportJobsListResult
     /// </summary>
     [JsonPropertyName("jobs")]
     public List<ImportJobSummary> Jobs { get; set; } = [];
+
+    /// <summary>Total count of records.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

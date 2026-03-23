@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -15,10 +16,12 @@ public interface ISolutionService
     /// </summary>
     /// <param name="filter">Optional filter by unique name or friendly name.</param>
     /// <param name="includeManaged">Include managed solutions (default: false).</param>
+    /// <param name="includeInternal">Include internal/invisible solutions like Default and Active (default: false).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<List<SolutionInfo>> ListAsync(
+    Task<ListResult<SolutionInfo>> ListAsync(
         string? filter = null,
         bool includeManaged = false,
+        bool includeInternal = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

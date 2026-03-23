@@ -43,14 +43,15 @@ public sealed class SolutionsListTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<ISolutionService>();
 
-        var solutions = await service.ListAsync(
+        var result = await service.ListAsync(
             filter: filter,
             includeManaged: includeManaged,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new SolutionsListResult
         {
-            Solutions = solutions.Select(s => new SolutionSummary
+            TotalCount = result.TotalCount,
+            Solutions = result.Items.Select(s => new SolutionSummary
             {
                 Id = s.Id.ToString(),
                 UniqueName = s.UniqueName,
@@ -75,6 +76,10 @@ public sealed class SolutionsListResult
     /// </summary>
     [JsonPropertyName("solutions")]
     public List<SolutionSummary> Solutions { get; set; } = [];
+
+    /// <summary>Total count of records matching the query.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

@@ -38,6 +38,8 @@ import type {
     SolutionComponentsResponse,
     MetadataEntitiesResponse,
     MetadataEntityResponse,
+    MetadataGlobalOptionSetsResponse,
+    MetadataGlobalOptionSetDetailResponse,
     ImportJobsListResponse,
     ImportJobsGetResponse,
     PluginTracesListResponse,
@@ -53,6 +55,7 @@ import type {
     EnvironmentVariablesListResponse,
     EnvironmentVariablesGetResponse,
     EnvironmentVariablesSetResponse,
+    EnvironmentVariablesSyncDeploymentSettingsResponse,
     WebResourceInfoDto,
     WebResourceDetailDto,
 } from './types.js';
@@ -678,7 +681,7 @@ export class DaemonClient implements vscode.Disposable {
     /**
      * Lists solutions in the active Dataverse environment.
      */
-    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string): Promise<SolutionsListResponse> {
+    async solutionsList(filter?: string, includeManaged?: boolean, environmentUrl?: string, includeInternal?: boolean): Promise<SolutionsListResponse> {
         await this.ensureConnected();
 
         const params: Record<string, unknown> = {};
@@ -690,6 +693,9 @@ export class DaemonClient implements vscode.Disposable {
         }
         if (environmentUrl !== undefined) {
             params.environmentUrl = environmentUrl;
+        }
+        if (includeInternal !== undefined) {
+            params.includeInternal = includeInternal;
         }
 
         this.log.info(`Calling solutions/list${filter ? ` with filter="${filter}"` : ''}...`);
@@ -752,11 +758,12 @@ export class DaemonClient implements vscode.Disposable {
     // ── Plugin Traces ─────────────────────────────────────────────────────────
     // ── Connection References ───────────────────────────────────────────────
 
-    async connectionReferencesList(solutionId?: string, environmentUrl?: string): Promise<ConnectionReferencesListResponse> {
+    async connectionReferencesList(solutionId?: string, environmentUrl?: string, includeInactive = false): Promise<ConnectionReferencesListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (includeInactive) params.includeInactive = true;
         this.log.info('Calling connectionReferences/list...');
         const result = await this.connection!.sendRequest<ConnectionReferencesListResponse>('connectionReferences/list', params);
         this.log.debug(`Got ${result.references.length} connection references`);
@@ -781,15 +788,24 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Environment Variables ───────────────────────────────────────────────
 
-    async environmentVariablesList(solutionId?: string, environmentUrl?: string): Promise<EnvironmentVariablesListResponse> {
+    async environmentVariablesList(solutionId?: string, environmentUrl?: string, includeInactive?: boolean): Promise<EnvironmentVariablesListResponse> {
         await this.ensureConnected();
         const params: Record<string, unknown> = {};
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        if (includeInactive !== undefined) params.includeInactive = includeInactive;
         this.log.info('Calling environmentVariables/list...');
         const result = await this.connection!.sendRequest<EnvironmentVariablesListResponse>('environmentVariables/list', params);
         this.log.debug(`Got ${result.variables.length} environment variables`);
         return result;
+    }
+
+    async environmentVariablesSyncDeploymentSettings(solutionId: string, filePath: string, environmentUrl?: string): Promise<EnvironmentVariablesSyncDeploymentSettingsResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { solutionId, filePath };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling environmentVariables/syncDeploymentSettings...');
+        return await this.connection!.sendRequest<EnvironmentVariablesSyncDeploymentSettingsResponse>('environmentVariables/syncDeploymentSettings', params);
     }
 
     async environmentVariablesGet(schemaName: string, environmentUrl?: string): Promise<EnvironmentVariablesGetResponse> {
@@ -813,18 +829,17 @@ export class DaemonClient implements vscode.Disposable {
     async webResourcesList(
         solutionId?: string,
         textOnly = true,
-        top = 5000,
         environmentUrl?: string,
-    ): Promise<{ resources: WebResourceInfoDto[] }> {
+    ): Promise<{ resources: WebResourceInfoDto[]; totalCount: number; filtersApplied?: string[] }> {
         await this.ensureConnected();
 
-        const params: Record<string, unknown> = { textOnly, top };
+        const params: Record<string, unknown> = { textOnly };
         if (solutionId !== undefined) params.solutionId = solutionId;
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
 
         this.log.info('Calling webResources/list...');
-        const result = await this.connection!.sendRequest<{ resources: WebResourceInfoDto[] }>('webResources/list', params);
-        this.log.debug(`Got ${result.resources.length} web resources`);
+        const result = await this.connection!.sendRequest<{ resources: WebResourceInfoDto[]; totalCount: number; filtersApplied?: string[] }>('webResources/list', params);
+        this.log.debug(`Got ${result.resources.length} of ${result.totalCount} web resources`);
 
         return result;
     }
@@ -996,10 +1011,10 @@ export class DaemonClient implements vscode.Disposable {
 
     // ── Metadata ────────────────────────────────────────────────────────────
 
-    async metadataEntities(environmentUrl?: string): Promise<MetadataEntitiesResponse> {
+    async metadataEntities(environmentUrl?: string, includeIntersect = false): Promise<MetadataEntitiesResponse> {
         await this.ensureConnected();
 
-        const params: Record<string, unknown> = {};
+        const params: Record<string, unknown> = { includeIntersect };
         if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
 
         this.log.debug('Calling metadata/entities...');
@@ -1008,6 +1023,38 @@ export class DaemonClient implements vscode.Disposable {
             params
         );
         this.log.debug(`Got ${result.entities.length} entities`);
+
+        return result;
+    }
+
+    async metadataGlobalOptionSets(environmentUrl?: string): Promise<MetadataGlobalOptionSetsResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.debug('Calling metadata/globalOptionSets...');
+        const result = await this.connection!.sendRequest<MetadataGlobalOptionSetsResponse>(
+            'metadata/globalOptionSets',
+            params
+        );
+        this.log.debug(`Got ${result.optionSets.length} global option sets`);
+
+        return result;
+    }
+
+    async metadataGlobalOptionSet(name: string, environmentUrl?: string): Promise<MetadataGlobalOptionSetDetailResponse> {
+        await this.ensureConnected();
+
+        const params: Record<string, unknown> = { name };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+
+        this.log.debug(`Calling metadata/globalOptionSet for "${name}"...`);
+        const result = await this.connection!.sendRequest<MetadataGlobalOptionSetDetailResponse>(
+            'metadata/globalOptionSet',
+            params
+        );
+        this.log.debug(`Got global option set "${name}"`);
 
         return result;
     }

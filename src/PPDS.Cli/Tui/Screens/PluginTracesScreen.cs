@@ -105,7 +105,8 @@ internal sealed class PluginTracesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
             var service = provider.GetRequiredService<IPluginTraceService>();
 
-            var traces = await service.ListAsync(filter: _currentFilter, cancellationToken: ct);
+            var tracesResult = await service.ListAsync(filter: _currentFilter, cancellationToken: ct);
+            var traces = tracesResult.Items.ToList();
 
             ct.ThrowIfCancellationRequested();
 

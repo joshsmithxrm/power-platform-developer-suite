@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -20,11 +21,13 @@ public interface IConnectionReferenceService
     /// </summary>
     /// <param name="solutionName">Optional solution filter (unique name).</param>
     /// <param name="unboundOnly">If true, only return connection references without a bound connection.</param>
+    /// <param name="includeInactive">If true, include inactive connection references (default: false, active only).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of connection references.</returns>
-    Task<List<ConnectionReferenceInfo>> ListAsync(
+    Task<ListResult<ConnectionReferenceInfo>> ListAsync(
         string? solutionName = null,
         bool unboundOnly = false,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

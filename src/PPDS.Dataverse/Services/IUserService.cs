@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -15,13 +16,11 @@ public interface IUserService
     /// </summary>
     /// <param name="filter">Optional filter string (matches name, email, domain).</param>
     /// <param name="includeDisabled">Include disabled users.</param>
-    /// <param name="top">Maximum number of results.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of user info.</returns>
-    Task<List<UserInfo>> ListAsync(
+    Task<ListResult<UserInfo>> ListAsync(
         string? filter = null,
         bool includeDisabled = false,
-        int top = 100,
         CancellationToken cancellationToken = default);
 
     /// <summary>

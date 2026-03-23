@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Services.Utilities;
 
@@ -38,9 +39,10 @@ public class ConnectionReferenceService : IConnectionReferenceService
     }
 
     /// <inheritdoc />
-    public async Task<List<ConnectionReferenceInfo>> ListAsync(
+    public async Task<ListResult<ConnectionReferenceInfo>> ListAsync(
         string? solutionName = null,
         bool unboundOnly = false,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -60,13 +62,20 @@ public class ConnectionReferenceService : IConnectionReferenceService
             Orders = { new OrderExpression(ConnectionReference.Fields.ConnectionReferenceLogicalName, OrderType.Ascending) }
         };
 
-        // Only active connection references
-        query.Criteria.AddCondition(ConnectionReference.Fields.StateCode, ConditionOperator.Equal, 0);
+        var filtersApplied = new List<string>();
+
+        if (!includeInactive)
+        {
+            // Only active connection references
+            query.Criteria.AddCondition(ConnectionReference.Fields.StateCode, ConditionOperator.Equal, 0);
+            filtersApplied.Add("active only");
+        }
 
         // Filter to unbound only if specified
         if (unboundOnly)
         {
             query.Criteria.AddCondition(ConnectionReference.Fields.ConnectionId, ConditionOperator.Null);
+            filtersApplied.Add("unbound only");
         }
 
         // Filter by solution if specified
@@ -93,7 +102,12 @@ public class ConnectionReferenceService : IConnectionReferenceService
         var connectionRefs = results.Entities.Select(MapToInfo).ToList();
         _logger.LogDebug("Found {Count} connection references", connectionRefs.Count);
 
-        return connectionRefs;
+        return new ListResult<ConnectionReferenceInfo>
+        {
+            Items = connectionRefs,
+            TotalCount = connectionRefs.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />
@@ -153,10 +167,10 @@ public class ConnectionReferenceService : IConnectionReferenceService
         CancellationToken cancellationToken = default)
     {
         // Get all flows and filter by those referencing this connection reference
-        var allFlows = await _flowService.ListAsync(cancellationToken: cancellationToken);
+        var allFlowsResult = await _flowService.ListAsync(cancellationToken: cancellationToken);
 
         // Case-insensitive comparison for connection reference names
-        return allFlows
+        return allFlowsResult.Items
             .Where(f => f.ConnectionReferenceLogicalNames
                 .Any(cr => string.Equals(cr, logicalName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -170,8 +184,11 @@ public class ConnectionReferenceService : IConnectionReferenceService
         _logger.LogDebug("Analyzing flow-connection reference relationships");
 
         // Get all connection references and flows in the solution
-        var connectionRefs = await ListAsync(solutionName, cancellationToken: cancellationToken);
-        var flows = await _flowService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var connectionRefsResult = await ListAsync(solutionName, cancellationToken: cancellationToken);
+        var flowsResult = await _flowService.ListAsync(solutionName, cancellationToken: cancellationToken);
+
+        var connectionRefs = connectionRefsResult.Items;
+        var flows = flowsResult.Items;
 
         // Build case-insensitive lookup for connection references
         var crLookup = connectionRefs.ToDictionary(

@@ -20,6 +20,9 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
     protected readonly panelLabel = 'Solutions';
 
+    /** Whether to include internal (hidden) solutions. Default false — show only visible solutions. */
+    private includeInternal = false;
+
     /**
      * Returns the number of open SolutionsPanel instances.
      * Used by diagnostic commands for panel state inspection.
@@ -60,7 +63,8 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: false,
+                enableFindWidget: true,
+                retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
                     vscode.Uri.joinPath(extensionUri, 'dist'),
@@ -82,6 +86,10 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                 await this.handleEnvironmentPickerClick(this.daemon, this.panelId, SolutionsPanel.instances.length > 1);
                 break;
             case 'refresh':
+                await this.loadSolutions();
+                break;
+            case 'setVisibilityFilter':
+                this.includeInternal = message.includeInternal;
                 await this.loadSolutions();
                 break;
             case 'expandSolution':
@@ -134,7 +142,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     private async loadSolutions(isRetry = false): Promise<void> {
         try {
             this.postMessage({ command: 'loading' });
-            const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl);
+            const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl, this.includeInternal);
 
             this.postMessage({
                 command: 'solutionsLoaded',
@@ -152,6 +160,8 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                     isVisible: s.isVisible ?? true,
                     isApiManaged: s.isApiManaged ?? false,
                 })),
+                totalCount: allResult.totalCount ?? allResult.solutions.length,
+                filtersApplied: allResult.filtersApplied ?? [],
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -234,7 +244,11 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="maker-portal-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
-    <input id="search-input" type="text" placeholder="Filter solutions..." class="toolbar-search" />
+    <input id="search-input" type="text" placeholder="Search solutions..." class="toolbar-search" />
+    <div class="segmented-control" id="visibility-filter" title="Show visible solutions only, or all including internal">
+        <button class="seg-btn active" data-value="visible">Visible</button>
+        <button class="seg-btn" data-value="all">All</button>
+    </div>
     <label class="toolbar-checkbox" title="Show managed solutions">
         <input type="checkbox" id="include-managed-cb" checked />
         <span>Include Managed</span>

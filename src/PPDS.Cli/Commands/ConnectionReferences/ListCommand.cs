@@ -73,7 +73,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var connectionRefs = await crService.ListAsync(solution, unboundOnly, cancellationToken);
+            var connectionRefsResult = await crService.ListAsync(solutionName: solution, unboundOnly: unboundOnly, cancellationToken: cancellationToken);
+            var connectionRefs = connectionRefsResult.Items;
 
             if (globalOptions.IsJsonMode)
             {

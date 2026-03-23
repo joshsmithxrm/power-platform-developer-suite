@@ -79,7 +79,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var jobs = await importJobService.ListAsync(solutionFilter, top, cancellationToken);
+            var result = await importJobService.ListAsync(solutionFilter, cancellationToken);
+            var jobs = result.Items;
 
             if (jobs.Count == 0)
             {

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -34,14 +35,12 @@ public class ImportJobService : IImportJobService
     }
 
     /// <inheritdoc />
-    public async Task<List<ImportJobInfo>> ListAsync(
+    public async Task<ListResult<ImportJobInfo>> ListAsync(
         string? solutionName = null,
-        int top = 50,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
-        // Note: ImportJob entity doesn't support $skip, so we use TopCount only
         var query = new QueryExpression(ImportJob.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(
@@ -55,7 +54,6 @@ public class ImportJobService : IImportJobService
                 ImportJob.Fields.CreatedOn,
                 ImportJob.Fields.CreatedBy,
                 ImportJob.Fields.OperationContext),
-            TopCount = top,
             Orders = { new OrderExpression(ImportJob.Fields.CreatedOn, OrderType.Descending) }
         };
 
@@ -64,11 +62,36 @@ public class ImportJobService : IImportJobService
             query.Criteria.AddCondition(ImportJob.Fields.SolutionName, ConditionOperator.Contains, solutionName);
         }
 
-        _logger.LogDebug("Querying import jobs with solutionName filter: {SolutionName}, top: {Top}", solutionName, top);
+        _logger.LogDebug("Querying import jobs with solutionName filter: {SolutionName}", solutionName);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        // Progressive paging — load all records
+        var allItems = new List<ImportJobInfo>();
+        string? pagingCookie = null;
+        int pageNumber = 1;
 
-        return results.Entities.Select(MapToImportJobInfo).ToList();
+        while (true)
+        {
+            query.PageInfo = new PagingInfo
+            {
+                PageNumber = pageNumber,
+                Count = 250,
+                PagingCookie = pagingCookie
+            };
+
+            var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+            allItems.AddRange(results.Entities.Select(MapToImportJobInfo));
+
+            if (!results.MoreRecords) break;
+
+            pagingCookie = results.PagingCookie;
+            pageNumber++;
+        }
+
+        return new ListResult<ImportJobInfo>
+        {
+            Items = allItems,
+            TotalCount = allItems.Count
+        };
     }
 
     /// <inheritdoc />

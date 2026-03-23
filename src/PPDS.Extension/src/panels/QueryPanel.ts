@@ -77,6 +77,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
+                enableFindWidget: true,
                 retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
@@ -227,7 +228,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                         this.environmentColor = null;
                     }
                     this.postMessage({ command: 'updateEnvironment', name: env.displayName, url: env.url, envType: this.environmentType, envColor: this.environmentColor });
-                    this.updateTitle();
+                    this.updatePanelTitle(this.panelId, QueryPanel.instances.length > 1);
                 }
                 break;
             }
@@ -284,14 +285,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
         }
         this.postMessage({ command: 'updateEnvironment', name: this.environmentDisplayName ?? 'No environment', url: this.environmentUrl ?? null, envType: this.environmentType, envColor: this.environmentColor });
-        this.updateTitle();
-    }
-
-    private updateTitle(): void {
-        if (!this.panel) return;
-        const context = [this.profileName, this.environmentDisplayName].filter(Boolean).join(' \u00B7 ');
-        const suffix = QueryPanel.instances.length > 1 ? ` ${this.panelId}` : '';
-        this.panel.title = context ? `${context} \u2014 Data Explorer${suffix}` : `Data Explorer${suffix}`;
+        this.updatePanelTitle(this.panelId, QueryPanel.instances.length > 1);
     }
 
     private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string, isConfirmed = false): Promise<void> {
@@ -633,9 +627,11 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
 <div class="filter-bar" id="filter-bar">
     <span class="codicon codicon-filter"></span>
-    <input type="text" id="filter-input" placeholder="Filter results..." />
+    <input type="text" id="filter-input" placeholder="Search results..." />
     <span id="filter-count"></span>
 </div>
+
+<div class="transpile-warning-banner" id="transpile-warning-banner" style="display:none"></div>
 
 <div class="data-source-banner" id="data-source-banner" style="display:none"></div>
 

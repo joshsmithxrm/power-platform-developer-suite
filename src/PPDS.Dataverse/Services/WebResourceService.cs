@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -63,19 +64,19 @@ public class WebResourceService : IWebResourceService
     }
 
     /// <inheritdoc />
-    public async Task<List<WebResourceInfo>> ListAsync(
+    public async Task<ListResult<WebResourceInfo>> ListAsync(
         Guid? solutionId = null,
         bool textOnly = false,
-        int top = 5000,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
 
         var query = new QueryExpression(WebResource.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet(ListColumns),
-            TopCount = top
+            ColumnSet = new ColumnSet(ListColumns)
         };
+
+        var filtersApplied = new List<string>();
 
         // Text-only filter: include only text type codes
         if (textOnly)
@@ -84,6 +85,7 @@ public class WebResourceService : IWebResourceService
                 WebResource.Fields.WebResourceType,
                 ConditionOperator.In,
                 TextTypes.Cast<object>().ToArray());
+            filtersApplied.Add("text types only");
         }
 
         // Solution filter: get component IDs via SolutionService, then IN filter
@@ -101,24 +103,57 @@ public class WebResourceService : IWebResourceService
 
             if (webResourceIds.Length == 0)
             {
-                return []; // No web resources in this solution
+                return new ListResult<WebResourceInfo>
+                {
+                    Items = [],
+                    TotalCount = 0,
+                    FiltersApplied = filtersApplied
+                };
             }
 
             query.Criteria.AddCondition(
                 WebResource.Fields.WebResourceId,
                 ConditionOperator.In,
                 webResourceIds.Cast<object>().ToArray());
+            filtersApplied.Add("solution filtered");
         }
 
         // Default sort: name ascending
         query.AddOrder(WebResource.Fields.Name, OrderType.Ascending);
 
         _logger.LogDebug(
-            "Querying web resources with solutionId: {SolutionId}, textOnly: {TextOnly}, top: {Top}",
-            solutionId, textOnly, top);
+            "Querying web resources with solutionId: {SolutionId}, textOnly: {TextOnly}",
+            solutionId, textOnly);
 
-        var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-        return results.Entities.Select(MapToWebResourceInfo).ToList();
+        // Progressive paging — load all records
+        var allItems = new List<WebResourceInfo>();
+        string? pagingCookie = null;
+        int pageNumber = 1;
+
+        while (true)
+        {
+            query.PageInfo = new PagingInfo
+            {
+                PageNumber = pageNumber,
+                Count = 250,
+                PagingCookie = pagingCookie
+            };
+
+            var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+            allItems.AddRange(results.Entities.Select(MapToWebResourceInfo));
+
+            if (!results.MoreRecords) break;
+
+            pagingCookie = results.PagingCookie;
+            pageNumber++;
+        }
+
+        return new ListResult<WebResourceInfo>
+        {
+            Items = allItems,
+            TotalCount = allItems.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />

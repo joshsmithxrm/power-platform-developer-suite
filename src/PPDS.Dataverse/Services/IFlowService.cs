@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -15,11 +16,13 @@ public interface IFlowService
     /// </summary>
     /// <param name="solutionName">Optional solution filter (unique name).</param>
     /// <param name="state">Optional state filter.</param>
+    /// <param name="includeClassic">When true, also returns classic workflows (Category != 5 or 6). Default false.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of cloud flows.</returns>
-    Task<List<FlowInfo>> ListAsync(
+    /// <returns>List of flows.</returns>
+    Task<ListResult<FlowInfo>> ListAsync(
         string? solutionName = null,
         FlowState? state = null,
+        bool includeClassic = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

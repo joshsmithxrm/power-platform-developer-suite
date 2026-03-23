@@ -2,25 +2,25 @@
 // External webview script for the Plugin Traces panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, escapeAttr } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, formatDateTime } from './shared/dom-utils.js';
 import type {
     PluginTracesPanelWebviewToHost,
     PluginTracesPanelHostToWebview,
     PluginTraceViewDto,
     PluginTraceDetailViewDto,
     TimelineNodeViewDto,
-    TraceFilterViewDto,
+    QueryConditionViewDto,
+    AdvancedQueryViewDto,
 } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
-import { DataTable } from './shared/data-table.js';
+import { DataTable, formatStatusCount } from './shared/data-table.js';
 
 const vscode = getVsCodeApi<PluginTracesPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as PluginTracesPanelWebviewToHost));
 
 // ── DOM element references ──────────────────────────────────────────────
-const filterBar = document.getElementById('filter-bar') as HTMLElement;
 const tablePane = document.getElementById('table-pane') as HTMLElement;
 const detailPane = document.getElementById('detail-pane') as HTMLElement;
 const statusText = document.getElementById('status-text') as HTMLElement;
@@ -33,6 +33,7 @@ const autoRefreshSelect = document.getElementById('auto-refresh-select') as HTML
 // Detail pane tabs
 const detailTabs = document.querySelectorAll<HTMLElement>('.detail-tab');
 const detailTabContents = document.querySelectorAll<HTMLElement>('.detail-tab-content');
+const detailTabOverview = document.getElementById('tab-overview') as HTMLElement;
 const detailTabDetails = document.getElementById('tab-details') as HTMLElement;
 const detailTabException = document.getElementById('tab-exception') as HTMLElement;
 const detailTabMessageBlock = document.getElementById('tab-message-block') as HTMLElement;
@@ -52,137 +53,17 @@ function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
 }
 
-// ── Filter bar controller ───────────────────────────────────────────────
-const filterEntity = document.getElementById('filter-entity') as HTMLInputElement;
-const filterMessage = document.getElementById('filter-message') as HTMLInputElement;
-const filterPlugin = document.getElementById('filter-plugin') as HTMLInputElement;
-const filterMode = document.getElementById('filter-mode') as HTMLSelectElement;
-const filterExceptions = document.getElementById('filter-exceptions') as HTMLInputElement;
-const filterStartDate = document.getElementById('filter-start-date') as HTMLInputElement;
-const filterEndDate = document.getElementById('filter-end-date') as HTMLInputElement;
-
-let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function collectFilter(): TraceFilterViewDto {
-    const filter: TraceFilterViewDto = {};
-    if (filterEntity.value.trim()) filter.primaryEntity = filterEntity.value.trim();
-    if (filterMessage.value.trim()) filter.messageName = filterMessage.value.trim();
-    if (filterPlugin.value.trim()) filter.typeName = filterPlugin.value.trim();
-    if (filterMode.value && filterMode.value !== 'All') filter.mode = filterMode.value;
-    if (filterExceptions.checked) filter.hasException = true;
-
-    // Date range from inputs
-    if (filterStartDate.value) {
-        filter.startDate = new Date(filterStartDate.value).toISOString();
-    }
-    if (filterEndDate.value) {
-        filter.endDate = new Date(filterEndDate.value).toISOString();
-    }
-
-    // Merge active quick filter state
-    const longRunningPill = document.getElementById('qf-long-running') as HTMLElement;
-    if (longRunningPill.classList.contains('active')) {
-        filter.minDurationMs = 1000;
-    }
-    return filter;
-}
-
-function applyFilterDebounced(): void {
-    if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
-    filterDebounceTimer = setTimeout(() => {
-        vscode.postMessage({ command: 'applyFilter', filter: collectFilter() });
-    }, 300);
-}
-
-filterEntity.addEventListener('input', applyFilterDebounced);
-filterMessage.addEventListener('input', applyFilterDebounced);
-filterPlugin.addEventListener('input', applyFilterDebounced);
-filterMode.addEventListener('change', applyFilterDebounced);
-filterExceptions.addEventListener('change', () => {
-    // Sync the Exceptions Only pill with the checkbox
-    const exPill = document.getElementById('qf-exceptions') as HTMLElement;
-    if (filterExceptions.checked) {
-        exPill.classList.add('active');
-    } else {
-        exPill.classList.remove('active');
-    }
-    applyFilterDebounced();
-});
-filterStartDate.addEventListener('change', applyFilterDebounced);
-filterEndDate.addEventListener('change', applyFilterDebounced);
-
-// Quick filter pills
-const qfLastHour = document.getElementById('qf-last-hour') as HTMLElement;
-const qfExceptions = document.getElementById('qf-exceptions') as HTMLElement;
-const qfLongRunning = document.getElementById('qf-long-running') as HTMLElement;
-const qfClearAll = document.getElementById('qf-clear-all') as HTMLElement;
-
-qfLastHour.addEventListener('click', () => {
-    qfLastHour.classList.toggle('active');
-    if (qfLastHour.classList.contains('active')) {
-        filterStartDate.value = new Date(Date.now() - 3600000).toISOString().slice(0, 16);
-        filterEndDate.value = '';
-    } else {
-        filterStartDate.value = '';
-        filterEndDate.value = '';
-    }
-    applyFilterDebounced();
-});
-
-qfExceptions.addEventListener('click', () => {
-    qfExceptions.classList.toggle('active');
-    filterExceptions.checked = qfExceptions.classList.contains('active');
-    applyFilterDebounced();
-});
-
-qfLongRunning.addEventListener('click', () => {
-    qfLongRunning.classList.toggle('active');
-    applyFilterDebounced();
-});
-
-qfClearAll.addEventListener('click', () => {
-    filterEntity.value = '';
-    filterMessage.value = '';
-    filterPlugin.value = '';
-    filterMode.value = '';
-    filterExceptions.checked = false;
-    filterStartDate.value = '';
-    filterEndDate.value = '';
-    qfLastHour.classList.remove('active');
-    qfExceptions.classList.remove('active');
-    qfLongRunning.classList.remove('active');
-    vscode.postMessage({ command: 'applyFilter', filter: {} });
-});
-
-// Filter collapse toggle
-const filterToggleBtn = document.getElementById('filter-toggle-btn') as HTMLElement;
-filterToggleBtn.addEventListener('click', () => {
-    filterBar.classList.toggle('collapsed');
-    filterToggleBtn.textContent = filterBar.classList.contains('collapsed') ? 'Show Filters' : 'Hide Filters';
-});
-
-// ── Format duration helper ──────────────────────────────────────────────
+// ── Format helpers ──────────────────────────────────────────────────────
 function formatDuration(ms: number | null): string {
     if (ms === null || ms === undefined) return '\u2014';
     if (ms < 1000) return ms + 'ms';
     return (ms / 1000).toFixed(2) + 's';
 }
 
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
-}
-
-// ── DataTable setup ─────────────────────────────────────────────────────
+// ── DataTable setup (6d: Operation Type + Correlation ID columns) ─────
 let selectedTraceId: string | null = null;
 let currentTraces: PluginTraceViewDto[] = [];
+let totalTraceCount = 0;
 
 const table = new DataTable<PluginTraceViewDto>({
     container: tablePane,
@@ -194,13 +75,14 @@ const table = new DataTable<PluginTraceViewDto>({
                 + '<span class="trace-status-icon ' + escapeAttr(item.hasException ? 'exception' : 'success') + '"></span>'
                 + '<span class="trace-status-label">' + escapeHtml(item.hasException ? 'Exception' : 'Success') + '</span>'
                 + '</span>',
-            className: '100px',
+            className: '90px',
             sortable: true,
         },
         {
             key: 'createdOn',
             label: 'Time',
             render: (item) => escapeHtml(formatDateTime(item.createdOn)),
+            sortValue: (item) => new Date(item.createdOn).getTime(),
             className: '140px',
         },
         {
@@ -213,6 +95,13 @@ const table = new DataTable<PluginTraceViewDto>({
                 }
                 return text;
             },
+            sortValue: (item) => item.durationMs ?? 0,
+            className: '80px',
+        },
+        {
+            key: 'operationType',
+            label: 'Operation',
+            render: (item) => escapeHtml(item.operationType || '\u2014'),
             className: '80px',
         },
         {
@@ -237,6 +126,7 @@ const table = new DataTable<PluginTraceViewDto>({
             key: 'depth',
             label: 'Depth',
             render: (item) => escapeHtml(String(item.depth)),
+            sortValue: (item) => item.depth,
             className: '50px',
         },
         {
@@ -244,6 +134,12 @@ const table = new DataTable<PluginTraceViewDto>({
             label: 'Mode',
             render: (item) => escapeHtml(item.mode),
             className: '60px',
+        },
+        {
+            key: 'correlationId',
+            label: 'Correlation ID',
+            render: (item) => escapeHtml(item.correlationId || '\u2014'),
+            className: '120px',
         },
     ],
     getRowId: (item) => item.id,
@@ -256,9 +152,16 @@ const table = new DataTable<PluginTraceViewDto>({
     statusEl: statusText,
     formatStatus: (items) => {
         const exceptions = items.filter(t => t.hasException).length;
-        const parts = [items.length + ' trace' + (items.length !== 1 ? 's' : '')];
-        if (exceptions > 0) parts.push(exceptions + ' exception' + (exceptions !== 1 ? 's' : ''));
-        return parts.join(' \u2014 ');
+        // V-21: Show "X of Y traces" when search or filter is active
+        const searchActive = searchInput.value.trim().length > 0;
+        let base: string;
+        if (searchActive || items.length < totalTraceCount) {
+            base = formatStatusCount(items.length, totalTraceCount, 'trace');
+        } else {
+            base = items.length + ' trace' + (items.length !== 1 ? 's' : '');
+        }
+        if (exceptions > 0) base += ' \u2014 ' + exceptions + ' exception' + (exceptions !== 1 ? 's' : '');
+        return base;
     },
     emptyMessage: 'No plugin traces found',
 });
@@ -273,6 +176,9 @@ function applySearchFilter(): void {
             t.typeName.toLowerCase().includes(query)
             || (t.primaryEntity && t.primaryEntity.toLowerCase().includes(query))
             || (t.messageName && t.messageName.toLowerCase().includes(query))
+            || (t.correlationId && t.correlationId.toLowerCase().includes(query))
+            || t.operationType.toLowerCase().includes(query)
+            || t.mode.toLowerCase().includes(query)
         );
         table.setItems(filtered);
     }
@@ -289,16 +195,11 @@ function applyRowClasses(): void {
     });
 }
 
-// ── Split pane resize ───────────────────────────────────────────────────
+// ── 6a: Split pane resize (horizontal) ───────────────────────────────
 const resizeHandle = document.getElementById('resize-handle') as HTMLElement;
 
-interface SplitState {
-    tableBasis: string;
-    detailBasis: string;
-}
-
 function restoreSplitState(): void {
-    const state = vscode.getState() as { split?: SplitState } | null;
+    const state = vscode.getState() as { split?: { tableBasis: string; detailBasis: string } } | null;
     if (state?.split) {
         tablePane.style.flexBasis = state.split.tableBasis;
         detailPane.style.flexBasis = state.split.detailBasis;
@@ -310,25 +211,25 @@ restoreSplitState();
 resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
     e.preventDefault();
     resizeHandle.classList.add('active');
-    const startY = e.clientY;
+    const startX = e.clientX;
     const tablePaneRect = tablePane.getBoundingClientRect();
     const detailPaneRect = detailPane.getBoundingClientRect();
-    const startTableHeight = tablePaneRect.height;
-    const startDetailHeight = detailPaneRect.height;
+    const startTableWidth = tablePaneRect.width;
+    const startDetailWidth = detailPaneRect.width;
 
     function onMouseMove(ev: MouseEvent): void {
-        const delta = ev.clientY - startY;
-        const newTableHeight = Math.max(100, startTableHeight + delta);
-        const newDetailHeight = Math.max(100, startDetailHeight - delta);
-        tablePane.style.flexBasis = newTableHeight + 'px';
-        detailPane.style.flexBasis = newDetailHeight + 'px';
+        const delta = ev.clientX - startX;
+        const newTableWidth = Math.max(200, startTableWidth + delta);
+        const newDetailWidth = Math.max(200, startDetailWidth - delta);
+        tablePane.style.flexBasis = newTableWidth + 'px';
+        detailPane.style.flexBasis = newDetailWidth + 'px';
     }
 
     function onMouseUp(): void {
         resizeHandle.classList.remove('active');
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
-        // Persist split ratio
+        // Persist split ratio (PT-20)
         const currentState = (vscode.getState() as Record<string, unknown>) || {};
         vscode.setState({
             ...currentState,
@@ -343,7 +244,18 @@ resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
     document.addEventListener('mouseup', onMouseUp);
 });
 
-// ── Detail pane tab switching ───────────────────────────────────────────
+// ── Detail pane close button (PT-59) ─────────────────────────────────
+const detailCloseBtn = document.getElementById('detail-close-btn');
+if (detailCloseBtn) {
+    detailCloseBtn.addEventListener('click', () => {
+        detailPane.classList.remove('visible');
+        table.clearSelection();
+        selectedTraceId = null;
+        currentDetail = null;
+    });
+}
+
+// ── Detail pane tab switching ───────────────────────────────────────
 let currentDetail: PluginTraceDetailViewDto | null = null;
 
 function activateTab(tabName: string): void {
@@ -375,7 +287,77 @@ detailTabs.forEach(tab => {
     });
 });
 
-// ── Detail pane render functions ────────────────────────────────────────
+// ── 6c: Overview tab render ──────────────────────────────────────────
+function renderOverviewTab(trace: PluginTraceDetailViewDto): void {
+    detailTabOverview.innerHTML = '';
+
+    // Status badge
+    const statusSection = document.createElement('div');
+    statusSection.className = 'overview-section';
+    const badge = document.createElement('span');
+    badge.className = 'overview-status-badge ' + (trace.hasException ? 'exception' : 'success');
+    const icon = document.createElement('span');
+    icon.className = 'trace-status-icon ' + (trace.hasException ? 'exception' : 'success');
+    badge.appendChild(icon);
+    const label = document.createElement('span');
+    label.textContent = trace.hasException ? 'Exception' : 'Success';
+    badge.appendChild(label);
+
+    const metaEl = document.createElement('span');
+    metaEl.style.marginLeft = '12px';
+    metaEl.style.fontSize = '12px';
+    metaEl.style.color = 'var(--vscode-descriptionForeground)';
+    metaEl.textContent = trace.typeName + ' / ' + (trace.messageName || '\u2014')
+        + ' (' + (trace.primaryEntity || '\u2014') + ') \u2014 '
+        + formatDuration(trace.durationMs);
+
+    statusSection.appendChild(badge);
+    statusSection.appendChild(metaEl);
+    detailTabOverview.appendChild(statusSection);
+
+    // Exception text (if any)
+    if (trace.exceptionDetails) {
+        const excSection = document.createElement('div');
+        excSection.className = 'overview-section';
+        const excTitle = document.createElement('div');
+        excTitle.className = 'overview-section-title';
+        excTitle.textContent = 'Exception Details';
+        excSection.appendChild(excTitle);
+        const excPre = document.createElement('pre');
+        excPre.className = 'monospace-content';
+        excPre.setAttribute('data-selection-zone', 'exception-details');
+        excPre.textContent = trace.exceptionDetails;
+        excSection.appendChild(excPre);
+        detailTabOverview.appendChild(excSection);
+    }
+
+    // Message block (if any)
+    if (trace.messageBlock) {
+        const msgSection = document.createElement('div');
+        msgSection.className = 'overview-section';
+        const msgTitle = document.createElement('div');
+        msgTitle.className = 'overview-section-title';
+        msgTitle.textContent = 'Message Block';
+        msgSection.appendChild(msgTitle);
+        const msgPre = document.createElement('pre');
+        msgPre.className = 'monospace-content';
+        msgPre.setAttribute('data-selection-zone', 'message-block');
+        msgPre.textContent = trace.messageBlock;
+        msgSection.appendChild(msgPre);
+        detailTabOverview.appendChild(msgSection);
+    }
+
+    if (!trace.exceptionDetails && !trace.messageBlock) {
+        const emptyNote = document.createElement('div');
+        emptyNote.style.color = 'var(--vscode-descriptionForeground)';
+        emptyNote.style.fontStyle = 'italic';
+        emptyNote.style.marginTop = '12px';
+        emptyNote.textContent = 'No exception or message block for this trace.';
+        detailTabOverview.appendChild(emptyNote);
+    }
+}
+
+// ── 6b: Detail tabs with all fields ──────────────────────────────────
 function renderDetailsTab(trace: PluginTraceDetailViewDto): void {
     const kvPairs: [string, string][] = [
         ['Type', trace.typeName],
@@ -383,28 +365,45 @@ function renderDetailsTab(trace: PluginTraceDetailViewDto): void {
         ['Entity', trace.primaryEntity || '\u2014'],
         ['Mode', trace.mode],
         ['Operation', trace.operationType],
+        ['Stage', trace.stage || trace.operationType],
         ['Depth', String(trace.depth)],
         ['Duration', formatDuration(trace.durationMs)],
         ['Created', formatDateTime(trace.createdOn)],
         ['Correlation ID', trace.correlationId || '\u2014'],
         ['Request ID', trace.requestId || '\u2014'],
-        ['Constructor', formatDuration(trace.constructorDurationMs)],
+        ['Constructor Duration', formatDuration(trace.constructorDurationMs)],
         ['Execution Start', formatDateTime(trace.executionStartTime)],
+        ['Constructor Start', formatDateTime(trace.constructorStartTime)],
+        ['Is System Created', trace.isSystemCreated ? 'Yes' : 'No'],
+        ['Created By', trace.createdById || '\u2014'],
+        ['Created On Behalf By', trace.createdOnBehalfById || '\u2014'],
+        ['Plugin Step ID', trace.pluginStepId || '\u2014'],
+        ['Persistence Key', trace.persistenceKey || '\u2014'],
+        ['Organization ID', trace.organizationId || '\u2014'],
+        ['Profile', trace.profile || '\u2014'],
     ];
 
-    let html = '<div class="detail-kv">';
-    for (const [label, value] of kvPairs) {
-        html += '<span class="detail-kv-label">' + escapeHtml(label) + '</span>';
-        html += '<span>' + escapeHtml(value) + '</span>';
+    // Build using DOM (S1: textContent, not innerHTML for user data)
+    detailTabDetails.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'detail-kv';
+    for (const [lbl, value] of kvPairs) {
+        const labelEl = document.createElement('span');
+        labelEl.className = 'detail-kv-label';
+        labelEl.textContent = lbl;
+        const valueEl = document.createElement('span');
+        valueEl.textContent = value;
+        grid.appendChild(labelEl);
+        grid.appendChild(valueEl);
     }
-    html += '</div>';
-    detailTabDetails.innerHTML = html;
+    detailTabDetails.appendChild(grid);
 }
 
 function renderExceptionTab(trace: PluginTraceDetailViewDto): void {
     detailTabException.innerHTML = '';
     const pre = document.createElement('pre');
     pre.className = 'monospace-content';
+    pre.setAttribute('data-selection-zone', 'exception-details');
     pre.textContent = trace.exceptionDetails || 'No exception';
     detailTabException.appendChild(pre);
 }
@@ -413,6 +412,7 @@ function renderMessageBlockTab(trace: PluginTraceDetailViewDto): void {
     detailTabMessageBlock.innerHTML = '';
     const pre = document.createElement('pre');
     pre.className = 'monospace-content';
+    pre.setAttribute('data-selection-zone', 'message-block');
     pre.textContent = trace.messageBlock || 'No message block';
     detailTabMessageBlock.appendChild(pre);
 }
@@ -440,7 +440,7 @@ function renderConfigTab(trace: PluginTraceDetailViewDto): void {
     detailTabConfig.appendChild(securedPre);
 }
 
-// ── Timeline waterfall renderer ─────────────────────────────────────────
+// ── 6e: Timeline waterfall renderer (overhaul) ──────────────────────
 interface FlatTimelineRow {
     node: TimelineNodeViewDto;
 }
@@ -461,42 +461,485 @@ function flattenTimeline(nodes: TimelineNodeViewDto[]): FlatTimelineRow[] {
 
 function renderTimeline(nodes: TimelineNodeViewDto[]): void {
     const rows = flattenTimeline(nodes);
+    detailTabTimeline.innerHTML = '';
 
     if (rows.length === 0) {
-        detailTabTimeline.innerHTML = '<div class="empty-state">' + escapeHtml('No timeline data available') + '</div>';
+        const empty = document.createElement('div');
+        empty.className = 'timeline-empty';
+        const title = document.createElement('div');
+        title.className = 'timeline-empty-title';
+        title.textContent = 'No timeline data available';
+        const hint = document.createElement('div');
+        hint.className = 'timeline-empty-hint';
+        hint.textContent = 'Timeline requires traces with a correlation ID. Select a trace that has related executions.';
+        empty.appendChild(title);
+        empty.appendChild(hint);
+        detailTabTimeline.appendChild(empty);
         return;
     }
 
-    let html = '<div class="timeline-container">';
-    html += '<div class="timeline-header">';
-    html += '<span class="timeline-header-label">' + escapeHtml('Plugin') + '</span>';
-    html += '<span class="timeline-header-bar">' + escapeHtml('Duration') + '</span>';
-    html += '</div>';
+    const container = document.createElement('div');
+    container.className = 'timeline-container';
+
+    // Header with total duration + trace count
+    const totalDurationMs = rows.reduce((sum, r) => sum + (r.node.durationMs || 0), 0);
+    const headerInfo = document.createElement('div');
+    headerInfo.className = 'timeline-header-info';
+    const durSpan = document.createElement('span');
+    durSpan.innerHTML = '<strong>Total Duration:</strong> ' + escapeHtml(formatDuration(totalDurationMs));
+    const countSpan = document.createElement('span');
+    countSpan.innerHTML = '<strong>Traces:</strong> ' + rows.length;
+    headerInfo.appendChild(durSpan);
+    headerInfo.appendChild(countSpan);
+    container.appendChild(headerInfo);
+
+    // Content
+    const content = document.createElement('div');
+    content.className = 'timeline-content';
 
     for (const row of rows) {
         const n = row.node;
-        const paddingLeft = n.hierarchyDepth * 16;
-        const labelText = escapeHtml(n.typeName + ' / ' + (n.messageName || '\u2014'));
-        const barClass = n.hasException ? 'exception' : (n.durationMs !== null && n.durationMs > 1000 ? 'slow' : 'normal');
-        const durationText = escapeHtml(n.durationMs !== null ? n.durationMs + 'ms' : '\u2014');
+        const depthClass = 'timeline-depth-' + Math.min(n.hierarchyDepth, 4);
+        const statusClass = n.hasException ? 'exception' : 'success';
 
-        html += '<div class="timeline-row">';
-        html += '<span class="timeline-label" style="padding-left: ' + escapeAttr(String(paddingLeft)) + 'px;" title="' + escapeAttr(n.typeName) + '">' + labelText + '</span>';
-        html += '<div class="timeline-bar-container">';
-        html += '<div class="timeline-bar ' + escapeAttr(barClass) + '" style="left: ' + escapeAttr(String(n.offsetPercent)) + '%; width: ' + escapeAttr(String(n.widthPercent)) + '%;"></div>';
-        html += '</div>';
-        html += '<span class="timeline-duration">' + durationText + '</span>';
-        html += '</div>';
+        const item = document.createElement('div');
+        item.className = 'timeline-item ' + depthClass;
+        item.dataset.traceId = n.traceId;
+
+        // Header row
+        const header = document.createElement('div');
+        header.className = 'timeline-item-header';
+        const titleEl = document.createElement('span');
+        titleEl.className = 'timeline-item-title';
+        titleEl.textContent = n.typeName;
+        header.appendChild(titleEl);
+        if (n.messageName) {
+            const msgEl = document.createElement('span');
+            msgEl.className = 'timeline-item-message';
+            msgEl.textContent = n.messageName;
+            header.appendChild(msgEl);
+        }
+        item.appendChild(header);
+
+        // Duration bar
+        const barContainer = document.createElement('div');
+        barContainer.className = 'timeline-bar-container';
+        const bar = document.createElement('div');
+        bar.className = 'timeline-bar ' + statusClass;
+        bar.style.left = n.offsetPercent + '%';
+        bar.style.width = Math.max(0.5, n.widthPercent) + '%';
+        bar.dataset.traceId = n.traceId;
+        const fill = document.createElement('div');
+        fill.className = 'timeline-bar-fill';
+        bar.appendChild(fill);
+        barContainer.appendChild(bar);
+        item.appendChild(barContainer);
+
+        // Metadata
+        const meta = document.createElement('div');
+        meta.className = 'timeline-item-meta';
+        const durEl = document.createElement('span');
+        durEl.className = 'timeline-item-duration';
+        durEl.textContent = formatDuration(n.durationMs);
+        meta.appendChild(durEl);
+        const modeEl = document.createElement('span');
+        modeEl.className = 'timeline-mode-badge';
+        modeEl.textContent = 'D' + n.depth;
+        meta.appendChild(modeEl);
+        if (n.hasException) {
+            const excEl = document.createElement('span');
+            excEl.style.color = 'var(--vscode-errorForeground, #f44336)';
+            excEl.textContent = '\u26A0 Exception';
+            meta.appendChild(excEl);
+        }
+        item.appendChild(meta);
+
+        // Click navigation: click bar → select the corresponding trace in the table
+        item.addEventListener('click', () => {
+            const traceId = n.traceId;
+            selectedTraceId = traceId;
+            // Select the row in the table
+            tablePane.querySelectorAll<HTMLElement>('.data-table-row.selected').forEach(r => r.classList.remove('selected'));
+            const targetRow = tablePane.querySelector<HTMLElement>('[data-id="' + CSS.escape(traceId) + '"]');
+            if (targetRow) {
+                targetRow.classList.add('selected');
+                targetRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+            // Load this trace's detail
+            vscode.postMessage({ command: 'selectTrace', id: traceId });
+        });
+
+        content.appendChild(item);
     }
 
-    html += '</div>';
-    detailTabTimeline.innerHTML = html;
+    container.appendChild(content);
+
+    // Legend
+    const legend = document.createElement('div');
+    legend.className = 'timeline-legend';
+    legend.innerHTML = '<div class="timeline-legend-item"><div class="timeline-legend-swatch success"></div><span>Success</span></div>'
+        + '<div class="timeline-legend-item"><div class="timeline-legend-swatch exception"></div><span>Exception</span></div>';
+    container.appendChild(legend);
+
+    detailTabTimeline.appendChild(container);
 }
 
-// ── Message handler ─────────────────────────────────────────────────────
+// ── 6f: Advanced Query Builder ──────────────────────────────────────
+const filterPanel = document.getElementById('filter-panel') as HTMLElement;
+const filterPanelHeader = document.getElementById('filter-panel-header') as HTMLElement;
+const filterPanelBody = document.getElementById('filter-panel-body') as HTMLElement;
+const filterPanelTabs = document.getElementById('filter-panel-tabs') as HTMLElement;
+const filterConditions = document.getElementById('filter-conditions') as HTMLElement;
+const queryPreviewText = document.getElementById('query-preview-text') as HTMLElement;
+
+// Collapse/expand filter panel
+filterPanelHeader.addEventListener('click', () => {
+    filterPanel.classList.toggle('collapsed');
+    // Persist
+    const currentState = (vscode.getState() as Record<string, unknown>) || {};
+    vscode.setState({ ...currentState, filterCollapsed: filterPanel.classList.contains('collapsed') });
+});
+
+// Restore filter panel state
+{
+    const state = vscode.getState() as { filterCollapsed?: boolean; filterHeight?: number } | null;
+    if (state?.filterCollapsed === false) {
+        filterPanel.classList.remove('collapsed');
+    }
+    if (state?.filterHeight) {
+        filterPanel.style.height = state.filterHeight + 'px';
+    }
+}
+
+// Filter panel tabs
+filterPanelTabs.addEventListener('click', (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>('.filter-panel-tab');
+    if (!tab) return;
+    const tabName = tab.dataset.filterTab;
+    if (!tabName) return;
+    filterPanelTabs.querySelectorAll('.filter-panel-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    filterPanelBody.querySelectorAll<HTMLElement>('.filter-tab-content').forEach(c => {
+        if (c.dataset.filterTab === tabName) {
+            c.classList.add('active');
+        } else {
+            c.classList.remove('active');
+        }
+    });
+    // Update query preview when switching to that tab
+    if (tabName === 'preview') updateQueryPreview();
+});
+
+// Quick filter checkboxes — auto-apply
+const quickFilterCheckboxes = filterPanelBody.querySelectorAll<HTMLInputElement>('[data-qf]');
+quickFilterCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => {
+        // Mutually exclusive: exceptions and success
+        if (cb.dataset.qf === 'exceptions' && cb.checked) {
+            const successCb = filterPanelBody.querySelector<HTMLInputElement>('[data-qf="success"]');
+            if (successCb) successCb.checked = false;
+        }
+        if (cb.dataset.qf === 'success' && cb.checked) {
+            const excCb = filterPanelBody.querySelector<HTMLInputElement>('[data-qf="exceptions"]');
+            if (excCb) excCb.checked = false;
+        }
+        // Mutually exclusive: async and sync
+        if (cb.dataset.qf === 'async' && cb.checked) {
+            const syncCb = filterPanelBody.querySelector<HTMLInputElement>('[data-qf="sync"]');
+            if (syncCb) syncCb.checked = false;
+        }
+        if (cb.dataset.qf === 'sync' && cb.checked) {
+            const asyncCb = filterPanelBody.querySelector<HTMLInputElement>('[data-qf="async"]');
+            if (asyncCb) asyncCb.checked = false;
+        }
+        applyAdvancedFilter();
+    });
+});
+
+// Condition field definitions
+const FILTER_FIELDS = ['Plugin Name', 'Entity', 'Message', 'Status', 'Created On', 'Duration', 'Mode', 'Stage'] as const;
+const FIELD_TYPES: Record<string, string> = {
+    'Plugin Name': 'text', 'Entity': 'text', 'Message': 'text',
+    'Status': 'enum', 'Mode': 'enum', 'Stage': 'enum',
+    'Created On': 'date', 'Duration': 'number',
+};
+const OPERATORS_BY_TYPE: Record<string, string[]> = {
+    text: ['Contains', 'Equals', 'Not Equals', 'Starts With', 'Ends With'],
+    enum: ['Equals', 'Not Equals'],
+    date: ['Equals', 'Greater Than', 'Less Than', 'Greater Than or Equal', 'Less Than or Equal'],
+    number: ['Equals', 'Greater Than', 'Less Than', 'Greater Than or Equal', 'Less Than or Equal'],
+};
+const ENUM_OPTIONS: Record<string, string[]> = {
+    'Status': ['Success', 'Exception'],
+    'Mode': ['Sync', 'Async'],
+    'Stage': ['Plugin', 'WorkflowActivity'],
+};
+
+let conditionIdCounter = 0;
+
+function addConditionRow(): void {
+    const id = 'cond-' + (conditionIdCounter++);
+    const row = document.createElement('div');
+    row.className = 'filter-condition-row';
+    row.dataset.conditionId = id;
+
+    // Enabled checkbox
+    const enabledCb = document.createElement('input');
+    enabledCb.type = 'checkbox';
+    enabledCb.className = 'condition-enabled';
+    enabledCb.checked = true;
+    enabledCb.title = 'Enable/disable this condition';
+    row.appendChild(enabledCb);
+
+    // Field select
+    const fieldSelect = document.createElement('select');
+    fieldSelect.className = 'condition-field';
+    for (const f of FILTER_FIELDS) {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f;
+        fieldSelect.appendChild(opt);
+    }
+    row.appendChild(fieldSelect);
+
+    // Operator select
+    const operatorSelect = document.createElement('select');
+    operatorSelect.className = 'condition-operator';
+    updateOperators(operatorSelect, 'text');
+    row.appendChild(operatorSelect);
+
+    // Value input
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.className = 'condition-value';
+    valueInput.placeholder = 'Enter value...';
+    row.appendChild(valueInput);
+
+    // Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove-condition-btn';
+    removeBtn.textContent = '\u00D7';
+    removeBtn.title = 'Remove condition';
+    removeBtn.addEventListener('click', () => {
+        row.remove();
+        updateFilterCount();
+    });
+    row.appendChild(removeBtn);
+
+    // Field change → update operators and value input type
+    fieldSelect.addEventListener('change', () => {
+        const fieldType = FIELD_TYPES[fieldSelect.value] || 'text';
+        updateOperators(operatorSelect, fieldType);
+        updateValueInput(row, fieldType, fieldSelect.value);
+    });
+
+    // PT-49: stopPropagation on keyboard events in filter inputs
+    [valueInput, fieldSelect, operatorSelect, enabledCb].forEach(el => {
+        el.addEventListener('keydown', ((e: KeyboardEvent) => {
+            if (e.ctrlKey && (e.key === 'a' || e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+                e.stopPropagation();
+            }
+        }) as EventListener, true);
+    });
+
+    filterConditions.appendChild(row);
+    updateFilterCount();
+}
+
+function updateOperators(select: HTMLSelectElement, fieldType: string): void {
+    const ops = OPERATORS_BY_TYPE[fieldType] || OPERATORS_BY_TYPE.text;
+    // Add universal operators
+    const allOps = [...ops, 'Is Null', 'Is Not Null'];
+    select.innerHTML = '';
+    for (const op of allOps) {
+        const opt = document.createElement('option');
+        opt.value = op;
+        opt.textContent = op;
+        select.appendChild(opt);
+    }
+}
+
+function updateValueInput(row: HTMLElement, fieldType: string, fieldName: string): void {
+    const oldInput = row.querySelector('.condition-value');
+    if (!oldInput) return;
+
+    let newInput: HTMLElement;
+    if (fieldType === 'enum') {
+        const sel = document.createElement('select');
+        sel.className = 'condition-value';
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = 'Select...';
+        sel.appendChild(emptyOpt);
+        for (const opt of (ENUM_OPTIONS[fieldName] || [])) {
+            const o = document.createElement('option');
+            o.value = opt;
+            o.textContent = opt;
+            sel.appendChild(o);
+        }
+        newInput = sel;
+    } else if (fieldType === 'date') {
+        const inp = document.createElement('input');
+        inp.type = 'datetime-local';
+        inp.className = 'condition-value';
+        newInput = inp;
+    } else if (fieldType === 'number') {
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.className = 'condition-value';
+        inp.placeholder = fieldName === 'Duration' ? 'Duration in ms' : 'Enter number...';
+        inp.min = '0';
+        newInput = inp;
+    } else {
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'condition-value';
+        inp.placeholder = 'Enter value...';
+        newInput = inp;
+    }
+
+    // PT-49: stopPropagation
+    newInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.ctrlKey && (e.key === 'a' || e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+            e.stopPropagation();
+        }
+    }, true);
+
+    oldInput.replaceWith(newInput);
+}
+
+function collectAdvancedQuery(): AdvancedQueryViewDto {
+    const quickFilterIds: string[] = [];
+    quickFilterCheckboxes.forEach(cb => {
+        if (cb.checked && cb.dataset.qf) quickFilterIds.push(cb.dataset.qf);
+    });
+
+    const conditions: QueryConditionViewDto[] = [];
+    const logicRadio = filterPanelBody.querySelector<HTMLInputElement>('input[name="filter-logic"]:checked');
+    const logic: 'and' | 'or' = logicRadio?.value === 'or' ? 'or' : 'and';
+
+    filterConditions.querySelectorAll<HTMLElement>('.filter-condition-row').forEach(row => {
+        const id = row.dataset.conditionId || '';
+        const enabled = row.querySelector<HTMLInputElement>('.condition-enabled')?.checked ?? true;
+        const field = row.querySelector<HTMLSelectElement>('.condition-field')?.value ?? '';
+        const operator = row.querySelector<HTMLSelectElement>('.condition-operator')?.value ?? '';
+        const valueEl = row.querySelector<HTMLInputElement>('.condition-value');
+        const value = valueEl?.value ?? '';
+        conditions.push({ id, enabled, field, operator, value, logicalOperator: logic });
+    });
+
+    return { quickFilterIds, conditions };
+}
+
+function applyAdvancedFilter(): void {
+    const query = collectAdvancedQuery();
+    vscode.postMessage({ command: 'applyAdvancedFilter', query });
+    updateFilterCount();
+    updateQueryPreview();
+}
+
+function updateFilterCount(): void {
+    const query = collectAdvancedQuery();
+    const totalQF = query.quickFilterIds.length;
+    const enabledConditions = query.conditions.filter(c => c.enabled).length;
+    const totalConditions = query.conditions.length;
+    const active = totalQF + enabledConditions;
+    const total = totalQF + totalConditions;
+
+    const titleEl = filterPanel.querySelector('.filter-panel-title');
+    if (titleEl) {
+        titleEl.innerHTML = '<span class="filter-chevron">&#x25B6;</span> Filters (' + active + ' / ' + total + ')';
+    }
+}
+
+function updateQueryPreview(): void {
+    const query = collectAdvancedQuery();
+    const lines: string[] = [];
+
+    if (query.quickFilterIds.length > 0) {
+        lines.push('Quick Filters:');
+        for (const qf of query.quickFilterIds) {
+            lines.push('  - ' + qf);
+        }
+    }
+
+    const enabledConditions = query.conditions.filter(c => c.enabled);
+    if (enabledConditions.length > 0) {
+        if (lines.length > 0) lines.push('');
+        const logic = enabledConditions[0]?.logicalOperator?.toUpperCase() || 'AND';
+        lines.push('Advanced Conditions (' + logic + '):');
+        for (const c of enabledConditions) {
+            const opNeedsValue = c.operator !== 'Is Null' && c.operator !== 'Is Not Null';
+            if (opNeedsValue && c.value) {
+                lines.push('  ' + c.field + ' ' + c.operator + ' "' + c.value + '"');
+            } else if (!opNeedsValue) {
+                lines.push('  ' + c.field + ' ' + c.operator);
+            }
+        }
+    }
+
+    if (lines.length === 0) {
+        lines.push('No filters applied');
+    }
+
+    queryPreviewText.textContent = lines.join('\n');
+}
+
+// Add condition button
+document.getElementById('add-condition-btn')?.addEventListener('click', () => addConditionRow());
+
+// Clear conditions button
+document.getElementById('clear-conditions-btn')?.addEventListener('click', () => {
+    filterConditions.innerHTML = '';
+    quickFilterCheckboxes.forEach(cb => { cb.checked = false; });
+    applyAdvancedFilter();
+});
+
+// Copy query button
+document.getElementById('copy-query-btn')?.addEventListener('click', () => {
+    const text = queryPreviewText.textContent || '';
+    vscode.postMessage({ command: 'copyToClipboard', text });
+});
+
+// Apply on Enter in condition value inputs
+filterConditions.addEventListener('keypress', (e) => {
+    if ((e.target as HTMLElement).classList.contains('condition-value') && e.key === 'Enter') {
+        e.preventDefault();
+        applyAdvancedFilter();
+    }
+});
+
+// Filter panel resize handle
+const filterResizeHandle = document.getElementById('filter-panel-resize');
+if (filterResizeHandle) {
+    filterResizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        filterResizeHandle.classList.add('active');
+        const startY = e.clientY;
+        const startHeight = filterPanel.offsetHeight;
+
+        function onMove(ev: MouseEvent): void {
+            const delta = ev.clientY - startY;
+            const newHeight = Math.max(120, Math.min(window.innerHeight * 0.6, startHeight + delta));
+            filterPanel.style.height = newHeight + 'px';
+        }
+
+        function onUp(): void {
+            filterResizeHandle?.classList.remove('active');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            const currentState = (vscode.getState() as Record<string, unknown>) || {};
+            vscode.setState({ ...currentState, filterHeight: filterPanel.offsetHeight });
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+}
+
+// ── Message handler ─────────────────────────────────────────────────
 window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToWebview>) => {
     const msg = event.data;
-    // VS Code sends internal messages that lack 'command' — ignore them
     if (!msg || typeof msg !== 'object' || !('command' in msg)) return;
 
     switch (msg.command) {
@@ -520,12 +963,13 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             break;
 
         case 'tracesLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             currentTraces = msg.traces;
+            totalTraceCount = msg.totalCount;
             {
                 const previousSelectedId = selectedTraceId;
-                // Apply search filter (renders filtered subset or all traces)
                 applySearchFilter();
-                // Preserve selection if the trace still exists
                 if (previousSelectedId) {
                     const stillExists = msg.traces.some(t => t.id === previousSelectedId);
                     if (stillExists) {
@@ -547,15 +991,22 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
 
         case 'traceDetailLoaded':
             currentDetail = msg.trace;
+            renderOverviewTab(msg.trace);
             renderDetailsTab(msg.trace);
             renderExceptionTab(msg.trace);
             renderMessageBlockTab(msg.trace);
             renderConfigTab(msg.trace);
             // Clear timeline tab — will be loaded on click
-            detailTabTimeline.innerHTML = '<div class="empty-state">' + escapeHtml('Click the Timeline tab to load execution chain') + '</div>';
-            // Show detail pane and select Details tab
+            detailTabTimeline.innerHTML = '';
+            {
+                const hint = document.createElement('div');
+                hint.className = 'empty-state';
+                hint.textContent = 'Click the Timeline tab to load execution chain';
+                detailTabTimeline.appendChild(hint);
+            }
+            // Show detail pane and select Overview tab (6c default)
             detailPane.classList.add('visible');
-            activateTab('details');
+            activateTab('overview');
             break;
 
         case 'timelineLoaded':
@@ -572,7 +1023,6 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
                 traceLevelIndicator.title = 'Trace level: ' + msg.level;
                 traceLevelIndicator.className = 'trace-level-indicator trace-level-on';
             }
-            // Highlight the active level in the dropdown
             traceLevelDropdown.querySelectorAll<HTMLElement>('.trace-level-dropdown-item').forEach(item => {
                 if (item.dataset.level === msg.level) {
                     item.classList.add('active');
@@ -589,12 +1039,27 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
             }, 1000);
             break;
 
+        case 'selectTraceById':
+            {
+                const traceId = msg.id;
+                selectedTraceId = traceId;
+                tablePane.querySelectorAll<HTMLElement>('.data-table-row.selected').forEach(r => r.classList.remove('selected'));
+                const targetRow = tablePane.querySelector<HTMLElement>('[data-id="' + CSS.escape(traceId) + '"]');
+                if (targetRow) {
+                    targetRow.classList.add('selected');
+                    targetRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                }
+            }
+            break;
+
         case 'loading':
             tablePane.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading plugin traces...</div></div>';
             statusText.textContent = 'Loading...';
             break;
 
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             tablePane.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;
@@ -611,8 +1076,10 @@ window.addEventListener('message', (event: MessageEvent<PluginTracesPanelHostToW
     }
 });
 
-// ── Toolbar handlers ────────────────────────────────────────────────────
+// ── Toolbar handlers ────────────────────────────────────────────────
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -628,7 +1095,6 @@ autoRefreshSelect.addEventListener('change', () => {
     const interval = value ? parseInt(value, 10) : null;
     vscode.postMessage({ command: 'setAutoRefresh', intervalSeconds: interval });
 
-    // Visual indicator for active auto-refresh
     if (interval !== null) {
         autoRefreshSelect.classList.add('auto-refresh-active');
     } else {
@@ -636,7 +1102,7 @@ autoRefreshSelect.addEventListener('change', () => {
     }
 });
 
-// ── Search input handler ──────────────────────────────────────────────────
+// ── Search input handler ──────────────────────────────────────────────
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 searchInput.addEventListener('input', () => {
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -645,7 +1111,14 @@ searchInput.addEventListener('input', () => {
     }, 200);
 });
 
-// ── Delete dropdown menu ─────────────────────────────────────────────────
+// PT-49: stopPropagation on search input keyboard events
+searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.ctrlKey && (e.key === 'a' || e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+        e.stopPropagation();
+    }
+}, true);
+
+// ── Delete dropdown menu ─────────────────────────────────────────────
 const deleteDropdown = document.createElement('div');
 deleteDropdown.className = 'delete-dropdown';
 deleteDropdown.style.display = 'none';
@@ -669,7 +1142,7 @@ document.getElementById('delete-selected')!.addEventListener('click', () => {
     }
 });
 
-// Inline input for "Delete older than" (prompt() is unavailable in webviews)
+// Inline input for "Delete older than"
 const deleteOlderDialog = document.createElement('div');
 deleteOlderDialog.className = 'delete-older-dialog';
 deleteOlderDialog.style.display = 'none';
@@ -703,7 +1176,7 @@ document.getElementById('delete-older-cancel')!.addEventListener('click', () => 
     deleteOlderDialog.style.display = 'none';
 });
 
-// ── Export dropdown menu ─────────────────────────────────────────────────
+// ── Export dropdown menu ─────────────────────────────────────────────
 const exportBtn = document.getElementById('export-btn') as HTMLElement;
 const exportDropdown = document.createElement('div');
 exportDropdown.className = 'export-dropdown';
@@ -729,7 +1202,7 @@ exportDropdown.addEventListener('click', (e) => {
     }
 });
 
-// ── Trace Level dropdown menu ─────────────────────────────────────────────
+// ── Trace Level dropdown menu ─────────────────────────────────────────
 const traceLevelDropdown = document.createElement('div');
 traceLevelDropdown.className = 'trace-level-dropdown';
 traceLevelDropdown.style.display = 'none';
@@ -741,11 +1214,9 @@ traceLevelDropdown.innerHTML = [
 traceLevelBtn.parentElement!.style.position = 'relative';
 traceLevelBtn.insertAdjacentElement('afterend', traceLevelDropdown);
 
-// Keep the indicator after the dropdown in the DOM (move it)
 traceLevelDropdown.insertAdjacentElement('afterend', traceLevelIndicator);
 
 traceLevelBtn.addEventListener('click', () => {
-    // Request fresh trace level data, then show the dropdown
     vscode.postMessage({ command: 'requestTraceLevel' });
     const isVisible = traceLevelDropdown.style.display !== 'none';
     traceLevelDropdown.style.display = isVisible ? 'none' : '';
@@ -783,7 +1254,7 @@ if (reconnectRefresh) {
     });
 }
 
-// ── Keyboard shortcuts ──────────────────────────────────────────────────
+// ── Keyboard shortcuts ──────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
     // Escape = hide detail pane and clear selection
     if (e.key === 'Escape' && detailPane.classList.contains('visible')) {
@@ -800,5 +1271,27 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// ── Ready signal ────────────────────────────────────────────────────────
+// PT-43: Ctrl+A in data-selection-zone selects just that block
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'a') {
+        const active = document.activeElement;
+        // If focus is in an input/textarea, let normal behavior happen
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+
+        // Check if the click target is inside a selection zone
+        const zone = (e.target as HTMLElement).closest?.('[data-selection-zone]');
+        if (zone) {
+            e.preventDefault();
+            const selection = window.getSelection();
+            if (selection) {
+                const range = document.createRange();
+                range.selectNodeContents(zone);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+    }
+}, true);
+
+// ── Ready signal ────────────────────────────────────────────────────
 vscode.postMessage({ command: 'ready' });
