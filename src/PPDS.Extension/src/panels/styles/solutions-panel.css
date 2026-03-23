@@ -31,7 +31,7 @@
 
 .solution-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     padding: 6px 12px;
     cursor: pointer;
@@ -47,6 +47,7 @@
     flex-shrink: 0;
     font-size: 10px;
     transition: transform 0.15s;
+    margin-top: 3px;
 }
 
 .solution-row .chevron.expanded { transform: rotate(90deg); }
@@ -54,9 +55,36 @@
 .solution-row .icon {
     flex-shrink: 0;
     font-size: 14px;
+    margin-top: 1px;
 }
 
-.solution-row .name { font-weight: 500; }
+.solution-row-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Primary line: name + version + publisher on one horizontal line */
+.solution-primary {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.solution-row .name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.solution-row .schema-name {
+    font-weight: 400;
+    color: var(--vscode-descriptionForeground);
+}
 
 .solution-row .version {
     color: var(--vscode-descriptionForeground);
@@ -69,12 +97,34 @@
     margin-left: 4px;
 }
 
-.solution-row .managed-badge {
+/* S-03: Secondary info line */
+.solution-secondary {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
+/* S-11: Managed/unmanaged badges on ALL solutions */
+.solution-badge {
     font-size: 10px;
     padding: 1px 4px;
     border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+
+.managed-badge {
     background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground);
+}
+
+.unmanaged-badge {
+    background: var(--vscode-testing-iconPassed, #73c991);
+    color: var(--vscode-editor-background, #1e1e1e);
 }
 
 .open-maker-btn {
@@ -239,6 +289,41 @@
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* ── Segmented control (S-05: Visible | All) ─────────────────── */
+.segmented-control {
+    display: flex;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.segmented-control .seg-btn {
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: none;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    cursor: pointer;
+    white-space: nowrap;
+    border-right: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+
+.segmented-control .seg-btn:last-child {
+    border-right: none;
+}
+
+.segmented-control .seg-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.segmented-control .seg-btn.active {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-list-activeSelectionBackground));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-list-activeSelectionForeground));
+    font-weight: 500;
 }
 
 /* ── Toolbar Search ──────────────────────────────────────────── */

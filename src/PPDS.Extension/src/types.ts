@@ -114,6 +114,7 @@ export interface QueryResultResponse {
     queryMode: 'tds' | 'dataverse' | null;
     dataSources?: { label: string; isRemote: boolean }[];
     appliedHints?: string[];
+    warnings?: string[];
 }
 
 export interface QueryColumnInfo {
@@ -154,6 +155,8 @@ export interface ProfilesInvalidateResponse {
 
 export interface SolutionsListResponse {
     solutions: SolutionInfoDto[];
+    totalCount: number;
+    filtersApplied: string[];
 }
 
 export interface SolutionInfoDto {
@@ -274,6 +277,25 @@ export interface EnvWhoResponse {
 
 export interface MetadataEntitiesResponse {
     entities: MetadataEntitySummaryDto[];
+    intersectHiddenCount: number;
+}
+
+export interface MetadataGlobalChoiceSummaryDto {
+    name: string;
+    displayName: string;
+    optionSetType: string;
+    isCustomOptionSet: boolean;
+    isManaged: boolean;
+    optionCount: number;
+    description: string | null;
+}
+
+export interface MetadataGlobalOptionSetsResponse {
+    optionSets: MetadataGlobalChoiceSummaryDto[];
+}
+
+export interface MetadataGlobalOptionSetDetailResponse {
+    optionSet: MetadataOptionSetDto;
 }
 
 export interface MetadataEntitySummaryDto {
@@ -394,6 +416,7 @@ export interface MetadataOptionValueDto {
 
 export interface ImportJobsListResponse {
     jobs: ImportJobInfoDto[];
+    totalCount: number;
 }
 
 export interface ImportJobsGetResponse {
@@ -421,6 +444,7 @@ export interface ImportJobDetailDto extends ImportJobInfoDto {
 
 export interface PluginTracesListResponse {
     traces: PluginTraceInfoDto[];
+    totalCount?: number;
 }
 
 export interface PluginTracesGetResponse {
@@ -466,6 +490,16 @@ export interface PluginTraceDetailDto extends PluginTraceInfoDto {
     configuration: string | null;
     secureConfiguration: string | null;
     requestId: string | null;
+    // Additional fields (PT-01 through PT-09)
+    stage?: string | null;
+    constructorStartTime?: string | null;
+    isSystemCreated?: boolean;
+    createdById?: string | null;
+    createdOnBehalfById?: string | null;
+    pluginStepId?: string | null;
+    persistenceKey?: string | null;
+    organizationId?: string | null;
+    profile?: string | null;
 }
 
 export interface TimelineNodeDto {
@@ -497,6 +531,8 @@ export interface TraceFilterDto {
 
 export interface ConnectionReferencesListResponse {
     references: ConnectionReferenceInfoDto[];
+    totalCount: number;
+    filtersApplied: string[] | null;
 }
 
 export interface ConnectionReferencesGetResponse {
@@ -531,6 +567,7 @@ export interface ConnectionReferenceDetailDto extends ConnectionReferenceInfoDto
 }
 
 export interface FlowReferenceDto {
+    flowId: string;
     uniqueName: string;
     displayName: string | null;
     state: string | null;
@@ -552,6 +589,20 @@ export interface OrphanedFlowDto {
 
 export interface EnvironmentVariablesListResponse {
     variables: EnvironmentVariableInfoDto[];
+    totalCount: number;
+    filtersApplied?: string[];
+}
+
+export interface SyncStatisticsDto {
+    added: number;
+    removed: number;
+    preserved: number;
+}
+
+export interface EnvironmentVariablesSyncDeploymentSettingsResponse {
+    filePath: string;
+    environmentVariables: SyncStatisticsDto;
+    connectionReferences: SyncStatisticsDto;
 }
 
 export interface EnvironmentVariablesGetResponse {
