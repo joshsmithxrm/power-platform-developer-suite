@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -43,10 +44,9 @@ public class UserService : IUserService
     }
 
     /// <inheritdoc />
-    public async Task<List<UserInfo>> ListAsync(
+    public async Task<ListResult<UserInfo>> ListAsync(
         string? filter = null,
         bool includeDisabled = false,
-        int top = 100,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -68,14 +68,16 @@ public class UserService : IUserService
                 SystemUser.Fields.BusinessUnitId,
                 SystemUser.Fields.CreatedOn,
                 SystemUser.Fields.ModifiedOn),
-            TopCount = top,
             Orders = { new OrderExpression(SystemUser.Fields.FullName, OrderType.Ascending) }
         };
+
+        var filtersApplied = new List<string>();
 
         // Exclude disabled users unless requested
         if (!includeDisabled)
         {
             query.Criteria.AddCondition(SystemUser.Fields.IsDisabled, ConditionOperator.Equal, false);
+            filtersApplied.Add("enabled only");
         }
 
         // Apply filter
@@ -89,9 +91,36 @@ public class UserService : IUserService
         }
 
         _logger.LogDebug("Querying users with filter: {Filter}, includeDisabled: {IncludeDisabled}", filter, includeDisabled);
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
 
-        return result.Entities.Select(MapToUserInfo).ToList();
+        // Progressive paging — load all records
+        var allItems = new List<UserInfo>();
+        string? pagingCookie = null;
+        int pageNumber = 1;
+
+        while (true)
+        {
+            query.PageInfo = new PagingInfo
+            {
+                PageNumber = pageNumber,
+                Count = 250,
+                PagingCookie = pagingCookie
+            };
+
+            var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+            allItems.AddRange(result.Entities.Select(MapToUserInfo));
+
+            if (!result.MoreRecords) break;
+
+            pagingCookie = result.PagingCookie;
+            pageNumber++;
+        }
+
+        return new ListResult<UserInfo>
+        {
+            Items = allItems,
+            TotalCount = allItems.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />

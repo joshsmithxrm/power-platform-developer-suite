@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -17,7 +18,7 @@ public interface IPluginTraceService
     /// <param name="top">Maximum number of results (default: 100).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of plugin trace summaries.</returns>
-    Task<List<PluginTraceInfo>> ListAsync(
+    Task<ListResult<PluginTraceInfo>> ListAsync(
         PluginTraceFilter? filter = null,
         int top = 100,
         CancellationToken cancellationToken = default);

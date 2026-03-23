@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -16,7 +17,7 @@ public interface IEnvironmentVariableService
     /// <param name="solutionName">Optional solution filter (unique name).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of environment variable definitions.</returns>
-    Task<List<EnvironmentVariableInfo>> ListAsync(
+    Task<ListResult<EnvironmentVariableInfo>> ListAsync(
         string? solutionName = null,
         CancellationToken cancellationToken = default);
 

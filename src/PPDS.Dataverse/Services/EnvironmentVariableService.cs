@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -50,7 +51,7 @@ public class EnvironmentVariableService : IEnvironmentVariableService
     }
 
     /// <inheritdoc />
-    public async Task<List<EnvironmentVariableInfo>> ListAsync(
+    public async Task<ListResult<EnvironmentVariableInfo>> ListAsync(
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
@@ -74,6 +75,8 @@ public class EnvironmentVariableService : IEnvironmentVariableService
             Orders = { new OrderExpression(EnvironmentVariableDefinition.Fields.SchemaName, OrderType.Ascending) }
         };
 
+        var filtersApplied = new List<string>();
+
         // Filter by solution if specified
         if (!string.IsNullOrEmpty(solutionName))
         {
@@ -95,13 +98,19 @@ public class EnvironmentVariableService : IEnvironmentVariableService
         // Only get active variables
         definitionQuery.Criteria.AddCondition(
             EnvironmentVariableDefinition.Fields.statecode, ConditionOperator.Equal, 0);
+        filtersApplied.Add("active only");
 
         _logger.LogDebug("Querying environment variable definitions");
         var definitions = await client.RetrieveMultipleAsync(definitionQuery, cancellationToken);
 
         if (definitions.Entities.Count == 0)
         {
-            return new List<EnvironmentVariableInfo>();
+            return new ListResult<EnvironmentVariableInfo>
+            {
+                Items = [],
+                TotalCount = 0,
+                FiltersApplied = filtersApplied
+            };
         }
 
         // Get all values for these definitions
@@ -130,17 +139,23 @@ public class EnvironmentVariableService : IEnvironmentVariableService
             e => e.GetAttributeValue<EntityReference>(EnvironmentVariableValue.Fields.EnvironmentVariableDefinitionId)?.Id ?? Guid.Empty,
             e => e);
 
-        var result = new List<EnvironmentVariableInfo>();
+        var items = new List<EnvironmentVariableInfo>();
         foreach (var def in definitions.Entities)
         {
             var defId = def.Id;
             valuesByDefinitionId.TryGetValue(defId, out var valueEntity);
 
-            result.Add(MapToInfo(def, valueEntity));
+            items.Add(MapToInfo(def, valueEntity));
         }
 
-        _logger.LogDebug("Found {Count} environment variables", result.Count);
-        return result;
+        _logger.LogDebug("Found {Count} environment variables", items.Count);
+
+        return new ListResult<EnvironmentVariableInfo>
+        {
+            Items = items,
+            TotalCount = items.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />
@@ -258,9 +273,9 @@ public class EnvironmentVariableService : IEnvironmentVariableService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
-        var variables = await ListAsync(solutionName, cancellationToken);
+        var result = await ListAsync(solutionName, cancellationToken);
 
-        var exportItems = variables
+        var exportItems = result.Items
             .Select(v => new EnvironmentVariableExportItem
             {
                 SchemaName = v.SchemaName,

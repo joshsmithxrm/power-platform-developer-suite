@@ -130,7 +130,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
             var service = provider.GetRequiredService<ISolutionService>();
 
             var includeManaged = _managedCheckBox.Checked;
-            var solutions = await service.ListAsync(
+            var result = await service.ListAsync(
                 filter: null,
                 includeManaged: includeManaged,
                 cancellationToken: ct);
@@ -139,7 +139,7 @@ internal sealed class SolutionsScreen : TuiScreenBase, ITuiStateCapture<Solution
 
             Application.MainLoop.Invoke(() =>
             {
-                _allSolutions = solutions;
+                _allSolutions = result.Items.ToList();
                 _isLoading = false;
                 ApplyClientFilterOnUiThread();
             });

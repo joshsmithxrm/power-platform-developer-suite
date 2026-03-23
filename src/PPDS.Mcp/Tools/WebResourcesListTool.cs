@@ -39,8 +39,6 @@ public sealed class WebResourcesListTool
         string? solutionId = null,
         [Description("If true, only return text-based web resources like JS/HTML/CSS (default true)")]
         bool textOnly = true,
-        [Description("Maximum number of results to return (default 100)")]
-        int top = 100,
         CancellationToken cancellationToken = default)
     {
         Guid? parsedSolutionId = null;
@@ -56,11 +54,12 @@ public sealed class WebResourcesListTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IWebResourceService>();
 
-        var resources = await service.ListAsync(parsedSolutionId, textOnly, top, cancellationToken).ConfigureAwait(false);
+        var result = await service.ListAsync(parsedSolutionId, textOnly, cancellationToken).ConfigureAwait(false);
 
         return new WebResourcesListResult
         {
-            Resources = resources.Select(r => new WebResourceSummary
+            TotalCount = result.TotalCount,
+            Resources = result.Items.Select(r => new WebResourceSummary
             {
                 Id = r.Id.ToString(),
                 Name = r.Name,
@@ -86,6 +85,10 @@ public sealed class WebResourcesListResult
     /// </summary>
     [JsonPropertyName("resources")]
     public List<WebResourceSummary> Resources { get; set; } = [];
+
+    /// <summary>Total count of records.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

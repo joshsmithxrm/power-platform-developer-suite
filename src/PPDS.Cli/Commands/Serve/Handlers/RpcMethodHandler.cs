@@ -2045,11 +2045,13 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var solutionService = sp.GetRequiredService<ISolutionService>();
-            var solutions = await solutionService.ListAsync(filter, includeManaged, ct);
+            var result = await solutionService.ListAsync(filter, includeManaged, cancellationToken: ct);
 
             return new SolutionsListResponse
             {
-                Solutions = solutions.Select(s => new SolutionInfoDto
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Solutions = result.Items.Select(s => new SolutionInfoDto
                 {
                     Id = s.Id,
                     UniqueName = s.UniqueName,
@@ -2135,18 +2137,18 @@ public class RpcMethodHandler : IDisposable
     /// </summary>
     [JsonRpcMethod("importJobs/list")]
     public async Task<ImportJobsListResponse> ImportJobsListAsync(
-        int top = 50,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var importJobService = sp.GetRequiredService<IImportJobService>();
-            var jobs = await importJobService.ListAsync(top: top, cancellationToken: ct);
+            var result = await importJobService.ListAsync(cancellationToken: ct);
 
             return new ImportJobsListResponse
             {
-                Jobs = jobs.Select(MapImportJobToDto).ToList()
+                TotalCount = result.TotalCount,
+                Jobs = result.Items.Select(MapImportJobToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2240,11 +2242,12 @@ public class RpcMethodHandler : IDisposable
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
             var serviceFilter = MapTraceFilterFromDto(filter);
-            var traces = await traceService.ListAsync(serviceFilter, top, ct);
+            var result = await traceService.ListAsync(serviceFilter, top, ct);
 
             return new PluginTracesListResponse
             {
-                Traces = traces.Select(MapTraceInfoToDto).ToList()
+                TotalCount = result.TotalCount,
+                Traces = result.Items.Select(MapTraceInfoToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2531,7 +2534,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var connRefService = sp.GetRequiredService<IConnectionReferenceService>();
-            var references = await connRefService.ListAsync(solutionName: solutionId, cancellationToken: ct);
+            var result = await connRefService.ListAsync(solutionName: solutionId, cancellationToken: ct);
 
             // Try to enrich with connection status from Power Platform API
             Dictionary<string, ConnectionInfo>? connectionMap = null;
@@ -2548,7 +2551,9 @@ public class RpcMethodHandler : IDisposable
 
             return new ConnectionReferencesListResponse
             {
-                References = references.Select(r => MapConnectionReferenceToDto(r, connectionMap)).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                References = result.Items.Select(r => MapConnectionReferenceToDto(r, connectionMap)).ToList()
             };
         }, cancellationToken);
     }
@@ -2720,11 +2725,13 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var envVarService = sp.GetRequiredService<IEnvironmentVariableService>();
-            var variables = await envVarService.ListAsync(solutionName: solutionId, cancellationToken: ct);
+            var result = await envVarService.ListAsync(solutionName: solutionId, cancellationToken: ct);
 
             return new EnvironmentVariablesListResponse
             {
-                Variables = variables.Select(MapEnvironmentVariableToDto).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Variables = result.Items.Select(MapEnvironmentVariableToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -2847,7 +2854,6 @@ public class RpcMethodHandler : IDisposable
     public async Task<WebResourcesListResponse> WebResourcesListAsync(
         string? solutionId = null,
         bool textOnly = true,
-        int top = 5000,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
@@ -2866,11 +2872,13 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var webResourceService = sp.GetRequiredService<IWebResourceService>();
-            var resources = await webResourceService.ListAsync(parsedSolutionId, textOnly, top, ct);
+            var result = await webResourceService.ListAsync(parsedSolutionId, textOnly, ct);
 
             return new WebResourcesListResponse
             {
-                Resources = resources.Select(MapWebResourceToDto).ToList()
+                TotalCount = result.TotalCount,
+                FiltersApplied = result.FiltersApplied.ToList(),
+                Resources = result.Items.Select(MapWebResourceToDto).ToList()
             };
         }, cancellationToken);
     }
@@ -3709,6 +3717,15 @@ public class SolutionsListResponse
     /// </summary>
     [JsonPropertyName("solutions")]
     public List<SolutionInfoDto> Solutions { get; set; } = [];
+
+    /// <summary>Gets or sets the total count of records matching the query.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    /// <summary>Gets or sets the filters that were applied.</summary>
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 /// <summary>
@@ -4050,6 +4067,9 @@ public class ImportJobsListResponse
 {
     [JsonPropertyName("jobs")]
     public List<ImportJobInfoDto> Jobs { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 public class ImportJobsGetResponse
@@ -4111,6 +4131,9 @@ public class PluginTracesListResponse
 {
     [JsonPropertyName("traces")]
     public List<PluginTraceInfoDto> Traces { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 public class PluginTracesGetResponse
@@ -4641,6 +4664,13 @@ public class ConnectionReferencesListResponse
 {
     [JsonPropertyName("references")]
     public List<ConnectionReferenceInfoDto> References { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class ConnectionReferencesGetResponse
@@ -4769,6 +4799,13 @@ public class EnvironmentVariablesListResponse
 {
     [JsonPropertyName("variables")]
     public List<EnvironmentVariableInfoDto> Variables { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class EnvironmentVariablesGetResponse
@@ -4839,6 +4876,13 @@ public class WebResourcesListResponse
 {
     [JsonPropertyName("resources")]
     public List<WebResourceInfoDto> Resources { get; set; } = [];
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("filtersApplied")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FiltersApplied { get; set; }
 }
 
 public class WebResourcesGetResponse

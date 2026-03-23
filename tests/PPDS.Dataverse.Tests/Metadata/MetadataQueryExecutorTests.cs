@@ -148,7 +148,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryEntityMetadata_MapsEntitySummaryToRows()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -199,7 +199,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryEntityMetadata_WithRequestedColumns_ReturnsOnlyRequested()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -230,7 +230,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryAttributeMetadata_MapsAttributesToRows()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -372,7 +372,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryOneToManyRelationships_MapsRelationshipsToRows()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -419,7 +419,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryManyToManyRelationships_MapsRelationshipsToRows()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -512,7 +512,7 @@ public class MetadataQueryExecutorTests
         cts.Cancel();
 
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         var executor = new MetadataQueryExecutor(mockService.Object);
@@ -529,7 +529,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryMetadataAsync_AcceptsSchemaQualifiedTableName()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new()
@@ -556,7 +556,7 @@ public class MetadataQueryExecutorTests
     public async Task QueryOneToManyRelationships_DeduplicatesBySchemaName()
     {
         var mockService = new Mock<IMetadataService>();
-        mockService.Setup(s => s.GetEntitiesAsync(false, null, It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntitySummary>
             {
                 new() { LogicalName = "account", DisplayName = "Account", SchemaName = "Account", IsCustomEntity = false },

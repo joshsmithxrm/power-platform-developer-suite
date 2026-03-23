@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Services.Utilities;
 
@@ -38,7 +39,7 @@ public class FlowService : IFlowService
     }
 
     /// <inheritdoc />
-    public async Task<List<FlowInfo>> ListAsync(
+    public async Task<ListResult<FlowInfo>> ListAsync(
         string? solutionName = null,
         FlowState? state = null,
         CancellationToken cancellationToken = default)
@@ -62,11 +63,14 @@ public class FlowService : IFlowService
             Orders = { new OrderExpression(Workflow.Fields.Name, OrderType.Ascending) }
         };
 
-        // Filter to only cloud flows (ModernFlow=5 or DesktopFlow=6)
+        var filtersApplied = new List<string>();
+
+        // Filter to only cloud flows (ModernFlow=5 or DesktopFlow=6) — excludes classic workflows
         var categoryFilter = new FilterExpression(LogicalOperator.Or);
         categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, ModernFlowCategory);
         categoryFilter.AddCondition(Workflow.Fields.Category, ConditionOperator.Equal, DesktopFlowCategory);
         query.Criteria.AddFilter(categoryFilter);
+        filtersApplied.Add("cloud flows only");
 
         // Filter by state if specified
         if (state.HasValue)
@@ -98,7 +102,12 @@ public class FlowService : IFlowService
         var flows = results.Entities.Select(MapToFlowInfo).ToList();
         _logger.LogDebug("Found {Count} cloud flows", flows.Count);
 
-        return flows;
+        return new ListResult<FlowInfo>
+        {
+            Items = flows,
+            TotalCount = flows.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />

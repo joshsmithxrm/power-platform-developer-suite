@@ -37,8 +37,10 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         _logger.LogDebug("Generating deployment settings for solution '{Solution}'", solutionName);
 
         // Get current environment variables and connection references from the solution
-        var envVars = await _envVarService.ListAsync(solutionName, cancellationToken);
-        var connectionRefs = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var envVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var connectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var envVars = envVarsResult.Items;
+        var connectionRefs = connectionRefsResult.Items;
 
         var settings = new DeploymentSettingsFile
         {
@@ -80,8 +82,10 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         _logger.LogDebug("Syncing deployment settings for solution '{Solution}'", solutionName);
 
         // Get current state from environment
-        var currentEnvVars = await _envVarService.ListAsync(solutionName, cancellationToken);
-        var currentConnectionRefs = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var currentConnectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var currentEnvVars = currentEnvVarsResult.Items;
+        var currentConnectionRefs = currentConnectionRefsResult.Items;
 
         // Build current schema names sets
         var currentEnvVarNames = currentEnvVars
@@ -200,8 +204,10 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         var issues = new List<ValidationIssue>();
 
         // Get current state from environment
-        var currentEnvVars = await _envVarService.ListAsync(solutionName, cancellationToken);
-        var currentConnectionRefs = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var currentConnectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
+        var currentEnvVars = currentEnvVarsResult.Items;
+        var currentConnectionRefs = currentConnectionRefsResult.Items;
 
         var currentEnvVarNames = currentEnvVars
             .ToDictionary(ev => ev.SchemaName, ev => ev, StringComparer.Ordinal);

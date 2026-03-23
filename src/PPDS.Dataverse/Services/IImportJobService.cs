@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -14,11 +15,9 @@ public interface IImportJobService
     /// Lists import jobs in the environment.
     /// </summary>
     /// <param name="solutionName">Optional filter by solution name.</param>
-    /// <param name="top">Maximum number of results to return.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<List<ImportJobInfo>> ListAsync(
+    Task<ListResult<ImportJobInfo>> ListAsync(
         string? solutionName = null,
-        int top = 50,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -91,7 +91,8 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
             var service = provider.GetRequiredService<IWebResourceService>();
 
-            _resources = await service.ListAsync(_selectedSolutionId, _textOnly, cancellationToken: ct);
+            var wrResult = await service.ListAsync(_selectedSolutionId, _textOnly, cancellationToken: ct);
+            _resources = wrResult.Items.ToList();
 
             Application.MainLoop.Invoke(() =>
             {
@@ -299,7 +300,8 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
-            var solutions = await solutionService.ListAsync(cancellationToken: ScreenCancellation);
+            var solutionsResult = await solutionService.ListAsync(cancellationToken: ScreenCancellation);
+            var solutions = solutionsResult.Items;
 
             Application.MainLoop.Invoke(() =>
             {

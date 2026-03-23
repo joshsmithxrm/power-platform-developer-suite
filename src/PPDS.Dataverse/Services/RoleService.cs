@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -43,7 +44,7 @@ public class RoleService : IRoleService
     }
 
     /// <inheritdoc />
-    public async Task<List<RoleInfo>> ListAsync(
+    public async Task<ListResult<RoleInfo>> ListAsync(
         string? filter = null,
         CancellationToken cancellationToken = default)
     {
@@ -75,7 +76,14 @@ public class RoleService : IRoleService
         _logger.LogDebug("Querying roles with filter: {Filter}", filter);
         var result = await client.RetrieveMultipleAsync(query, cancellationToken);
 
-        return result.Entities.Select(MapToRoleInfo).ToList();
+        var items = result.Entities.Select(MapToRoleInfo).ToList();
+
+        return new ListResult<RoleInfo>
+        {
+            Items = items,
+            TotalCount = items.Count,
+            FiltersApplied = ["root roles only"]
+        };
     }
 
     /// <inheritdoc />

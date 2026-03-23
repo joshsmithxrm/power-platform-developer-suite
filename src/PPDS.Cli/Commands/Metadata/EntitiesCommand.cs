@@ -82,7 +82,7 @@ public static class EntitiesCommand
                 Console.Error.WriteLine("Retrieving entities...");
             }
 
-            var entities = await metadataService.GetEntitiesAsync(customOnly, filter, cancellationToken);
+            var entities = await metadataService.GetEntitiesAsync(customOnly, filter, cancellationToken: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {

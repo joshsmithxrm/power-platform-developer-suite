@@ -11,6 +11,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -152,9 +153,10 @@ public class SolutionService : ISolutionService
     }
 
     /// <inheritdoc />
-    public async Task<List<SolutionInfo>> ListAsync(
+    public async Task<ListResult<SolutionInfo>> ListAsync(
         string? filter = null,
         bool includeManaged = false,
+        bool includeInternal = false,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -177,14 +179,21 @@ public class SolutionService : ISolutionService
             Orders = { new OrderExpression(Solution.Fields.FriendlyName, OrderType.Ascending) }
         };
 
+        var filtersApplied = new List<string>();
+
         // Exclude managed unless requested
         if (!includeManaged)
         {
             query.Criteria.AddCondition(Solution.Fields.IsManaged, ConditionOperator.Equal, false);
+            filtersApplied.Add("unmanaged only");
         }
 
-        // Exclude internal solutions (Default, Active, Basic)
-        query.Criteria.AddCondition(Solution.Fields.IsVisible, ConditionOperator.Equal, true);
+        // Exclude internal solutions (Default, Active, Basic) unless requested
+        if (!includeInternal)
+        {
+            query.Criteria.AddCondition(Solution.Fields.IsVisible, ConditionOperator.Equal, true);
+            filtersApplied.Add("visible only");
+        }
 
         // Apply filter if provided
         if (!string.IsNullOrWhiteSpace(filter))
@@ -204,11 +213,17 @@ public class SolutionService : ISolutionService
         publisherLink.EntityAlias = "pub";
         publisherLink.Columns.AddColumn(Publisher.Fields.FriendlyName);
 
-        _logger.LogDebug("Querying solutions with filter: {Filter}, includeManaged: {IncludeManaged}", filter, includeManaged);
+        _logger.LogDebug("Querying solutions with filter: {Filter}, includeManaged: {IncludeManaged}, includeInternal: {IncludeInternal}", filter, includeManaged, includeInternal);
 
         var results = await client.RetrieveMultipleAsync(query, cancellationToken);
+        var items = results.Entities.Select(e => MapToSolutionInfo(e)).ToList();
 
-        return results.Entities.Select(e => MapToSolutionInfo(e)).ToList();
+        return new ListResult<SolutionInfo>
+        {
+            Items = items,
+            TotalCount = items.Count,
+            FiltersApplied = filtersApplied
+        };
     }
 
     /// <inheritdoc />

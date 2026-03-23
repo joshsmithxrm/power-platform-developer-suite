@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
+using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Dataverse.Services;
@@ -33,7 +34,7 @@ public class PluginTraceService : IPluginTraceService
     }
 
     /// <inheritdoc />
-    public async Task<List<PluginTraceInfo>> ListAsync(
+    public async Task<ListResult<PluginTraceInfo>> ListAsync(
         PluginTraceFilter? filter = null,
         int top = 100,
         CancellationToken cancellationToken = default)
@@ -44,8 +45,17 @@ public class PluginTraceService : IPluginTraceService
 
         _logger.LogDebug("Querying plugin traces with top: {Top}", top);
         var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        var items = result.Entities.Select(MapToPluginTraceInfo).ToList();
 
-        return result.Entities.Select(MapToPluginTraceInfo).ToList();
+        // Wire existing CountAsync into TotalCount for I4 transparency
+        var totalCount = await CountAsync(filter, cancellationToken);
+
+        return new ListResult<PluginTraceInfo>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            WasTruncated = items.Count < totalCount
+        };
     }
 
     /// <inheritdoc />
@@ -175,13 +185,13 @@ public class PluginTraceService : IPluginTraceService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var traces = await ListAsync(filter, top: 5000, cancellationToken);
-            if (traces.Count == 0)
+            var result = await ListAsync(filter, top: 5000, cancellationToken);
+            if (result.Items.Count == 0)
             {
                 break;
             }
 
-            var ids = traces.Select(t => t.Id).ToList();
+            var ids = result.Items.Select(t => t.Id).ToList();
 
             // Create wrapper progress that adds to total
             var batchProgress = new Progress<int>(count =>
@@ -193,7 +203,7 @@ public class PluginTraceService : IPluginTraceService
             totalDeleted += batchDeleted;
 
             // If we deleted fewer than requested, we're done
-            if (traces.Count < 5000)
+            if (result.Items.Count < 5000)
             {
                 break;
             }

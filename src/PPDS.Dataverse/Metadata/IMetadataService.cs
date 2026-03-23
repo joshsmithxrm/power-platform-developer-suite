@@ -15,11 +15,13 @@ public interface IMetadataService
     /// </summary>
     /// <param name="customOnly">If true, only return custom entities.</param>
     /// <param name="filter">Optional filter pattern to match entity logical names (supports * wildcard).</param>
+    /// <param name="includeIntersect">If true, include intersection entities (default: false).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of entity summaries.</returns>
     Task<IReadOnlyList<EntitySummary>> GetEntitiesAsync(
         bool customOnly = false,
         string? filter = null,
+        bool includeIntersect = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -17,7 +18,7 @@ public interface IFlowService
     /// <param name="state">Optional state filter.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of cloud flows.</returns>
-    Task<List<FlowInfo>> ListAsync(
+    Task<ListResult<FlowInfo>> ListAsync(
         string? solutionName = null,
         FlowState? state = null,
         CancellationToken cancellationToken = default);

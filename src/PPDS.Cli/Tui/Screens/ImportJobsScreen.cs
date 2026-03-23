@@ -71,7 +71,8 @@ internal sealed class ImportJobsScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var service = provider.GetRequiredService<IImportJobService>();
 
-            _jobs = await service.ListAsync(top: 50, cancellationToken: ScreenCancellation);
+            var result = await service.ListAsync(cancellationToken: ScreenCancellation);
+            _jobs = result.Items.ToList();
 
             var dt = new System.Data.DataTable();
             dt.Columns.Add("Solution", typeof(string));

@@ -38,10 +38,11 @@ public class DataverseMetadataService : IMetadataService
     public async Task<IReadOnlyList<EntitySummary>> GetEntitiesAsync(
         bool customOnly = false,
         string? filter = null,
+        bool includeIntersect = false,
         CancellationToken cancellationToken = default)
     {
-        _logger?.LogInformation("Retrieving entity list from Dataverse (customOnly={CustomOnly}, filter={Filter})",
-            customOnly, filter ?? "(none)");
+        _logger?.LogInformation("Retrieving entity list from Dataverse (customOnly={CustomOnly}, filter={Filter}, includeIntersect={IncludeIntersect})",
+            customOnly, filter ?? "(none)", includeIntersect);
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -57,8 +58,19 @@ public class DataverseMetadataService : IMetadataService
 
         var filterRegex = CreateFilterRegex(filter);
 
-        var entities = response.EntityMetadata
-            .Where(e => e.IsIntersect != true)
+        var allMetadata = response.EntityMetadata.AsEnumerable();
+
+        if (!includeIntersect)
+        {
+            var intersectCount = allMetadata.Count(e => e.IsIntersect == true);
+            if (intersectCount > 0)
+            {
+                _logger?.LogDebug("Filtering out {IntersectCount} intersect entities", intersectCount);
+            }
+            allMetadata = allMetadata.Where(e => e.IsIntersect != true);
+        }
+
+        var entities = allMetadata
             .Where(e => !customOnly || e.IsCustomEntity == true)
             .Where(e => filterRegex == null || filterRegex.IsMatch(e.LogicalName))
             .Select(MapToEntitySummary)

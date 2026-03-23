@@ -347,7 +347,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var traces = await traceService.ListAsync(filter, top, cancellationToken);
+            var tracesResult = await traceService.ListAsync(filter, top, cancellationToken);
+            var traces = tracesResult.Items.ToList();
 
             if (traces.Count == 0)
             {

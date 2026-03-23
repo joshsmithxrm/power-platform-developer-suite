@@ -79,9 +79,10 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var crService = provider.GetRequiredService<IConnectionReferenceService>();
 
-            _references = await crService.ListAsync(
+            var crResult = await crService.ListAsync(
                 solutionName: _solutionFilter,
                 cancellationToken: ScreenCancellation);
+            _references = crResult.Items.ToList();
 
             // Try to load connections for status enrichment (SPN graceful degradation)
             try
@@ -402,14 +403,14 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
-            var solutions = await solutionService.ListAsync(
+            var solutionsResult = await solutionService.ListAsync(
                 includeManaged: false,
                 cancellationToken: ScreenCancellation);
 
             Application.MainLoop.Invoke(() =>
             {
                 var names = new List<string> { "(All - no filter)" };
-                names.AddRange(solutions.Select(s => s.UniqueName));
+                names.AddRange(solutionsResult.Items.Select(s => s.UniqueName));
 
                 var listView = new ListView(names)
                 {

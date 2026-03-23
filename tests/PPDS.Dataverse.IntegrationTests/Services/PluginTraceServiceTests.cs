@@ -37,7 +37,7 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync();
 
         // Assert
-        result.Should().HaveCount(2);
+        result.Items.Should().HaveCount(2);
     }
 
     [Fact]
@@ -53,8 +53,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { TypeName = "Account" });
 
         // Assert
-        result.Should().ContainSingle();
-        result[0].TypeName.Should().Contain("Account");
+        result.Items.Should().ContainSingle();
+        result.Items[0].TypeName.Should().Contain("Account");
     }
 
     [Fact]
@@ -71,8 +71,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { MessageName = "Update" });
 
         // Assert
-        result.Should().ContainSingle();
-        result[0].MessageName.Should().Be("Update");
+        result.Items.Should().ContainSingle();
+        result.Items[0].MessageName.Should().Be("Update");
     }
 
     [Fact]
@@ -88,8 +88,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { Mode = PluginTraceMode.Asynchronous });
 
         // Assert
-        result.Should().ContainSingle();
-        result[0].Mode.Should().Be(PluginTraceMode.Asynchronous);
+        result.Items.Should().ContainSingle();
+        result.Items[0].Mode.Should().Be(PluginTraceMode.Asynchronous);
     }
 
     [Fact]
@@ -105,8 +105,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { CreatedBefore = now.AddDays(-1) });
 
         // Assert
-        result.Should().ContainSingle();
-        result[0].TypeName.Should().Contain("Account");
+        result.Items.Should().ContainSingle();
+        result.Items[0].TypeName.Should().Contain("Account");
     }
 
     [Fact]
@@ -122,8 +122,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { HasException = true });
 
         // Assert
-        result.Should().ContainSingle();
-        result[0].HasException.Should().BeTrue();
+        result.Items.Should().ContainSingle();
+        result.Items[0].HasException.Should().BeTrue();
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(top: 5);
 
         // Assert
-        result.Should().HaveCount(5);
+        result.Items.Should().HaveCount(5);
     }
 
     [Fact]
@@ -156,8 +156,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
         var result = await _service.ListAsync(new PluginTraceFilter { MinDepth = 2 });
 
         // Assert
-        result.Should().HaveCount(2);
-        result.Should().OnlyContain(t => t.Depth >= 2);
+        result.Items.Should().HaveCount(2);
+        result.Items.Should().OnlyContain(t => t.Depth >= 2);
     }
 
     #endregion
@@ -267,7 +267,7 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
 
         // Verify deletion
         var remaining = await _service.ListAsync();
-        remaining.Should().BeEmpty();
+        remaining.Items.Should().BeEmpty();
     }
 
     [Fact]
@@ -309,8 +309,8 @@ public class PluginTraceServiceTests : FakeXrmEasyTestsBase
 
         // Verify remaining
         var remaining = await _service.ListAsync();
-        remaining.Should().ContainSingle();
-        remaining[0].Id.Should().Be(id3);
+        remaining.Items.Should().ContainSingle();
+        remaining.Items[0].Id.Should().Be(id3);
     }
 
     [Fact]
