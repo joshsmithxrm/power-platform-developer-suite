@@ -432,7 +432,7 @@ export class FetchXmlToSqlTranspiler {
 	private parseFilter(xml: string): ParsedFilter | null {
 		// Find the first filter element in the main entity
 		const filterMatch = xml.match(
-			/<filter([^>]*)>([\s\S]*)<\/filter>/i
+			/<filter([^>]*)>([\s\S]*?)<\/filter>/i
 		);
 
 		if (!filterMatch) {
