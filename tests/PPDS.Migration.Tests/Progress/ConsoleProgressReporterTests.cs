@@ -51,6 +51,30 @@ public class ConsoleProgressReporterTests : IDisposable
     }
 
     [Fact]
+    public void Complete_ShowsSourceVsImported_ExcludingM2MFailures()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Import" };
+        var result = new MigrationResult
+        {
+            Success = false,
+            SourceRecordCount = 1000,
+            SuccessCount = 970,
+            FailureCount = 70, // 50 entity failures + 20 M2M failures
+            RelationshipsFailed = 20,
+            RecordsProcessed = 1040,
+            Duration = TimeSpan.FromSeconds(10)
+        };
+
+        reporter.Complete(result);
+
+        var output = GetOutput();
+        // Should show entity-only stats: 1000 source - 50 entity failures = 950 imported
+        output.Should().Contain("Source: 1,000");
+        output.Should().Contain("Imported: 950");
+        output.Should().Contain("Failed: 50");
+    }
+
+    [Fact]
     public void Complete_OmitsSourceComparison_WhenNoFailures()
     {
         var reporter = new ConsoleProgressReporter { OperationName = "Import" };

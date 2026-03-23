@@ -64,6 +64,12 @@ namespace PPDS.Migration.Progress
         public int? M2MCount { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of M2M relationship failures.
+        /// Only populated for import operations; null otherwise.
+        /// </summary>
+        public int? RelationshipsFailed { get; set; }
+
+        /// <summary>
         /// Gets or sets the connection pool statistics at the end of the operation.
         /// </summary>
         public PoolStatistics? PoolStatistics { get; set; }

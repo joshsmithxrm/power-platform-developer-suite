@@ -192,8 +192,10 @@ namespace PPDS.Migration.Progress
             // Only show when failures exist to avoid confusion from deferred field/M2M counts inflating SuccessCount
             if (result.SourceRecordCount.HasValue && result.FailureCount > 0)
             {
-                var importedCount = result.SourceRecordCount.Value - result.FailureCount;
-                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {importedCount:N0} | Failed: {result.FailureCount:N0}");
+                // Exclude M2M relationship failures — SourceRecordCount only covers entity records
+                var entityFailureCount = result.FailureCount - result.RelationshipsFailed.GetValueOrDefault();
+                var importedCount = result.SourceRecordCount.Value - entityFailureCount;
+                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {importedCount:N0} | Failed: {entityFailureCount:N0}");
             }
 
             // Show created/updated breakdown for upsert operations

@@ -22,6 +22,7 @@ public class MigrationResultTests
         result.CreatedCount.Should().BeNull();
         result.UpdatedCount.Should().BeNull();
         result.M2MCount.Should().BeNull();
+        result.RelationshipsFailed.Should().BeNull();
         result.PoolStatistics.Should().BeNull();
     }
 

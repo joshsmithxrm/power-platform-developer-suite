@@ -527,6 +527,7 @@ namespace PPDS.Migration.Import
                 CreatedCount = totalCreated,
                 UpdatedCount = totalUpdated,
                 M2MCount = relationshipResult.SuccessCount > 0 ? relationshipResult.SuccessCount : null,
+                RelationshipsFailed = relationshipResult.FailureCount > 0 ? relationshipResult.FailureCount : null,
                 PoolStatistics = _connectionPool.Statistics,
                 Duration = result.Duration,
                 Errors = errors.ToArray()
