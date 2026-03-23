@@ -763,12 +763,13 @@ describe('DaemonClient', () => {
                     { logicalName: 'account', schemaName: 'Account', displayName: 'Account', isCustomEntity: false, isManaged: false, ownershipType: 'UserOwned', objectTypeCode: 1, description: null },
                     { logicalName: 'contact', schemaName: 'Contact', displayName: 'Contact', isCustomEntity: false, isManaged: false, ownershipType: 'UserOwned', objectTypeCode: 2, description: null },
                 ],
+                intersectHiddenCount: 0,
             };
             mockConnection.sendRequest.mockResolvedValueOnce(mockResult);
 
             const result = await client.metadataEntities();
 
-            expect(mockConnection.sendRequest).toHaveBeenCalledWith('metadata/entities', {});
+            expect(mockConnection.sendRequest).toHaveBeenCalledWith('metadata/entities', { includeIntersect: false });
             expect(result.entities).toHaveLength(2);
             expect(result.entities[0].logicalName).toBe('account');
         });

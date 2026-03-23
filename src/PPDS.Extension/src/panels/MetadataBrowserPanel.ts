@@ -72,6 +72,8 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
         this.subscribeToDaemonReconnect(this.daemon);
     }
 
+    private includeIntersect = false;
+
     protected async handleMessage(message: MetadataBrowserPanelWebviewToHost): Promise<void> {
         switch (message.command) {
             case 'ready':
@@ -81,10 +83,17 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 await this.handleEnvironmentPickerClick(this.daemon, this.panelId, MetadataBrowserPanel.instances.length > 1);
                 break;
             case 'refresh':
+                await this.refreshAll();
+                break;
+            case 'setIncludeIntersect':
+                this.includeIntersect = message.includeIntersect;
                 await this.loadEntities();
                 break;
             case 'selectEntity':
                 await this.loadEntityDetail(message.logicalName);
+                break;
+            case 'selectGlobalChoice':
+                await this.loadGlobalChoiceDetail(message.name);
                 break;
             case 'openInMaker':
                 await this.openInMaker(message.entityLogicalName);
@@ -101,7 +110,12 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     }
 
     protected override onDaemonReconnected(): void {
-        void this.loadEntities();
+        void this.refreshAll();
+    }
+
+    private async refreshAll(): Promise<void> {
+        this.postMessage({ command: 'loading' });
+        await Promise.all([this.loadEntities(), this.loadGlobalChoices()]);
     }
 
     override dispose(): void {
@@ -111,17 +125,16 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     }
 
     protected override async onInitialized(): Promise<void> {
-        await this.loadEntities();
+        await this.refreshAll();
     }
 
     protected override async onEnvironmentChanged(): Promise<void> {
-        await this.loadEntities();
+        await this.refreshAll();
     }
 
     private async loadEntities(isRetry = false): Promise<void> {
         try {
-            this.postMessage({ command: 'loading' });
-            const result = await this.daemon.metadataEntities(this.environmentUrl);
+            const result = await this.daemon.metadataEntities(this.environmentUrl, this.includeIntersect);
 
             this.postMessage({
                 command: 'entitiesLoaded',
@@ -134,6 +147,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                     ownershipType: e.ownershipType,
                     description: e.description,
                 })),
+                intersectHiddenCount: result.intersectHiddenCount ?? 0,
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -143,6 +157,42 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             }
 
             this.postMessage({ command: 'error', message: msg });
+        }
+    }
+
+    private async loadGlobalChoices(isRetry = false): Promise<void> {
+        try {
+            const result = await this.daemon.metadataGlobalOptionSets(this.environmentUrl);
+            this.postMessage({
+                command: 'globalChoicesLoaded',
+                choices: result.optionSets,
+            });
+        } catch (error) {
+            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoices(true))) {
+                return;
+            }
+
+            // Non-fatal — choices section just stays empty
+            this.postMessage({ command: 'globalChoicesLoaded', choices: [] });
+        }
+    }
+
+    private async loadGlobalChoiceDetail(name: string, isRetry = false): Promise<void> {
+        try {
+            this.postMessage({ command: 'globalChoiceDetailLoading', name });
+            const result = await this.daemon.metadataGlobalOptionSet(name, this.environmentUrl);
+            this.postMessage({
+                command: 'globalChoiceDetailLoaded',
+                choice: result.optionSet,
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+
+            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoiceDetail(name, true))) {
+                return;
+            }
+
+            this.postMessage({ command: 'error', message: `Failed to load choice detail: ${msg}` });
         }
     }
 
@@ -214,7 +264,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
 <div class="split-pane">
     <div class="entity-list-pane" id="entity-list-pane">
         <div class="search-container">
-            <input type="text" id="entity-search" placeholder="Search entities..." />
+            <input type="text" id="entity-search" placeholder="Search entities and choices..." />
             <span id="filter-count"></span>
         </div>
         <div class="filter-toggle-container">
@@ -222,10 +272,15 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 <input type="checkbox" id="hide-system-toggle" />
                 <span>Custom Only</span>
             </label>
+            <label class="filter-toggle-label">
+                <input type="checkbox" id="include-intersect-toggle" />
+                <span>Include Intersect</span>
+            </label>
         </div>
         <div class="entity-list" id="entity-list"></div>
     </div>
     <div class="entity-detail-pane" id="entity-detail-pane">
+        <div id="entity-breadcrumb" class="entity-breadcrumb" style="display:none;"></div>
         <div class="tab-bar" id="tab-bar"></div>
         <div class="tab-content" id="tab-content">
             <div class="empty-state">Select an entity to view details</div>
