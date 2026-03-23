@@ -29,7 +29,7 @@ public class ConsoleProgressReporterTests : IDisposable
     #region Complete() — Source vs Imported Comparison (#280)
 
     [Fact]
-    public void Complete_ShowsSourceVsImported_WhenCountsDiffer()
+    public void Complete_ShowsSourceVsImported_WhenFailuresExist()
     {
         var reporter = new ConsoleProgressReporter { OperationName = "Import" };
         var result = new MigrationResult
@@ -51,7 +51,7 @@ public class ConsoleProgressReporterTests : IDisposable
     }
 
     [Fact]
-    public void Complete_OmitsSourceComparison_WhenCountsMatch()
+    public void Complete_OmitsSourceComparison_WhenNoFailures()
     {
         var reporter = new ConsoleProgressReporter { OperationName = "Import" };
         var result = new MigrationResult

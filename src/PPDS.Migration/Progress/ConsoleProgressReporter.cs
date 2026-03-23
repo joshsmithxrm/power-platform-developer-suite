@@ -188,13 +188,12 @@ namespace PPDS.Migration.Progress
                 : "";
             Console.Error.WriteLine($"    {result.SuccessCount:N0} record(s) in {result.Duration:hh\\:mm\\:ss} ({result.RecordsPerSecond:F1} rec/s){m2mBreakdown}");
 
-            // Source vs imported comparison when there's a difference
-            if (result.SourceRecordCount.HasValue && result.SourceRecordCount.Value != result.SuccessCount)
+            // Source vs imported comparison when there are failures
+            // Only show when failures exist to avoid confusion from deferred field/M2M counts inflating SuccessCount
+            if (result.SourceRecordCount.HasValue && result.FailureCount > 0)
             {
-                var entitySuccessCount = result.M2MCount.HasValue
-                    ? result.SuccessCount - result.M2MCount.Value
-                    : result.SuccessCount;
-                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {entitySuccessCount:N0} | Failed: {result.FailureCount:N0}");
+                var importedCount = result.SourceRecordCount.Value - result.FailureCount;
+                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {importedCount:N0} | Failed: {result.FailureCount:N0}");
             }
 
             // Show created/updated breakdown for upsert operations
