@@ -79,7 +79,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var solutions = await solutionService.ListAsync(filter, includeManaged, cancellationToken);
+            var result = await solutionService.ListAsync(filter, includeManaged, cancellationToken: cancellationToken);
+            var solutions = result.Items;
 
             if (solutions.Count == 0)
             {

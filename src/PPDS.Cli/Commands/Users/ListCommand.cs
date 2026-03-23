@@ -88,7 +88,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var users = await userService.ListAsync(filter, includeDisabled, top, cancellationToken);
+            var usersResult = await userService.ListAsync(filter, includeDisabled, cancellationToken);
+            var users = usersResult.Items;
 
             if (globalOptions.IsJsonMode)
             {

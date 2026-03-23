@@ -4,6 +4,7 @@ import type { DaemonClient } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
 import { buildMakerUrl } from '../commands/browserCommands.js';
 import type { WebResourceFileSystemProvider } from '../providers/WebResourceFileSystemProvider.js';
+import type { WebResourceInfoDto } from '../types.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
 import { getNonce } from './webviewUtils.js';
@@ -26,6 +27,15 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     private textOnly = true;
     /** Monotonically increasing request ID to discard stale responses. */
     private requestId = 0;
+
+    /**
+     * WR-23: Cache loaded resources keyed by "<solutionId>|<textOnly>|<envUrl>".
+     * Invalidated on explicit Refresh or environment change.
+     */
+    private readonly resourceCache = new Map<string, { resources: WebResourceInfoDto[]; totalCount: number }>();
+
+    /** Batch size for progressive webview delivery (WR-04). */
+    private static readonly PAGE_SIZE = 250;
 
     /** File system provider for opening web resources in editor. */
     private readonly fsp: WebResourceFileSystemProvider | undefined;
@@ -84,7 +94,8 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: false,
+                enableFindWidget: true,
+                retainContextWhenHidden: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(extensionUri, 'node_modules'),
                     vscode.Uri.joinPath(extensionUri, 'dist'),
@@ -128,7 +139,14 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 await this.loadWebResources();
                 break;
             case 'refresh':
+                // WR-23: Explicit refresh invalidates the cache for this key
+                this.resourceCache.delete(this.cacheKey());
                 await this.loadWebResources();
+                break;
+            case 'serverSearch':
+                // WR-03: Server-side search — re-send all cached resources so the webview
+                // can filter from the full set (all records are already loaded server-side).
+                await this.handleServerSearch(message.term);
                 break;
             case 'openWebResource':
                 await this.openWebResource(message.id, message.name, message.webResourceType);
@@ -180,8 +198,15 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         // Reset solution filter on environment change
         this.solutionId = null;
         void this.context.globalState.update('ppds.webResources.solutionId', null);
+        // WR-23: Environment change invalidates all cached data
+        this.resourceCache.clear();
         await this.loadSolutionList();
         await this.loadWebResources();
+    }
+
+    /** WR-23: Cache key combining all factors that determine the result set. */
+    private cacheKey(): string {
+        return `${this.solutionId ?? ''}|${String(this.textOnly)}|${this.environmentUrl ?? ''}`;
     }
 
     private async loadSolutionList(): Promise<void> {
@@ -201,21 +226,33 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     }
 
     private async loadWebResources(isRetry = false): Promise<void> {
+        const key = this.cacheKey();
+
+        // WR-23: Serve from cache when available (skips the RPC call entirely).
+        const cached = this.resourceCache.get(key);
+        if (cached) {
+            const currentRequestId = ++this.requestId;
+            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount);
+            return;
+        }
+
         try {
             this.postMessage({ command: 'loading' });
             const currentRequestId = ++this.requestId;
+
             const result = await this.daemon.webResourcesList(
                 this.solutionId ?? undefined,
                 this.textOnly,
-                5000,
                 this.environmentUrl,
             );
 
-            this.postMessage({
-                command: 'webResourcesLoaded',
-                resources: result.resources,
-                requestId: currentRequestId,
-            });
+            // WR-23: Store in cache before streaming to webview.
+            this.resourceCache.set(key, { resources: result.resources, totalCount: result.totalCount });
+
+            // WR-04: Send first page immediately so the UI renders fast,
+            // then stream remaining pages in the background.
+            await this.sendProgressivePages(result.resources, currentRequestId, result.totalCount);
+
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
 
@@ -224,6 +261,78 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             }
 
             this.postMessage({ command: 'error', message: msg });
+        }
+    }
+
+    /**
+     * WR-04: Streams all resources to the webview in batches of PAGE_SIZE.
+     *
+     * The first batch is sent as `webResourcesLoaded` (resets the table).
+     * Subsequent batches are sent as `webResourcesPage` (appended).
+     * A final `webResourcesLoadComplete` is sent when done.
+     *
+     * Sending in chunks prevents the webview message bridge from blocking
+     * on a single large JSON payload (60K records ≈ several MB serialised).
+     */
+    private async sendProgressivePages(
+        resources: WebResourceInfoDto[],
+        requestId: number,
+        totalCount: number,
+    ): Promise<void> {
+        const pageSize = WebResourcesPanel.PAGE_SIZE;
+        const firstPage = resources.slice(0, pageSize);
+
+        // Send the first page — this replaces any existing table content.
+        this.postMessage({
+            command: 'webResourcesLoaded',
+            resources: firstPage,
+            requestId,
+            totalCount,
+        });
+
+        // Yield to the VS Code event loop between each batch so the UI stays
+        // responsive. Use setImmediate-equivalent via Promise microtask.
+        for (let offset = pageSize; offset < resources.length; offset += pageSize) {
+            // Guard: discard if a newer request has started
+            if (requestId !== this.requestId) return;
+
+            const batch = resources.slice(offset, offset + pageSize);
+            this.postMessage({
+                command: 'webResourcesPage',
+                resources: batch,
+                requestId,
+                loadedSoFar: offset + batch.length,
+                totalCount,
+            });
+
+            // Yield to the event loop between batches (avoids blocking)
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+
+        if (requestId === this.requestId) {
+            this.postMessage({ command: 'webResourcesLoadComplete', requestId, totalCount });
+        }
+    }
+
+    /**
+     * WR-03: Server-side search fallback.
+     *
+     * Since the service already loads ALL records server-side, "server-side search"
+     * simply means: ensure the full dataset is loaded and apply the filter client-side.
+     * If the cache is warm (all data loaded), re-send all resources so the webview
+     * can re-filter with the new term across the complete set.
+     * If the cache is cold (loading still in progress), trigger a fresh load.
+     */
+    private async handleServerSearch(_term: string): Promise<void> {
+        const key = this.cacheKey();
+        const cached = this.resourceCache.get(key);
+        if (cached) {
+            // Cache hit: re-send full dataset so the webview can filter locally.
+            const currentRequestId = ++this.requestId;
+            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount);
+        } else {
+            // Cache miss: trigger a full load (which will cache and stream the result).
+            await this.loadWebResources();
         }
     }
 
@@ -333,9 +442,14 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         <input type="checkbox" id="text-only-cb" checked>
         Text only
     </label>
-    <input type="text" id="wr-search" class="search-input" placeholder="Search web resources..." title="Filter by name" />
+    <input type="text" id="wr-search" class="toolbar-search" placeholder="Search web resources..." title="Filter by name" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
+</div>
+
+<div id="server-search-banner" class="server-search-banner" style="display:none;">
+    <span class="server-search-banner-text">Search term active while data is still loading.</span>
+    <button id="server-search-btn" class="server-search-btn"></button>
 </div>
 
 <div class="content" id="content">

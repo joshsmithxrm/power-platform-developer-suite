@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Models;
 
 namespace PPDS.Dataverse.Services;
 
@@ -15,12 +16,10 @@ public interface IWebResourceService
     /// </summary>
     /// <param name="solutionId">Optional solution ID filter. Uses ConditionOperator.In with component IDs.</param>
     /// <param name="textOnly">If true, excludes binary types (PNG/JPG/GIF/XAP/ICO).</param>
-    /// <param name="top">Maximum number of results.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<List<WebResourceInfo>> ListAsync(
+    Task<ListResult<WebResourceInfo>> ListAsync(
         Guid? solutionId = null,
         bool textOnly = false,
-        int top = 5000,
         CancellationToken cancellationToken = default);
 
     /// <summary>

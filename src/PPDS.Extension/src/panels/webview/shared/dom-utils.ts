@@ -26,13 +26,30 @@ export function cssEscape(str: unknown): string {
 }
 
 /**
- * Format an ISO date string into a human-readable local date.
+ * Format an ISO date string into a human-readable local date (date only, no time).
  * Returns empty string for falsy input; returns the raw string if parsing fails.
  */
 export function formatDate(isoString: string | null | undefined): string {
     if (!isoString) return '';
     try {
         return new Date(isoString).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch {
+        return isoString;
+    }
+}
+
+/**
+ * Format an ISO date string into a human-readable local date and time (no seconds).
+ * Returns empty string for falsy input; returns the raw string if parsing fails.
+ * Example output: "Dec 11, 2025, 4:00 AM"
+ */
+export function formatDateTime(isoString: string | null | undefined): string {
+    if (!isoString) return '';
+    try {
+        return new Date(isoString).toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit',
+        });
     } catch {
         return isoString;
     }

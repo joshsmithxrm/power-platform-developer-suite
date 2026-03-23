@@ -2,7 +2,7 @@
 // External webview script for the Web Resources panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, formatDateTime } from './shared/dom-utils.js';
 import type {
     WebResourcesPanelWebviewToHost,
     WebResourcesPanelHostToWebview,
@@ -45,18 +45,32 @@ let lastRequestId = 0;
 let allResources: WebResourceInfoDto[] = [];
 let searchTerm = '';
 
-// ── Format date/time helper ──
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '\u2014';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
+// ── WR-04: Progressive loading state ──
+/** Total record count reported by the server (may exceed allResources.length during loading). */
+let serverTotalCount = 0;
+/** True while the host is still streaming pages for the current request. */
+let isLoadingMore = false;
+
+// ── WR-03: Server-side search banner ──
+const serverSearchBanner = document.getElementById('server-search-banner');
+const serverSearchBtn = document.getElementById('server-search-btn');
+
+function updateServerSearchBanner(): void {
+    if (!serverSearchBanner || !serverSearchBtn) return;
+    // Show banner only when: search term active AND still loading more data
+    if (searchTerm.length > 0 && isLoadingMore) {
+        serverSearchBanner.style.display = '';
+        serverSearchBtn.textContent = `Search all ${serverTotalCount.toLocaleString()} records`;
+    } else {
+        serverSearchBanner.style.display = 'none';
     }
 }
+
+serverSearchBtn?.addEventListener('click', () => {
+    // Ask the host to re-send the full dataset so we can filter the complete set
+    vscode.postMessage({ command: 'serverSearch', term: searchTerm });
+    serverSearchBanner!.style.display = 'none';
+});
 
 // ── Type badge helper ──
 function typeBadgeHtml(typeName: string): string {
@@ -170,10 +184,14 @@ const table = new DataTable<WebResourceInfoDto>({
         const text = items.filter(r => r.isTextType).length;
         const managed = items.filter(r => r.isManaged).length;
         const isFiltered = searchTerm.length > 0 && items.length !== allResources.length;
+        // WR-04: Show progress when still loading more from host
+        const loadedOf = isLoadingMore
+            ? ` \u2014 Loading... ${allResources.length.toLocaleString()} of ${serverTotalCount.toLocaleString()}`
+            : '';
         const countLabel = isFiltered
             ? items.length + ' of ' + allResources.length + ' web resources'
             : items.length + ' web resource' + (items.length !== 1 ? 's' : '');
-        const parts = [countLabel];
+        const parts = [countLabel + loadedOf];
         if (text > 0) parts.push(text + ' text');
         if (managed > 0) parts.push(managed + ' managed');
         return parts.join(' \u2014 ');
@@ -198,6 +216,8 @@ content.addEventListener('click', (e) => {
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -240,6 +260,8 @@ function applySearchFilter(): void {
             || r.typeName.toLowerCase().includes(term)
         );
     table.setItems(filtered);
+    // WR-03: Update server-search banner visibility
+    updateServerSearchBanner();
 }
 
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -294,8 +316,13 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
             // Discard stale responses
             if (msg.requestId < lastRequestId) break;
             lastRequestId = msg.requestId;
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             selectedIds.clear();
             updatePublishButton();
+            // WR-04: First page — reset accumulated list
+            serverTotalCount = msg.totalCount;
+            isLoadingMore = msg.resources.length < msg.totalCount;
             allResources = msg.resources;
             applySearchFilter();
             {
@@ -303,13 +330,36 @@ window.addEventListener('message', (event: MessageEvent<WebResourcesPanelHostToW
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
             }
             break;
+        case 'webResourcesPage':
+            // WR-04: Subsequent page — append to accumulated list, discard stale
+            if (msg.requestId !== lastRequestId) break;
+            serverTotalCount = msg.totalCount;
+            isLoadingMore = msg.loadedSoFar < msg.totalCount;
+            allResources = allResources.concat(msg.resources);
+            applySearchFilter();
+            break;
+        case 'webResourcesLoadComplete':
+            // WR-04: All pages received for this request
+            if (msg.requestId !== lastRequestId) break;
+            serverTotalCount = msg.totalCount;
+            isLoadingMore = false;
+            // Re-render status bar and hide the server-search banner if showing
+            applySearchFilter();
+            break;
         case 'loading':
             content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading web resources...</div></div>';
             statusText.textContent = 'Loading...';
+            isLoadingMore = true;
+            serverTotalCount = 0;
+            allResources = [];
+            if (serverSearchBanner) serverSearchBanner.style.display = 'none';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
+            isLoadingMore = false;
             break;
         case 'publishResult':
             if (msg.error) {

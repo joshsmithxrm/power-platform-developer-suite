@@ -55,9 +55,9 @@ public class WebResourceServiceTests
         var result = await service.ListAsync();
 
         // Assert
-        result.Should().HaveCount(2);
-        result[0].Name.Should().Be("new_script.js");
-        result[1].Name.Should().Be("new_style.css");
+        result.Items.Should().HaveCount(2);
+        result.Items[0].Name.Should().Be("new_script.js");
+        result.Items[1].Name.Should().Be("new_style.css");
 
         // Verify no solution service was called
         _solutionService.Verify(
@@ -153,7 +153,7 @@ public class WebResourceServiceTests
         var result = await service.ListAsync(solutionId: solutionId);
 
         // Assert
-        result.Should().BeEmpty();
+        result.Items.Should().BeEmpty();
 
         // Should not even query Dataverse when there are no component IDs
         _client.Verify(

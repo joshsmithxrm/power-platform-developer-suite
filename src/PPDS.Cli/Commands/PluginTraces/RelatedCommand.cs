@@ -144,7 +144,8 @@ public static class RelatedCommand
             {
                 // List traces for the specified entity
                 var filter = new PluginTraceFilter { PrimaryEntity = recordEntity };
-                traces = await traceService.ListAsync(filter, top, cancellationToken);
+                var tracesResult = await traceService.ListAsync(filter, top, cancellationToken);
+                traces = tracesResult.Items.ToList();
 
                 if (traces.Count == 0)
                 {

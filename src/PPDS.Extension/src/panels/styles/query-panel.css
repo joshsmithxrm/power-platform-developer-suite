@@ -285,6 +285,82 @@ tbody.all-selected td {
     border-color: var(--vscode-focusBorder);
 }
 
+/* ── Transpilation warning banner ───────────────────────────────────────── */
+
+.transpile-warning-banner {
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--vscode-editorWarning-foreground, #c90);
+    background: var(--vscode-inputValidation-warningBackground, rgba(204, 153, 0, 0.12));
+    border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, rgba(204, 153, 0, 0.4));
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.transpile-warning-banner .warning-icon {
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.transpile-warning-banner .warning-messages {
+    flex: 1;
+    line-height: 1.5;
+}
+
+.transpile-warning-banner .warning-dismiss {
+    background: none;
+    border: none;
+    color: var(--vscode-editorWarning-foreground, #c90);
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.7;
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.transpile-warning-banner .warning-dismiss:hover {
+    opacity: 1;
+}
+
+/* ── Hover copy button on record link cells ─────────────────────────────── */
+
+.results-table td.cell-has-link {
+    position: relative;
+}
+
+.cell-copy-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    opacity: 0.7;
+    font-size: 11px;
+    z-index: 2;
+    padding: 0;
+    line-height: 1;
+}
+
+.results-table td.cell-has-link:hover .cell-copy-btn {
+    display: flex;
+}
+
+.cell-copy-btn:hover {
+    opacity: 1;
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
 /* ── Load more ──────────────────────────────────────────────────────────── */
 
 .load-more-bar {

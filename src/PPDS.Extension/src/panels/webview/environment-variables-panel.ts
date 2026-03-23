@@ -2,7 +2,7 @@
 // External webview script for the Environment Variables panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, formatDate } from './shared/dom-utils.js';
+import { escapeHtml, formatDateTime } from './shared/dom-utils.js';
 import { FilterBar } from './shared/filter-bar.js';
 import type {
     EnvironmentVariablesPanelWebviewToHost,
@@ -39,6 +39,20 @@ const editDialogClose = document.getElementById('edit-dialog-close') as HTMLElem
 
 let editingSchemaName: string | null = null;
 let editingType: string | null = null;
+
+// ── Data state ──
+let totalCount = 0;
+let includeInactive = false;
+
+// ── Inactive toggle ──
+const inactiveToggle = document.getElementById('inactive-toggle') as HTMLElement;
+const inactiveToggleLabel = document.getElementById('inactive-toggle-label') as HTMLElement;
+inactiveToggle.addEventListener('click', () => {
+    includeInactive = !includeInactive;
+    inactiveToggleLabel.textContent = includeInactive ? 'All' : 'Active Only';
+    inactiveToggle.classList.toggle('active', includeInactive);
+    vscode.postMessage({ command: 'setIncludeInactive', includeInactive });
+});
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -108,8 +122,8 @@ const table = new DataTable<EnvironmentVariableViewDto>({
         {
             key: 'modifiedOn',
             label: 'Modified On',
-            render: (v) => escapeHtml(formatDate(v.modifiedOn)),
-            className: '120px',
+            render: (v) => escapeHtml(formatDateTime(v.modifiedOn)),
+            className: '140px',
         },
         {
             key: 'isManaged',
@@ -128,7 +142,14 @@ const table = new DataTable<EnvironmentVariableViewDto>({
     formatStatus: (items) => {
         const overridden = items.filter(v => v.hasOverride).length;
         const missing = items.filter(v => v.isMissing).length;
-        const parts = [items.length + ' environment variable' + (items.length !== 1 ? 's' : '')];
+        const noun = 'environment variable' + (totalCount !== 1 ? 's' : '');
+        let countStr: string;
+        if (items.length < totalCount) {
+            countStr = items.length + ' of ' + totalCount + ' ' + noun;
+        } else {
+            countStr = totalCount + ' ' + noun;
+        }
+        const parts = [countStr];
         if (overridden > 0) parts.push(overridden + ' overridden');
         if (missing > 0) parts.push(missing + ' missing');
         return parts.join(' \u2014 ');
@@ -138,6 +159,8 @@ const table = new DataTable<EnvironmentVariableViewDto>({
 
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
@@ -146,6 +169,8 @@ exportBtn.addEventListener('click', () => {
 });
 
 syncBtn.addEventListener('click', () => {
+    (syncBtn as HTMLButtonElement).disabled = true;
+    syncBtn.textContent = 'Syncing...';
     vscode.postMessage({ command: 'syncDeploymentSettings' });
 });
 
@@ -165,6 +190,8 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
 
 // ── Search filter ──
 const searchFilterCount = document.createElement('span');
+searchFilterCount.className = 'filter-count-label';
+searchInput.insertAdjacentElement('afterend', searchFilterCount);
 const searchFilter = new FilterBar<EnvironmentVariableViewDto>({
     input: searchInput,
     countEl: searchFilterCount,
@@ -252,10 +279,10 @@ function renderDetail(detail: EnvironmentVariableDetailViewDto): void {
         html += '<div class="detail-row"><span class="detail-label">Description:</span> <span class="detail-value">' + escapeHtml(detail.description) + '</span></div>';
     }
     if (detail.createdOn) {
-        html += '<div class="detail-row"><span class="detail-label">Created On:</span> <span class="detail-value">' + escapeHtml(detail.createdOn) + '</span></div>';
+        html += '<div class="detail-row"><span class="detail-label">Created On:</span> <span class="detail-value">' + escapeHtml(formatDateTime(detail.createdOn)) + '</span></div>';
     }
     if (detail.modifiedOn) {
-        html += '<div class="detail-row"><span class="detail-label">Modified On:</span> <span class="detail-value">' + escapeHtml(detail.modifiedOn) + '</span></div>';
+        html += '<div class="detail-row"><span class="detail-label">Modified On:</span> <span class="detail-value">' + escapeHtml(formatDateTime(detail.modifiedOn)) + '</span></div>';
     }
     html += '</div>';
 
@@ -339,6 +366,9 @@ window.addEventListener('message', (event: MessageEvent<EnvironmentVariablesPane
             }
             break;
         case 'environmentVariablesLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
+            totalCount = msg.totalCount;
             searchFilter.setItems(msg.variables);
             detailPane.style.display = 'none';
             {
@@ -362,11 +392,29 @@ window.addEventListener('message', (event: MessageEvent<EnvironmentVariablesPane
         case 'deploymentSettingsExported':
             // No special webview handling needed -- user saw the save dialog
             break;
+        case 'deploymentSettingsSynced':
+            (syncBtn as HTMLButtonElement).disabled = false;
+            syncBtn.textContent = 'Sync Settings';
+            {
+                const ev = msg.envVars;
+                const cr = msg.connectionRefs;
+                const summary = [
+                    'Sync complete.',
+                    'Env vars: +' + ev.added + ' -' + ev.removed + ' =' + ev.preserved,
+                    'Connection refs: +' + cr.added + ' -' + cr.removed + ' =' + cr.preserved,
+                ].join('  ');
+                statusText.textContent = summary;
+            }
+            break;
         case 'loading':
             content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading environment variables...</div></div>';
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
+            (syncBtn as HTMLButtonElement).disabled = false;
+            syncBtn.textContent = 'Sync Settings';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

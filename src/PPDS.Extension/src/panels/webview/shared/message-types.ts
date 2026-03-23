@@ -5,7 +5,7 @@
  */
 
 // Import daemon response types that appear in message payloads
-import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto, WebResourceInfoDto } from '../../../types.js';
+import type { QueryResultResponse, CompletionItemDto, MetadataEntityDetailDto, WebResourceInfoDto, MetadataGlobalChoiceSummaryDto, MetadataOptionSetDto } from '../../../types.js';
 
 // ── Query Panel ─────────────────────────────────────────────────────────────
 
@@ -86,12 +86,13 @@ export type SolutionsPanelWebviewToHost =
     | { command: 'collapseSolution'; uniqueName: string }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'openInMaker'; solutionId?: string }
+    | { command: 'setVisibilityFilter'; includeInternal: boolean }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Solutions Panel webview. */
 export type SolutionsPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
-    | { command: 'solutionsLoaded'; solutions: SolutionViewDto[] }
+    | { command: 'solutionsLoaded'; solutions: SolutionViewDto[]; totalCount: number; filtersApplied: string[] }
     | { command: 'componentsLoading'; uniqueName: string }
     | { command: 'componentsLoaded'; uniqueName: string; groups: ComponentGroupDto[] }
     | { command: 'loading' }
@@ -118,7 +119,7 @@ export interface ImportJobViewDto {
 export type ImportJobsPanelWebviewToHost =
     | { command: 'ready' }
     | { command: 'refresh' }
-    | { command: 'selectJob'; id: string }
+    | { command: 'viewImportLog'; id: string }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
     | { command: 'copyToClipboard'; text: string }
@@ -127,8 +128,7 @@ export type ImportJobsPanelWebviewToHost =
 /** Messages the extension host sends to the Import Jobs Panel webview. */
 export type ImportJobsPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
-    | { command: 'importJobsLoaded'; jobs: ImportJobViewDto[] }
-    | { command: 'importJobDetailLoaded'; id: string; data: string | null }
+    | { command: 'importJobsLoaded'; jobs: ImportJobViewDto[]; totalCount: number }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
@@ -159,6 +159,16 @@ export interface PluginTraceDetailViewDto extends PluginTraceViewDto {
     configuration: string | null;
     secureConfiguration: string | null;
     requestId: string | null;
+    // Additional fields (PT-01 through PT-09)
+    stage: string | null;
+    constructorStartTime: string | null;
+    isSystemCreated: boolean;
+    createdById: string | null;
+    createdOnBehalfById: string | null;
+    pluginStepId: string | null;
+    persistenceKey: string | null;
+    organizationId: string | null;
+    profile: string | null;
 }
 
 /** Timeline node for the waterfall visualization. */
@@ -182,10 +192,29 @@ export interface TraceFilterViewDto {
     primaryEntity?: string;
     mode?: string;
     hasException?: boolean;
+    hasNoException?: boolean;
     correlationId?: string;
     minDurationMs?: number;
     startDate?: string;
     endDate?: string;
+    operationType?: string;
+    stage?: string;
+}
+
+/** Advanced query builder condition. */
+export interface QueryConditionViewDto {
+    id: string;
+    enabled: boolean;
+    field: string;
+    operator: string;
+    value: string;
+    logicalOperator: 'and' | 'or';
+}
+
+/** Full advanced query sent from the query builder. */
+export interface AdvancedQueryViewDto {
+    quickFilterIds: string[];
+    conditions: QueryConditionViewDto[];
 }
 
 /** Messages the Plugin Traces Panel webview sends to the extension host. */
@@ -193,6 +222,7 @@ export type PluginTracesPanelWebviewToHost =
     | { command: 'ready' }
     | { command: 'refresh' }
     | { command: 'applyFilter'; filter: TraceFilterViewDto }
+    | { command: 'applyAdvancedFilter'; query: AdvancedQueryViewDto }
     | { command: 'selectTrace'; id: string }
     | { command: 'loadTimeline'; correlationId: string }
     | { command: 'deleteTraces'; ids: string[] }
@@ -203,17 +233,19 @@ export type PluginTracesPanelWebviewToHost =
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
     | { command: 'exportTraces'; format: string }
+    | { command: 'persistState'; key: string; value: unknown }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
 /** Messages the extension host sends to the Plugin Traces Panel webview. */
 export type PluginTracesPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
-    | { command: 'tracesLoaded'; traces: PluginTraceViewDto[] }
+    | { command: 'tracesLoaded'; traces: PluginTraceViewDto[]; totalCount: number }
     | { command: 'traceDetailLoaded'; trace: PluginTraceDetailViewDto }
     | { command: 'timelineLoaded'; nodes: TimelineNodeViewDto[] }
     | { command: 'traceLevelLoaded'; level: string; levelValue: number }
     | { command: 'deleteComplete'; deletedCount: number }
+    | { command: 'selectTraceById'; id: string }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
@@ -235,7 +267,9 @@ export interface MetadataEntityViewDto {
 export type MetadataBrowserPanelWebviewToHost =
     | { command: 'ready' }
     | { command: 'refresh' }
+    | { command: 'setIncludeIntersect'; includeIntersect: boolean }
     | { command: 'selectEntity'; logicalName: string }
+    | { command: 'selectGlobalChoice'; name: string }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker'; entityLogicalName?: string }
     | { command: 'copyToClipboard'; text: string }
@@ -244,9 +278,12 @@ export type MetadataBrowserPanelWebviewToHost =
 /** Messages the extension host sends to the Metadata Browser Panel webview. */
 export type MetadataBrowserPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
-    | { command: 'entitiesLoaded'; entities: MetadataEntityViewDto[] }
+    | { command: 'entitiesLoaded'; entities: MetadataEntityViewDto[]; intersectHiddenCount: number }
+    | { command: 'globalChoicesLoaded'; choices: MetadataGlobalChoiceSummaryDto[] }
+    | { command: 'globalChoiceDetailLoaded'; choice: MetadataOptionSetDto }
     | { command: 'entityDetailLoaded'; entity: MetadataEntityDetailDto }
     | { command: 'entityDetailLoading'; logicalName: string }
+    | { command: 'globalChoiceDetailLoading'; name: string }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
@@ -263,6 +300,10 @@ export interface ConnectionReferenceViewDto {
     modifiedOn: string | null;
     connectionStatus: string;
     connectorDisplayName: string | null;
+    /** Number of flows using this connection reference. */
+    flowCount?: number;
+    /** True if the CR is unbound or has orphaned flows (health warning). */
+    hasHealthWarning?: boolean;
 }
 
 /** Connection reference detail sent when a row is selected. */
@@ -270,7 +311,7 @@ export interface ConnectionReferenceDetailViewDto extends ConnectionReferenceVie
     description: string | null;
     isBound: boolean;
     createdOn: string | null;
-    flows: { uniqueName: string; displayName: string | null; state: string | null }[];
+    flows: { flowId: string; uniqueName: string; displayName: string | null; state: string | null }[];
     connectionOwner: string | null;
     connectionIsShared: boolean | null;
 }
@@ -298,9 +339,11 @@ export type ConnectionReferencesPanelWebviewToHost =
     | { command: 'getDetail'; logicalName: string }
     | { command: 'analyze' }
     | { command: 'filterBySolution'; solutionId: string | null }
+    | { command: 'setIncludeInactive'; includeInactive: boolean }
     | { command: 'requestSolutionList' }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
+    | { command: 'openFlowInMaker'; url: string }
     | { command: 'syncDeploymentSettings' }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
@@ -309,10 +352,11 @@ export type ConnectionReferencesPanelWebviewToHost =
 export type ConnectionReferencesPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
     | { command: 'loading' }
-    | { command: 'connectionReferencesLoaded'; references: ConnectionReferenceViewDto[] }
-    | { command: 'connectionReferenceDetailLoaded'; detail: ConnectionReferenceDetailViewDto }
+    | { command: 'connectionReferencesLoaded'; references: ConnectionReferenceViewDto[]; totalCount: number; filtersApplied: string[] }
+    | { command: 'connectionReferenceDetailLoaded'; detail: ConnectionReferenceDetailViewDto; environmentId: string | null }
     | { command: 'analyzeResult'; result: ConnectionReferencesAnalyzeViewDto }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
+    | { command: 'deploymentSettingsSynced'; filePath: string; envVars: DeploymentSettingsSyncStatsDto; connectionRefs: DeploymentSettingsSyncStatsDto }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
 
@@ -338,6 +382,13 @@ export interface EnvironmentVariableDetailViewDto extends EnvironmentVariableVie
     createdOn: string | null;
 }
 
+/** Result counts for a sync deployment settings operation. */
+export interface DeploymentSettingsSyncStatsDto {
+    added: number;
+    removed: number;
+    preserved: number;
+}
+
 /** Messages the Environment Variables Panel webview sends to the extension host. */
 export type EnvironmentVariablesPanelWebviewToHost =
     | { command: 'ready' }
@@ -349,6 +400,7 @@ export type EnvironmentVariablesPanelWebviewToHost =
     | { command: 'requestSolutionList' }
     | { command: 'exportDeploymentSettings' }
     | { command: 'syncDeploymentSettings' }
+    | { command: 'setIncludeInactive'; includeInactive: boolean }
     | { command: 'requestEnvironmentList' }
     | { command: 'openInMaker' }
     | { command: 'copyToClipboard'; text: string }
@@ -358,12 +410,13 @@ export type EnvironmentVariablesPanelWebviewToHost =
 export type EnvironmentVariablesPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
     | { command: 'loading' }
-    | { command: 'environmentVariablesLoaded'; variables: EnvironmentVariableViewDto[] }
+    | { command: 'environmentVariablesLoaded'; variables: EnvironmentVariableViewDto[]; totalCount: number; filtersApplied: string[] }
     | { command: 'environmentVariableDetailLoaded'; detail: EnvironmentVariableDetailViewDto }
     | { command: 'editVariableDialog'; schemaName: string; displayName: string | null; type: string; currentValue: string | null }
     | { command: 'variableSaved'; schemaName: string; success: boolean }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
     | { command: 'deploymentSettingsExported'; filePath: string }
+    | { command: 'deploymentSettingsSynced'; filePath: string; envVars: DeploymentSettingsSyncStatsDto; connectionRefs: DeploymentSettingsSyncStatsDto }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };
 
@@ -381,6 +434,7 @@ export type WebResourcesPanelWebviewToHost =
     | { command: 'publishSelected'; ids: string[] }
     | { command: 'publishAll' }
     | { command: 'openInMaker' }
+    | { command: 'serverSearch'; term: string }
     | { command: 'copyToClipboard'; text: string }
     | { command: 'webviewError'; error: string; stack?: string };
 
@@ -388,7 +442,9 @@ export type WebResourcesPanelWebviewToHost =
 export type WebResourcesPanelHostToWebview =
     | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
     | { command: 'solutionListLoaded'; solutions: SolutionOptionDto[] }
-    | { command: 'webResourcesLoaded'; resources: WebResourceInfoDto[]; requestId: number }
+    | { command: 'webResourcesLoaded'; resources: WebResourceInfoDto[]; requestId: number; totalCount: number }
+    | { command: 'webResourcesPage'; resources: WebResourceInfoDto[]; requestId: number; loadedSoFar: number; totalCount: number }
+    | { command: 'webResourcesLoadComplete'; requestId: number; totalCount: number }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'publishResult'; count: number; error?: string }

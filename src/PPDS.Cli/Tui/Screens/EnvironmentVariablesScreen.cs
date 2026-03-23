@@ -78,9 +78,10 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
 
-            _variables = await service.ListAsync(
+            var evResult = await service.ListAsync(
                 solutionName: _solutionFilter,
                 cancellationToken: ScreenCancellation);
+            _variables = evResult.Items.ToList();
 
             var dt = new System.Data.DataTable();
             dt.Columns.Add("Schema Name", typeof(string));
@@ -471,14 +472,14 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var solutionService = provider.GetRequiredService<ISolutionService>();
 
-            var solutions = await solutionService.ListAsync(
+            var solutionsResult = await solutionService.ListAsync(
                 includeManaged: false,
                 cancellationToken: ScreenCancellation);
 
             Application.MainLoop.Invoke(() =>
             {
                 var names = new List<string> { "(All - no filter)" };
-                names.AddRange(solutions.Select(s => s.UniqueName));
+                names.AddRange(solutionsResult.Items.Select(s => s.UniqueName));
 
                 var listView = new ListView(names)
                 {

@@ -40,11 +40,12 @@ public sealed class EnvironmentVariablesListTool
         await using var serviceProvider = await _context.CreateServiceProviderAsync(cancellationToken).ConfigureAwait(false);
         var service = serviceProvider.GetRequiredService<IEnvironmentVariableService>();
 
-        var variables = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var result = await service.ListAsync(solutionName: solutionId, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new EnvironmentVariablesListResult
         {
-            EnvironmentVariables = variables.Select(v => new EnvironmentVariableSummary
+            TotalCount = result.TotalCount,
+            EnvironmentVariables = result.Items.Select(v => new EnvironmentVariableSummary
             {
                 SchemaName = v.SchemaName,
                 DisplayName = v.DisplayName,
@@ -70,6 +71,10 @@ public sealed class EnvironmentVariablesListResult
     /// </summary>
     [JsonPropertyName("environmentVariables")]
     public List<EnvironmentVariableSummary> EnvironmentVariables { get; set; } = [];
+
+    /// <summary>Total count of records.</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

@@ -1,5 +1,9 @@
 /* shared.css — Common styles for all PPDS webview panels. */
 
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
     padding: 0;
@@ -9,6 +13,12 @@ body {
     font-family: var(--vscode-font-family);
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background);
+    user-select: none;
+}
+
+/* Allow selection in specific elements */
+input, textarea, pre, code, .selectable, [contenteditable], .data-table td {
+    user-select: text;
 }
 
 .toolbar {
@@ -131,4 +141,106 @@ body {
 .env-picker-label {
     font-size: 11px;
     color: var(--vscode-descriptionForeground);
+}
+
+/* ── DataTable ─────────────────────────────────────────────────────────────── */
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Header styling (CC-06) */
+.data-table th {
+    padding: 6px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+    border-bottom: 2px solid var(--vscode-panel-border);
+    border-right: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    user-select: none;
+}
+
+.data-table th:last-child {
+    border-right: none;
+}
+
+.data-table th.sortable {
+    cursor: pointer;
+}
+
+.data-table th.sortable:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.data-table td {
+    padding: 4px 12px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 400px;
+}
+
+/* Row striping (CC-07) */
+.data-table tbody tr:nth-child(even) {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+    opacity: 0.85;
+}
+
+.data-table tbody tr:hover {
+    background: var(--vscode-list-hoverBackground);
+    opacity: 1;
+}
+
+.data-table tbody tr.selected {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* Virtual scroll container */
+.data-table-scroll {
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ── Cell selection (CC-03) ────────────────────────────────────────────────── */
+
+.data-table td.cell-selected {
+    background: var(--vscode-editor-selectionBackground) !important;
+}
+
+.data-table td.cell-selected-top {
+    border-top: 2px solid var(--vscode-focusBorder) !important;
+}
+
+.data-table td.cell-selected-bottom {
+    border-bottom: 2px solid var(--vscode-focusBorder) !important;
+}
+
+.data-table td.cell-selected-left {
+    border-left: 2px solid var(--vscode-focusBorder) !important;
+}
+
+.data-table td.cell-selected-right {
+    border-right: 2px solid var(--vscode-focusBorder) !important;
+}
+
+.data-table tbody.selecting {
+    cursor: cell !important;
+    user-select: none !important;
+}
+
+.data-table tbody.all-selected td {
+    background: var(--vscode-editor-selectionBackground) !important;
 }

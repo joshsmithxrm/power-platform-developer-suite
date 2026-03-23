@@ -33,7 +33,7 @@ public class CachedMetadataProviderTests
         public TimeSpan Delay { get; set; } = TimeSpan.Zero;
 
         public async Task<IReadOnlyList<EntitySummary>> GetEntitiesAsync(
-            bool customOnly = false, string? filter = null, CancellationToken cancellationToken = default)
+            bool customOnly = false, string? filter = null, bool includeIntersect = false, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _getEntitiesCount);
             if (Delay > TimeSpan.Zero)

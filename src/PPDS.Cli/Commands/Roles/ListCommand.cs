@@ -70,7 +70,8 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var roles = await roleService.ListAsync(filter, cancellationToken);
+            var rolesResult = await roleService.ListAsync(filter, cancellationToken);
+            var roles = rolesResult.Items;
 
             if (globalOptions.IsJsonMode)
             {

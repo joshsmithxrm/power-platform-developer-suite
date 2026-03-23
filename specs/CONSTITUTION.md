@@ -36,6 +36,8 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 **I3.** Every spec must have numbered acceptance criteria (AC-01, AC-02, ...) before implementation begins. No ACs = no implementation.
 
+**I4.** Never silently hide, truncate, or filter data. Every reduction in displayed records must be (a) visible — show "X of Y" with the reason, and (b) reversible — provide a toggle, filter, or option to show the full dataset. Service methods that apply filters or limits must return total counts alongside results so every consumer (CLI, TUI, Extension, MCP) can communicate what was filtered. Security-correct exclusions (e.g., secrets) still require visibility ("N secrets excluded") but need not be reversible.
+
 ## Session Laws
 
 **SS1.** Running sessions are independent — changing the active profile or environment in one surface (CLI, TUI, Extension, MCP) does not affect other running surfaces. The persisted active profile is a default for new sessions, not a live binding.

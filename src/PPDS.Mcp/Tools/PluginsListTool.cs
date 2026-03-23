@@ -94,7 +94,8 @@ public sealed class PluginsListTool
         return new PluginsListResult
         {
             Assemblies = assemblies,
-            Count = assemblies.Count
+            Count = assemblies.Count,
+            TotalCount = assemblies.Count
         };
     }
 
@@ -195,6 +196,10 @@ public sealed class PluginsListResult
     /// </summary>
     [JsonPropertyName("count")]
     public int Count { get; set; }
+
+    /// <summary>Total count of assemblies matching the filter (before top limit).</summary>
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
 }
 
 /// <summary>

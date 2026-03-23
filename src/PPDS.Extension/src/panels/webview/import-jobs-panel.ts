@@ -2,12 +2,12 @@
 // External webview script for the Import Jobs panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, formatDateTime } from './shared/dom-utils.js';
 import type { ImportJobsPanelWebviewToHost, ImportJobsPanelHostToWebview, ImportJobViewDto } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
 import { installErrorHandler } from './shared/error-handler.js';
-import { DataTable } from './shared/data-table.js';
+import { DataTable, formatStatusCount } from './shared/data-table.js';
 
 const vscode = getVsCodeApi<ImportJobsPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as ImportJobsPanelWebviewToHost));
@@ -16,9 +16,6 @@ const statusText = document.getElementById('status-text') as HTMLElement;
 const refreshBtn = document.getElementById('refresh-btn') as HTMLElement;
 const makerBtn = document.getElementById('maker-btn') as HTMLElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
-const detailPane = document.getElementById('detail-pane') as HTMLElement;
-const detailContent = document.getElementById('detail-content') as HTMLElement;
-const detailClose = document.getElementById('detail-close') as HTMLElement;
 
 // ── Environment picker ──
 const envPickerBtn = document.getElementById('env-picker-btn') as HTMLElement;
@@ -30,30 +27,23 @@ function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
 }
 
-// ── Search state ──
+// ── Search + total count state ──
 let allJobs: ImportJobViewDto[] = [];
+let totalCount = 0;
 let searchTerm = '';
 
-// ── Format date/time helper ──
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '\u2014';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
-}
-
 // ── Status badge helper ──
+// Daemon returns: "Succeeded", "Failed", "In Progress".
+// Badge classes defined for all known + historical statuses (IJ-15).
 function statusBadgeHtml(status: string): string {
     const lower = status.toLowerCase();
     let cls = 'status-badge';
-    if (lower === 'succeeded' || lower === 'completed') cls += ' status-succeeded';
+    if (lower === 'succeeded') cls += ' status-succeeded';
     else if (lower === 'failed') cls += ' status-failed';
     else if (lower === 'in progress' || lower === 'inprogress' || lower === 'processing') cls += ' status-inprogress';
+    else if (lower === 'cancelled' || lower === 'canceled') cls += ' status-cancelled';
+    else if (lower === 'queued') cls += ' status-queued';
+    else if (lower === 'completed with errors') cls += ' status-completed-errors';
     return '<span class="' + cls + '">' + escapeHtml(status) + '</span>';
 }
 
@@ -64,17 +54,23 @@ const table = new DataTable<ImportJobViewDto>({
         {
             key: 'solutionName',
             label: 'Solution',
-            render: (j) => escapeHtml(j.solutionName ?? '\u2014'),
+            render: (j) => {
+                const name = escapeHtml(j.solutionName ?? '\u2014');
+                // IJ-01: Solution name is a clickable link to open the import log.
+                return '<a href="#" class="solution-link" data-id="' + escapeHtml(j.id) + '" title="Open import log">' + name + '</a>';
+            },
         },
         {
             key: 'status',
             label: 'Status',
             render: (j) => statusBadgeHtml(j.status),
+            sortValue: (j) => j.status,
         },
         {
             key: 'progress',
             label: 'Progress',
             render: (j) => escapeHtml(j.progress + '%'),
+            sortValue: (j) => j.progress,
             className: '80px',
         },
         {
@@ -86,6 +82,7 @@ const table = new DataTable<ImportJobViewDto>({
             key: 'createdOn',
             label: 'Created On',
             render: (j) => escapeHtml(formatDateTime(j.createdOn)),
+            sortValue: (j) => j.createdOn ?? '',
         },
         {
             key: 'duration',
@@ -101,19 +98,19 @@ const table = new DataTable<ImportJobViewDto>({
     ],
     getRowId: (j) => j.id,
     onRowClick: (j) => {
-        vscode.postMessage({ command: 'selectJob', id: j.id });
+        // IJ-02: Row click opens the import log XML in a VS Code editor tab.
+        vscode.postMessage({ command: 'viewImportLog', id: j.id });
     },
     defaultSortKey: 'createdOn',
     defaultSortDirection: 'desc',
     statusEl: statusText,
     formatStatus: (items) => {
+        // IJ-45 / P2-IJ-01: Use formatStatusCount for "X of Y" pattern (Constitution I4).
+        // Align status counts with actual badge matching logic.
         const succeeded = items.filter(j => j.status === 'Succeeded').length;
         const failed = items.filter(j => j.status === 'Failed').length;
-        const inProgress = items.filter(j => j.status === 'In Progress').length;
-        const isFiltered = searchTerm.length > 0 && items.length !== allJobs.length;
-        const countLabel = isFiltered
-            ? items.length + ' of ' + allJobs.length + ' import jobs'
-            : items.length + ' import job' + (items.length !== 1 ? 's' : '');
+        const inProgress = items.filter(j => (j.status === 'In Progress' || j.status === 'InProgress' || j.status === 'Processing')).length;
+        const countLabel = formatStatusCount(items.length, totalCount, 'import job');
         const parts = [countLabel];
         if (succeeded > 0) parts.push(succeeded + ' succeeded');
         if (failed > 0) parts.push(failed + ' failed');
@@ -123,17 +120,27 @@ const table = new DataTable<ImportJobViewDto>({
     emptyMessage: 'No import jobs found',
 });
 
+// ── Solution link click handler (IJ-01): delegated on content ──
+content.addEventListener('click', (e) => {
+    const link = (e.target as HTMLElement).closest<HTMLElement>('a.solution-link');
+    if (!link) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = link.dataset['id'];
+    if (id) {
+        vscode.postMessage({ command: 'viewImportLog', id });
+    }
+});
+
 // ── Button handlers ──
 refreshBtn.addEventListener('click', () => {
+    (refreshBtn as HTMLButtonElement).disabled = true;
+    refreshBtn.textContent = 'Loading...';
     vscode.postMessage({ command: 'refresh' });
 });
 
 makerBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'openInMaker' });
-});
-
-detailClose.addEventListener('click', () => {
-    detailPane.style.display = 'none';
 });
 
 // ── Search filter ──
@@ -145,6 +152,7 @@ function applySearchFilter(): void {
             (j.solutionName ?? '').toLowerCase().includes(term)
             || (j.createdBy ?? '').toLowerCase().includes(term)
             || (j.operationContext ?? '').toLowerCase().includes(term)
+            || j.status.toLowerCase().includes(term)
         );
     table.setItems(filtered);
 }
@@ -162,16 +170,6 @@ document.getElementById('reconnect-refresh')!.addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('reconnect-banner')!.style.display = 'none';
     vscode.postMessage({ command: 'refresh' });
-});
-
-// ── Keyboard shortcuts ──
-// Note: Ctrl+R is NOT used because it conflicts with VS Code's native reload.
-// Refresh is available via the toolbar button.
-document.addEventListener('keydown', (e) => {
-    // Escape = close detail pane
-    if (e.key === 'Escape' && detailPane.style.display !== 'none') {
-        detailPane.style.display = 'none';
-    }
 });
 
 // ── Message handling ──
@@ -199,24 +197,23 @@ window.addEventListener('message', (event: MessageEvent<ImportJobsPanelHostToWeb
             }
             break;
         case 'importJobsLoaded':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             allJobs = msg.jobs;
+            totalCount = msg.totalCount;
             applySearchFilter();
-            detailPane.style.display = 'none';
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
             }
-            break;
-        case 'importJobDetailLoaded':
-            // Show detail in the detail pane using textContent (safe)
-            detailContent.textContent = msg.data ?? 'No detail data available';
-            detailPane.style.display = '';
             break;
         case 'loading':
             content.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading import jobs...</div></div>';
             statusText.textContent = 'Loading...';
             break;
         case 'error':
+            (refreshBtn as HTMLButtonElement).disabled = false;
+            refreshBtn.textContent = 'Refresh';
             content.innerHTML = '<div class="error-state">' + escapeHtml(msg.message) + '</div>';
             statusText.textContent = 'Error';
             break;

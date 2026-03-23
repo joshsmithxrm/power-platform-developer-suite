@@ -16,13 +16,15 @@ describe('ConnectionReferencesPanel message types', () => {
             { command: 'selectReference', logicalName: 'cr_test' },
             { command: 'analyze' },
             { command: 'filterBySolution', solutionId: 'MySolution' },
+            { command: 'setIncludeInactive', includeInactive: true },
             { command: 'requestSolutionList' },
             { command: 'requestEnvironmentList' },
             { command: 'openInMaker' },
+            { command: 'openFlowInMaker', url: 'https://make.powerautomate.com/environments/env1/flows/flow1/details' },
             { command: 'copyToClipboard', text: 'test' },
             { command: 'webviewError', error: 'test', stack: 'trace' },
         ];
-        expect(messages).toHaveLength(10);
+        expect(messages).toHaveLength(12);
     });
 
     it('WebviewToHost filterBySolution accepts null for "All Solutions"', () => {
@@ -37,8 +39,8 @@ describe('ConnectionReferencesPanel message types', () => {
         const messages: ConnectionReferencesPanelHostToWebview[] = [
             { command: 'updateEnvironment', name: 'test', envType: null, envColor: null },
             { command: 'loading' },
-            { command: 'connectionReferencesLoaded', references: [] },
-            { command: 'connectionReferenceDetailLoaded', detail: {
+            { command: 'connectionReferencesLoaded', references: [], totalCount: 0, filtersApplied: [] },
+            { command: 'connectionReferenceDetailLoaded', environmentId: null, detail: {
                 logicalName: 'cr_test',
                 displayName: 'Test',
                 connectorId: null,
@@ -77,7 +79,7 @@ describe('ConnectionReferencesPanel message types', () => {
         expect(dto.isManaged).toBe(true);
     });
 
-    it('ConnectionReferenceDetailViewDto extends base with flows', () => {
+    it('ConnectionReferenceDetailViewDto extends base with flows including flowId', () => {
         const dto: ConnectionReferenceDetailViewDto = {
             logicalName: 'cr_shared_test',
             displayName: 'Test',
@@ -91,12 +93,13 @@ describe('ConnectionReferencesPanel message types', () => {
             isBound: false,
             createdOn: '2026-01-01T00:00:00Z',
             flows: [
-                { uniqueName: 'flow_1', displayName: 'My Flow', state: 'Active' },
+                { flowId: '11111111-1111-1111-1111-111111111111', uniqueName: 'flow_1', displayName: 'My Flow', state: 'Active' },
             ],
             connectionOwner: 'admin@test.com',
             connectionIsShared: true,
         };
         expect(dto.flows).toHaveLength(1);
+        expect(dto.flows[0].flowId).toBe('11111111-1111-1111-1111-111111111111');
         expect(dto.connectionStatus).toBe('N/A');
     });
 
@@ -128,5 +131,22 @@ describe('ConnectionReferencesPanel message types', () => {
         };
         expect(dto.displayName).toBeNull();
         expect(dto.connectionStatus).toBe('Unknown');
+    });
+
+    it('ConnectionReferenceViewDto supports optional flowCount and hasHealthWarning', () => {
+        const dto: ConnectionReferenceViewDto = {
+            logicalName: 'cr_health_test',
+            displayName: 'Health Test',
+            connectorId: null,
+            connectionId: null,
+            isManaged: false,
+            modifiedOn: null,
+            connectionStatus: 'Unbound',
+            connectorDisplayName: null,
+            flowCount: 3,
+            hasHealthWarning: true,
+        };
+        expect(dto.flowCount).toBe(3);
+        expect(dto.hasHealthWarning).toBe(true);
     });
 });
