@@ -10,6 +10,9 @@ import { getEnvironmentPickerHtml } from './environmentPicker.js';
 import type { ConnectionReferencesPanelWebviewToHost, ConnectionReferencesPanelHostToWebview } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
+/** Default Solution GUID — always present in every environment. */
+const DEFAULT_SOLUTION_ID = 'fd140aaf-4df4-11dd-bd17-0019b9312238';
+
 export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionReferencesPanelWebviewToHost, ConnectionReferencesPanelHostToWebview> {
     private static instances: ConnectionReferencesPanel[] = [];
     private static nextId = 1;
@@ -19,7 +22,12 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
 
     protected readonly panelLabel = 'Connection References';
 
-    private solutionFilter: string | null = null;
+    /** Current solution filter (CR-09: defaults to Default Solution GUID). */
+    private solutionFilter: string | null = DEFAULT_SOLUTION_ID;
+    /** Include inactive CRs (V-16). */
+    private includeInactive = false;
+    /** AbortController for cancelling in-flight list requests (CR-11). */
+    private _loadAbortController: AbortController | null = null;
 
     /**
      * Returns the number of open ConnectionReferencesPanel instances.
@@ -94,6 +102,12 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 break;
             case 'filterBySolution':
                 this.solutionFilter = message.solutionId;
+                this.abortPendingLoad();
+                await this.loadConnectionReferences();
+                break;
+            case 'setIncludeInactive':
+                this.includeInactive = message.includeInactive;
+                this.abortPendingLoad();
                 await this.loadConnectionReferences();
                 break;
             case 'requestSolutionList':
@@ -104,6 +118,9 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 break;
             case 'openInMaker':
                 await this.openInMaker();
+                break;
+            case 'openFlowInMaker':
+                await vscode.env.openExternal(vscode.Uri.parse(message.url));
                 break;
             case 'syncDeploymentSettings':
                 vscode.window.showInformationMessage('Sync Deployment Settings coming soon');
@@ -119,11 +136,20 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
         }
     }
 
+    /** Cancel any in-flight list request (CR-11). */
+    private abortPendingLoad(): void {
+        if (this._loadAbortController) {
+            this._loadAbortController.abort();
+            this._loadAbortController = null;
+        }
+    }
+
     protected override onDaemonReconnected(): void {
         void this.loadConnectionReferences();
     }
 
     override dispose(): void {
+        this.abortPendingLoad();
         const idx = ConnectionReferencesPanel.instances.indexOf(this);
         if (idx >= 0) ConnectionReferencesPanel.instances.splice(idx, 1);
         super.dispose();
@@ -134,16 +160,27 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     }
 
     protected override async onEnvironmentChanged(): Promise<void> {
+        // Reset solution filter to default on environment change (CR-09)
+        this.solutionFilter = DEFAULT_SOLUTION_ID;
         await this.loadConnectionReferences();
     }
 
     private async loadConnectionReferences(isRetry = false): Promise<void> {
+        // CR-11: abort any previous in-flight request
+        this.abortPendingLoad();
+        this._loadAbortController = new AbortController();
+        const signal = this._loadAbortController.signal;
+
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.connectionReferencesList(
                 this.solutionFilter ?? undefined,
                 this.environmentUrl,
+                this.includeInactive,
             );
+
+            // Check if request was aborted before we got the result
+            if (signal.aborted) return;
 
             this.postMessage({
                 command: 'connectionReferencesLoaded',
@@ -156,9 +193,14 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                     modifiedOn: r.modifiedOn,
                     connectionStatus: r.connectionStatus,
                     connectorDisplayName: r.connectorDisplayName,
+                    // CR-05: flag unbound CRs as health warnings
+                    hasHealthWarning: !r.connectionId || r.connectionStatus?.toLowerCase() === 'error',
                 })),
+                totalCount: result.totalCount ?? result.references.length,
+                filtersApplied: result.filtersApplied ?? [],
             });
         } catch (error) {
+            if (signal.aborted) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadConnectionReferences(true))) {
@@ -175,6 +217,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             const ref = result.reference;
             this.postMessage({
                 command: 'connectionReferenceDetailLoaded',
+                environmentId: this.environmentId,
                 detail: {
                     logicalName: ref.logicalName,
                     displayName: ref.displayName,
@@ -188,12 +231,16 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                     isBound: ref.isBound,
                     createdOn: ref.createdOn,
                     flows: ref.flows.map(f => ({
+                        flowId: f.flowId,
                         uniqueName: f.uniqueName,
                         displayName: f.displayName,
                         state: f.state,
                     })),
                     connectionOwner: ref.connectionOwner,
                     connectionIsShared: ref.connectionIsShared,
+                    // Propagate flow count to the detail DTO for status colum update
+                    flowCount: ref.flows.length,
+                    hasHealthWarning: !ref.isBound || ref.connectionStatus?.toLowerCase() === 'error',
                 },
             });
         } catch (error) {
@@ -289,6 +336,10 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings for connection references">Sync Deployment Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Connections in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
+    <div class="toolbar-segmented" id="inactive-toggle" title="Toggle active/all connection references">
+        <button class="seg-btn seg-active" id="seg-active" data-value="active">Active Only</button>
+        <button class="seg-btn" id="seg-all" data-value="all">All</button>
+    </div>
     <input id="search-input" type="text" placeholder="Search connection references..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}

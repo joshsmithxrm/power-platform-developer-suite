@@ -370,3 +370,73 @@
 .toolbar-search::placeholder {
     color: var(--vscode-input-placeholderForeground);
 }
+
+/* ── Active/All segmented toggle (V-16) ──────────────────────── */
+.toolbar-segmented {
+    display: flex;
+    border: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));
+    border-radius: 2px;
+    overflow: hidden;
+    font-size: 12px;
+}
+
+.seg-btn {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: none;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    line-height: 1.4;
+    transition: background 0.1s;
+}
+
+.seg-btn + .seg-btn {
+    border-left: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));
+}
+
+.seg-btn.seg-active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.seg-btn:hover:not(.seg-active) {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
+/* ── Flow count column ────────────────────────────────────────── */
+.cr-flow-count {
+    color: var(--vscode-foreground);
+    font-size: 12px;
+}
+
+.cr-flow-count-zero {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+.cr-flow-count-unknown {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+/* ── Warning status badge (CR-05) ────────────────────────────── */
+.status-warning {
+    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 20%, transparent);
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    cursor: help;
+}
+
+/* ── Flow deep links (CR-03/CR-30) ───────────────────────────── */
+.cr-flow-link {
+    color: var(--vscode-textLink-foreground, #4daafc);
+    text-decoration: none;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.cr-flow-link:hover {
+    text-decoration: underline;
+    color: var(--vscode-textLink-activeForeground, #4daafc);
+}

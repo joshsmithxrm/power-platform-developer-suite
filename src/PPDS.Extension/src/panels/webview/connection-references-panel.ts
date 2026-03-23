@@ -17,6 +17,9 @@ import { DataTable } from './shared/data-table.js';
 import { SolutionFilter } from './shared/solution-filter.js';
 import { FilterBar } from './shared/filter-bar.js';
 
+/** Default Solution GUID — must match the constant in ConnectionReferencesPanel.ts (CR-09). */
+const DEFAULT_SOLUTION_ID = 'fd140aaf-4df4-11dd-bd17-0019b9312238';
+
 const vscode = getVsCodeApi<ConnectionReferencesPanelWebviewToHost>();
 installErrorHandler((msg) => vscode.postMessage(msg as ConnectionReferencesPanelWebviewToHost));
 const content = document.getElementById('content') as HTMLElement;
@@ -37,7 +40,22 @@ function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
 }
 
-// ── Solution filter ──
+// ── Active/All segmented toggle (V-16) ──
+let includeInactive = false;
+const segActive = document.getElementById('seg-active') as HTMLButtonElement;
+const segAll = document.getElementById('seg-all') as HTMLButtonElement;
+
+function setActiveSegment(active: boolean): void {
+    includeInactive = !active;
+    segActive.classList.toggle('seg-active', active);
+    segAll.classList.toggle('seg-active', !active);
+    vscode.postMessage({ command: 'setIncludeInactive', includeInactive });
+}
+
+segActive.addEventListener('click', () => setActiveSegment(true));
+segAll.addEventListener('click', () => setActiveSegment(false));
+
+// ── Solution filter (CR-09) ──
 const solutionFilterContainer = document.getElementById('solution-filter-container') as HTMLElement;
 const solutionFilter = new SolutionFilter(solutionFilterContainer, {
     onChange: (solutionId) => {
@@ -46,6 +64,7 @@ const solutionFilter = new SolutionFilter(solutionFilterContainer, {
     getState: () => vscode.getState() as Record<string, unknown> | undefined,
     setState: (state) => vscode.setState(state),
     storageKey: 'connectionReferences.solutionFilter',
+    defaultValue: DEFAULT_SOLUTION_ID,
 });
 
 // Request solution list on load
@@ -54,9 +73,11 @@ vscode.postMessage({ command: 'requestSolutionList' });
 // ── Expandable row state ──
 const expandedRows = new Set<string>();
 const rowDetails = new Map<string, ConnectionReferenceDetailViewDto>();
+/** environmentId forwarded with each detail response for Maker deep links (CR-03). */
+let currentEnvironmentId: string | null = null;
 
-// ── Status badge helper ──
-function statusBadgeHtml(status: string, connectionId: string | null | undefined): string {
+// ── Status badge helper (CR-05) ──
+function statusBadgeHtml(status: string, connectionId: string | null | undefined, hasHealthWarning?: boolean): string {
     const lower = status.toLowerCase();
     let cls = 'status-badge';
     let label = status;
@@ -79,6 +100,13 @@ function statusBadgeHtml(status: string, connectionId: string | null | undefined
         cls = 'status-badge status-unbound';
         label = 'Unbound';
         tooltip = ' title="No connection is bound to this connection reference."';
+    }
+
+    // CR-05: override with warning badge if health warning is set
+    if (hasHealthWarning && connectionId) {
+        cls = 'status-badge status-warning';
+        label = 'Warning';
+        tooltip = ' title="This connection reference has a health issue (error status or orphaned flows)."';
     }
 
     return '<span class="' + cls + '"' + tooltip + '>' + escapeHtml(label) + '</span>';
@@ -126,9 +154,22 @@ const table = new DataTable<ConnectionReferenceViewDto>({
             render: (r) => escapeHtml(r.connectorDisplayName ?? r.connectorId ?? '\u2014'),
         },
         {
+            // CR-01/CR-02: Flow count column
+            key: 'flowCount',
+            label: 'Flows',
+            render: (r) => {
+                const count = r.flowCount;
+                if (count === undefined) return '<span class="cr-flow-count-unknown">\u2014</span>';
+                if (count === 0) return '<span class="cr-flow-count-zero">\u2014</span>';
+                return '<span class="cr-flow-count">' + escapeHtml(count + ' flow' + (count !== 1 ? 's' : '')) + '</span>';
+            },
+            className: '80px',
+        },
+        {
+            // CR-05: Status column reflects relationship health
             key: 'connectionStatus',
             label: 'Status',
-            render: (r) => statusBadgeHtml(r.connectionStatus, r.connectionId),
+            render: (r) => statusBadgeHtml(r.connectionStatus, r.connectionId, r.hasHealthWarning),
         },
         {
             key: 'isManaged',
@@ -248,6 +289,9 @@ function toggleRowExpansion(logicalName: string): void {
     }
 }
 
+/** Number of columns: chevron + displayName + logicalName + connector + flows + status + managed + modifiedOn = 8 */
+const COLUMN_COUNT = 8;
+
 function insertInlineDetailLoading(logicalName: string): void {
     const row = content.querySelector<HTMLElement>('.data-table-row[data-id="' + cssEscape(logicalName) + '"]');
     if (!row) return;
@@ -256,12 +300,11 @@ function insertInlineDetailLoading(logicalName: string): void {
     const existing = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
     if (existing) existing.remove();
 
-    const colCount = 7; // chevron + 6 data columns
     const tr = document.createElement('tr');
     tr.className = 'cr-inline-detail';
     tr.setAttribute('data-for', logicalName);
     const td = document.createElement('td');
-    td.colSpan = colCount;
+    td.colSpan = COLUMN_COUNT;
     td.innerHTML = '<div class="cr-detail-card"><div class="loading-state"><div class="spinner"></div><div>Loading details...</div></div></div>';
     tr.appendChild(td);
     row.after(tr);
@@ -275,12 +318,11 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
     const existing = content.querySelector<HTMLElement>('.cr-inline-detail[data-for="' + cssEscape(logicalName) + '"]');
     if (existing) existing.remove();
 
-    const colCount = 7; // chevron + 6 data columns
     const tr = document.createElement('tr');
     tr.className = 'cr-inline-detail';
     tr.setAttribute('data-for', logicalName);
     const td = document.createElement('td');
-    td.colSpan = colCount;
+    td.colSpan = COLUMN_COUNT;
 
     let html = '<div class="cr-detail-card">';
     html += '<div class="cr-detail-grid">';
@@ -295,8 +337,8 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
     // Connector
     html += '<div class="cr-detail-item"><span class="detail-label">Connector:</span> <span>' + escapeHtml(detail.connectorDisplayName ?? detail.connectorId ?? '\u2014') + '</span></div>';
 
-    // Status
-    html += '<div class="cr-detail-item"><span class="detail-label">Status:</span> ' + statusBadgeHtml(detail.connectionStatus, detail.connectionId) + '</div>';
+    // Status (CR-05: health-aware)
+    html += '<div class="cr-detail-item"><span class="detail-label">Status:</span> ' + statusBadgeHtml(detail.connectionStatus, detail.connectionId, detail.hasHealthWarning) + '</div>';
 
     // Managed
     html += '<div class="cr-detail-item"><span class="detail-label">Managed:</span> <span>' + escapeHtml(detail.isManaged ? 'Yes' : 'No') + '</span></div>';
@@ -321,14 +363,28 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
 
     html += '</div>';
 
-    // Flows section
+    // Flows section (CR-03/CR-30: per-flow Maker Portal deep links)
     if (detail.flows.length > 0) {
         html += '<div class="cr-detail-flows">';
         html += '<div class="detail-section-title">Flows using this CR (' + detail.flows.length + ')</div>';
         html += '<ul class="cr-flow-list">';
         for (const flow of detail.flows) {
             html += '<li class="cr-flow-item">';
-            html += '<span class="cr-flow-name">' + escapeHtml(flow.displayName ?? flow.uniqueName) + '</span>';
+
+            // CR-03/CR-30: clickable deep link if we have envId and flowId
+            const flowName = escapeHtml(flow.displayName ?? flow.uniqueName);
+            if (currentEnvironmentId && flow.flowId) {
+                const deepLinkUrl = 'https://make.powerautomate.com/environments/'
+                    + escapeAttr(currentEnvironmentId)
+                    + '/flows/'
+                    + escapeAttr(flow.flowId)
+                    + '/details';
+                html += '<a class="cr-flow-link" href="' + deepLinkUrl + '" title="Open in Maker Portal" data-url="' + deepLinkUrl + '">'
+                    + flowName + '</a>';
+            } else {
+                html += '<span class="cr-flow-name">' + flowName + '</span>';
+            }
+
             if (flow.state) {
                 const stateClass = flow.state.toLowerCase() === 'activated' ? 'cr-flow-state-active' : 'cr-flow-state-inactive';
                 html += ' <span class="cr-flow-state ' + stateClass + '">' + escapeHtml(flow.state) + '</span>';
@@ -343,6 +399,16 @@ function insertInlineDetail(logicalName: string, detail: ConnectionReferenceDeta
 
     html += '</div>';
     td.innerHTML = html;
+
+    // Wire deep link clicks to open in external browser via message (CR-03)
+    td.querySelectorAll<HTMLAnchorElement>('.cr-flow-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const url = link.dataset.url;
+            if (url) vscode.postMessage({ command: 'openFlowInMaker', url });
+        });
+    });
+
     tr.appendChild(td);
     row.after(tr);
 }
@@ -421,6 +487,8 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
     switch (msg.command) {
         case 'updateEnvironment':
             updateEnvironmentDisplay(msg.name);
+            // CR-09: update solution filter environment key for per-env persistence
+            solutionFilter.setEnvironmentKey(msg.name);
             {
                 const toolbar = document.querySelector('.toolbar');
                 if (toolbar) {
@@ -444,12 +512,24 @@ window.addEventListener('message', (event: MessageEvent<ConnectionReferencesPane
             rowDetails.clear();
             table.setItems(msg.references);
             searchFilter.setItems(msg.references);
+            // V-16: show "X of Y" when filtered
+            {
+                const total = msg.totalCount;
+                const displayed = msg.references.length;
+                const filters = msg.filtersApplied ?? [];
+                if (displayed < total || filters.length > 0) {
+                    const filterNote = filters.length > 0 ? ' (' + escapeHtml(filters.join(', ')) + ')' : '';
+                    statusText.textContent = displayed + ' of ' + total + ' connection reference' + (total !== 1 ? 's' : '') + filterNote;
+                }
+            }
             {
                 const reconnectBanner = document.getElementById('reconnect-banner');
                 if (reconnectBanner) reconnectBanner.style.display = 'none';
             }
             break;
         case 'connectionReferenceDetailLoaded':
+            // Store environment ID for deep links (CR-03)
+            currentEnvironmentId = msg.environmentId;
             // Cache the detail
             rowDetails.set(msg.detail.logicalName, msg.detail);
             // If the row is expanded, update its inline detail card

@@ -42,6 +42,7 @@ public class ConnectionReferenceService : IConnectionReferenceService
     public async Task<ListResult<ConnectionReferenceInfo>> ListAsync(
         string? solutionName = null,
         bool unboundOnly = false,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -63,9 +64,12 @@ public class ConnectionReferenceService : IConnectionReferenceService
 
         var filtersApplied = new List<string>();
 
-        // Only active connection references
-        query.Criteria.AddCondition(ConnectionReference.Fields.StateCode, ConditionOperator.Equal, 0);
-        filtersApplied.Add("active only");
+        if (!includeInactive)
+        {
+            // Only active connection references
+            query.Criteria.AddCondition(ConnectionReference.Fields.StateCode, ConditionOperator.Equal, 0);
+            filtersApplied.Add("active only");
+        }
 
         // Filter to unbound only if specified
         if (unboundOnly)
