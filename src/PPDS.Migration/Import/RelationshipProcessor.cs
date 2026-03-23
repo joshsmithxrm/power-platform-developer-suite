@@ -101,8 +101,8 @@ namespace PPDS.Migration.Import
             _logger?.LogDebug("Processing {Count} M2M operations with parallelism {DOP}",
                 allOperations.Count, parallelism);
 
-            // Track first exception for non-ContinueOnError mode
-            Exception? firstException = null;
+            // Track all exceptions for non-ContinueOnError mode
+            var exceptions = new ConcurrentBag<Exception>();
             var shouldStop = false;
 
             await Parallel.ForEachAsync(
@@ -245,16 +245,19 @@ namespace PPDS.Migration.Import
                             if (!context.Options.ContinueOnError)
                             {
                                 shouldStop = true;
-                                firstException ??= ex;
+                                exceptions.Add(ex);
                             }
                         }
                     }
                 }).ConfigureAwait(false);
 
-            // If we stopped due to an error in non-ContinueOnError mode, rethrow
-            if (firstException != null)
+            // If we stopped due to errors in non-ContinueOnError mode, rethrow all
+            if (!exceptions.IsEmpty)
             {
-                throw firstException;
+                var allExceptions = exceptions.ToArray();
+                throw allExceptions.Length == 1
+                    ? allExceptions[0]
+                    : new AggregateException("Multiple M2M association failures", allExceptions);
             }
 
             // Report final completion (parallel counting may not hit exact total)
