@@ -150,7 +150,7 @@ namespace PPDS.Migration.Export
                 });
 
                 var relationshipData = await ExportM2MRelationshipsAsync(
-                    schema, entityData, options, progress, cancellationToken).ConfigureAwait(false);
+                    schema, entityData, options, progress, errors, cancellationToken).ConfigureAwait(false);
 
                 // Write to output file
                 progress?.Report(new ProgressEventArgs
@@ -319,6 +319,7 @@ namespace PPDS.Migration.Export
             ConcurrentDictionary<string, IReadOnlyList<Entity>> entityData,
             ExportOptions options,
             IProgressReporter? progress,
+            ConcurrentBag<MigrationError> errors,
             CancellationToken cancellationToken)
         {
             var result = new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>(StringComparer.OrdinalIgnoreCase);
@@ -362,6 +363,12 @@ namespace PPDS.Migration.Export
                     {
                         _logger?.LogWarning(ex, "Failed to export M2M relationship {Relationship} for entity {Entity}",
                             rel.Name, entitySchema.LogicalName);
+                        errors.Add(new MigrationError
+                        {
+                            Phase = MigrationPhase.Exporting,
+                            EntityLogicalName = entitySchema.LogicalName,
+                            Message = $"M2M relationship '{rel.Name}' export failed: {ex.Message}"
+                        });
                     }
                 }
 
