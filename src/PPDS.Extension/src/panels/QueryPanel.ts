@@ -638,6 +638,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     <span id="filter-count"></span>
 </div>
 
+<div class="transpile-warning-banner" id="transpile-warning-banner" style="display:none"></div>
+
 <div class="data-source-banner" id="data-source-banner" style="display:none"></div>
 
 <div class="results-wrapper" id="results-wrapper">
