@@ -37,7 +37,7 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         _logger.LogDebug("Generating deployment settings for solution '{Solution}'", solutionName);
 
         // Get current environment variables and connection references from the solution
-        var envVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var envVarsResult = await _envVarService.ListAsync(solutionName: solutionName, cancellationToken: cancellationToken);
         var connectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
         var envVars = envVarsResult.Items;
         var connectionRefs = connectionRefsResult.Items;
@@ -82,7 +82,7 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         _logger.LogDebug("Syncing deployment settings for solution '{Solution}'", solutionName);
 
         // Get current state from environment
-        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName: solutionName, cancellationToken: cancellationToken);
         var currentConnectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
         var currentEnvVars = currentEnvVarsResult.Items;
         var currentConnectionRefs = currentConnectionRefsResult.Items;
@@ -204,7 +204,7 @@ public class DeploymentSettingsService : IDeploymentSettingsService
         var issues = new List<ValidationIssue>();
 
         // Get current state from environment
-        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName, cancellationToken);
+        var currentEnvVarsResult = await _envVarService.ListAsync(solutionName: solutionName, cancellationToken: cancellationToken);
         var currentConnectionRefsResult = await _connectionRefService.ListAsync(solutionName, cancellationToken: cancellationToken);
         var currentEnvVars = currentEnvVarsResult.Items;
         var currentConnectionRefs = currentConnectionRefsResult.Items;

@@ -70,7 +70,7 @@ public static class ListCommand
                 Console.Error.WriteLine();
             }
 
-            var variablesResult = await envVarService.ListAsync(solution, cancellationToken);
+            var variablesResult = await envVarService.ListAsync(solutionName: solution, cancellationToken: cancellationToken);
             var variables = variablesResult.Items;
 
             if (globalOptions.IsJsonMode)

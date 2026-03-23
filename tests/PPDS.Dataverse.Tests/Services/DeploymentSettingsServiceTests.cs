@@ -130,7 +130,7 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new()
@@ -152,7 +152,7 @@ public class DeploymentSettingsServiceTests
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = new List<ConnectionReferenceInfo>
             {
                 new()
@@ -187,7 +187,7 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_NormalVar", Type = "String", CurrentValue = "normal" },
@@ -195,7 +195,7 @@ public class DeploymentSettingsServiceTests
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = [] });
 
         var logger = new NullLogger<DeploymentSettingsService>();
@@ -214,7 +214,7 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_Zebra", Type = "String" },
@@ -223,7 +223,7 @@ public class DeploymentSettingsServiceTests
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = new List<ConnectionReferenceInfo>
             {
                 new() { Id = Guid.NewGuid(), LogicalName = "cr_zebra_conn" },
@@ -251,14 +251,14 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_Var1", Type = "String", CurrentValue = "new-value" }
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = new List<ConnectionReferenceInfo>
             {
                 new() { Id = Guid.NewGuid(), LogicalName = "cr_conn1", ConnectionId = "new-conn-id" }
@@ -294,14 +294,14 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_NewVar", Type = "String", CurrentValue = "new-value" }
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = new List<ConnectionReferenceInfo>
             {
                 new() { Id = Guid.NewGuid(), LogicalName = "cr_new_conn", ConnectionId = "new-conn-id", ConnectorId = "new-connector" }
@@ -331,11 +331,11 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items = [] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = [] });
 
         var existingSettings = new DeploymentSettingsFile
@@ -368,11 +368,11 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items = [] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = [] });
 
         var settings = new DeploymentSettingsFile
@@ -403,14 +403,14 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_RequiredVar", Type = "String", IsRequired = true }
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = [] });
 
         var settings = new DeploymentSettingsFile
@@ -437,14 +437,14 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items =
             [
                 new() { Id = Guid.NewGuid(), SchemaName = "cr_RequiredVar", Type = "String", IsRequired = true }
             ] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = [] });
 
         var settings = new DeploymentSettingsFile
@@ -474,11 +474,11 @@ public class DeploymentSettingsServiceTests
     {
         // Arrange
         var envVarService = new Mock<IEnvironmentVariableService>();
-        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        envVarService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<EnvironmentVariableInfo> { Items = [] });
 
         var connectionRefService = new Mock<IConnectionReferenceService>();
-        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        connectionRefService.Setup(s => s.ListAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ListResult<ConnectionReferenceInfo> { Items = new List<ConnectionReferenceInfo>
             {
                 new() { Id = Guid.NewGuid(), LogicalName = "cr_unbound", ConnectorId = "connector-id" }

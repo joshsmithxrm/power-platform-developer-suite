@@ -20,6 +20,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     protected readonly panelLabel = 'Environment Variables';
 
     private solutionFilter: string | null = null;
+    private includeInactive = false;
 
     /**
      * Returns the number of open EnvironmentVariablesPanel instances.
@@ -103,7 +104,11 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 await this.exportDeploymentSettings();
                 break;
             case 'syncDeploymentSettings':
-                vscode.window.showInformationMessage('Sync Deployment Settings coming soon');
+                await this.syncDeploymentSettings();
+                break;
+            case 'setIncludeInactive':
+                this.includeInactive = message.includeInactive;
+                await this.loadEnvironmentVariables();
                 break;
             case 'requestEnvironmentList':
                 await this.handleEnvironmentPickerClick(this.daemon, this.panelId, EnvironmentVariablesPanel.instances.length > 1);
@@ -146,6 +151,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             const result = await this.daemon.environmentVariablesList(
                 this.solutionFilter ?? undefined,
                 this.environmentUrl,
+                this.includeInactive,
             );
 
             this.postMessage({
@@ -162,6 +168,8 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                     hasOverride: v.hasOverride,
                     isMissing: v.isMissing,
                 })),
+                totalCount: result.totalCount,
+                filtersApplied: result.filtersApplied ?? [],
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -261,6 +269,41 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
         }
     }
 
+    private async syncDeploymentSettings(): Promise<void> {
+        if (!this.solutionFilter) {
+            vscode.window.showWarningMessage('Please select a solution before syncing deployment settings.');
+            return;
+        }
+
+        try {
+            // Ask the user to select a file to sync (open existing or create new)
+            const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: defaultUri ? vscode.Uri.joinPath(defaultUri, 'deployment-settings.json') : undefined,
+                filters: { 'JSON Files': ['json'] },
+                title: 'Sync Deployment Settings — Save To',
+            });
+
+            if (!uri) return;
+
+            const result = await this.daemon.environmentVariablesSyncDeploymentSettings(
+                this.solutionFilter,
+                uri.fsPath,
+                this.environmentUrl,
+            );
+
+            this.postMessage({
+                command: 'deploymentSettingsSynced',
+                filePath: result.filePath,
+                envVars: result.environmentVariables,
+                connectionRefs: result.connectionReferences,
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Sync failed: ${msg}` });
+        }
+    }
+
     private async loadSolutionList(): Promise<void> {
         try {
             const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl);
@@ -321,6 +364,9 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     <vscode-button id="sync-btn" appearance="secondary" title="Sync deployment settings">Sync Settings</vscode-button>
     <vscode-button id="maker-btn" appearance="secondary" title="Open Environment Variables in Maker Portal">Maker Portal</vscode-button>
     <div id="solution-filter-container" class="solution-filter-container"></div>
+    <div class="toolbar-toggle" id="inactive-toggle" title="Toggle active/inactive variables">
+        <span id="inactive-toggle-label">Active Only</span>
+    </div>
     <input id="search-input" type="text" placeholder="Filter variables..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}

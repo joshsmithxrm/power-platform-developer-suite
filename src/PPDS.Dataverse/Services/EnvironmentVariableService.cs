@@ -53,6 +53,7 @@ public class EnvironmentVariableService : IEnvironmentVariableService
     /// <inheritdoc />
     public async Task<ListResult<EnvironmentVariableInfo>> ListAsync(
         string? solutionName = null,
+        bool includeInactive = false,
         CancellationToken cancellationToken = default)
     {
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
@@ -95,10 +96,13 @@ public class EnvironmentVariableService : IEnvironmentVariableService
                 Solution.Fields.UniqueName, ConditionOperator.Equal, solutionName);
         }
 
-        // Only get active variables
-        definitionQuery.Criteria.AddCondition(
-            EnvironmentVariableDefinition.Fields.statecode, ConditionOperator.Equal, 0);
-        filtersApplied.Add("active only");
+        if (!includeInactive)
+        {
+            // Only get active variables
+            definitionQuery.Criteria.AddCondition(
+                EnvironmentVariableDefinition.Fields.statecode, ConditionOperator.Equal, 0);
+            filtersApplied.Add("active only");
+        }
 
         _logger.LogDebug("Querying environment variable definitions");
         var definitions = await client.RetrieveMultipleAsync(definitionQuery, cancellationToken);
@@ -273,7 +277,7 @@ public class EnvironmentVariableService : IEnvironmentVariableService
         string? solutionName = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await ListAsync(solutionName, cancellationToken);
+        var result = await ListAsync(solutionName: solutionName, cancellationToken: cancellationToken);
 
         var exportItems = result.Items
             .Select(v => new EnvironmentVariableExportItem
