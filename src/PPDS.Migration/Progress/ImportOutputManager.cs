@@ -250,9 +250,12 @@ namespace PPDS.Migration.Progress
                 Success = result.Success,
                 Duration = result.Duration,
                 TiersProcessed = result.TiersProcessed,
+                SourceRecordCount = result.SourceRecordCount,
                 RecordsImported = result.RecordsImported,
                 RecordsUpdated = result.RecordsUpdated,
                 RecordsFailed = _errorCount,
+                RelationshipsProcessed = result.RelationshipsProcessed > 0 ? result.RelationshipsProcessed : null,
+                RelationshipsFailed = result.RelationshipsFailed > 0 ? result.RelationshipsFailed : null,
                 RecordsPerSecond = result.RecordsPerSecond,
                 ErrorPatterns = DetectErrorPatterns(result),
                 Entities = result.EntityResults.Count > 0
@@ -412,6 +415,9 @@ namespace PPDS.Migration.Progress
             [JsonPropertyName("tiersProcessed")]
             public int TiersProcessed { get; set; }
 
+            [JsonPropertyName("sourceRecordCount")]
+            public int SourceRecordCount { get; set; }
+
             [JsonPropertyName("recordsImported")]
             public int RecordsImported { get; set; }
 
@@ -420,6 +426,12 @@ namespace PPDS.Migration.Progress
 
             [JsonPropertyName("recordsFailed")]
             public int RecordsFailed { get; set; }
+
+            [JsonPropertyName("relationshipsProcessed")]
+            public int? RelationshipsProcessed { get; set; }
+
+            [JsonPropertyName("relationshipsFailed")]
+            public int? RelationshipsFailed { get; set; }
 
             [JsonPropertyName("recordsPerSecond")]
             public double RecordsPerSecond { get; set; }

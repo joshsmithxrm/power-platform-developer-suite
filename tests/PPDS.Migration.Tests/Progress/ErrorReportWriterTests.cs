@@ -241,6 +241,29 @@ public class ErrorReportWriterTests : IDisposable
 
     #endregion
 
+    [Fact]
+    public async Task WriteAsync_WithMissingParentError_ClassifiesPattern()
+    {
+        var filePath = Path.Combine(_tempDir, "report.json");
+        var result = new ImportResult
+        {
+            RecordsImported = 95,
+            Errors = new List<MigrationError>
+            {
+                new()
+                {
+                    EntityLogicalName = "account",
+                    Message = "account With Id = abc-123 Does Not Exist"
+                }
+            }
+        };
+
+        await ErrorReportWriter.WriteAsync(filePath, result, null, null);
+
+        var json = await File.ReadAllTextAsync(filePath);
+        json.Should().Contain("MISSING_PARENT");
+    }
+
     #region Helper Methods
 
     private static ImportResult CreateBasicImportResult()

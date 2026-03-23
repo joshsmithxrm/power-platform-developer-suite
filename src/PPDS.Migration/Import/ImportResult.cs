@@ -21,6 +21,11 @@ namespace PPDS.Migration.Import
         public int TiersProcessed { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of records in the source data file.
+        /// </summary>
+        public int SourceRecordCount { get; set; }
+
+        /// <summary>
         /// Gets or sets the number of records imported.
         /// </summary>
         public int RecordsImported { get; set; }
@@ -34,6 +39,11 @@ namespace PPDS.Migration.Import
         /// Gets or sets the number of relationships processed.
         /// </summary>
         public int RelationshipsProcessed { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of relationship failures.
+        /// </summary>
+        public int RelationshipsFailed { get; set; }
 
         /// <summary>
         /// Gets or sets the import duration.

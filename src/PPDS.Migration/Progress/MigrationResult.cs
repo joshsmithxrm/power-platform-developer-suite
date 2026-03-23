@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Migration.Progress
 {
@@ -13,6 +14,11 @@ namespace PPDS.Migration.Progress
         /// Gets or sets whether the operation was successful.
         /// </summary>
         public bool Success { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records in the source data file.
+        /// </summary>
+        public int? SourceRecordCount { get; set; }
 
         /// <summary>
         /// Gets or sets the total records processed.
@@ -56,6 +62,17 @@ namespace PPDS.Migration.Progress
         /// Only populated for import operations; null otherwise.
         /// </summary>
         public int? M2MCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of M2M relationship failures.
+        /// Only populated for import operations; null otherwise.
+        /// </summary>
+        public int? RelationshipsFailed { get; set; }
+
+        /// <summary>
+        /// Gets or sets the connection pool statistics at the end of the operation.
+        /// </summary>
+        public PoolStatistics? PoolStatistics { get; set; }
 
         /// <summary>
         /// Gets the average records per second.

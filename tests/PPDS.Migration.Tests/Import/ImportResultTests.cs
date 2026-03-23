@@ -14,9 +14,11 @@ public class ImportResultTests
 
         result.Success.Should().BeFalse();
         result.TiersProcessed.Should().Be(0);
+        result.SourceRecordCount.Should().Be(0);
         result.RecordsImported.Should().Be(0);
         result.RecordsUpdated.Should().Be(0);
         result.RelationshipsProcessed.Should().Be(0);
+        result.RelationshipsFailed.Should().Be(0);
         result.Duration.Should().Be(TimeSpan.Zero);
         result.Errors.Should().NotBeNull().And.BeEmpty();
         result.EntityResults.Should().NotBeNull().And.BeEmpty();
@@ -33,9 +35,11 @@ public class ImportResultTests
         {
             Success = true,
             TiersProcessed = 3,
+            SourceRecordCount = 1100,
             RecordsImported = 1000,
             RecordsUpdated = 50,
             RelationshipsProcessed = 10,
+            RelationshipsFailed = 2,
             Duration = duration,
             Errors = errors,
             EntityResults = entityResults
@@ -43,9 +47,11 @@ public class ImportResultTests
 
         result.Success.Should().BeTrue();
         result.TiersProcessed.Should().Be(3);
+        result.SourceRecordCount.Should().Be(1100);
         result.RecordsImported.Should().Be(1000);
         result.RecordsUpdated.Should().Be(50);
         result.RelationshipsProcessed.Should().Be(10);
+        result.RelationshipsFailed.Should().Be(2);
         result.Duration.Should().Be(duration);
         result.Errors.Should().HaveCount(1);
         result.EntityResults.Should().HaveCount(1);

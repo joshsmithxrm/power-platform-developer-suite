@@ -181,12 +181,22 @@ namespace PPDS.Migration.Progress
             }
             Console.ResetColor();
 
-            // Summary line: "    42,366 records in 00:00:08 (4,774.5 rec/s)"
+            // Summary line: "    42,366 record(s) in 00:00:08 (4,774.5 rec/s)"
             // Include M2M breakdown if present: "... [42,000 entities + 366 M2M]"
             var m2mBreakdown = result.M2MCount.HasValue && result.M2MCount.Value > 0
                 ? $" [{result.SuccessCount - result.M2MCount.Value:N0} entities + {result.M2MCount.Value:N0} M2M]"
                 : "";
             Console.Error.WriteLine($"    {result.SuccessCount:N0} record(s) in {result.Duration:hh\\:mm\\:ss} ({result.RecordsPerSecond:F1} rec/s){m2mBreakdown}");
+
+            // Source vs imported comparison when there are failures
+            // Only show when failures exist to avoid confusion from deferred field/M2M counts inflating SuccessCount
+            if (result.SourceRecordCount.HasValue && result.FailureCount > 0)
+            {
+                // Exclude M2M relationship failures — SourceRecordCount only covers entity records
+                var entityFailureCount = result.FailureCount - result.RelationshipsFailed.GetValueOrDefault();
+                var importedCount = result.SourceRecordCount.Value - entityFailureCount;
+                Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {importedCount:N0} | Failed: {entityFailureCount:N0}");
+            }
 
             // Show created/updated breakdown for upsert operations
             if (result.CreatedCount.HasValue && result.UpdatedCount.HasValue)
@@ -253,6 +263,16 @@ namespace PPDS.Migration.Progress
                     {
                         Console.Error.WriteLine($"Error Pattern: {topPattern.Value:N0} of {result.Errors.Count:N0} errors share the same cause:");
                         Console.Error.WriteLine($"  {GetPatternDescription(topPattern.Key)}");
+
+                        // For MISSING_PARENT, show which lookup fields are involved
+                        if (topPattern.Key == "MISSING_PARENT")
+                        {
+                            var fieldNames = ExtractDiagnosticFieldNames(result.Errors);
+                            if (fieldNames.Count > 0)
+                            {
+                                Console.Error.WriteLine($"  Lookup fields: {string.Join(", ", fieldNames)}");
+                            }
+                        }
                     }
                     else
                     {
@@ -299,6 +319,20 @@ namespace PPDS.Migration.Progress
                     }
                     Console.ResetColor();
                 }
+            }
+
+            // Show API call statistics if available
+            if (result.PoolStatistics != null && result.PoolStatistics.RequestsServed > 0)
+            {
+                Console.Error.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                var apiLine = $"    API calls: {result.PoolStatistics.RequestsServed:N0}";
+                if (result.PoolStatistics.ThrottleEvents > 0)
+                {
+                    apiLine += $" ({result.PoolStatistics.ThrottleEvents:N0} throttled, {result.PoolStatistics.TotalBackoffTime.TotalSeconds:F1}s backoff)";
+                }
+                Console.Error.WriteLine(apiLine);
+                Console.ResetColor();
             }
 
             Console.Error.WriteLine();
@@ -354,6 +388,12 @@ namespace PPDS.Migration.Progress
                 return "MISSING_REFERENCE";
             }
 
+            // Self-referential parent doesn't exist
+            if (Regex.IsMatch(message, @"\w+ With Ids? = .+ Do(es)? Not Exist", RegexOptions.IgnoreCase))
+            {
+                return "MISSING_PARENT";
+            }
+
             // Duplicate record
             if (message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
                 message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
@@ -387,6 +427,7 @@ namespace PPDS.Migration.Progress
             "MISSING_USER" => "Referenced systemuser (owner/createdby/modifiedby) does not exist in target environment",
             "MISSING_TEAM" => "Referenced team does not exist in target environment",
             "MISSING_REFERENCE" => "Referenced record does not exist in target environment",
+            "MISSING_PARENT" => "Referenced parent record does not exist in target environment",
             "DUPLICATE_RECORD" => "Record already exists (duplicate detected)",
             "PERMISSION_DENIED" => "Insufficient permissions to create/update records",
             "REQUIRED_FIELD" => "Required field is missing or null",
@@ -415,6 +456,11 @@ namespace PPDS.Migration.Progress
                         suggestions.Add("Check that the data file includes all required parent records");
                         break;
 
+                    case "MISSING_PARENT":
+                        suggestions.Add("Parent records must exist before child records can reference them");
+                        suggestions.Add("Check self-referential lookups (e.g., parentaccountid) — the referenced record may not have been imported yet");
+                        break;
+
                     case "DUPLICATE_RECORD":
                         suggestions.Add("Use --mode Update to update existing records instead of creating duplicates");
                         suggestions.Add("Or use --mode Upsert to create-or-update based on record ID");
@@ -434,6 +480,21 @@ namespace PPDS.Migration.Progress
 
             // Deduplicate suggestions
             return suggestions.Distinct().ToList();
+        }
+
+        /// <summary>
+        /// Extracts unique field names from error diagnostics.
+        /// </summary>
+        private static List<string> ExtractDiagnosticFieldNames(IReadOnlyList<MigrationError> errors)
+        {
+            return errors
+                .Where(e => e.Diagnostics != null)
+                .SelectMany(e => e.Diagnostics!)
+                .Where(d => !string.IsNullOrEmpty(d.FieldName))
+                .Select(d => d.FieldName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <inheritdoc />
