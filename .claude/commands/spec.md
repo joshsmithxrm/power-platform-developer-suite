@@ -77,7 +77,7 @@ If the user tries to skip ACs, remind them: Constitution I3 requires numbered ac
    ```
    docs(specs): add/update {spec-name} specification
 
-   Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+   Co-Authored-By: {use the format from the system prompt}
    ```
 
 ## Rules

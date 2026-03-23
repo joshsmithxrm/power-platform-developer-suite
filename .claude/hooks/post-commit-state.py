@@ -49,6 +49,11 @@ def main():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass  # Can't resolve HEAD — skip
 
+    # Pipeline continuation nudge — only during active /implement sessions
+    # gates.passed is always None here (cleared above), so condition is just started + plan
+    if state.get("started") and state.get("plan"):
+        print("Commit recorded. Proceed to /gates — do not stop for summary.", file=sys.stderr)
+
     try:
         with open(state_path, "w") as f:
             json.dump(state, f, indent=2)

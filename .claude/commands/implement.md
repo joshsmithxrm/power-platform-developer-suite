@@ -22,6 +22,8 @@ $ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3
 - Identify ALL phases, their dependencies, and parallelization opportunities
 - Identify which phases are SEQUENTIAL (have dependencies) vs PARALLEL (independent streams)
 - Note the quality gates defined in the plan
+- **Findings reconciliation:** If the plan references a findings document (check for `**Findings:**` or links to a findings file), read it and extract all finding IDs (e.g., CC-01, V-15, CR-06). Cross-reference every finding ID against the plan text. Report any finding IDs that do not appear in the plan — these may have been accidentally dropped during plan authoring. Present the gap to the user before proceeding.
+- **Shared-infrastructure scan:** Identify files that appear in multiple phases (e.g., `message-types.ts`, `shared.css`, `dom-utils.ts`). Verify these files are modified in an earlier sequential phase, not in parallel phases. If a shared file appears in parallel phases, flag it: either serialize those modifications or designate one phase as the owner of the shared file.
 
 ### Step 2: Load Spec Context
 
@@ -77,6 +79,14 @@ python scripts/workflow-state.py set started now
 - Set up dependencies between tasks using addBlockedBy/addBlocks
 - Mark any already-completed work as done
 
+### Step 4.5: Assess Model Selection
+
+For each phase, assess complexity to choose the appropriate model for subagents:
+- **Primary model (Opus):** Phases with >3 sub-steps, complex UI work (timelines, query builders, virtual scrolling), cross-cutting refactors touching >10 files, or Constitution-sensitive Dataverse service changes
+- **Lighter model (Sonnet):** Mechanical phases — one-liner fixes, find-and-replace, boilerplate application, CSS-only changes, documentation updates
+
+Do not hardcode model IDs in the plan. Assess at dispatch time based on the phase's actual complexity. When in doubt, use the primary model — the cost of a subagent re-dispatch exceeds the cost difference between models.
+
 ### Step 5: Execute Each Phase
 
 For EACH phase in the plan, repeat this cycle:
@@ -92,7 +102,9 @@ For EACH phase in the plan, repeat this cycle:
   - Test command to run and verify
   - The spec context block from Step 2 (constitution + relevant AC tables)
   - Reminder: no shell redirections (2>&1, >, >>)
+  - Self-check gate: before reporting completion, run the relevant gate checks for your changed files. For TypeScript/extension changes: `npm run typecheck:all --prefix src/PPDS.Extension` and `npx eslint --quiet {changed-files}`. For C# changes: `dotnet build {project}.csproj -v q`. Report gate results in your summary — do not silently suppress failures.
 - Maximize parallelism: if 4 tasks are independent, launch 4 agents simultaneously
+- **Shared-file guard:** If multiple parallel agents will modify the same file (identified in Step 1's shared-infrastructure scan), either: (a) serialize those agents, (b) have the first agent create the shared additions and later agents import them, or (c) designate one agent as the file owner and have others list their additions as requirements for the owner.
 
 **B. Collect Results**
 - Wait for all agents in the current phase to complete
@@ -142,7 +154,7 @@ This prevents the most common parallel-agent defect: each agent delivers its sli
 
   Bullet points of what was added/changed.
 
-  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+  Co-Authored-By: {use the format from the system prompt}
   ```
 - Each phase gets its OWN commit - do not batch multiple phases into one commit
 - Exception: parallel streams within a phase group (e.g., Phases 2-4 running simultaneously) can share a commit since they're one logical gate
@@ -183,6 +195,9 @@ If `/review` finds critical or important issues, invoke `/converge` to run the f
 - Verify git log shows clean commit history with one commit per phase
 - Verify `.workflow/state.json` shows fresh timestamps for gates, verify, qa, and review
 - All timestamps must be more recent than the `started` timestamp
+
+**G. Continue Pipeline**
+After final state check passes, proceed IMMEDIATELY to the tail verification pipeline. Do NOT stop to present a summary. The pipeline is: gates → verify → qa → review → pr. Execute end-to-end unless a step fails.
 
 ## Rules
 

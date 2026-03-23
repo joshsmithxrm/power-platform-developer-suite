@@ -91,20 +91,15 @@ Use the prompt template below for EACH session. Do NOT batch sessions — each g
 >    `~/.claude/projects/<project-path>/*.jsonl`
 >
 >    Find the project path:
->    ```bash
->    ls ~/.claude/projects/ | grep {repo-name}
->    ```
+>    Use the Glob tool: `~/.claude/projects/*{repo-name}*`
 >
 >    Find recent sessions matching this date range:
->    ```bash
->    find ~/.claude/projects/{project-path} -name "*.jsonl" -mtime -{days} -maxdepth 1
->    ```
+>    Use the Glob tool: `~/.claude/projects/{project-path}/*.jsonl`
+>    Then use the Bash tool with `ls -lt` to sort by modification time
+>    and filter to files modified within the date range.
 >
 >    Search for correction patterns (user frustration, redirections):
->    ```bash
->    grep -il '"role":"user"' ~/.claude/projects/{path}/*.jsonl
->    ```
->    Then use Grep to search high-hit files for correction keywords:
+>    Use the Grep tool (NOT bash grep) on the .jsonl files with:
 >    pattern: `"role":"user".*(no not|don't|wrong|instead|stop|shouldn't|you missed|why didn't)`
 >
 >    Lines are long (one JSON record per line). Use the Read tool with

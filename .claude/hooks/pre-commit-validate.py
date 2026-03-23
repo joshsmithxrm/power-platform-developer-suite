@@ -78,9 +78,26 @@ def main():
                 print(test_result.stderr, file=sys.stderr)
             sys.exit(2)
 
-        # Run extension lint if src/PPDS.Extension/ has changes or exists
+        # Run extension lint only if staged files include extension changes
         extension_dir = os.path.join(project_dir, "src", "PPDS.Extension")
-        if os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
+        has_ext_changes = False
+        try:
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if staged.returncode == 0:
+                has_ext_changes = any(
+                    line.startswith("src/PPDS.Extension/")
+                    for line in staged.stdout.strip().split("\n") if line
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            has_ext_changes = True  # If git check fails, run lint to be safe
+
+        if has_ext_changes and os.path.exists(extension_dir) and os.path.exists(os.path.join(extension_dir, "package.json")):
             # shell=True required on Windows where npm is a .cmd batch file
             lint_result = subprocess.run(
                 "npm run lint",
