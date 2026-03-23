@@ -1,4 +1,5 @@
 using FluentAssertions;
+using PPDS.Dataverse.Pooling;
 using PPDS.Migration.Progress;
 using Xunit;
 
@@ -12,6 +13,7 @@ public class MigrationResultTests
         var result = new MigrationResult();
 
         result.Success.Should().BeFalse();
+        result.SourceRecordCount.Should().BeNull();
         result.RecordsProcessed.Should().Be(0);
         result.SuccessCount.Should().Be(0);
         result.FailureCount.Should().Be(0);
@@ -20,6 +22,7 @@ public class MigrationResultTests
         result.CreatedCount.Should().BeNull();
         result.UpdatedCount.Should().BeNull();
         result.M2MCount.Should().BeNull();
+        result.PoolStatistics.Should().BeNull();
     }
 
     [Fact]
@@ -27,10 +30,17 @@ public class MigrationResultTests
     {
         var duration = TimeSpan.FromMinutes(10);
         var errors = new List<MigrationError> { new() { Message = "Test error" } };
+        var poolStats = new PoolStatistics
+        {
+            RequestsServed = 1234,
+            ThrottleEvents = 5,
+            TotalBackoffTime = TimeSpan.FromSeconds(3)
+        };
 
         var result = new MigrationResult
         {
             Success = true,
+            SourceRecordCount = 5500,
             RecordsProcessed = 5000,
             SuccessCount = 4950,
             FailureCount = 50,
@@ -38,10 +48,12 @@ public class MigrationResultTests
             Errors = errors,
             CreatedCount = 3000,
             UpdatedCount = 1950,
-            M2MCount = 500
+            M2MCount = 500,
+            PoolStatistics = poolStats
         };
 
         result.Success.Should().BeTrue();
+        result.SourceRecordCount.Should().Be(5500);
         result.RecordsProcessed.Should().Be(5000);
         result.SuccessCount.Should().Be(4950);
         result.FailureCount.Should().Be(50);
@@ -50,6 +62,9 @@ public class MigrationResultTests
         result.CreatedCount.Should().Be(3000);
         result.UpdatedCount.Should().Be(1950);
         result.M2MCount.Should().Be(500);
+        result.PoolStatistics.Should().BeSameAs(poolStats);
+        result.PoolStatistics!.RequestsServed.Should().Be(1234);
+        result.PoolStatistics.ThrottleEvents.Should().Be(5);
     }
 
     [Fact]

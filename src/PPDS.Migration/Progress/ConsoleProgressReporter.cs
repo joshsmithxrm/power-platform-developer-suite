@@ -387,6 +387,12 @@ namespace PPDS.Migration.Progress
                 return "MISSING_REFERENCE";
             }
 
+            // Self-referential parent doesn't exist
+            if (Regex.IsMatch(message, @"\w+ With Ids? = .+ Do(es)? Not Exist", RegexOptions.IgnoreCase))
+            {
+                return "MISSING_PARENT";
+            }
+
             // Duplicate record
             if (message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
                 message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
