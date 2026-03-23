@@ -428,9 +428,14 @@ export class FetchXmlToSqlTranspiler {
 	 * Note: Nested filters are flattened - all conditions are extracted
 	 * and joined with the parent filter's type (AND/OR).
 	 * Captures end position for comment association.
+	 * Limitation: Lazy match stops at the first </filter>, so conditions
+	 * after a nested </filter> within the same parent are not captured.
+	 * This is a trade-off — greedy match incorrectly spans across separate
+	 * entity filters in multi-entity FetchXML, which is worse.
 	 */
 	private parseFilter(xml: string): ParsedFilter | null {
-		// Find the first filter element in the main entity
+		// Find the first filter element — lazy match to avoid spanning across
+		// separate entity filters in multi-entity FetchXML
 		const filterMatch = xml.match(
 			/<filter([^>]*)>([\s\S]*?)<\/filter>/i
 		);
