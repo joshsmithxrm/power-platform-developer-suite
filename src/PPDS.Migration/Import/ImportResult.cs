@@ -36,6 +36,11 @@ namespace PPDS.Migration.Import
         public int RelationshipsProcessed { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of relationship failures.
+        /// </summary>
+        public int RelationshipsFailed { get; set; }
+
+        /// <summary>
         /// Gets or sets the import duration.
         /// </summary>
         public TimeSpan Duration { get; set; }

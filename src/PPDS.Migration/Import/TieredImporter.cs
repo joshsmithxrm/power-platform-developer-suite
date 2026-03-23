@@ -478,6 +478,7 @@ namespace PPDS.Migration.Import
                 RecordsImported = totalImported,
                 RecordsUpdated = deferredResult.SuccessCount,
                 RelationshipsProcessed = relationshipResult.SuccessCount,
+                RelationshipsFailed = relationshipResult.FailureCount,
                 Duration = duration,
                 Phase1Duration = phase1Duration,
                 Phase2Duration = phase2Duration,
