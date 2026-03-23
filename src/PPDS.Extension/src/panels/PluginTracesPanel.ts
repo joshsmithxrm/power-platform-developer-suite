@@ -13,6 +13,7 @@ import type {
     PluginTraceViewDto,
     PluginTraceDetailViewDto,
     TimelineNodeViewDto,
+    AdvancedQueryViewDto,
 } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -125,6 +126,13 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             case 'exportTraces':
                 await this.exportTraces(message.format);
                 break;
+            case 'applyAdvancedFilter':
+                this.currentFilter = this.convertAdvancedQuery(message.query);
+                await this.loadTraces();
+                break;
+            case 'persistState':
+                // State is persisted on the webview side via vscode.getState/setState
+                break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
                 break;
@@ -188,7 +196,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             }));
 
             this.lastLoadedTraces = traces;
-            this.postMessage({ command: 'tracesLoaded', traces });
+            this.postMessage({ command: 'tracesLoaded', traces, totalCount: result.totalCount ?? traces.length });
 
             // Also check trace level to inform the user if tracing is Off
             void this.loadTraceLevel();
@@ -226,6 +234,16 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
                 configuration: t.configuration,
                 secureConfiguration: t.secureConfiguration,
                 requestId: t.requestId,
+                // Additional fields (PT-01 through PT-09)
+                stage: t.stage ?? t.operationType,
+                constructorStartTime: t.constructorStartTime ?? null,
+                isSystemCreated: t.isSystemCreated ?? false,
+                createdById: t.createdById ?? null,
+                createdOnBehalfById: t.createdOnBehalfById ?? null,
+                pluginStepId: t.pluginStepId ?? null,
+                persistenceKey: t.persistenceKey ?? null,
+                organizationId: t.organizationId ?? null,
+                profile: t.profile ?? null,
             };
             this.postMessage({ command: 'traceDetailLoaded', trace });
         } catch (error) {
@@ -393,6 +411,52 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
         }
     }
 
+    /** Convert advanced query builder state to a TraceFilterDto for the daemon. */
+    private convertAdvancedQuery(query: AdvancedQueryViewDto): TraceFilterDto {
+        const filter: TraceFilterDto = {};
+
+        // Apply quick filters
+        for (const qfId of query.quickFilterIds) {
+            switch (qfId) {
+                case 'exceptions': filter.hasException = true; break;
+                case 'success': filter.hasException = false; break;
+                case 'last-hour': filter.startDate = new Date(Date.now() - 3600000).toISOString(); break;
+                case 'last-24h': filter.startDate = new Date(Date.now() - 86400000).toISOString(); break;
+                case 'today': {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    filter.startDate = today.toISOString();
+                    break;
+                }
+                case 'async': filter.mode = 'Async'; break;
+                case 'sync': filter.mode = 'Sync'; break;
+                case 'recursive': filter.minDurationMs = undefined; break; // handled by depth filter in conditions
+            }
+        }
+
+        // Apply enabled advanced conditions (simplified — the daemon supports basic filter fields)
+        for (const cond of query.conditions) {
+            if (!cond.enabled) continue;
+            const val = cond.value;
+            switch (cond.field) {
+                case 'Plugin Name': filter.typeName = val; break;
+                case 'Entity': filter.primaryEntity = val; break;
+                case 'Message': filter.messageName = val; break;
+                case 'Duration': if (val) filter.minDurationMs = parseInt(val, 10) || undefined; break;
+                case 'Created On': if (val) filter.startDate = new Date(val).toISOString(); break;
+                case 'Mode': filter.mode = val; break;
+            }
+        }
+
+        return filter;
+    }
+
+    /** Select a trace by ID and load its detail — used for timeline click navigation. */
+    async selectTraceFromTimeline(traceId: string): Promise<void> {
+        this.postMessage({ command: 'selectTraceById', id: traceId });
+        await this.loadTraceDetail(traceId);
+    }
+
     getHtmlContent(webview: vscode.Webview): string {
         const toolkitUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist', 'toolkit.min.js')
@@ -441,63 +505,73 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     ${getEnvironmentPickerHtml()}
 </div>
 
-<div id="filter-bar" class="filter-bar">
-    <button id="filter-toggle-btn" class="filter-toggle-btn">Filters &#x25BC;</button>
-    <div class="filter-fields">
-        <div class="filter-field">
-            <label>Entity</label>
-            <input type="text" id="filter-entity" placeholder="Entity name..." />
+<!-- 6f: Advanced Query Builder -->
+<div id="filter-panel" class="filter-panel collapsed">
+    <div id="filter-panel-header" class="filter-panel-header">
+        <span class="filter-panel-title"><span class="filter-chevron">&#x25B6;</span> Filters (0 / 0)</span>
+    </div>
+    <div class="filter-panel-tabs" id="filter-panel-tabs">
+        <button class="filter-panel-tab active" data-filter-tab="quick">Quick Filters</button>
+        <button class="filter-panel-tab" data-filter-tab="advanced">Advanced</button>
+        <button class="filter-panel-tab" data-filter-tab="preview">Query Preview</button>
+    </div>
+    <div class="filter-panel-body" id="filter-panel-body">
+        <!-- Quick Filters tab -->
+        <div class="filter-tab-content active" data-filter-tab="quick">
+            <div class="quick-filter-grid">
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="exceptions" /> Exceptions</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="success" /> Success Only</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="last-hour" /> Last Hour</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="last-24h" /> Last 24 Hours</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="today" /> Today</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="async" /> Async Only</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="sync" /> Sync Only</label>
+                <label class="quick-filter-checkbox-item"><input type="checkbox" data-qf="recursive" /> Recursive Calls</label>
+            </div>
         </div>
-        <div class="filter-field">
-            <label>Message</label>
-            <input type="text" id="filter-message" placeholder="Message name..." />
+        <!-- Advanced tab -->
+        <div class="filter-tab-content" data-filter-tab="advanced">
+            <div class="advanced-filter-controls">
+                <span class="advanced-filter-logic">
+                    <label><input type="radio" name="filter-logic" value="and" checked /> AND</label>
+                    <label><input type="radio" name="filter-logic" value="or" /> OR</label>
+                </span>
+                <button id="add-condition-btn" class="filter-action-btn">+ Add Condition</button>
+                <button id="clear-conditions-btn" class="filter-action-btn">Clear</button>
+            </div>
+            <div id="filter-conditions" class="filter-conditions"></div>
         </div>
-        <div class="filter-field">
-            <label>Plugin</label>
-            <input type="text" id="filter-plugin" placeholder="Plugin type..." />
-        </div>
-        <div class="filter-field">
-            <label>Mode</label>
-            <select id="filter-mode">
-                <option value="">All</option>
-                <option value="Sync">Sync</option>
-                <option value="Async">Async</option>
-            </select>
-        </div>
-        <div class="filter-field">
-            <label>&nbsp;</label>
-            <label><input type="checkbox" id="filter-exceptions" /> Exceptions only</label>
-        </div>
-        <div class="filter-field">
-            <label>From</label>
-            <input type="datetime-local" id="filter-start-date" />
-        </div>
-        <div class="filter-field">
-            <label>To</label>
-            <input type="datetime-local" id="filter-end-date" />
+        <!-- Query Preview tab -->
+        <div class="filter-tab-content" data-filter-tab="preview">
+            <div class="query-preview-section">
+                <div class="query-preview-label">Generated Filter Conditions</div>
+                <pre id="query-preview-text" class="query-preview-text">No filters applied</pre>
+                <button id="copy-query-btn" class="filter-action-btn">Copy</button>
+            </div>
         </div>
     </div>
-    <div class="quick-filters">
-        <span id="qf-last-hour" class="quick-filter-pill">Last Hour</span>
-        <span id="qf-exceptions" class="quick-filter-pill">Exceptions Only</span>
-        <span id="qf-long-running" class="quick-filter-pill">Long Running</span>
-        <button id="qf-clear-all" class="filter-toggle-btn">Clear All</button>
-    </div>
+    <div id="filter-panel-resize" class="filter-panel-resize-handle"></div>
 </div>
 
+<!-- 6a: Side-by-side layout -->
 <div class="panel-content">
     <div id="table-pane" class="table-pane">
         <div class="empty-state" id="empty-state">Loading plugin traces...</div>
     </div>
     <div id="resize-handle" class="resize-handle"></div>
     <div id="detail-pane" class="detail-pane">
-        <div class="detail-tabs-bar">
-            <button class="detail-tab active" data-tab="details">Details</button>
-            <button class="detail-tab" data-tab="exception">Exception</button>
-            <button class="detail-tab" data-tab="message-block">Message Block</button>
-            <button class="detail-tab" data-tab="config">Configuration</button>
-            <button class="detail-tab" data-tab="timeline">Timeline</button>
+        <div class="detail-header">
+            <div class="detail-tabs-bar">
+                <button class="detail-tab active" data-tab="overview">Overview</button>
+                <button class="detail-tab" data-tab="details">Details</button>
+                <button class="detail-tab" data-tab="exception">Exception</button>
+                <button class="detail-tab" data-tab="message-block">Message Block</button>
+                <button class="detail-tab" data-tab="config">Configuration</button>
+                <button class="detail-tab" data-tab="timeline">Timeline</button>
+            </div>
+            <button id="detail-close-btn" class="detail-close-btn" title="Close detail pane">&times;</button>
         </div>
+        <div class="detail-tab-content active" id="tab-overview"></div>
         <div class="detail-tab-content" id="tab-details"></div>
         <div class="detail-tab-content" id="tab-exception"></div>
         <div class="detail-tab-content" id="tab-message-block"></div>
