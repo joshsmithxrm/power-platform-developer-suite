@@ -98,8 +98,11 @@ internal sealed class PpdsApplication : IDisposable
 
         // Start warming the connection pool in the background
         // This runs while Terminal.Gui initializes, so connection is ready faster
+        // Note: don't wrap in FireAndForget here — WireInitializationToSplash in TuiShell
+        // already observes this task with proper error handling on the splash screen.
+        // Double-observation via FireAndForget causes a raw "Background operation failed"
+        // message when initialization fails (e.g., no active profile).
         var initTask = _session.InitializeAsync(cancellationToken);
-        _session.GetErrorService().FireAndForget(initTask, "SessionInit");
 
         // Register cancellation to request stop
         using var registration = cancellationToken.Register(() => Application.RequestStop());
