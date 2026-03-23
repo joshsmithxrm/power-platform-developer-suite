@@ -253,6 +253,16 @@ namespace PPDS.Migration.Progress
                     {
                         Console.Error.WriteLine($"Error Pattern: {topPattern.Value:N0} of {result.Errors.Count:N0} errors share the same cause:");
                         Console.Error.WriteLine($"  {GetPatternDescription(topPattern.Key)}");
+
+                        // For MISSING_PARENT, show which lookup fields are involved
+                        if (topPattern.Key == "MISSING_PARENT")
+                        {
+                            var fieldNames = ExtractDiagnosticFieldNames(result.Errors);
+                            if (fieldNames.Count > 0)
+                            {
+                                Console.Error.WriteLine($"  Lookup fields: {string.Join(", ", fieldNames)}");
+                            }
+                        }
                     }
                     else
                     {
@@ -387,6 +397,7 @@ namespace PPDS.Migration.Progress
             "MISSING_USER" => "Referenced systemuser (owner/createdby/modifiedby) does not exist in target environment",
             "MISSING_TEAM" => "Referenced team does not exist in target environment",
             "MISSING_REFERENCE" => "Referenced record does not exist in target environment",
+            "MISSING_PARENT" => "Referenced parent record does not exist in target environment",
             "DUPLICATE_RECORD" => "Record already exists (duplicate detected)",
             "PERMISSION_DENIED" => "Insufficient permissions to create/update records",
             "REQUIRED_FIELD" => "Required field is missing or null",
@@ -415,6 +426,11 @@ namespace PPDS.Migration.Progress
                         suggestions.Add("Check that the data file includes all required parent records");
                         break;
 
+                    case "MISSING_PARENT":
+                        suggestions.Add("Parent records must exist before child records can reference them");
+                        suggestions.Add("Check self-referential lookups (e.g., parentaccountid) — the referenced record may not have been imported yet");
+                        break;
+
                     case "DUPLICATE_RECORD":
                         suggestions.Add("Use --mode Update to update existing records instead of creating duplicates");
                         suggestions.Add("Or use --mode Upsert to create-or-update based on record ID");
@@ -434,6 +450,21 @@ namespace PPDS.Migration.Progress
 
             // Deduplicate suggestions
             return suggestions.Distinct().ToList();
+        }
+
+        /// <summary>
+        /// Extracts unique field names from error diagnostics.
+        /// </summary>
+        private static List<string> ExtractDiagnosticFieldNames(IReadOnlyList<MigrationError> errors)
+        {
+            return errors
+                .Where(e => e.Diagnostics != null)
+                .SelectMany(e => e.Diagnostics!)
+                .Where(d => !string.IsNullOrEmpty(d.FieldName))
+                .Select(d => d.FieldName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <inheritdoc />

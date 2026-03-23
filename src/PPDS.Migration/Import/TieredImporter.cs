@@ -688,7 +688,8 @@ namespace PPDS.Migration.Import
                 RecordIndex = e.Index,
                 RecordId = e.RecordId,
                 ErrorCode = e.ErrorCode,
-                Message = e.Message
+                Message = e.Message,
+                Diagnostics = e.Diagnostics
             }).ToList();
 
             entityStopwatch.Stop();
