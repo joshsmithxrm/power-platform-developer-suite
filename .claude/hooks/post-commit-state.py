@@ -50,10 +50,8 @@ def main():
         pass  # Can't resolve HEAD — skip
 
     # Pipeline continuation nudge — only during active /implement sessions
-    started = state.get("started")
-    plan = state.get("plan")
-    gates_passed = state.get("gates", {}).get("passed") if isinstance(state.get("gates"), dict) else None
-    if started and plan and not gates_passed:
+    # gates.passed is always None here (cleared above), so condition is just started + plan
+    if state.get("started") and state.get("plan"):
         print("Commit recorded. Proceed to /gates — do not stop for summary.", file=sys.stderr)
 
     try:
