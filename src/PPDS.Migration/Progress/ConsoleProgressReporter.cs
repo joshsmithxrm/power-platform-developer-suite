@@ -320,6 +320,20 @@ namespace PPDS.Migration.Progress
                 }
             }
 
+            // Show API call statistics if available
+            if (result.PoolStatistics != null && result.PoolStatistics.RequestsServed > 0)
+            {
+                Console.Error.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                var apiLine = $"    API calls: {result.PoolStatistics.RequestsServed:N0}";
+                if (result.PoolStatistics.ThrottleEvents > 0)
+                {
+                    apiLine += $" ({result.PoolStatistics.ThrottleEvents:N0} throttled, {result.PoolStatistics.TotalBackoffTime.TotalSeconds:F1}s backoff)";
+                }
+                Console.Error.WriteLine(apiLine);
+                Console.ResetColor();
+            }
+
             Console.Error.WriteLine();
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PPDS.Dataverse.BulkOperations;
+using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Migration.Progress
 {
@@ -61,6 +62,11 @@ namespace PPDS.Migration.Progress
         /// Only populated for import operations; null otherwise.
         /// </summary>
         public int? M2MCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the connection pool statistics at the end of the operation.
+        /// </summary>
+        public PoolStatistics? PoolStatistics { get; set; }
 
         /// <summary>
         /// Gets the average records per second.
