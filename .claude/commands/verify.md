@@ -189,7 +189,7 @@ Surface key matches mode: `ext`, `tui`, `mcp`, `cli`. Example: `/verify extensio
 ## Rules
 
 1. **Unit tests first** -- always. Don't waste interactive cycles on broken code.
-2. **Structured data over screenshots** -- when both are available, prefer ppds.debug.* JSON over visual inspection. For webview panels, use @ext-verify screenshots (see Extension Mode above).
+2. **Screenshots for visual changes** -- if your change affects what users see, take a screenshot and look at it. See @ext-verify for what requires screenshots vs compile+test.
 3. **Report exact state** -- include actual values, not just pass/fail.
 4. **Prerequisites are hard gates** -- if MCP not configured, stop and say so.
 5. **Don't fix during verify** -- report problems, don't fix them. That's for /debug or /converge.

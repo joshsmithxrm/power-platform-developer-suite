@@ -101,7 +101,7 @@ If `wt` is not found, warn and continue:
 Resume manually: cd <path> && claude --resume <session-id>
 ```
 
-### 7. Print Workflow Guidance
+### 8. Print Workflow Guidance
 
 ```
 ✓ Worktree ready: .worktrees/<name>

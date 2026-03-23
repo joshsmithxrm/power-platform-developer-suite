@@ -99,8 +99,8 @@ For each spec, check these categories:
 2. {spec}: {issue}
 
 ### Stats
-- Specs with ACs: N/21
-- Specs fully aligned: N/21
+- Specs with ACs: N/{total} (compute {total} from glob `specs/*.md` minus CONSTITUTION.md, SPEC-TEMPLATE.md, README.md)
+- Specs fully aligned: N/{total}
 - Constitution violations: N
 ```
 
