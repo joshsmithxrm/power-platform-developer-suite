@@ -26,7 +26,7 @@ try {
     editor = monaco.editor.create(document.getElementById('sql-editor')!, {
         language: 'sql',
         theme: monacoTheme,
-        value: '',
+        value: '-- Enter your SQL query here\n',
         minimap: { enabled: false },
         lineNumbers: 'off',
         scrollBeyondLastLine: false,

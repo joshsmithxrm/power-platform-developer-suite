@@ -244,7 +244,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh solutions">Refresh</vscode-button>
     <vscode-button id="maker-portal-btn" appearance="secondary" title="Open in Maker Portal">Maker Portal</vscode-button>
-    <input id="search-input" type="text" placeholder="Filter solutions..." class="toolbar-search" />
+    <input id="search-input" type="text" placeholder="Search solutions..." class="toolbar-search" />
     <div class="segmented-control" id="visibility-filter" title="Show visible solutions only, or all including internal">
         <button class="seg-btn active" data-value="visible">Visible</button>
         <button class="seg-btn" data-value="all">All</button>

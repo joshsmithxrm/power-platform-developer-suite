@@ -2,7 +2,7 @@
 // External webview script for the Connection References panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, escapeAttr, cssEscape } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, cssEscape, formatDateTime } from './shared/dom-utils.js';
 import type {
     ConnectionReferencesPanelWebviewToHost,
     ConnectionReferencesPanelHostToWebview,
@@ -110,18 +110,6 @@ function statusBadgeHtml(status: string, connectionId: string | null | undefined
     }
 
     return '<span class="' + cls + '"' + tooltip + '>' + escapeHtml(label) + '</span>';
-}
-
-// ── Format date/time helper ──
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '\u2014';
-    try {
-        const d = new Date(isoString);
-        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-            + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    } catch {
-        return isoString;
-    }
 }
 
 // ── DataTable setup ──

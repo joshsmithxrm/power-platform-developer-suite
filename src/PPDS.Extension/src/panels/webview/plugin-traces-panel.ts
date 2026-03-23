@@ -2,7 +2,7 @@
 // External webview script for the Plugin Traces panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, escapeAttr } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, formatDateTime } from './shared/dom-utils.js';
 import type {
     PluginTracesPanelWebviewToHost,
     PluginTracesPanelHostToWebview,
@@ -58,18 +58,6 @@ function formatDuration(ms: number | null): string {
     if (ms === null || ms === undefined) return '\u2014';
     if (ms < 1000) return ms + 'ms';
     return (ms / 1000).toFixed(2) + 's';
-}
-
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
 }
 
 // ── DataTable setup (6d: Operation Type + Correlation ID columns) ─────

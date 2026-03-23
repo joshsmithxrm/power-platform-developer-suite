@@ -279,10 +279,10 @@ function renderDetail(detail: EnvironmentVariableDetailViewDto): void {
         html += '<div class="detail-row"><span class="detail-label">Description:</span> <span class="detail-value">' + escapeHtml(detail.description) + '</span></div>';
     }
     if (detail.createdOn) {
-        html += '<div class="detail-row"><span class="detail-label">Created On:</span> <span class="detail-value">' + escapeHtml(detail.createdOn) + '</span></div>';
+        html += '<div class="detail-row"><span class="detail-label">Created On:</span> <span class="detail-value">' + escapeHtml(formatDateTime(detail.createdOn)) + '</span></div>';
     }
     if (detail.modifiedOn) {
-        html += '<div class="detail-row"><span class="detail-label">Modified On:</span> <span class="detail-value">' + escapeHtml(detail.modifiedOn) + '</span></div>';
+        html += '<div class="detail-row"><span class="detail-label">Modified On:</span> <span class="detail-value">' + escapeHtml(formatDateTime(detail.modifiedOn)) + '</span></div>';
     }
     html += '</div>';
 

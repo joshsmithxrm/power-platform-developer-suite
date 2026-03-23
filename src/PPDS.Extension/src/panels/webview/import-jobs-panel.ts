@@ -2,7 +2,7 @@
 // External webview script for the Import Jobs panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, formatDateTime } from './shared/dom-utils.js';
 import type { ImportJobsPanelWebviewToHost, ImportJobsPanelHostToWebview, ImportJobViewDto } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
@@ -31,19 +31,6 @@ function updateEnvironmentDisplay(name: string | null): void {
 let allJobs: ImportJobViewDto[] = [];
 let totalCount = 0;
 let searchTerm = '';
-
-// ── Format date/time helper ──
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '\u2014';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
-}
 
 // ── Status badge helper ──
 // Daemon returns: "Succeeded", "Failed", "In Progress".

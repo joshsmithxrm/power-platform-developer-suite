@@ -367,7 +367,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     <div class="toolbar-toggle" id="inactive-toggle" title="Toggle active/inactive variables">
         <span id="inactive-toggle-label">Active Only</span>
     </div>
-    <input id="search-input" type="text" placeholder="Filter variables..." class="toolbar-search" />
+    <input id="search-input" type="text" placeholder="Search variables..." class="toolbar-search" />
     <span class="toolbar-spacer"></span>
     ${getEnvironmentPickerHtml()}
 </div>

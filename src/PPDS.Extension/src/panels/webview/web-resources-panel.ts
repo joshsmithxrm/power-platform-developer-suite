@@ -2,7 +2,7 @@
 // External webview script for the Web Resources panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml } from './shared/dom-utils.js';
+import { escapeHtml, formatDateTime } from './shared/dom-utils.js';
 import type {
     WebResourcesPanelWebviewToHost,
     WebResourcesPanelHostToWebview,
@@ -71,19 +71,6 @@ serverSearchBtn?.addEventListener('click', () => {
     vscode.postMessage({ command: 'serverSearch', term: searchTerm });
     serverSearchBanner!.style.display = 'none';
 });
-
-// ── Format date/time helper ──
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '\u2014';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
-}
 
 // ── Type badge helper ──
 function typeBadgeHtml(typeName: string): string {

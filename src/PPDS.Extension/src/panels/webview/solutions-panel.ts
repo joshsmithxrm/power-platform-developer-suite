@@ -2,7 +2,7 @@
 // External webview script for the Solutions panel.
 // Built by esbuild as IIFE for browser, loaded via <script src="...">.
 
-import { escapeHtml, escapeAttr, cssEscape } from './shared/dom-utils.js';
+import { escapeHtml, escapeAttr, cssEscape, formatDateTime } from './shared/dom-utils.js';
 import type { SolutionsPanelWebviewToHost, SolutionsPanelHostToWebview, SolutionViewDto, ComponentGroupDto } from './shared/message-types.js';
 import { assertNever } from './shared/assert-never.js';
 import { getVsCodeApi } from './shared/vscode-api.js';
@@ -36,22 +36,6 @@ envPickerBtn.addEventListener('click', () => {
 });
 function updateEnvironmentDisplay(name: string | null): void {
     envPickerName.textContent = name || 'No environment';
-}
-
-/**
- * Format an ISO date string to include date and time (S-09).
- * Uses toLocaleString() instead of toLocaleDateString() to include time.
- */
-function formatDateTime(isoString: string | null | undefined): string {
-    if (!isoString) return '';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit',
-        });
-    } catch {
-        return isoString;
-    }
 }
 
 // ── Visibility filter segmented control ──
