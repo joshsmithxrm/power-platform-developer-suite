@@ -57,7 +57,9 @@ When the design is approved:
 After user approves the written spec:
 - Write an implementation plan to `docs/plans/`
 - Commit the plan
-- Implementation happens in a new session with `/implement`
+- Present: "Plan saved to `docs/plans/<filename>.md`. Invoke `/implement <plan-path>` to execute. /implement provides structured orchestration — spec context injection, phase gates, cross-agent consistency checks, and findings reconciliation — that ad-hoc execution lacks. Do not continue to implementation without it."
+- If the user wants to proceed in this session, invoke `/implement <plan-path>` directly
+- If deferring, note the plan path for the next session
 
 ## Key Principles
 
