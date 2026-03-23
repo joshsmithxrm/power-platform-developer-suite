@@ -50,35 +50,35 @@ public class ProfileResolutionServiceTests
     }
 
     [Fact]
-    public void Constructor_RejectsReservedDboLabel()
+    public void Constructor_SkipsReservedDboLabel()
     {
         var configs = new List<EnvironmentConfig>
         {
-            new() { Url = "https://dbo.crm.dynamics.com/", Label = "dbo" }
+            new() { Url = "https://dbo.crm.dynamics.com/", Label = "dbo" },
+            new() { Url = "https://uat.crm.dynamics.com/", Label = "UAT" }
         };
 
-        var act = () => new ProfileResolutionService(configs);
-
-        act.Should().Throw<ArgumentException>()
-            .WithMessage("*dbo*reserved*");
+        // Should not throw — "dbo" is silently skipped
+        var service = new ProfileResolutionService(configs);
+        service.ResolveByLabel("dbo").Should().BeNull();
+        service.ResolveByLabel("UAT").Should().NotBeNull();
     }
 
     [Fact]
-    public void Constructor_RejectsReservedDboLabel_CaseInsensitive()
+    public void Constructor_SkipsReservedDboLabel_CaseInsensitive()
     {
         var configs = new List<EnvironmentConfig>
         {
             new() { Url = "https://dbo.crm.dynamics.com/", Label = "DBO" }
         };
 
-        var act = () => new ProfileResolutionService(configs);
-
-        act.Should().Throw<ArgumentException>()
-            .WithMessage("*DBO*reserved*");
+        // Should not throw — "DBO" is silently skipped (case-insensitive)
+        var service = new ProfileResolutionService(configs);
+        service.ResolveByLabel("DBO").Should().BeNull();
     }
 
     [Fact]
-    public void Constructor_DuplicateLabels_UsesLastWriteWins()
+    public void Constructor_DuplicateLabels_KeepsFirstOccurrence()
     {
         var configs = new[]
         {
@@ -86,12 +86,11 @@ public class ProfileResolutionServiceTests
             new EnvironmentConfig { Label = "uat", Url = "https://uat2.crm.dynamics.com/" }
         };
 
-        // Should not throw — last-write-wins prevents TUI crash on orphaned configs
+        // Should not throw — first occurrence wins, duplicate is skipped
         var service = new ProfileResolutionService(configs);
 
-        // The second config (uat2) should win
         var resolved = service.ResolveByLabel("UAT");
         resolved.Should().NotBeNull();
-        resolved!.Url.Should().Be("https://uat2.crm.dynamics.com/");
+        resolved!.Url.Should().Be("https://uat.crm.dynamics.com/");
     }
 }
