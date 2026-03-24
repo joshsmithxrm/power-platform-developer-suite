@@ -58,6 +58,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
 
     <!-- JSON serialization -->
+  <PackageReference Include="System.Security.Cryptography.Pkcs" VersionOverride="10.0.5" />
     <PackageReference Include="System.Text.Json" />
 
     <!-- JWT token parsing for extracting claims -->
