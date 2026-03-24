@@ -98,9 +98,9 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
-    public void Create_HasTenSubcommands()
+    public void Create_HasTwelveSubcommands()
     {
-        Assert.Equal(10, _command.Subcommands.Count);
+        Assert.Equal(12, _command.Subcommands.Count);
     }
 
     #endregion

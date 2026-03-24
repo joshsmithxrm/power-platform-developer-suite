@@ -258,6 +258,27 @@ public static class ErrorCodes
     }
 
     /// <summary>
+    /// Service endpoint operation errors.
+    /// </summary>
+    public static class ServiceEndpoint
+    {
+        /// <summary>Service endpoint not found by ID or name.</summary>
+        public const string NotFound = "ServiceEndpoint.NotFound";
+
+        /// <summary>Service endpoint name is already in use.</summary>
+        public const string NameInUse = "ServiceEndpoint.NameInUse";
+
+        /// <summary>Input validation failed (URL, SAS key length, namespace format, etc.).</summary>
+        public const string ValidationFailed = "ServiceEndpoint.ValidationFailed";
+
+        /// <summary>Cannot modify a managed service endpoint.</summary>
+        public const string ManagedComponent = "ServiceEndpoint.ManagedComponent";
+
+        /// <summary>Service endpoint has dependent step registrations that must be removed first.</summary>
+        public const string HasDependents = "ServiceEndpoint.HasDependents";
+    }
+
+    /// <summary>
     /// Web resource operation errors.
     /// </summary>
     public static class WebResource

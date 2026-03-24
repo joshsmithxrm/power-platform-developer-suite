@@ -82,6 +82,14 @@ public static class ServiceRegistration
             return new PluginRegistrationService(pool, logger);
         });
 
+        // Service endpoint service - manages webhooks and service bus endpoints
+        services.AddTransient<IServiceEndpointService>(sp =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var logger = sp.GetRequiredService<ILogger<ServiceEndpointService>>();
+            return new ServiceEndpointService(pool, logger);
+        });
+
         // SQL language service - uses ICachedMetadataProvider when available
         services.AddTransient<ISqlLanguageService>(sp =>
         {
