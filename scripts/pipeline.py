@@ -414,14 +414,14 @@ def main():
                         log(logger, "worktree", "STATE_SET_FAILED", error=result.stderr.strip())
 
                 # Store linked issue numbers in workflow state
-                for issue_num in args.issue:
+                if args.issue:
+                    cmd = ["python", "scripts/workflow-state.py", "append", "issues"] + [str(num) for num in args.issue]
                     subprocess.run(
-                        ["python", "scripts/workflow-state.py", "append", "issues", str(issue_num)],
+                        cmd,
                         cwd=worktree_path,
                         capture_output=True,
                         text=True,
                     )
-                if args.issue:
                     log(logger, "worktree", "ISSUES_LINKED", issues=args.issue)
 
             elif stage == "implement":

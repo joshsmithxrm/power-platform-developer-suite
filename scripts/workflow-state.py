@@ -138,10 +138,10 @@ def main():
 
     if command == "append":
         if len(sys.argv) < 4:
-            print("Usage: workflow-state.py append <key> <value>", file=sys.stderr)
+            print("Usage: workflow-state.py append <key> <value1> [<value2> ...]", file=sys.stderr)
             sys.exit(1)
         key = sys.argv[2]
-        value = coerce_value(sys.argv[3])
+        values = [coerce_value(v) for v in sys.argv[3:]]
         state = read_state()
         # Navigate to parent, get or create list at final key
         parts = key.split(".")
@@ -153,8 +153,9 @@ def main():
         final_key = parts[-1]
         if final_key not in current or not isinstance(current[final_key], list):
             current[final_key] = []
-        if value not in current[final_key]:
-            current[final_key].append(value)
+        for value in values:
+            if value not in current[final_key]:
+                current[final_key].append(value)
         write_state(state)
         sys.exit(0)
 

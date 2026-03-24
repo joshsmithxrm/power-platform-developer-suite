@@ -131,24 +131,10 @@ echo "=== Inbox (untriaged) ==="
 gh issue list --state open --no-milestone --json number,labels --jq '[.[] | select(.labels | map(.name) | any(startswith("status:")) | not)] | length'
 ```
 
-### 4. GitHub Account Check
-
-Before any `gh` write operation, verify the correct account is active:
-
-```bash
-gh auth status
-```
-
-This repo is owned by `joshsmithxrm`. If the wrong account is active, switch first:
-
-```bash
-gh auth switch --user joshsmithxrm
-```
-
 ## Error Handling
 
 | Error | Recovery |
 |-------|----------|
-| Permission denied on gh command | Check `gh auth status`, switch to `joshsmithxrm` |
+| Permission denied on gh command | Use the `github-account-switch` skill to switch to the correct account |
 | Label doesn't exist | Check `docs/BACKLOG.md` for current taxonomy, create if needed |
 | Milestone doesn't exist | List milestones with `gh api repos/{owner}/{repo}/milestones`, create if needed |
