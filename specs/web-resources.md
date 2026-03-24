@@ -1,8 +1,8 @@
 # Web Resources
 
 **Status:** Implemented
-**Last Updated:** 2026-03-18
-**Code:** [src/PPDS.Dataverse/Services/IWebResourceService.cs](../src/PPDS.Dataverse/Services/IWebResourceService.cs) | [src/PPDS.Extension/src/panels/WebResourcesPanel.ts](../src/PPDS.Extension/src/panels/WebResourcesPanel.ts) | [src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs](../src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs)
+**Last Updated:** 2026-03-23
+**Code:** [src/PPDS.Dataverse/Services/IWebResourceService.cs](../src/PPDS.Dataverse/Services/IWebResourceService.cs) | [src/PPDS.Extension/src/panels/WebResourcesPanel.ts](../src/PPDS.Extension/src/panels/WebResourcesPanel.ts) | [src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs](../src/PPDS.Cli/Tui/Screens/WebResourcesScreen.cs) | [src/PPDS.Cli/Commands/WebResources/](../src/PPDS.Cli/Commands/WebResources/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
 ---
@@ -23,7 +23,6 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 - Web resource creation (managed through solutions)
 - Binary content editing (PNG, JPG, GIF, ICO, XAP are view-only)
 - Bulk import/export of web resources (deployment pipeline concern)
-- Offline editing or local sync (files exist only in Dataverse)
 
 ---
 
@@ -70,6 +69,8 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | Component | Responsibility |
 |-----------|----------------|
 | `IWebResourceService` | Domain service — list, get, content (published/unpublished), update, publish, publishAll |
+| `WebResourceNameResolver` | Shared name resolution — GUID detection, exact match, partial match, ambiguity handling |
+| `WebResourcesCommandGroup.cs` | CLI command group — list, get, url subcommands + publish alias |
 | `WebResourceFileSystemProvider` | VS Code FSP — ppds-webresource:// scheme, conflict detection, publish coordination |
 | `WebResourcesPanel.ts` | VS Code webview panel — virtual table, solution filter, text-only toggle, FSP integration |
 | `PublishCoordinator` | Per-environment `SemaphoreSlim` in `PooledClientExtensions.cs:22` — shared by PublishXml and PublishAllXml |
@@ -121,6 +122,44 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 **WebResourceInfo fields:** id, name, displayName, type, typeName, isManaged, createdBy, createdOn, modifiedBy, modifiedOn
 
 **WebResourceDetail fields:** all of WebResourceInfo + content (decoded string for text types, null for binary)
+
+### CLI Surface
+
+#### Name Resolution
+
+All commands that accept a web resource identifier use shared resolution logic:
+
+1. **GUID** — if the argument parses as a GUID, look up directly by ID
+2. **Exact name** — query for a resource whose `name` matches exactly
+3. **Partial match** — query for resources whose `name` ends with the argument (e.g., `app.js` matches `new_/scripts/app.js`)
+
+On ambiguity (multiple matches):
+- `list` — shows all matches (expected behavior)
+- `get`, `url` — error with list of matches, exit code 1
+
+#### Commands
+
+**`ppds webresources list [name-pattern] [--solution <name>] [--type <type>] [--unpublished] [--top <n>]`**
+
+List web resources with optional filters. Positional argument is a partial name filter.
+
+Table columns (default): Name, Type, Managed, Modified On, Modified By. Full data in `--json` mode.
+
+Type shortcuts: `--type text` (HTML/CSS/JS/XML/XSL/SVG/RESX), `--type image` (PNG/JPG/GIF/ICO/SVG), or specific type (`--type js`, `--type css`).
+
+**`ppds webresources get <name|id> [--unpublished] [--output <path>]`**
+
+Get web resource content. Defaults to published content (SDK convention). `--unpublished` fetches the latest saved draft via `RetrieveUnpublished`.
+
+Output: content to stdout (pipeable per Constitution I1). `--output <path>` writes to file. Binary types error on stdout with message to use `--output`.
+
+**`ppds webresources url <name|id>`**
+
+Get the Maker portal URL for a web resource. Follows existing `UrlCommand` pattern (Solutions, Flows, etc.). URL to stdout in text mode, structured JSON in `--json` mode.
+
+**`ppds webresources publish <name|id>... [--solution <name>]`**
+
+Alias for `ppds publish --type webresource`. Auto-injects `--type webresource`. See [publish.md](./publish.md).
 
 ### Extension Surface
 
@@ -197,6 +236,16 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 | AC-WR-21 | Panel uses `SolutionFilter` shared component (not raw `<select>`) | TBD | 🔲 |
 | AC-WR-22 | Publish All button in VS Code panel calls `webResources/publishAll` | TBD | 🔲 |
 | AC-WR-23 | TUI Publish All hotkey with confirmation dialog | TBD | 🔲 |
+| AC-WR-24 | CLI `list` displays Name, Type, Managed, Modified On, Modified By in table mode | TBD | 🔲 |
+| AC-WR-25 | CLI `list` supports partial name matching as positional argument | TBD | 🔲 |
+| AC-WR-26 | CLI `list` supports `--solution`, `--type` (with shortcuts), `--top` filters | TBD | 🔲 |
+| AC-WR-27 | CLI `get` outputs published content to stdout by default | TBD | 🔲 |
+| AC-WR-28 | CLI `get` with `--unpublished` returns latest draft via RetrieveUnpublished | TBD | 🔲 |
+| AC-WR-29 | CLI `get` with `--output` writes content to file | TBD | 🔲 |
+| AC-WR-30 | CLI `get` errors on binary type to stdout with message to use `--output` | TBD | 🔲 |
+| AC-WR-31 | CLI `url` generates Maker portal URL, outputs to stdout | TBD | 🔲 |
+| AC-WR-32 | Name resolution: GUID → exact name → partial match; error on ambiguity for get/url | TBD | 🔲 |
+| AC-WR-33 | CLI `webresources publish` is alias for `ppds publish --type webresource` | TBD | 🔲 |
 
 ---
 
@@ -240,12 +289,21 @@ Browse, view, edit, and publish web resources. Features a FileSystemProvider for
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added CLI surface (list, get, url), name resolution, publish alias; removed "offline editing" from non-goals (deferred to post-v1) |
 | 2026-03-18 | Extracted from panel-parity.md per SL1 |
+
+---
+
+## Roadmap
+
+- **Pull/push workflow** — download web resources to local folder with hash tracking, push back with conflict detection (#161, #162)
+- **Diff** — local file vs server comparison, depends on pull/push (#163)
 
 ---
 
 ## Related Specs
 
+- [publish.md](./publish.md) — Cross-cutting publish command (`ppds publish`)
 - [architecture.md](./architecture.md) — Application Service boundary
 - [connection-pooling.md](./connection-pooling.md) — Dataverse connection management, publish coordination
 - [CONSTITUTION.md](./CONSTITUTION.md) — Governing principles
