@@ -64,6 +64,12 @@ public static class UrlCommand
             var webResourceService = serviceProvider.GetRequiredService<IWebResourceService>();
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
 
+            if (!globalOptions.IsJsonMode)
+            {
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+                Console.Error.WriteLine();
+            }
+
             // Resolve name to ID
             var resources = await webResourceService.ListAsync(cancellationToken: cancellationToken);
             var resolveResult = WebResourceNameResolver.Resolve(name, resources);

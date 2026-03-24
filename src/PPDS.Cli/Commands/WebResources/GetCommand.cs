@@ -78,7 +78,13 @@ public static class GetCommand
                 cancellationToken);
 
             var webResourceService = serviceProvider.GetRequiredService<IWebResourceService>();
-            var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+
+            if (!globalOptions.IsJsonMode)
+            {
+                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                ConsoleHeader.WriteConnectedAs(connectionInfo);
+                Console.Error.WriteLine();
+            }
 
             // Resolve name to ID
             var resources = await webResourceService.ListAsync(cancellationToken: cancellationToken);
@@ -156,7 +162,7 @@ public static class GetCommand
             else if (outputPath != null)
             {
                 await File.WriteAllTextAsync(outputPath, content.Content, cancellationToken);
-                Console.Error.WriteLine($"Written to {outputPath} ({content.Content.Length} bytes)");
+                Console.Error.WriteLine($"Written to {outputPath} ({content.Content.Length} characters)");
             }
             else
             {
