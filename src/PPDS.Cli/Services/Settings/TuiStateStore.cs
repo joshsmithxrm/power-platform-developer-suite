@@ -72,6 +72,43 @@ internal sealed class TuiStateStore : IDisposable
     }
 
     /// <summary>
+    /// Synchronously loads the state for a specific screen and environment.
+    /// Intended for use in constructors where async is not available.
+    /// Returns null if no state is persisted or the file is missing/corrupt.
+    /// </summary>
+    public T? LoadScreenState<T>(string screenKey, string environmentUrl) where T : class
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(screenKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
+
+        _lock.Wait();
+        try
+        {
+            var collection = LoadCollection();
+            if (collection == null)
+                return null;
+
+            var normalizedUrl = NormalizeUrl(environmentUrl);
+            if (!collection.Screens.TryGetValue(normalizedUrl, out var screenDict))
+                return null;
+
+            if (!screenDict.TryGetValue(screenKey, out var element))
+                return null;
+
+            return JsonSerializer.Deserialize<T>(element, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
     /// Saves the state for a specific screen and environment, merging into existing data.
     /// </summary>
     public async Task SaveScreenStateAsync<T>(
@@ -168,6 +205,30 @@ internal sealed class TuiStateStore : IDisposable
         try
         {
             var json = await File.ReadAllTextAsync(_filePath, ct).ConfigureAwait(false);
+            _cached = JsonSerializer.Deserialize<TuiStateCollection>(json, JsonOptions);
+            return _cached;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Synchronously loads the collection from cache or disk. Returns null if file is missing or corrupt.
+    /// Must be called under the lock.
+    /// </summary>
+    private TuiStateCollection? LoadCollection()
+    {
+        if (_cached != null)
+            return _cached;
+
+        if (!File.Exists(_filePath))
+            return null;
+
+        try
+        {
+            var json = File.ReadAllText(_filePath);
             _cached = JsonSerializer.Deserialize<TuiStateCollection>(json, JsonOptions);
             return _cached;
         }

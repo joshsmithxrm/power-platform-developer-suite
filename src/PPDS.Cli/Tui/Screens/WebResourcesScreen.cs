@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
 using Terminal.Gui;
@@ -49,7 +50,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
         if (EnvironmentUrl != null)
         {
-            ErrorService.FireAndForget(LoadDataAsync(), "WebResources.InitialLoad");
+            ErrorService.FireAndForget(LoadDataAsync(restoreState: true), "WebResources.InitialLoad");
         }
         else
         {
@@ -68,12 +69,24 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             ErrorService.FireAndForget(PublishAllAsync(), "WebResources.PublishAll"));
     }
 
-    private async Task LoadDataAsync()
+    private async Task LoadDataAsync(bool restoreState = false)
     {
         if (EnvironmentUrl == null)
         {
             _statusLabel.Text = "No environment selected. Use the status bar to connect.";
             return;
+        }
+
+        // Restore persisted filter state before first load
+        if (restoreState)
+        {
+            var savedState = await Session.GetTuiStateStore()
+                .LoadScreenStateAsync<WebResourcesScreenState>("WebResources", EnvironmentUrl);
+            if (savedState != null)
+            {
+                _selectedSolutionId = savedState.SelectedSolutionId;
+                _textOnly = savedState.TextOnly;
+            }
         }
 
         // Cancel any previous load
@@ -303,6 +316,21 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             var solutionsResult = await solutionService.ListAsync(cancellationToken: ScreenCancellation);
             var solutions = solutionsResult.Items;
 
+            // Stale reference check: persisted solution may no longer exist
+            if (_selectedSolutionId.HasValue && !solutions.Any(s => s.Id == _selectedSolutionId.Value))
+            {
+                _selectedSolutionId = null;
+                Application.MainLoop.Invoke(() =>
+                {
+                    _statusLabel.Text = "Previously filtered solution not found \u2014 showing all";
+                });
+                ErrorService.FireAndForget(
+                    Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
+                        new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
+                    "WebResources.ClearStaleState");
+                ErrorService.FireAndForget(LoadDataAsync(), "WebResources.StaleFilterReload");
+            }
+
             Application.MainLoop.Invoke(() =>
             {
                 // Build list with "All Solutions" option at top
@@ -340,6 +368,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                 Application.Run(dialog);
                 dialog.Dispose();
 
+                // Persist updated filter state
+                ErrorService.FireAndForget(
+                    Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
+                        new WebResourcesScreenState { SelectedSolutionId = _selectedSolutionId, TextOnly = _textOnly }),
+                    "WebResources.SaveState");
+
                 // Reload with new filter
                 ErrorService.FireAndForget(LoadDataAsync(), "WebResources.FilterReload");
             });
@@ -357,6 +391,16 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     private void ToggleTextOnly()
     {
         _textOnly = !_textOnly;
+
+        if (EnvironmentUrl != null)
+        {
+            // Persist updated filter state
+            ErrorService.FireAndForget(
+                Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl,
+                    new WebResourcesScreenState { SelectedSolutionId = _selectedSolutionId, TextOnly = _textOnly }),
+                "WebResources.SaveState");
+        }
+
         ErrorService.FireAndForget(LoadDataAsync(), "WebResources.ToggleTextOnly");
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Dialogs;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
@@ -51,6 +52,11 @@ internal sealed class PluginTracesScreen : TuiScreenBase
 
         if (EnvironmentUrl != null)
         {
+            var savedFilter = Session.GetTuiStateStore()
+                .LoadScreenState<PluginTraceFilter>("PluginTraces", EnvironmentUrl);
+            if (savedFilter != null)
+                _currentFilter = savedFilter;
+
             ErrorService.FireAndForget(LoadTracesAsync(), "PluginTraces.InitialLoad");
         }
         else
@@ -357,6 +363,13 @@ internal sealed class PluginTracesScreen : TuiScreenBase
         if (dialog.Filter != _currentFilter)
         {
             _currentFilter = dialog.Filter;
+
+            ErrorService.FireAndForget(
+                _currentFilter != null
+                    ? Session.GetTuiStateStore().SaveScreenStateAsync("PluginTraces", EnvironmentUrl!, _currentFilter)
+                    : Session.GetTuiStateStore().ClearScreenStateAsync("PluginTraces", EnvironmentUrl!),
+                "PluginTraces.SaveState");
+
             ErrorService.FireAndForget(LoadTracesAsync(), "PluginTraces.FilterApply");
         }
     }
