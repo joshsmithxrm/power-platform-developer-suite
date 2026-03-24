@@ -28,7 +28,7 @@ public static class CustomApisCommandGroup
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("custom-apis", "Custom API management: list, get, register, update, unregister, add-parameter, remove-parameter");
+        var command = new Command("custom-apis", "Custom API management: list, get, register, update, unregister, add-parameter, update-parameter, remove-parameter");
 
         command.Subcommands.Add(ListCommand.Create());
         command.Subcommands.Add(GetCommand.Create());
@@ -36,6 +36,7 @@ public static class CustomApisCommandGroup
         command.Subcommands.Add(UpdateCommand.Create());
         command.Subcommands.Add(UnregisterCommand.Create());
         command.Subcommands.Add(AddParameterCommand.Create());
+        command.Subcommands.Add(UpdateParameterCommand.Create());
         command.Subcommands.Add(RemoveParameterCommand.Create());
 
         return command;

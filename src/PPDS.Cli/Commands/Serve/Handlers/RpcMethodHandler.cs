@@ -4314,6 +4314,36 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
+    /// Updates mutable properties (display name, description) of a parameter.
+    /// Maps to: ppds custom-apis update-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/updateParameter")]
+    public async Task<CustomApisUpdateParameterResponse> CustomApisUpdateParameterAsync(
+        string parameterId,
+        string? displayName = null,
+        string? description = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'parameterId' parameter must be a valid GUID");
+
+        if (displayName == null && description == null)
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "At least one of 'displayName' or 'description' must be provided");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UpdateParameterAsync(
+                paramGuid,
+                new CustomApiParameterUpdateRequest(displayName, description),
+                ct);
+
+            return new CustomApisUpdateParameterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
     /// Removes a request parameter or response property by ID.
     /// Maps to: ppds custom-apis remove-parameter --json
     /// </summary>
@@ -7285,6 +7315,12 @@ public class CustomApisAddParameterResponse
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
+}
+
+public class CustomApisUpdateParameterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
 }
 
 public class CustomApisRemoveParameterResponse

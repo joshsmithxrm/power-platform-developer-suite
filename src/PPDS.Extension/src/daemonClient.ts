@@ -1389,6 +1389,16 @@ export class DaemonClient implements vscode.Disposable {
         return await this.connection!.sendRequest<{ id: string }>('customApis/addParameter', params);
     }
 
+    async customApisUpdateParameter(parameterId: string, displayName?: string, description?: string, environmentUrl?: string): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { parameterId };
+        if (displayName !== undefined) params.displayName = displayName;
+        if (description !== undefined) params.description = description;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/updateParameter for ${parameterId}...`);
+        return await this.connection!.sendRequest<{ success: boolean }>('customApis/updateParameter', params);
+    }
+
     async customApisRemoveParameter(parameterId: string, environmentUrl?: string): Promise<{ success: boolean }> {
         await this.ensureConnected();
         const params: Record<string, unknown> = { parameterId };
