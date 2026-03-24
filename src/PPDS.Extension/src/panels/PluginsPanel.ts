@@ -351,12 +351,11 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Reload detail for the updated node to get fresh state
             const result = await this.daemon.pluginsGet('step', id, this.environmentUrl);
-            // Extract entity from type-specific property
-            const entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? undefined;
+            const entity = result.step;
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
-                    id: `step:${id}`,
+                    id: id,
                     name: String(entity?.['name'] ?? id),
                     nodeType: 'step',
                     isEnabled: enabled,
@@ -385,7 +384,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     await this.daemon.pluginsUnregister(entityType, id, force, this.environmentUrl);
                 }
             );
-            this.postMessage({ command: 'nodeRemoved', nodeId: `${entityType}:${id}` });
+            this.postMessage({ command: 'nodeRemoved', nodeId: id });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to unregister: ${msg}` });
@@ -497,14 +496,22 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 }
             );
 
-            // Reload detail for the updated node
-            const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl);
-            // Extract entity from type-specific property
-            const updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
+            // Reload detail for the updated node, routing through the correct endpoint
+            let updatedEntity: Record<string, unknown> | null;
+            if (entityType === 'customApi') {
+                const result = await this.daemon.customApisGet(id, this.environmentUrl);
+                updatedEntity = result.api as unknown as Record<string, unknown>;
+            } else if (entityType === 'serviceEndpoint') {
+                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl);
+                updatedEntity = result.endpoint as unknown as Record<string, unknown>;
+            } else {
+                const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl);
+                updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
+            }
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
-                    id: `${entityType}:${id}`,
+                    id: id,
                     name: String(updatedEntity?.['name'] ?? id),
                     nodeType: entityType,
                 },
