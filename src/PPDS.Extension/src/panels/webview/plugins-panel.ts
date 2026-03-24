@@ -267,7 +267,8 @@ function reorganizeForView(data: PluginTreeData, mode: 'assembly' | 'message' | 
         for (const [message, entityMap] of [...messageMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
             const entityNodes: PluginTreeNode[] = [];
             for (const [entity, stepList] of [...entityMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-                entityNodes.push(makeGroupNode(`msg_${message}_${entity}`, entity, 'entityGroup', stepList));
+                const entityDisplayName = entity === 'none' ? 'Global (no entity)' : entity;
+                entityNodes.push(makeGroupNode(`msg_${message}_${entity}`, entityDisplayName, 'entityGroup', stepList));
             }
             roots.push(makeGroupNode(`msg_${message}`, message, 'messageGroup', entityNodes));
         }
@@ -294,7 +295,9 @@ function reorganizeForView(data: PluginTreeData, mode: 'assembly' | 'message' | 
             for (const [message, stepList] of [...messageMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
                 messageNodes.push(makeGroupNode(`ent_${entity}_${message}`, message, 'messageGroup', stepList));
             }
-            roots.push(makeGroupNode(`ent_${entity}`, entity, 'entityGroup', messageNodes));
+            // Replace "none" key with a friendly label for the display name
+            const displayName = entity === 'none' ? 'Global (no entity)' : entity;
+            roots.push(makeGroupNode(`ent_${entity}`, displayName, 'entityGroup', messageNodes));
         }
         // Append non-step roots
         for (const se of data.serviceEndpoints) roots.push(se);
@@ -453,21 +456,26 @@ function renderTree(): void {
         fragment.appendChild(bottomSpacer);
     }
 
-    // Wrap in scroll container of fixed total height
+    // Wrap in a flex column so spacers + visible nodes stack correctly
     const inner = document.createElement('div');
-    inner.style.height = `${totalHeight}px`;
-    inner.style.position = 'relative';
+    inner.style.display = 'flex';
+    inner.style.flexDirection = 'column';
+    inner.style.minHeight = `${totalHeight}px`;
     inner.appendChild(fragment);
 
     // Replace content
     treeContainer.innerHTML = '';
     treeContainer.appendChild(inner);
 
-    // Update status
+    // Update status — show descriptive breakdown from host when available, else item count
     if (statusText) {
-        statusText.textContent = flatNodes.length === 0
-            ? 'No items'
-            : `${flatNodes.length} item${flatNodes.length !== 1 ? 's' : ''}`;
+        if (treeData?.statusSummary) {
+            statusText.textContent = treeData.statusSummary;
+        } else {
+            statusText.textContent = flatNodes.length === 0
+                ? 'No items'
+                : `${flatNodes.length} item${flatNodes.length !== 1 ? 's' : ''}`;
+        }
     }
 }
 
@@ -536,6 +544,13 @@ function renderNode(flatNode: FlatNode): HTMLElement {
     // Status indicators
     if (flatNode.node.isEnabled === false) {
         row.classList.add('disabled');
+        if (flatNode.node.nodeType === 'step') {
+            const disabledIcon = document.createElement('span');
+            disabledIcon.className = 'status-disabled';
+            disabledIcon.textContent = '\uD83D\uDEAB'; // 🚫
+            disabledIcon.title = 'Disabled';
+            row.appendChild(disabledIcon);
+        }
     }
     if (flatNode.node.isManaged) {
         const managedLabel = document.createElement('span');
@@ -1909,6 +1924,9 @@ function renderDetail(detail: Record<string, unknown> | null | undefined): void 
     table.className = 'detail-table';
 
     for (const [key, value] of Object.entries(detail)) {
+        // Skip null/undefined/empty values
+        if (value === null || value === undefined || value === '') continue;
+
         const row = document.createElement('tr');
 
         const keyCell = document.createElement('td');
@@ -1917,7 +1935,20 @@ function renderDetail(detail: Record<string, unknown> | null | undefined): void 
 
         const valueCell = document.createElement('td');
         valueCell.className = 'detail-value';
-        valueCell.textContent = String(value ?? '');
+
+        // Format booleans as Yes/No
+        if (typeof value === 'boolean') {
+            valueCell.textContent = value ? 'Yes' : 'No';
+        } else if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+            // Format ISO date strings to locale-friendly format
+            try {
+                valueCell.textContent = new Date(value).toLocaleString();
+            } catch {
+                valueCell.textContent = value;
+            }
+        } else {
+            valueCell.textContent = String(value);
+        }
 
         row.appendChild(keyCell);
         row.appendChild(valueCell);
@@ -2058,6 +2089,25 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     }
 });
 
+// ── Help button ───────────────────────────────────────────────────────────────
+
+function buildHelpButton(): void {
+    const toolbar = document.querySelector('.toolbar');
+    if (!toolbar) return;
+
+    const helpBtn = document.createElement('button');
+    helpBtn.className = 'toolbar-btn';
+    helpBtn.textContent = '?';
+    helpBtn.title = 'Plugin Registration Help';
+    helpBtn.setAttribute('aria-label', 'Open plugin registration documentation');
+    helpBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'openHelp' });
+    });
+
+    toolbar.appendChild(helpBtn);
+}
+
 // ── Ready signal ──────────────────────────────────────────────────────────────
 buildRegisterDropdown();
+buildHelpButton();
 vscode.postMessage({ command: 'ready' });

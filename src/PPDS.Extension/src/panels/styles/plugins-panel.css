@@ -6,6 +6,10 @@
     flex-direction: row;
     gap: 6px;
     align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--vscode-editor-background);
 }
 
 #toolbar select {
@@ -15,6 +19,26 @@
     padding: 2px 4px;
     font-size: 12px;
     font-family: var(--vscode-font-family);
+}
+
+/* ── Search Input ────────────────────────────────────────────────── */
+#search-input {
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 4px 8px;
+    border-radius: 2px;
+    outline: none;
+    font-family: var(--vscode-font-family);
+    font-size: 12px;
+}
+
+#search-input:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+#search-input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
 }
 
 /* ── Filter Bar ─────────────────────────────────────────────────── */
@@ -63,6 +87,15 @@
 #filter-bar input[type="checkbox"] {
     accent-color: var(--vscode-focusBorder);
     cursor: pointer;
+}
+
+/* ── Panel Content Layout ────────────────────────────────────────── */
+.panel-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 /* ── Tree Container ──────────────────────────────────────────────── */
@@ -156,6 +189,26 @@
     color: var(--vscode-descriptionForeground);
     opacity: 0.7;
     white-space: nowrap;
+}
+
+/* ── View Mode Active State ──────────────────────────────────────── */
+.view-mode-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    font-weight: bold;
+}
+
+/* ── Loading Spinner (inline, toolbar-style) ─────────────────────── */
+.loading-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--vscode-descriptionForeground);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 4px;
 }
 
 /* ── Status Indicators ───────────────────────────────────────────── */
@@ -352,6 +405,8 @@
     left: 0;
     z-index: 50;
     min-width: 200px;
+    max-height: 300px;
+    overflow-y: auto;
     background: var(--vscode-menu-background, var(--vscode-editor-background));
     border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);

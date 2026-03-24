@@ -115,6 +115,9 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             case 'requestEnvironmentList':
                 await this.handleEnvironmentPickerClick(this.daemon, this.panelId, PluginsPanel.instances.length > 1);
                 break;
+            case 'openHelp':
+                await vscode.env.openExternal(vscode.Uri.parse('https://ppds.dev/docs/plugin-registration'));
+                break;
             case 'copyToClipboard':
                 this.handleCopyToClipboard(message.text);
                 break;
@@ -154,26 +157,33 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 this.daemon.dataProvidersList(undefined, this.environmentUrl),
             ]);
 
-            // Build assemblies tree nodes
-            const assemblies: PluginTreeNode[] = pluginsResult.assemblies.map(asm => ({
-                id: asm.id ?? `assembly:${asm.name}`,
-                name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
-                nodeType: 'assembly',
-                hasChildren: asm.types.length > 0,
-                children: asm.types.map(t => ({
-                    id: t.id ?? `type:${t.typeName}`,
-                    name: t.typeName,
-                    nodeType: 'type',
-                    hasChildren: t.steps.length > 0,
-                    children: t.steps.map(s => ({
-                        id: s.id ?? `step:${s.name}`,
-                        name: s.name,
-                        nodeType: 'step',
-                        isEnabled: s.isEnabled,
-                        badge: s.isEnabled ? undefined : 'Disabled',
+            // Collect assembly names that already appear under a package to avoid duplication
+            const packagedAssemblyNames = new Set<string>(
+                pluginsResult.packages.flatMap(pkg => pkg.assemblies.map(a => a.name))
+            );
+
+            // Build assemblies tree nodes — skip any assembly already nested under a package
+            const assemblies: PluginTreeNode[] = pluginsResult.assemblies
+                .filter(asm => !packagedAssemblyNames.has(asm.name))
+                .map(asm => ({
+                    id: asm.id ?? `assembly:${asm.name}`,
+                    name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
+                    nodeType: 'assembly',
+                    hasChildren: asm.types.length > 0,
+                    children: asm.types.map(t => ({
+                        id: t.id ?? `type:${t.typeName}`,
+                        name: t.typeName,
+                        nodeType: 'type',
+                        hasChildren: t.steps.length > 0,
+                        children: t.steps.map(s => ({
+                            id: s.id ?? `step:${s.name}`,
+                            name: s.name,
+                            nodeType: 'step',
+                            isEnabled: s.isEnabled,
+                            badge: s.isEnabled ? undefined : 'Disabled',
+                        })),
                     })),
-                })),
-            }));
+                }));
 
             // Build packages tree nodes
             const mapAssemblyNode = (asm: PluginAssemblyInfoDto): PluginTreeNode => ({
@@ -254,12 +264,25 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 });
             }
 
+            // Build descriptive status summary
+            const summaryParts: string[] = [];
+            if (packages.length > 0) summaryParts.push(`${packages.length} package${packages.length !== 1 ? 's' : ''}`);
+            if (assemblies.length > 0) summaryParts.push(`${assemblies.length} assembl${assemblies.length !== 1 ? 'ies' : 'y'}`);
+            const webhookCount = serviceEndpoints.filter(se => se.badge === 'Webhook').length;
+            const otherEndpointCount = serviceEndpoints.length - webhookCount;
+            if (webhookCount > 0) summaryParts.push(`${webhookCount} webhook${webhookCount !== 1 ? 's' : ''}`);
+            if (otherEndpointCount > 0) summaryParts.push(`${otherEndpointCount} service endpoint${otherEndpointCount !== 1 ? 's' : ''}`);
+            if (customApis.length > 0) summaryParts.push(`${customApis.length} custom API${customApis.length !== 1 ? 's' : ''}`);
+            if (dataSources.length > 0) summaryParts.push(`${dataSources.length} data source${dataSources.length !== 1 ? 's' : ''}`);
+            const statusSummary = summaryParts.length > 0 ? summaryParts.join(' \u2014 ') : 'No registrations';
+
             const data: PluginTreeData = {
                 assemblies,
                 packages,
                 serviceEndpoints,
                 customApis,
                 dataSources,
+                statusSummary,
             };
 
             this.postMessage({ command: 'treeLoaded', data });
@@ -553,13 +576,12 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh plugin registrations">Refresh</vscode-button>
     <div class="view-mode-group">
-        <vscode-button id="view-mode-assembly" appearance="secondary" title="View by assembly">Assembly</vscode-button>
-        <vscode-button id="view-mode-message" appearance="secondary" title="View by message">Message</vscode-button>
-        <vscode-button id="view-mode-entity" appearance="secondary" title="View by entity">Entity</vscode-button>
+        <vscode-button id="view-mode-assembly" class="view-mode-btn active" appearance="secondary" title="View by assembly">Assembly</vscode-button>
+        <vscode-button id="view-mode-message" class="view-mode-btn" appearance="secondary" title="View by message">Message</vscode-button>
+        <vscode-button id="view-mode-entity" class="view-mode-btn" appearance="secondary" title="View by entity">Entity</vscode-button>
     </div>
     <vscode-button id="expand-all-btn" appearance="secondary" title="Expand all nodes">Expand All</vscode-button>
     <vscode-button id="collapse-all-btn" appearance="secondary" title="Collapse all nodes">Collapse All</vscode-button>
-    <vscode-button id="register-btn" appearance="secondary" title="Register new plugin assembly or step">Register</vscode-button>
     <span class="toolbar-spacer"></span>
     <input type="text" id="search-input" class="toolbar-search" placeholder="Search registrations..." title="Filter by name, message, or entity" />
     <label class="filter-checkbox" title="Hide disabled steps">

@@ -466,6 +466,7 @@ export type PluginsPanelWebviewToHost =
     | { command: 'unregister'; entityType: string; id: string; force: boolean }
     | { command: 'downloadBinary'; entityType: string; id: string }
     | { command: 'requestEnvironmentList' }
+    | { command: 'openHelp' }
     | { command: 'webviewError'; error: string; stack?: string }
     | { command: 'copyToClipboard'; text: string };
 
@@ -494,6 +495,8 @@ export interface PluginTreeData {
     serviceEndpoints: PluginTreeNode[];
     customApis: PluginTreeNode[];
     dataSources: PluginTreeNode[];
+    /** Human-readable summary e.g. "2 packages — 3 assemblies — 336 custom APIs" */
+    statusSummary?: string;
 }
 
 /** A single node in the plugin tree. */

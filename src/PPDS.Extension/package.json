@@ -323,6 +323,26 @@
         "icon": "$(arrow-down)"
       },
       {
+        "command": "ppds.pluginTreeEnableStep",
+        "title": "Enable Step",
+        "category": "PPDS"
+      },
+      {
+        "command": "ppds.pluginTreeDisableStep",
+        "title": "Disable Step",
+        "category": "PPDS"
+      },
+      {
+        "command": "ppds.pluginTreeUnregister",
+        "title": "Unregister",
+        "category": "PPDS"
+      },
+      {
+        "command": "ppds.pluginTreeDownload",
+        "title": "Download Binary",
+        "category": "PPDS"
+      },
+      {
         "command": "ppds.restartDaemon",
         "title": "Restart Daemon",
         "category": "PPDS"
@@ -491,6 +511,28 @@
           "command": "ppds.removeEnvironment",
           "when": "view == ppds.profiles && viewItem == environment && viewItem != activeEnvironment",
           "group": "env-danger@1"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "ppds.pluginTreeEnableStep",
+          "when": "webviewSection == 'pluginTreeNode' && nodeType == 'step'",
+          "group": "1_actions"
+        },
+        {
+          "command": "ppds.pluginTreeDisableStep",
+          "when": "webviewSection == 'pluginTreeNode' && nodeType == 'step'",
+          "group": "1_actions"
+        },
+        {
+          "command": "ppds.pluginTreeUnregister",
+          "when": "webviewSection == 'pluginTreeNode'",
+          "group": "2_destructive"
+        },
+        {
+          "command": "ppds.pluginTreeDownload",
+          "when": "webviewSection == 'pluginTreeNode' && nodeType =~ /assembly|package/",
+          "group": "3_export"
         }
       ],
       "notebook/cell/title": [

@@ -94,6 +94,19 @@ function registerPanelCommands(
         vscode.commands.registerCommand('ppds.openPlugins', () => {
             PluginsPanel.show(context.extensionUri, client);
         }),
+        vscode.commands.registerCommand('ppds.pluginTreeEnableStep', () => {
+            // Context menu command — the active PluginsPanel handles this via data-vscode-context nodeId
+            vscode.window.showInformationMessage('Use the plugin tree to enable a step (right-click a step node).');
+        }),
+        vscode.commands.registerCommand('ppds.pluginTreeDisableStep', () => {
+            vscode.window.showInformationMessage('Use the plugin tree to disable a step (right-click a step node).');
+        }),
+        vscode.commands.registerCommand('ppds.pluginTreeUnregister', () => {
+            vscode.window.showInformationMessage('Use the plugin tree to unregister (right-click a node).');
+        }),
+        vscode.commands.registerCommand('ppds.pluginTreeDownload', () => {
+            vscode.window.showInformationMessage('Use the plugin tree to download a binary (right-click an assembly or package).');
+        }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
         }),
