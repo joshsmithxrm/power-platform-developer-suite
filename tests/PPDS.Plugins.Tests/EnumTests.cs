@@ -117,6 +117,10 @@ public class EnumTests
         Assert.Equal("PPDS.Plugins", typeof(PluginImageType).Namespace);
         Assert.Equal("PPDS.Plugins", typeof(PluginDeployment).Namespace);
         Assert.Equal("PPDS.Plugins", typeof(PluginInvocationSource).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(ApiBindingType).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(ApiParameterType).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(ParameterDirection).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(ApiProcessingStepType).Namespace);
     }
 
     [Theory]
@@ -125,6 +129,10 @@ public class EnumTests
     [InlineData(typeof(PluginImageType))]
     [InlineData(typeof(PluginDeployment))]
     [InlineData(typeof(PluginInvocationSource))]
+    [InlineData(typeof(ApiBindingType))]
+    [InlineData(typeof(ApiParameterType))]
+    [InlineData(typeof(ParameterDirection))]
+    [InlineData(typeof(ApiProcessingStepType))]
     public void AllEnums_AreValidAndNotEmpty(Type enumType)
     {
         // Verify the enum type exists and is an enum
@@ -133,6 +141,98 @@ public class EnumTests
         // Verify all values exist (will throw if values are missing)
         var values = Enum.GetValues(enumType);
         Assert.True(values.Length > 0);
+    }
+
+    #endregion
+
+    #region ApiBindingType Tests
+
+    [Theory]
+    [InlineData(ApiBindingType.Global, 0)]
+    [InlineData(ApiBindingType.Entity, 1)]
+    [InlineData(ApiBindingType.EntityCollection, 2)]
+    public void ApiBindingType_ValuesMatchDataverseSDK(ApiBindingType bindingType, int expectedValue)
+    {
+        // These values must match the Dataverse SDK for proper registration
+        Assert.Equal(expectedValue, (int)bindingType);
+    }
+
+    [Fact]
+    public void ApiBindingType_HasExactlyThreeValues()
+    {
+        var values = Enum.GetValues<ApiBindingType>();
+        Assert.Equal(3, values.Length);
+    }
+
+    #endregion
+
+    #region ApiParameterType Tests
+
+    [Theory]
+    [InlineData(ApiParameterType.Boolean, 0)]
+    [InlineData(ApiParameterType.DateTime, 1)]
+    [InlineData(ApiParameterType.Decimal, 2)]
+    [InlineData(ApiParameterType.Entity, 3)]
+    [InlineData(ApiParameterType.EntityCollection, 4)]
+    [InlineData(ApiParameterType.EntityReference, 5)]
+    [InlineData(ApiParameterType.Float, 6)]
+    [InlineData(ApiParameterType.Integer, 7)]
+    [InlineData(ApiParameterType.Money, 8)]
+    [InlineData(ApiParameterType.Picklist, 9)]
+    [InlineData(ApiParameterType.String, 10)]
+    [InlineData(ApiParameterType.StringArray, 11)]
+    [InlineData(ApiParameterType.Guid, 12)]
+    public void ApiParameterType_ValuesMatchDataverseSDK(ApiParameterType paramType, int expectedValue)
+    {
+        // These values must match the Dataverse SDK for proper registration
+        Assert.Equal(expectedValue, (int)paramType);
+    }
+
+    [Fact]
+    public void ApiParameterType_HasExactlyThirteenValues()
+    {
+        var values = Enum.GetValues<ApiParameterType>();
+        Assert.Equal(13, values.Length);
+    }
+
+    #endregion
+
+    #region ParameterDirection Tests
+
+    [Theory]
+    [InlineData(ParameterDirection.Input, 0)]
+    [InlineData(ParameterDirection.Output, 1)]
+    public void ParameterDirection_ValuesAreCorrect(ParameterDirection direction, int expectedValue)
+    {
+        Assert.Equal(expectedValue, (int)direction);
+    }
+
+    [Fact]
+    public void ParameterDirection_HasExactlyTwoValues()
+    {
+        var values = Enum.GetValues<ParameterDirection>();
+        Assert.Equal(2, values.Length);
+    }
+
+    #endregion
+
+    #region ApiProcessingStepType Tests
+
+    [Theory]
+    [InlineData(ApiProcessingStepType.None, 0)]
+    [InlineData(ApiProcessingStepType.AsyncOnly, 1)]
+    [InlineData(ApiProcessingStepType.SyncAndAsync, 2)]
+    public void ApiProcessingStepType_ValuesMatchDataverseSDK(ApiProcessingStepType stepType, int expectedValue)
+    {
+        // These values must match the Dataverse SDK for proper registration
+        Assert.Equal(expectedValue, (int)stepType);
+    }
+
+    [Fact]
+    public void ApiProcessingStepType_HasExactlyThreeValues()
+    {
+        var values = Enum.GetValues<ApiProcessingStepType>();
+        Assert.Equal(3, values.Length);
     }
 
     #endregion
