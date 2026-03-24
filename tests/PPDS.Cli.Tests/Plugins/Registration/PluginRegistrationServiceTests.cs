@@ -1223,4 +1223,76 @@ public class PluginRegistrationServiceTests
     }
 
     #endregion
+
+    #region EnableStepAsync / DisableStepAsync Tests
+
+    [Fact]
+    public async Task EnableStepAsync_SendsSetStateRequest_WithEnabledState()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _executedRequests.Clear();
+
+        // Act
+        await _sut.EnableStepAsync(stepId);
+
+        // Assert
+        var setStateRequest = _executedRequests.OfType<SetStateRequest>().SingleOrDefault();
+        Assert.NotNull(setStateRequest);
+        Assert.Equal(stepId, setStateRequest.EntityMoniker.Id);
+        Assert.Equal(SdkMessageProcessingStep.EntityLogicalName, setStateRequest.EntityMoniker.LogicalName);
+        Assert.Equal((int)sdkmessageprocessingstep_statecode.Enabled, setStateRequest.State.Value);
+    }
+
+    [Fact]
+    public async Task DisableStepAsync_SendsSetStateRequest_WithDisabledState()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _executedRequests.Clear();
+
+        // Act
+        await _sut.DisableStepAsync(stepId);
+
+        // Assert
+        var setStateRequest = _executedRequests.OfType<SetStateRequest>().SingleOrDefault();
+        Assert.NotNull(setStateRequest);
+        Assert.Equal(stepId, setStateRequest.EntityMoniker.Id);
+        Assert.Equal(SdkMessageProcessingStep.EntityLogicalName, setStateRequest.EntityMoniker.LogicalName);
+        Assert.Equal((int)sdkmessageprocessingstep_statecode.Disabled, setStateRequest.State.Value);
+    }
+
+    [Fact]
+    public async Task EnableStepAsync_ThrowsPpdsException_WhenDataverseFails()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Network failure"));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.EnableStepAsync(stepId));
+
+        Assert.NotNull(exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task DisableStepAsync_ThrowsPpdsException_WhenDataverseFails()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Network failure"));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.DisableStepAsync(stepId));
+
+        Assert.NotNull(exception.ErrorCode);
+    }
+
+    #endregion
 }

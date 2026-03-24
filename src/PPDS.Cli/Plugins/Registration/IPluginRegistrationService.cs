@@ -414,6 +414,20 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    #region Enable/Disable Operations
+
+    /// <summary>
+    /// Enables a plugin processing step.
+    /// </summary>
+    Task EnableStepAsync(Guid stepId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Disables a plugin processing step.
+    /// </summary>
+    Task DisableStepAsync(Guid stepId, CancellationToken cancellationToken = default);
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>

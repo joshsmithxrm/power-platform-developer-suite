@@ -234,6 +234,9 @@ public static class ErrorCodes
 
         /// <summary>Specified user for impersonation was not found.</summary>
         public const string UserNotFound = "Plugin.UserNotFound";
+
+        /// <summary>Failed to enable or disable a plugin processing step.</summary>
+        public const string SetStateFailed = "Plugin.SetStateFailed";
     }
 
     /// <summary>

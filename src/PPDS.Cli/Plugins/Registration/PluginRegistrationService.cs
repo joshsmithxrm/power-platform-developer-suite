@@ -1974,6 +1974,60 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     #endregion
 
+    #region Enable/Disable Operations
+
+    /// <summary>
+    /// Enables a plugin processing step.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task EnableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Enabled, client, cancellationToken);
+        }
+        catch (PpdsException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.SetStateFailed,
+                $"Failed to enable plugin step '{stepId}'.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Disables a plugin processing step.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DisableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Disabled, client, cancellationToken);
+        }
+        catch (PpdsException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.SetStateFailed,
+                $"Failed to disable plugin step '{stepId}'.",
+                ex);
+        }
+    }
+
+    #endregion
+
     #region Private Helpers
 
     /// <summary>
