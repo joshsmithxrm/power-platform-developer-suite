@@ -85,7 +85,7 @@ function registerPanelCommands(
             ConnectionReferencesPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openEnvironmentVariables', () => {
-            EnvironmentVariablesPanel.show(context.extensionUri, client);
+            EnvironmentVariablesPanel.show(context.extensionUri, client, context);
         }),
         vscode.commands.registerCommand('ppds.openWebResources', () => {
             WebResourcesPanel.show(context.extensionUri, client, context, undefined, undefined, fsp);
@@ -307,7 +307,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // Open Environment Variables targeting this environment
         vscode.commands.registerCommand('ppds.openEnvironmentVariablesForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
-            EnvironmentVariablesPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+            EnvironmentVariablesPanel.show(context.extensionUri, client, context, item.envUrl, item.envDisplayName);
         })),
 
         // Open Web Resources targeting this environment

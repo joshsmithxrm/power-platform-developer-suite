@@ -30,19 +30,20 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
         return EnvironmentVariablesPanel.instances.length;
     }
 
-    static show(extensionUri: vscode.Uri, daemon: DaemonClient, envUrl?: string, envDisplayName?: string): EnvironmentVariablesPanel {
+    static show(extensionUri: vscode.Uri, daemon: DaemonClient, context: vscode.ExtensionContext, envUrl?: string, envDisplayName?: string): EnvironmentVariablesPanel {
         if (EnvironmentVariablesPanel.instances.length >= EnvironmentVariablesPanel.MAX_PANELS) {
             const oldest = EnvironmentVariablesPanel.instances[0];
             oldest.panel?.reveal();
             return oldest;
         }
-        const panel = new EnvironmentVariablesPanel(extensionUri, daemon, envUrl, envDisplayName);
+        const panel = new EnvironmentVariablesPanel(extensionUri, daemon, context, envUrl, envDisplayName);
         return panel;
     }
 
     private constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly daemon: DaemonClient,
+        private readonly context: vscode.ExtensionContext,
         initialEnvUrl?: string,
         initialEnvDisplayName?: string,
     ) {
@@ -52,6 +53,9 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             this.environmentUrl = initialEnvUrl;
             this.environmentDisplayName = initialEnvDisplayName ?? initialEnvUrl;
         }
+
+        // Restore persisted filter state
+        this.solutionFilter = this.context.globalState.get<string | null>('ppds.environmentVariables.solutionFilter', null);
 
         this.panelId = EnvironmentVariablesPanel.nextId++;
         EnvironmentVariablesPanel.instances.push(this);
@@ -95,6 +99,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 break;
             case 'filterBySolution':
                 this.solutionFilter = message.solutionId;
+                void this.context.globalState.update('ppds.environmentVariables.solutionFilter', this.solutionFilter);
                 await this.loadEnvironmentVariables();
                 break;
             case 'requestSolutionList':
@@ -142,6 +147,9 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     }
 
     protected override async onEnvironmentChanged(): Promise<void> {
+        // Reset solution filter on environment change
+        this.solutionFilter = null;
+        void this.context.globalState.update('ppds.environmentVariables.solutionFilter', null);
         await this.loadEnvironmentVariables();
     }
 
