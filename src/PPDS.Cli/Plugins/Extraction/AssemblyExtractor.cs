@@ -190,6 +190,31 @@ public sealed class AssemblyExtractor : IDisposable
                 case "StepId":
                     step.StepId = value?.ToString();
                     break;
+                case "Deployment":
+                    // Only write non-default value (default is ServerOnly = 0)
+                    var deploymentStr = MapDeploymentValue(value);
+                    if (deploymentStr != "ServerOnly")
+                        step.Deployment = deploymentStr;
+                    break;
+                case "RunAsUser":
+                    step.RunAsUser = value?.ToString();
+                    break;
+                case "CanBeBypassed":
+                    // Default is true — only write when false (non-default)
+                    if (value is false)
+                        step.CanBeBypassed = false;
+                    break;
+                case "CanUseReadOnlyConnection":
+                    // Default is false — only write when true (non-default)
+                    if (value is true)
+                        step.CanUseReadOnlyConnection = true;
+                    break;
+                case "InvocationSource":
+                    // Default is Parent = 0 — only write when Child (non-default)
+                    var invocationStr = MapInvocationSourceValue(value);
+                    if (invocationStr != "Parent")
+                        step.InvocationSource = invocationStr;
+                    break;
             }
         }
 
@@ -245,6 +270,12 @@ public sealed class AssemblyExtractor : IDisposable
                     break;
                 case "EntityAlias":
                     image.EntityAlias = value?.ToString();
+                    break;
+                case "Description":
+                    image.Description = value?.ToString();
+                    break;
+                case "MessagePropertyName":
+                    image.MessagePropertyName = value?.ToString();
                     break;
             }
         }
@@ -321,6 +352,39 @@ public sealed class AssemblyExtractor : IDisposable
         }
 
         return value?.ToString() ?? "PreImage";
+    }
+
+    private static string MapDeploymentValue(object? value)
+    {
+        // PluginDeployment enum: ServerOnly=0, Offline=1, Both=2
+        if (value is int intValue)
+        {
+            return intValue switch
+            {
+                0 => "ServerOnly",
+                1 => "Offline",
+                2 => "Both",
+                _ => intValue.ToString()
+            };
+        }
+
+        return value?.ToString() ?? "ServerOnly";
+    }
+
+    private static string MapInvocationSourceValue(object? value)
+    {
+        // PluginInvocationSource enum: Parent=0, Child=1
+        if (value is int intValue)
+        {
+            return intValue switch
+            {
+                0 => "Parent",
+                1 => "Child",
+                _ => intValue.ToString()
+            };
+        }
+
+        return value?.ToString() ?? "Parent";
     }
 
     public void Dispose()

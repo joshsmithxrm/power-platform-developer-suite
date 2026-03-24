@@ -263,6 +263,39 @@ public sealed class PluginStepConfig
     public string? RunAsUser { get; set; }
 
     /// <summary>
+    /// Whether this step can be bypassed via BypassBusinessLogicExecution.
+    /// Only written when false (non-default). Default (true) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("canBeBypassed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanBeBypassed { get; set; }
+
+    /// <summary>
+    /// Whether this step can use a read-only database connection for improved performance.
+    /// Only written when true (non-default). Default (false) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("canUseReadOnlyConnection")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanUseReadOnlyConnection { get; set; }
+
+    /// <summary>
+    /// Pipeline invocation source: Parent (default) or Child.
+    /// Only written when non-default (Child). Default (Parent) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("invocationSource")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvocationSource { get; set; }
+
+    /// <summary>
+    /// Secure configuration string passed to plugin constructor.
+    /// Write-only at runtime — never extracted from assemblies, never stored in source control.
+    /// Provided separately at deploy time via CLI flags or environment variables.
+    /// </summary>
+    [JsonPropertyName("secureConfiguration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecureConfiguration { get; set; }
+
+    /// <summary>
     /// Whether the step is enabled. Default is true.
     /// When false, the step is registered but disabled (won't execute).
     /// </summary>
@@ -329,6 +362,21 @@ public sealed class PluginImageConfig
     /// </summary>
     [JsonPropertyName("entityAlias")]
     public string? EntityAlias { get; set; }
+
+    /// <summary>
+    /// Description of this image's purpose. Stored as metadata in Dataverse.
+    /// </summary>
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// The message property name that carries the entity.
+    /// If null, auto-inferred from the message name (e.g., "Target" for Create/Update).
+    /// </summary>
+    [JsonPropertyName("messagePropertyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessagePropertyName { get; set; }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
