@@ -48,7 +48,7 @@
   </ItemGroup>
 
   <ItemGroup Label="SQL Parsing">
-    <PackageVersion Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="170.3.0" />
+    <PackageVersion Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="170.191.0" />
   </ItemGroup>
 
   <ItemGroup Label="Analyzers and Build">
