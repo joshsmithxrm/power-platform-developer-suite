@@ -316,9 +316,23 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             const colonIdx = nodeId.indexOf(':');
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
 
-            const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
-            // Extract entity from type-specific property
-            const entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? {};
+            let entity: Record<string, unknown>;
+
+            if (nodeType === 'customApi') {
+                const result = await this.daemon.customApisGet(id, this.environmentUrl);
+                entity = result.api as unknown as Record<string, unknown>;
+            } else if (nodeType === 'serviceEndpoint' || nodeType === 'webhook') {
+                const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl);
+                entity = result.endpoint as unknown as Record<string, unknown>;
+            } else if (nodeType === 'dataSource' || nodeType === 'dataProvider') {
+                // No dedicated get endpoint — skip detail load
+                return;
+            } else {
+                const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
+                // Extract entity from type-specific property
+                entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? {};
+            }
+
             this.postMessage({ command: 'detailLoaded', detail: entity });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);

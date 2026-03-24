@@ -314,10 +314,17 @@ function reorganizeForView(data: PluginTreeData, mode: 'assembly' | 'message' | 
  */
 function nodeMatchesFilters(node: PluginTreeNode): boolean {
     if (hideHidden && node.isHidden) return false;
-    // hideMicrosoft applies to assembly-level nodes only; group nodes are synthetic
-    if (hideMicrosoft && node.nodeType === 'assembly') {
+    // hideMicrosoft applies to assembly-level nodes and package nodes that wrap Microsoft assemblies.
+    // Assembly names start with "Microsoft." (e.g. Microsoft.Crm.*).
+    // Package names for Microsoft bundles start with "mspp_microsoft" (case-insensitive).
+    if (hideMicrosoft) {
         const lc = node.name.toLowerCase();
-        if (lc.startsWith('microsoft.') && lc !== 'microsoft.crm.servicebus') return false;
+        if (node.nodeType === 'assembly') {
+            if (lc.startsWith('microsoft.') && lc !== 'microsoft.crm.servicebus') return false;
+        }
+        if (node.nodeType === 'package') {
+            if (lc.startsWith('mspp_microsoft')) return false;
+        }
     }
     return true;
 }
@@ -1735,7 +1742,7 @@ function buildRegisterDropdown(): void {
     if (!toolbar) return;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'register-dropdown-wrapper';
+    wrapper.className = 'register-dropdown register-dropdown-wrapper';
 
     const btn = document.createElement('button');
     btn.className = 'toolbar-btn register-dropdown-btn';
@@ -1886,9 +1893,17 @@ function formatKey(key: string): string {
         .replace(/^./, (c) => c.toUpperCase());
 }
 
-function renderDetail(detail: Record<string, unknown>): void {
+function renderDetail(detail: Record<string, unknown> | null | undefined): void {
     if (!detailPanel) return;
     detailPanel.innerHTML = ''; // Safe: we control all content via createElement
+
+    if (!detail) {
+        const msg = document.createElement('div');
+        msg.className = 'detail-placeholder';
+        msg.textContent = 'No details available.';
+        detailPanel.appendChild(msg);
+        return;
+    }
 
     const table = document.createElement('table');
     table.className = 'detail-table';
