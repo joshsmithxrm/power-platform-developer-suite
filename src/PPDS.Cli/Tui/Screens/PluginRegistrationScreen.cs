@@ -455,6 +455,13 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
         if (args.NewValue is PluginTreeNode node)
         {
             UpdateDetailPanel(node);
+
+            // Trigger lazy-load when a node is selected that has only the placeholder child
+            if (!node.IsLoaded && node.Children.Count == 1 &&
+                node.Children[0] is PluginTreeNode placeholder && placeholder.NodeType == "loading")
+            {
+                ErrorService.FireAndForget(LoadChildrenAsync(node), "PluginReg.LazyLoad");
+            }
         }
         else
         {
