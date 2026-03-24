@@ -279,6 +279,30 @@ public static class ErrorCodes
     }
 
     /// <summary>
+    /// Custom API operation errors.
+    /// </summary>
+    public static class CustomApi
+    {
+        /// <summary>Custom API not found by ID or unique name.</summary>
+        public const string NotFound = "CustomApi.NotFound";
+
+        /// <summary>Custom API unique name is already in use.</summary>
+        public const string NameInUse = "CustomApi.NameInUse";
+
+        /// <summary>Input validation failed (binding type, bound entity, parameter type, etc.).</summary>
+        public const string ValidationFailed = "CustomApi.ValidationFailed";
+
+        /// <summary>Cannot modify a managed Custom API.</summary>
+        public const string ManagedComponent = "CustomApi.ManagedComponent";
+
+        /// <summary>Custom API has parameters/properties that must be removed first (use --force to cascade).</summary>
+        public const string HasDependents = "CustomApi.HasDependents";
+
+        /// <summary>Parameter or response property not found by ID.</summary>
+        public const string ParameterNotFound = "CustomApi.ParameterNotFound";
+    }
+
+    /// <summary>
     /// Web resource operation errors.
     /// </summary>
     public static class WebResource

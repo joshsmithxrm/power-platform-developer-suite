@@ -90,6 +90,14 @@ public static class ServiceRegistration
             return new ServiceEndpointService(pool, logger);
         });
 
+        // Custom API service - manages Custom APIs and their request/response parameters
+        services.AddTransient<ICustomApiService>(sp =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var logger = sp.GetRequiredService<ILogger<CustomApiService>>();
+            return new CustomApiService(pool, logger);
+        });
+
         // SQL language service - uses ICachedMetadataProvider when available
         services.AddTransient<ISqlLanguageService>(sp =>
         {
