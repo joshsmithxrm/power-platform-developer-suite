@@ -812,6 +812,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginsGetResponse> PluginsGetAsync(
         string type,
         string id,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -819,7 +820,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -880,9 +881,10 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("plugins/messages")]
     public async Task<PluginsMessagesResponse> PluginsMessagesAsync(
         string? filter = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -899,12 +901,13 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("plugins/entityAttributes")]
     public async Task<PluginsEntityAttributesResponse> PluginsEntityAttributesAsync(
         string entityLogicalName,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entityLogicalName' parameter is required");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -930,12 +933,13 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginsToggleStepResponse> PluginsToggleStepAsync(
         string id,
         bool enabled,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -959,6 +963,7 @@ public class RpcMethodHandler : IDisposable
         string name,
         string content,
         string? solutionName = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -966,7 +971,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(content))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -988,6 +993,7 @@ public class RpcMethodHandler : IDisposable
         string name,
         string content,
         string? solutionName = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -995,7 +1001,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(content))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1031,6 +1037,7 @@ public class RpcMethodHandler : IDisposable
         bool asyncAutoDelete = false,
         string? secondaryEntity = null,
         string? solutionName = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var typeId))
@@ -1042,7 +1049,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(stage))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'stage' parameter is required");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1090,6 +1097,7 @@ public class RpcMethodHandler : IDisposable
         string? attributes = null,
         string? entityAlias = null,
         string? messageName = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(stepId) || !Guid.TryParse(stepId, out var parsedStepId))
@@ -1099,7 +1107,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(imageType))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'imageType' parameter is required");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1143,12 +1151,13 @@ public class RpcMethodHandler : IDisposable
         bool? canBeBypassed = null,
         bool? canUseReadOnlyConnection = null,
         string? invocationSource = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1180,12 +1189,13 @@ public class RpcMethodHandler : IDisposable
         string id,
         string? imageAttributes = null,
         string? name = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var imageId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1211,6 +1221,7 @@ public class RpcMethodHandler : IDisposable
         string type,
         string id,
         bool force = false,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -1218,7 +1229,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
@@ -1257,6 +1268,7 @@ public class RpcMethodHandler : IDisposable
     public async Task<PluginsDownloadResponse> PluginsDownloadBinaryAsync(
         string type,
         string id,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(type))
@@ -1264,7 +1276,7 @@ public class RpcMethodHandler : IDisposable
         if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
 
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
             var registrationService = new PluginRegistrationService(
