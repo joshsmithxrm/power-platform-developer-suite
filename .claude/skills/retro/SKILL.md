@@ -5,7 +5,7 @@ description: Conduct a structured retrospective on recent work sessions. Use whe
 
 # Retrospective
 
-Structured analysis of recent work sessions to identify patterns, assign blame candidly, and recommend improvements.
+Structured analysis of recent work sessions to identify patterns, trace root causes, and recommend improvements.
 
 ## Quality Bar (READ BEFORE STARTING)
 
@@ -48,13 +48,34 @@ git log {start}..{end} --format="COMMIT:%H%nDATE:%ai%nSUBJECT:%s%nBODY:%b%n---" 
 
 Identify session boundaries: gaps of 30+ minutes between commits = new session.
 
-### 2. Dispatch Agents
+### 2. Discover Transcript Paths
+
+Before dispatching session agents, find the conversation transcripts:
+
+1. Determine which branch(es) the commits came from (from git log output in step 1)
+2. Compute the encoded project directory: take the worktree absolute path, replace `\` and `/` with `-`, strip `:`
+   Example: `C:\VS\ppdsw\ppds\.worktrees\v1-bugs` → `C--VS-ppdsw-ppds--worktrees-v1-bugs`
+3. Handle encoding inconsistency: search BOTH patterns using Bash:
+   ```bash
+   ls -d ~/.claude/projects/*ppdsw-ppds*worktrees-<name>*
+   ```
+   Also check the main repo path: `ls -d ~/.claude/projects/*ppdsw-ppds/`
+4. Find .jsonl files matching the date range:
+   ```bash
+   ls -lt <project-dir>/*.jsonl
+   ```
+   Filter to files modified within the session's date range.
+5. Pass the **absolute file path(s)** to each session agent in step 3.
+
+If no transcript paths are found, note it and continue — transcript search becomes optional for those sessions.
+
+### 2.5. Dispatch Agents
 
 Launch ALL of these simultaneously — do NOT proceed until all are dispatched:
 
 - [ ] **One agent per session** for deep dives (step 3). Do NOT batch multiple sessions into one agent — each session gets its own agent with a focused scope.
 - [ ] **One agent for skills/tools audit** (step 4)
-- [ ] **One agent for memory cross-reference** (step 5)
+- [ ] **One agent for memory cross-reference** (step 5) — only if memory is enabled (see step 5)
 
 ### 3. Deep Dive Each Session (one agent per session)
 
@@ -86,21 +107,15 @@ Use the prompt template below for EACH session. Do NOT batch sessions — each g
 >    successive diff and explain what changed between attempts and why
 >    the earlier attempts failed.
 >
-> 4. **Search conversation transcripts** for user corrections and
->    repeated instructions. Transcripts are at:
->    `~/.claude/projects/<project-path>/*.jsonl`
+> 4. **Read conversation transcripts** for user corrections.
 >
->    Find the project path:
->    Use the Glob tool: `~/.claude/projects/*{repo-name}*`
+>    Transcripts for this session are at:
+>    {orchestrator inserts absolute paths here, or "No transcripts found — skip this step"}
 >
->    Find recent sessions matching this date range:
->    Use the Glob tool: `~/.claude/projects/{project-path}/*.jsonl`
->    Then use the Bash tool with `ls -lt` to sort by modification time
->    and filter to files modified within the date range.
->
->    Search for correction patterns (user frustration, redirections):
->    Use the Grep tool (NOT bash grep) on the .jsonl files with:
->    pattern: `"role":"user".*(no not|don't|wrong|instead|stop|shouldn't|you missed|why didn't)`
+>    Search for correction patterns using Grep (NOT bash grep) on the provided files:
+>    - Corrections: `"role":"user".*(that's not what|I never said|I didn't ask|not what I meant|who said|where did you get)`
+>    - Frustration: `"role":"user".*(fuck|shit|damn|wtf|what the hell|frustrated|half.ass)`
+>    - Redirections: `"role":"user".*(you missed|why didn't you|I already told you|I said|read it again|look at the)`
 >
 >    Lines are long (one JSON record per line). Use the Read tool with
 >    offset/limit to read specific user messages. Extract direct quotes.
@@ -110,33 +125,44 @@ Use the prompt template below for EACH session. Do NOT batch sessions — each g
 >    - Feat-then-fix chains with commit hashes and diff evidence
 >    - Thrashing incidents with diff evidence
 >    - Direct user quotes (if transcripts found)
->    - Blame assignment per incident (AI / Process / Tooling / User)
+>    - Root cause chain per incident (5-Whys)
 >    - What went well
 
-#### Blame Categories
+#### Root Cause Analysis (5-Whys)
 
-| Category | When to assign |
-|----------|---------------|
-| **AI** | Generated code that was broken on arrival, didn't read docs before implementing, shotgun debugging, shipped without testing |
-| **Process** | No verification gate, no review before merge, working 14+ hours, premature documentation |
-| **Tooling** | Platform behavior that is genuinely underdocumented or surprising |
-| **User** | Flawed requirements, continuing to push during fatigue, not enforcing breaks |
+For each incident, trace the root cause chain instead of assigning blame labels:
+
+```
+Incident: AI skipped real verification
+  → /verify language is ambiguous about what "verify" means
+    → Skill was written assuming AI would interpret "use the product" literally
+      → No artifact requirement to prove verification happened
+        → Root cause: /verify needs screenshot/output evidence gate
+```
+
+The final "why" becomes the action item directly. Capture the full chain in `retro-findings.json` as `root_cause_chain`.
+
+Do NOT use blame categories (AI/Process/Tooling/User). They describe symptoms, not causes.
 
 ### 4. Audit Skills and Tools (parallel agent)
 
-Dispatch one agent with this scope:
+Dispatch one agent with this concrete checklist:
 
-- Read all `.claude/skills/` and `.claude/commands/` files
-- Check each for staleness (references to removed tools, wrong paths, outdated patterns)
-- Verify descriptions trigger correctly (not too broad, not too narrow)
-- Check for conflicts between skills
-- Identify repeated manual behaviors that should be skills
+1. **Path verification:** For every file path mentioned in any skill/command, run Glob to verify it exists
+2. **Command/skill references:** For every `/command` or skill name referenced, verify it exists in `.claude/commands/` or `.claude/skills/`
+3. **Tool references:** For every tool name referenced (Bash, Edit, Glob, etc.), verify it matches the current tool catalog
+4. **Trigger accuracy:** For each skill's `description` frontmatter, assess: would this trigger on the intended scenario? Would it false-positive on unrelated scenarios?
+5. **Conflicts:** Check for overlapping scopes or contradictory instructions between skills
+6. **Convention compliance:** Verify worktree paths, commit message formats, and other conventions match CLAUDE.md
+7. **Missing skills:** Identify repeated manual behaviors that should be codified as skills
 
-### 5. Cross-Reference Memory (parallel agent)
+### 5. Cross-Reference Memory (conditional — check before dispatching)
 
-If auto-memory is disabled and no memory files exist, skip this step and note it in the output.
+Before dispatching: check if auto-memory is enabled (read CLAUDE.md for "Auto-memory is OFF").
+If auto-memory is OFF and no memory files exist under `~/.claude/memory/`, **skip this step entirely**.
+Do not dispatch an agent that will just report "nothing found."
 
-Dispatch one agent with this scope:
+If memory IS enabled, dispatch one agent with this scope:
 
 - Read all memory files
 - Flag any memory entries that contradict the current codebase
@@ -149,7 +175,7 @@ After ALL agents return, compile findings into:
 
 **Aggregate Stats:**
 - Total commits, feat/fix ratio, thrashing incidents count
-- Blame distribution (AI/Process/Tooling/User percentages)
+- Root cause distribution (which root causes recur across sessions)
 
 **Per-Session Analysis:**
 - Time range, scope, what went well, what went wrong
@@ -168,3 +194,36 @@ After ALL agents return, compile findings into:
 ## Output
 
 Present findings to the user for discussion — do NOT save to `docs/plans/` or create an action plan. Wait for the user's input before proposing changes.
+
+## Structured Output
+
+In addition to the conversational analysis, write `.workflow/retro-findings.json`:
+
+```json
+{
+  "session_date": "YYYY-MM-DD",
+  "pr": "#NNN",
+  "stats": {
+    "total_commits": 0,
+    "feat_fix_ratio": "N/M",
+    "thrashing_incidents": 0
+  },
+  "findings": [
+    {
+      "id": "R-01",
+      "tier": "auto-fix|draft-fix|issue-only",
+      "description": "What is wrong",
+      "files": ["path/to/affected/file"],
+      "fix_description": "What to do about it",
+      "root_cause_chain": ["surface problem", "why 1", "why 2", "why 3", "root cause"]
+    }
+  ]
+}
+```
+
+Tier definitions:
+- **auto-fix**: Stale references, typos, hardcoded values, known hook bugs. Safe to auto-implement.
+- **draft-fix**: Spec template additions, skill wording improvements, checklist gaps. Auto-PR but flag for review.
+- **issue-only**: Architectural changes, new skills, process redesigns. Create GitHub issue, needs /design session.
+
+The pipeline orchestrator reads this file to drive auto-heal behavior after the retro completes.

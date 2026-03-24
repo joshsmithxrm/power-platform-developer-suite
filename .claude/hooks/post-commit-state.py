@@ -50,9 +50,18 @@ def main():
         pass  # Can't resolve HEAD — skip
 
     # Pipeline continuation nudge — only during active /implement sessions
-    # gates.passed is always None here (cleared above), so condition is just started + plan
+    # Output JSON with additionalContext so the AI sees this in its context
     if state.get("started") and state.get("plan"):
-        print("Commit recorded. Proceed to /gates — do not stop for summary.", file=sys.stderr)
+        nudge = json.dumps({
+            "hookSpecificOutput": {
+                "additionalContext": (
+                    "Commit recorded. Gates are now stale. "
+                    "You MUST run /gates before any other workflow step. "
+                    "Invoke /gates now. Do not summarize."
+                )
+            }
+        })
+        print(nudge)
 
     try:
         with open(state_path, "w") as f:

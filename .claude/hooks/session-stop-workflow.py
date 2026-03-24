@@ -12,10 +12,15 @@ import sys
 
 def main():
     # Read stdin
+    hook_input = {}
     try:
-        json.load(sys.stdin)
+        hook_input = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):
         pass
+
+    # If we already blocked once, allow stop to prevent infinite loop
+    if hook_input.get("stop_hook_active"):
+        sys.exit(0)
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
@@ -188,16 +193,10 @@ def main():
     # --- Decision: block or allow ---
     if missing:
         lines.insert(0, "BLOCKED — incomplete workflow steps:")
+        next_step = missing[0]
         lines.append("")
-        lines.append("Remaining steps:")
-        for step in missing:
-            lines.append(f"  → {step}")
-        lines.append("")
-        lines.append(
-            "YOU MUST complete the remaining steps before stopping. "
-            "Do NOT present a summary and wait — execute the next step immediately.\n"
-            "Run in order: /gates → /verify → /qa → /review → /pr"
-        )
+        lines.append(f"You MUST now run: {next_step}")
+        lines.append("Do not summarize. Do not ask permission. Invoke the command immediately.")
 
         output = {
             "decision": "block",

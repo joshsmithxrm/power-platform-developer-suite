@@ -55,11 +55,23 @@ When the design is approved:
 ### 6. Transition
 
 After user approves the written spec:
-- Write an implementation plan to `docs/plans/`
-- Commit the plan
-- Present: "Plan saved to `docs/plans/<filename>.md`. Invoke `/implement <plan-path>` to execute. /implement provides structured orchestration — spec context injection, phase gates, cross-agent consistency checks, and findings reconciliation — that ad-hoc execution lacks. Do not continue to implementation without it."
-- If the user wants to proceed in this session, invoke `/implement <plan-path>` directly
-- If deferring, note the plan path for the next session
+1. Write an implementation plan to `docs/plans/`
+2. Commit the spec and plan
+3. Present the plan path and pipeline command:
+
+> Plan saved to `docs/plans/<filename>.md`.
+>
+> To execute: `python scripts/pipeline.py docs/plans/<filename>.md`
+>
+> Or say "run it" and I'll invoke the pipeline from here.
+
+If the user wants to proceed immediately, invoke the pipeline:
+```bash
+python scripts/pipeline.py docs/plans/<filename>.md
+```
+Run this in the background so the user can check `/status` while it runs.
+
+If deferring, note the plan path for the next session.
 
 ## Key Principles
 
