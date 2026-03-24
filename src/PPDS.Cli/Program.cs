@@ -12,6 +12,7 @@ using PPDS.Cli.Commands.Internal;
 using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Commands.PluginTraces;
+using PPDS.Cli.Commands.CustomApis;
 using PPDS.Cli.Commands.ServiceEndpoints;
 using PPDS.Cli.Commands.Query;
 using PPDS.Cli.Commands.Roles;
@@ -83,6 +84,7 @@ public static class Program
         rootCommand.Subcommands.Add(PluginsCommandGroup.Create());
         rootCommand.Subcommands.Add(PluginTracesCommandGroup.Create());
         rootCommand.Subcommands.Add(ServiceEndpointsCommandGroup.Create());
+        rootCommand.Subcommands.Add(CustomApisCommandGroup.Create());
         rootCommand.Subcommands.Add(MetadataCommandGroup.Create());
         rootCommand.Subcommands.Add(QueryCommandGroup.Create());
         rootCommand.Subcommands.Add(SolutionsCommandGroup.Create());
