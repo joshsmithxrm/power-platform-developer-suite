@@ -7300,10 +7300,6 @@ public class DataProviderDto
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
-    [JsonPropertyName("dataSourceId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DataSourceId { get; set; }
-
     [JsonPropertyName("dataSourceName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DataSourceName { get; set; }

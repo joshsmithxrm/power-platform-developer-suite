@@ -179,10 +179,6 @@ public static class ListCommand
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
 
-        [JsonPropertyName("dataSourceId")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public Guid? DataSourceId { get; set; }
-
         [JsonPropertyName("dataSourceName")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? DataSourceName { get; set; }

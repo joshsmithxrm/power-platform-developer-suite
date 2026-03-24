@@ -403,7 +403,7 @@ public class DataProviderServiceTests
     }
 
     [Fact]
-    public async Task UnregisterDataSourceAsync_CascadeDeletesProviders_WhenProgressReporterProvided()
+    public async Task UnregisterDataSourceAsync_CascadeDeletesProviders_WhenForceIsTrue()
     {
         var id = Guid.NewGuid();
         var providerId = Guid.NewGuid();
