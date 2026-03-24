@@ -74,11 +74,11 @@ public static class PublishCommandGroup
             if (all)
             {
                 if (type != null)
-                    result.AddError("--all publishes all customizations. Remove --type or use --solution to scope.");
+                    result.AddError("--all publishes all customizations and cannot be combined with --type. Use --type without --all to scope by component type.");
                 if (solution != null)
-                    result.AddError("--all publishes all customizations. Remove --all to scope by solution.");
+                    result.AddError("--all publishes all customizations and cannot be combined with --solution. Use --solution without --all to scope by solution.");
                 if (names.Length > 0)
-                    result.AddError("--all publishes all customizations. Remove --all to publish specific resources.");
+                    result.AddError("--all publishes all customizations and cannot be combined with resource names. Remove --all to publish specific resources.");
             }
             else if (names.Length > 0 && type == null)
             {
