@@ -20,11 +20,6 @@ public static class UpdateCommand
             Description = "Data source logical name or GUID"
         };
 
-        var displayNameOption = new Option<string?>("--display-name")
-        {
-            Description = "New display name for the data source"
-        };
-
         var descriptionOption = new Option<string?>("--description")
         {
             Description = "New description for the data source"
@@ -33,7 +28,6 @@ public static class UpdateCommand
         var command = new Command("update", "Update mutable properties of an existing data source")
         {
             nameOrIdArgument,
-            displayNameOption,
             descriptionOption,
             DataSourcesCommandGroup.ProfileOption,
             DataSourcesCommandGroup.EnvironmentOption
@@ -44,13 +38,12 @@ public static class UpdateCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var nameOrId = parseResult.GetValue(nameOrIdArgument)!;
-            var displayName = parseResult.GetValue(displayNameOption);
             var description = parseResult.GetValue(descriptionOption);
             var profile = parseResult.GetValue(DataSourcesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataSourcesCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(nameOrId, displayName, description, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(nameOrId, description, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -58,7 +51,6 @@ public static class UpdateCommand
 
     private static async Task<int> ExecuteAsync(
         string nameOrId,
-        string? displayName,
         string? description,
         string? profile,
         string? environment,
@@ -68,11 +60,11 @@ public static class UpdateCommand
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         // Check that at least one change was specified
-        if (displayName == null && description == null)
+        if (description == null)
         {
             writer.WriteError(new StructuredError(
                 ErrorCodes.Validation.InvalidArguments,
-                "No changes specified. Use --display-name or --description.",
+                "No changes specified. Use --description.",
                 Target: nameOrId));
             return ExitCodes.InvalidArguments;
         }
@@ -108,14 +100,12 @@ public static class UpdateCommand
             }
 
             var request = new DataSourceUpdateRequest(
-                DisplayName: displayName,
                 Description: description);
 
             await dataProviderService.UpdateDataSourceAsync(existing.Id, request, cancellationToken);
 
             // Build list of changes
             var changes = new List<string>();
-            if (displayName != null) changes.Add($"displayName -> {displayName}");
             if (description != null) changes.Add($"description -> {description}");
 
             var result = new UpdateResult

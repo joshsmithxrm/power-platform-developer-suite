@@ -89,7 +89,6 @@ public static class GetCommand
                 {
                     Id = dataSource.Id,
                     Name = dataSource.Name,
-                    DisplayName = dataSource.DisplayName,
                     Description = dataSource.Description,
                     IsManaged = dataSource.IsManaged,
                     CreatedOn = dataSource.CreatedOn,
@@ -103,7 +102,6 @@ public static class GetCommand
                 {
                     ["Name"] = dataSource.Name,
                     ["ID"] = dataSource.Id.ToString(),
-                    ["Display Name"] = dataSource.DisplayName ?? "-",
                     ["Description"] = dataSource.Description ?? "-",
                     ["Is Managed"] = dataSource.IsManaged ? "Yes" : "No",
                     ["Created"] = dataSource.CreatedOn?.ToString("g") ?? "-",
@@ -145,10 +143,6 @@ public static class GetCommand
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("displayName")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? DisplayName { get; set; }
 
         [JsonPropertyName("description")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -15,15 +15,9 @@ public static class RegisterCommand
 {
     public static Command Create()
     {
-        var displayNameArgument = new Argument<string>("display-name")
+        var nameArgument = new Argument<string>("name")
         {
-            Description = "Human-readable display name for the data source"
-        };
-
-        var nameOption = new Option<string>("--name")
-        {
-            Description = "Logical name in the format {prefix}_{name}",
-            Required = true
+            Description = "Logical name in the format {prefix}_{name}"
         };
 
         var descriptionOption = new Option<string?>("--description")
@@ -33,8 +27,7 @@ public static class RegisterCommand
 
         var command = new Command("register", "Register a new data source entity in Dataverse")
         {
-            displayNameArgument,
-            nameOption,
+            nameArgument,
             descriptionOption,
             DataSourcesCommandGroup.ProfileOption,
             DataSourcesCommandGroup.EnvironmentOption
@@ -44,21 +37,19 @@ public static class RegisterCommand
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var displayName = parseResult.GetValue(displayNameArgument)!;
-            var name = parseResult.GetValue(nameOption)!;
+            var name = parseResult.GetValue(nameArgument)!;
             var description = parseResult.GetValue(descriptionOption);
             var profile = parseResult.GetValue(DataSourcesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataSourcesCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(displayName, name, description, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(name, description, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
     }
 
     private static async Task<int> ExecuteAsync(
-        string displayName,
         string name,
         string? description,
         string? profile,
@@ -85,12 +76,11 @@ public static class RegisterCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine($"Registering data source: {displayName}");
+                Console.Error.WriteLine($"Registering data source: {name}");
             }
 
             var registration = new DataSourceRegistration(
                 Name: name,
-                DisplayName: displayName,
                 Description: description);
 
             var dataSourceId = await dataProviderService.RegisterDataSourceAsync(registration, cancellationToken);
@@ -100,8 +90,7 @@ public static class RegisterCommand
                 Success = true,
                 Operation = "register-data-source",
                 Id = dataSourceId,
-                Name = name,
-                DisplayName = displayName
+                Name = name
             };
 
             if (globalOptions.IsJsonMode)
@@ -112,14 +101,13 @@ public static class RegisterCommand
             {
                 Console.Error.WriteLine($"  Data source registered: {dataSourceId}");
                 Console.Error.WriteLine($"  Logical name: {name}");
-                Console.Error.WriteLine($"  Display name: {displayName}");
             }
 
             return ExitCodes.Success;
         }
         catch (Exception ex)
         {
-            var error = ExceptionMapper.Map(ex, context: $"registering data source '{displayName}'", debug: globalOptions.Debug);
+            var error = ExceptionMapper.Map(ex, context: $"registering data source '{name}'", debug: globalOptions.Debug);
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
@@ -140,9 +128,6 @@ public static class RegisterCommand
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("displayName")]
-        public string DisplayName { get; set; } = string.Empty;
     }
 
     #endregion

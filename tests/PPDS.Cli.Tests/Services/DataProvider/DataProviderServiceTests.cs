@@ -103,11 +103,10 @@ public class DataProviderServiceTests
 
     #region Helper builders
 
-    private static Entity BuildDataSourceEntity(Guid id, string name, string? displayName = null, bool isManaged = false)
+    private static Entity BuildDataSourceEntity(Guid id, string name, bool isManaged = false)
     {
         var e = new Entity("entitydatasource") { Id = id };
         e["name"] = name;
-        e["displayname"] = displayName ?? name;
         e["description"] = (string?)null;
         e["ismanaged"] = isManaged;
         e["createdon"] = (DateTime?)null;
@@ -156,7 +155,7 @@ public class DataProviderServiceTests
     public async Task ListDataSourcesAsync_ReturnsDataSources_WhenTheyExist()
     {
         var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_contacts", "Virtual Contacts");
+        var entity = BuildDataSourceEntity(id, "cr123_contacts");
         _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
 
         var result = await _sut.ListDataSourcesAsync();
@@ -164,7 +163,6 @@ public class DataProviderServiceTests
         Assert.Single(result);
         Assert.Equal(id, result[0].Id);
         Assert.Equal("cr123_contacts", result[0].Name);
-        Assert.Equal("Virtual Contacts", result[0].DisplayName);
         Assert.False(result[0].IsManaged);
     }
 
@@ -197,7 +195,7 @@ public class DataProviderServiceTests
     public async Task GetDataSourceAsync_FindsByName_WhenStringIsNotGuid()
     {
         var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_contacts", "Virtual Contacts");
+        var entity = BuildDataSourceEntity(id, "cr123_contacts");
         _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
 
         var result = await _sut.GetDataSourceAsync("cr123_contacts");
@@ -227,16 +225,7 @@ public class DataProviderServiceTests
     [Fact]
     public async Task RegisterDataSourceAsync_ThrowsValidation_WhenNameIsEmpty()
     {
-        var reg = new DataSourceRegistration(Name: "", DisplayName: "Virtual Contacts", Description: null);
-
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => _sut.RegisterDataSourceAsync(reg));
-        Assert.Equal(ErrorCodes.DataProvider.ValidationFailed, ex.ErrorCode);
-    }
-
-    [Fact]
-    public async Task RegisterDataSourceAsync_ThrowsValidation_WhenDisplayNameIsEmpty()
-    {
-        var reg = new DataSourceRegistration(Name: "cr123_contacts", DisplayName: "", Description: null);
+        var reg = new DataSourceRegistration(Name: "", Description: null);
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => _sut.RegisterDataSourceAsync(reg));
         Assert.Equal(ErrorCodes.DataProvider.ValidationFailed, ex.ErrorCode);
@@ -250,7 +239,6 @@ public class DataProviderServiceTests
 
         var reg = new DataSourceRegistration(
             Name: "cr123_contacts",
-            DisplayName: "Virtual Contacts",
             Description: "Test data source");
 
         var result = await _sut.RegisterDataSourceAsync(reg);
@@ -264,7 +252,7 @@ public class DataProviderServiceTests
     }
 
     [Fact]
-    public async Task RegisterDataSourceAsync_SetsNameAndDisplayName_OnCreatedEntity()
+    public async Task RegisterDataSourceAsync_SetsName_OnCreatedEntity()
     {
         _createResult = Guid.NewGuid();
         Entity? capturedEntity = null;
@@ -275,14 +263,12 @@ public class DataProviderServiceTests
 
         var reg = new DataSourceRegistration(
             Name: "cr123_contacts",
-            DisplayName: "Virtual Contacts",
             Description: null);
 
         await _sut.RegisterDataSourceAsync(reg);
 
         Assert.NotNull(capturedEntity);
         Assert.Equal("cr123_contacts", capturedEntity!["name"]);
-        Assert.Equal("Virtual Contacts", capturedEntity["displayname"]);
     }
 
     #endregion
@@ -296,21 +282,8 @@ public class DataProviderServiceTests
         var id = Guid.NewGuid();
 
         var ex = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest(DisplayName: "New Name")));
+            () => _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest(Description: "New Description")));
         Assert.Equal(ErrorCodes.DataSource.NotFound, ex.ErrorCode);
-    }
-
-    [Fact]
-    public async Task UpdateDataSourceAsync_UpdatesDisplayName_WhenProvided()
-    {
-        var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_contacts", "Old Name");
-        _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
-
-        await _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest(DisplayName: "New Name"));
-
-        Assert.NotNull(_updatedEntity);
-        Assert.Equal("New Name", _updatedEntity!["displayname"]);
     }
 
     [Fact]

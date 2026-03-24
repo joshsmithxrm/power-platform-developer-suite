@@ -23,7 +23,6 @@ public sealed class DataProviderService : IDataProviderService
     private const string DataSourceEntityName = "entitydatasource";
     private const string DataSourceIdField = "entitydatasourceid";
     private const string DataSourceNameField = "name";
-    private const string DataSourceDisplayNameField = "displayname";
     private const string DataSourceDescriptionField = "description";
     private const string DataSourceIsManagedField = "ismanaged";
     private const string DataSourceCreatedOnField = "createdon";
@@ -81,16 +80,8 @@ public sealed class DataProviderService : IDataProviderService
                 "Data source name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(registration.DisplayName))
-        {
-            throw new PpdsException(
-                ErrorCodes.DataProvider.ValidationFailed,
-                "Data source display name is required.");
-        }
-
         var entity = new Entity(DataSourceEntityName);
         entity[DataSourceNameField] = registration.Name;
-        entity[DataSourceDisplayNameField] = registration.DisplayName;
 
         if (!string.IsNullOrWhiteSpace(registration.Description))
             entity[DataSourceDescriptionField] = registration.Description;
@@ -119,12 +110,6 @@ public sealed class DataProviderService : IDataProviderService
 
         var update = new Entity(DataSourceEntityName) { Id = id };
         var hasChanges = false;
-
-        if (request.DisplayName is not null)
-        {
-            update[DataSourceDisplayNameField] = request.DisplayName;
-            hasChanges = true;
-        }
 
         if (request.Description is not null)
         {
@@ -392,7 +377,6 @@ public sealed class DataProviderService : IDataProviderService
         {
             ColumnSet = new ColumnSet(
                 DataSourceNameField,
-                DataSourceDisplayNameField,
                 DataSourceDescriptionField,
                 DataSourceIsManagedField,
                 DataSourceCreatedOnField,
@@ -422,7 +406,6 @@ public sealed class DataProviderService : IDataProviderService
         {
             Id = e.Id,
             Name = e.GetAttributeValue<string>(DataSourceNameField) ?? "",
-            DisplayName = e.GetAttributeValue<string>(DataSourceDisplayNameField),
             Description = e.GetAttributeValue<string>(DataSourceDescriptionField),
             IsManaged = e.GetAttributeValue<bool?>(DataSourceIsManagedField) ?? false,
             CreatedOn = e.GetAttributeValue<DateTime?>(DataSourceCreatedOnField),

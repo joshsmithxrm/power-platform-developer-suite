@@ -267,7 +267,7 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                     {
                         NodeType = "dataSource",
                         Id = ds.Id,
-                        DisplayName = ds.DisplayName ?? ds.Name,
+                        DisplayName = ds.Name,
                         IsManaged = ds.IsManaged,
                         Info = ds
                     };
@@ -585,7 +585,6 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
             case "dataSource" when node.Info is DataSourceInfo ds:
                 sb.AppendLine($"Type:       Data Source");
                 sb.AppendLine($"Name:       {ds.Name}");
-                sb.AppendLine($"Display:    {ds.DisplayName ?? "\u2014"}");
                 sb.AppendLine($"Managed:    {FormatBool(ds.IsManaged)}");
                 if (!string.IsNullOrEmpty(ds.Description))
                     sb.AppendLine($"Desc:       {ds.Description}");

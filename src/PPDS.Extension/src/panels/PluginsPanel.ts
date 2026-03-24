@@ -228,7 +228,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 const providers = dataProvidersResult.providers.filter(p => p.dataSourceId === ds.id);
                 return {
                     id: `datasource:${ds.id}`,
-                    name: ds.displayName || ds.name,
+                    name: ds.name,
                     nodeType: 'dataSource',
                     isManaged: ds.isManaged,
                     hasChildren: providers.length > 0,

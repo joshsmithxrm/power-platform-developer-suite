@@ -85,7 +85,6 @@ public static class ListCommand
                     {
                         Id = ds.Id,
                         Name = ds.Name,
-                        DisplayName = ds.DisplayName,
                         Description = ds.Description,
                         IsManaged = ds.IsManaged,
                         CreatedOn = ds.CreatedOn,
@@ -99,8 +98,7 @@ public static class ListCommand
                 foreach (var ds in dataSources)
                 {
                     var managed = ds.IsManaged ? " [managed]" : "";
-                    var displayName = ds.DisplayName != null ? $" ({ds.DisplayName})" : "";
-                    Console.Error.WriteLine($"Data Source: {ds.Name}{displayName}{managed}");
+                    Console.Error.WriteLine($"Data Source: {ds.Name}{managed}");
                     if (!string.IsNullOrEmpty(ds.Description))
                         Console.Error.WriteLine($"  Description: {ds.Description}");
                 }
@@ -134,10 +132,6 @@ public static class ListCommand
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("displayName")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? DisplayName { get; set; }
 
         [JsonPropertyName("description")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -4612,21 +4612,18 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("dataSources/register")]
     public async Task<DataSourcesRegisterResponse> DataSourcesRegisterAsync(
         string name,
-        string displayName,
         string? description = null,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
-        if (string.IsNullOrWhiteSpace(displayName))
-            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
 
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var newId = await service.RegisterDataSourceAsync(
-                new DataSourceRegistration(name, displayName, description),
+                new DataSourceRegistration(name, description),
                 ct);
 
             return new DataSourcesRegisterResponse { Id = newId.ToString() };
@@ -4640,7 +4637,6 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("dataSources/update")]
     public async Task<DataSourcesUpdateResponse> DataSourcesUpdateAsync(
         string id,
-        string? displayName = null,
         string? description = null,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
@@ -4653,7 +4649,7 @@ public class RpcMethodHandler : IDisposable
             var service = sp.GetRequiredService<IDataProviderService>();
             await service.UpdateDataSourceAsync(
                 sourceId,
-                new DataSourceUpdateRequest(displayName, description),
+                new DataSourceUpdateRequest(description),
                 ct);
 
             return new DataSourcesUpdateResponse { Success = true };
@@ -4688,7 +4684,6 @@ public class RpcMethodHandler : IDisposable
         {
             Id = s.Id.ToString(),
             Name = s.Name,
-            DisplayName = s.DisplayName,
             Description = s.Description,
             IsManaged = s.IsManaged,
             CreatedOn = s.CreatedOn?.ToString("o"),
@@ -7375,10 +7370,6 @@ public class DataSourceDto
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
-
-    [JsonPropertyName("displayName")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DisplayName { get; set; }
 
     [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -39,7 +39,6 @@ public sealed class DataProvidersListTool
                 <entity name=""entitydatasource"">
                     <attribute name=""entitydatasourceid"" />
                     <attribute name=""name"" />
-                    <attribute name=""displayname"" />
                     <attribute name=""description"" />
                     <attribute name=""ismanaged"" />
                     <attribute name=""createdon"" />
@@ -77,7 +76,6 @@ public sealed class DataProvidersListTool
         {
             Id = GetGuid(record, "entitydatasourceid"),
             Name = GetString(record, "name") ?? "",
-            DisplayName = GetString(record, "displayname"),
             Description = GetString(record, "description"),
             IsManaged = GetBool(record, "ismanaged"),
             CreatedOn = GetDateTime(record, "createdon"),
@@ -204,13 +202,6 @@ public sealed class DataSourceSummary
     /// </summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
-
-    /// <summary>
-    /// Display name.
-    /// </summary>
-    [JsonPropertyName("displayName")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DisplayName { get; set; }
 
     /// <summary>
     /// Optional description.

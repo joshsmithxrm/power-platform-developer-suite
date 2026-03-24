@@ -160,7 +160,6 @@ export interface DataSourcesListResponse { dataSources: DataSourceDto[] }
 export interface DataSourceDto {
     id: string;
     name: string;
-    displayName?: string;
     description?: string;
     isManaged: boolean;
 }
