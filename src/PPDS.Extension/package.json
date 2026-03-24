@@ -292,6 +292,17 @@
         "icon": "$(file-code)"
       },
       {
+        "command": "ppds.openPlugins",
+        "title": "Open Plugins",
+        "category": "PPDS",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "ppds.openPluginsForEnv",
+        "title": "Open Plugins",
+        "icon": "$(extensions)"
+      },
+      {
         "command": "ppds.copyEnvironmentUrl",
         "title": "Copy URL",
         "icon": "$(copy)"
@@ -445,6 +456,11 @@
           "command": "ppds.openWebResourcesForEnv",
           "when": "view == ppds.profiles && viewItem == environment",
           "group": "env-tools@8"
+        },
+        {
+          "command": "ppds.openPluginsForEnv",
+          "when": "view == ppds.profiles && viewItem == environment",
+          "group": "env-tools@9"
         },
         {
           "command": "ppds.openInMaker",

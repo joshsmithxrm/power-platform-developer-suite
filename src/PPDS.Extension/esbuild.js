@@ -201,6 +201,26 @@ const builds = [
         outfile: 'dist/web-resources-panel.css',
         logLevel: 'warning',
     },
+    // Plugins panel webview (browser, IIFE)
+    {
+        entryPoints: ['src/panels/webview/plugins-panel.ts'],
+        bundle: true,
+        format: 'iife',
+        minify: production,
+        sourcemap: !production,
+        sourcesContent: false,
+        platform: 'browser',
+        outfile: 'dist/plugins-panel.js',
+        logLevel: 'warning',
+    },
+    // Plugins panel CSS
+    {
+        entryPoints: ['src/panels/styles/plugins-panel.css'],
+        bundle: true,
+        minify: production,
+        outfile: 'dist/plugins-panel.css',
+        logLevel: 'warning',
+    },
 ];
 
 async function main() {

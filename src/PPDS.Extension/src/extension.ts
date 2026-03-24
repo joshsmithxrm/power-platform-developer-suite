@@ -26,6 +26,7 @@ import { MetadataBrowserPanel } from './panels/MetadataBrowserPanel.js';
 import { ConnectionReferencesPanel } from './panels/ConnectionReferencesPanel.js';
 import { EnvironmentVariablesPanel } from './panels/EnvironmentVariablesPanel.js';
 import { WebResourcesPanel } from './panels/WebResourcesPanel.js';
+import { PluginsPanel } from './panels/PluginsPanel.js';
 import { migrateLegacyState } from './migration/legacyState.js';
 import { registerDebugCommands } from './commands/debugCommands.js';
 import { DaemonStatusBar } from './daemonStatusBar.js';
@@ -89,6 +90,9 @@ function registerPanelCommands(
         }),
         vscode.commands.registerCommand('ppds.openWebResources', () => {
             WebResourcesPanel.show(context.extensionUri, client, context, undefined, undefined, fsp);
+        }),
+        vscode.commands.registerCommand('ppds.openPlugins', () => {
+            PluginsPanel.show(context.extensionUri, client);
         }),
         vscode.commands.registerCommand('ppds.openQueryInNotebook', (sql?: string) => {
             void openQueryInNotebook(sql ?? '');
@@ -316,6 +320,12 @@ export function activate(context: vscode.ExtensionContext): void {
             WebResourcesPanel.show(context.extensionUri, client, context, item.envUrl, item.envDisplayName, webResourceFsp);
         })),
 
+        // Open Plugins targeting this environment
+        vscode.commands.registerCommand('ppds.openPluginsForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
+            if (!item?.envUrl) return;
+            PluginsPanel.show(context.extensionUri, client, item.envUrl, item.envDisplayName);
+        })),
+
         // Open Metadata Browser targeting this environment
         vscode.commands.registerCommand('ppds.openMetadataBrowserForEnv', cmd((item: { envUrl: string; envDisplayName: string }) => {
             if (!item?.envUrl) return;
@@ -431,6 +441,7 @@ export function activate(context: vscode.ExtensionContext): void {
         connectionReferencesPanels: () => ConnectionReferencesPanel.instanceCount,
         environmentVariablesPanels: () => EnvironmentVariablesPanel.instanceCount,
         webResourcesPanels: () => WebResourcesPanel.instanceCount,
+        pluginsPanels: () => PluginsPanel.instanceCount,
     });
 
     // Register environment selection command for notebooks
