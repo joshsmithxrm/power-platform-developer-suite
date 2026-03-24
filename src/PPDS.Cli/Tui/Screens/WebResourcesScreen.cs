@@ -18,6 +18,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     private CancellationTokenSource? _loadCts;
     private bool _textOnly = true;
     private Guid? _selectedSolutionId;
+    private bool _staleFilterChecked;
 
     public override string Title => "Web Resources";
 
@@ -103,6 +104,26 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
             var service = provider.GetRequiredService<IWebResourceService>();
+
+            // Stale reference check: verify persisted solution still exists (first load only)
+            if (_selectedSolutionId.HasValue && !_staleFilterChecked)
+            {
+                _staleFilterChecked = true;
+                var solutionService = provider.GetRequiredService<ISolutionService>();
+                var solutions = await solutionService.ListAsync(cancellationToken: ct);
+                if (!solutions.Items.Any(s => s.Id == _selectedSolutionId.Value))
+                {
+                    _selectedSolutionId = null;
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
+                            new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
+                        "WebResources.ClearStaleState");
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        _statusLabel.Text = "Previously filtered solution not found \u2014 showing all";
+                    });
+                }
+            }
 
             var wrResult = await service.ListAsync(_selectedSolutionId, _textOnly, cancellationToken: ct);
             _resources = wrResult.Items.ToList();
@@ -315,22 +336,6 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             var solutionsResult = await solutionService.ListAsync(cancellationToken: ScreenCancellation);
             var solutions = solutionsResult.Items;
-
-            // Stale reference check: persisted solution may no longer exist
-            if (_selectedSolutionId.HasValue && !solutions.Any(s => s.Id == _selectedSolutionId.Value))
-            {
-                _selectedSolutionId = null;
-                Application.MainLoop.Invoke(() =>
-                {
-                    _statusLabel.Text = "Previously filtered solution not found \u2014 showing all";
-                });
-                ErrorService.FireAndForget(
-                    Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
-                        new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
-                    "WebResources.ClearStaleState");
-                ErrorService.FireAndForget(LoadDataAsync(), "WebResources.StaleFilterReload");
-                return;
-            }
 
             Application.MainLoop.Invoke(() =>
             {
