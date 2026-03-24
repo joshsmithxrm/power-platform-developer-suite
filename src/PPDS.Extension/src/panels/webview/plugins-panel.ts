@@ -22,6 +22,7 @@ let selectedNodeId: string | null = null;
 let hideHidden = false;
 let hideMicrosoft = false;
 let searchText = '';
+let currentViewMode: 'assembly' | 'message' | 'entity' = 'assembly';
 // Track expanded node IDs across re-renders
 const expandedIds = new Set<string>();
 
@@ -38,6 +39,8 @@ const hideMicrosoftCheck = document.getElementById('hide-microsoft-check') as HT
 const viewModeAssembly = document.getElementById('view-mode-assembly') as HTMLElement;
 const viewModeMessage = document.getElementById('view-mode-message') as HTMLElement;
 const viewModeEntity = document.getElementById('view-mode-entity') as HTMLElement;
+const expandAllBtn = document.getElementById('expand-all-btn') as HTMLElement;
+const collapseAllBtn = document.getElementById('collapse-all-btn') as HTMLElement;
 
 // ── Virtual scrolling constants ───────────────────────────────────────────────
 interface FlatNode {
@@ -99,6 +102,7 @@ if (viewModeEntity) {
 }
 
 function setViewMode(mode: 'assembly' | 'message' | 'entity'): void {
+    currentViewMode = mode;
     [viewModeAssembly, viewModeMessage, viewModeEntity].forEach(btn => {
         if (btn) btn.classList.remove('active');
     });
@@ -107,6 +111,9 @@ function setViewMode(mode: 'assembly' | 'message' | 'entity'): void {
         : viewModeEntity;
     if (activeBtn) activeBtn.classList.add('active');
     vscode.postMessage({ command: 'setViewMode', mode });
+    // Reorganize client-side and re-render (no server round-trip needed)
+    expandedIds.clear();
+    rebuildAndRender();
 }
 
 // ── Filter handlers ──────────────────────────────────────────────────────────
@@ -139,34 +146,223 @@ if (searchInput) {
     });
 }
 
+// ── Expand / Collapse all ─────────────────────────────────────────────────────
+
+function expandAll(): void {
+    if (!treeData) return;
+    // Collect all node IDs in the current view's root set (recursively)
+    const collectIds = (nodes: PluginTreeNode[]): void => {
+        for (const node of nodes) {
+            if (node.hasChildren || (node.children && node.children.length > 0)) {
+                expandedIds.add(node.id);
+                // Request lazy children if not yet loaded
+                if (node.hasChildren && (!node.children || node.children.length === 0)) {
+                    vscode.postMessage({ command: 'expandNode', nodeId: node.id, nodeType: node.nodeType });
+                }
+            }
+            if (node.children && node.children.length > 0) {
+                collectIds(node.children);
+            }
+        }
+    };
+    collectIds(getViewRootNodes());
+    rebuildAndRender();
+}
+
+function collapseAll(): void {
+    expandedIds.clear();
+    rebuildAndRender();
+}
+
+if (expandAllBtn) {
+    expandAllBtn.addEventListener('click', () => expandAll());
+}
+if (collapseAllBtn) {
+    collapseAllBtn.addEventListener('click', () => collapseAll());
+}
+
+// ── View mode reorganization ──────────────────────────────────────────────────
+
+/** Walk all nodes recursively and collect step nodes (nodeType === 'step'). */
+function collectSteps(nodes: PluginTreeNode[]): PluginTreeNode[] {
+    const steps: PluginTreeNode[] = [];
+    for (const node of nodes) {
+        if (node.nodeType === 'step') {
+            steps.push(node);
+        }
+        if (node.children && node.children.length > 0) {
+            for (const s of collectSteps(node.children)) {
+                steps.push(s);
+            }
+        }
+    }
+    return steps;
+}
+
+/** Parse message and entity out of a step node name/badge. Returns { message, entity }. */
+function parseStepLabel(node: PluginTreeNode): { message: string; entity: string } {
+    // badge may carry "Create on account" style info; fall back to name parsing
+    const badge = node.badge ?? '';
+    // Try "MessageName on entity" pattern first
+    const onMatch = badge.match(/^(.+?)\s+on\s+(.+)$/i);
+    if (onMatch) {
+        return { message: onMatch[1].trim(), entity: onMatch[2].trim() };
+    }
+    // Try extracting from node name: "TypeName.MethodName" → use name as message
+    const nameParts = node.name.split('.');
+    return {
+        message: nameParts.length > 1 ? nameParts[nameParts.length - 1] : node.name,
+        entity: 'none',
+    };
+}
+
+/**
+ * Create a synthetic virtual node (not backed by treeData) for grouping.
+ * Uses a prefix to avoid ID collisions with real nodes.
+ */
+function makeGroupNode(id: string, name: string, nodeType: string, children: PluginTreeNode[]): PluginTreeNode {
+    return {
+        id: `__group__${id}`,
+        name,
+        nodeType,
+        hasChildren: children.length > 0,
+        children,
+    };
+}
+
+/**
+ * Reorganize the raw treeData roots for message view or entity view.
+ * Assembly view just returns the raw roots (default order).
+ */
+function reorganizeForView(data: PluginTreeData, mode: 'assembly' | 'message' | 'entity'): PluginTreeNode[] {
+    if (mode === 'assembly') {
+        // Default: packages → assemblies → service endpoints → custom APIs → data sources
+        const roots: PluginTreeNode[] = [];
+        for (const pkg of data.packages) roots.push(pkg);
+        for (const asm of data.assemblies) roots.push(asm);
+        for (const se of data.serviceEndpoints) roots.push(se);
+        for (const ca of data.customApis) roots.push(ca);
+        for (const ds of data.dataSources) roots.push(ds);
+        return roots;
+    }
+
+    // Collect all steps from assembly/package trees
+    const allAssemblyRoots: PluginTreeNode[] = [
+        ...data.packages,
+        ...data.assemblies,
+    ];
+    const steps = collectSteps(allAssemblyRoots);
+
+    if (mode === 'message') {
+        // Group: message → entity → steps
+        const messageMap = new Map<string, Map<string, PluginTreeNode[]>>();
+        for (const step of steps) {
+            const { message, entity } = parseStepLabel(step);
+            if (!messageMap.has(message)) messageMap.set(message, new Map());
+            const entityMap = messageMap.get(message)!;
+            if (!entityMap.has(entity)) entityMap.set(entity, []);
+            entityMap.get(entity)!.push(step);
+        }
+        const roots: PluginTreeNode[] = [];
+        for (const [message, entityMap] of [...messageMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+            const entityNodes: PluginTreeNode[] = [];
+            for (const [entity, stepList] of [...entityMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+                entityNodes.push(makeGroupNode(`msg_${message}_${entity}`, entity, 'entityGroup', stepList));
+            }
+            roots.push(makeGroupNode(`msg_${message}`, message, 'messageGroup', entityNodes));
+        }
+        // Append non-step roots (service endpoints, custom APIs, data sources) at the end
+        for (const se of data.serviceEndpoints) roots.push(se);
+        for (const ca of data.customApis) roots.push(ca);
+        for (const ds of data.dataSources) roots.push(ds);
+        return roots;
+    }
+
+    if (mode === 'entity') {
+        // Group: entity → message → steps
+        const entityMap = new Map<string, Map<string, PluginTreeNode[]>>();
+        for (const step of steps) {
+            const { message, entity } = parseStepLabel(step);
+            if (!entityMap.has(entity)) entityMap.set(entity, new Map());
+            const messageMap = entityMap.get(entity)!;
+            if (!messageMap.has(message)) messageMap.set(message, []);
+            messageMap.get(message)!.push(step);
+        }
+        const roots: PluginTreeNode[] = [];
+        for (const [entity, messageMap] of [...entityMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+            const messageNodes: PluginTreeNode[] = [];
+            for (const [message, stepList] of [...messageMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+                messageNodes.push(makeGroupNode(`ent_${entity}_${message}`, message, 'messageGroup', stepList));
+            }
+            roots.push(makeGroupNode(`ent_${entity}`, entity, 'entityGroup', messageNodes));
+        }
+        // Append non-step roots
+        for (const se of data.serviceEndpoints) roots.push(se);
+        for (const ca of data.customApis) roots.push(ca);
+        for (const ds of data.dataSources) roots.push(ds);
+        return roots;
+    }
+
+    return [];
+}
+
 // ── Tree flattening ───────────────────────────────────────────────────────────
 
-/** Test whether a node matches the current search/filter state. */
+/**
+ * Test whether a node directly matches the current search/filter predicates.
+ * Does NOT consider descendants — use subtreeMatchesFilters for that.
+ */
 function nodeMatchesFilters(node: PluginTreeNode): boolean {
     if (hideHidden && node.isHidden) return false;
-    if (hideMicrosoft && node.name.toLowerCase().startsWith('microsoft.')) return false;
-    if (searchText && !node.name.toLowerCase().includes(searchText)) return false;
+    // hideMicrosoft applies to assembly-level nodes only; group nodes are synthetic
+    if (hideMicrosoft && node.nodeType === 'assembly') {
+        const lc = node.name.toLowerCase();
+        if (lc.startsWith('microsoft.') && lc !== 'microsoft.crm.servicebus') return false;
+    }
     return true;
 }
 
-/** Collect all root nodes from treeData in the current view mode order. */
-function getRootNodes(): PluginTreeNode[] {
-    if (!treeData) return [];
-    const roots: PluginTreeNode[] = [];
-    // Packages, then assemblies, then service endpoints, custom APIs, data sources
-    for (const pkg of treeData.packages) roots.push(pkg);
-    for (const asm of treeData.assemblies) roots.push(asm);
-    for (const se of treeData.serviceEndpoints) roots.push(se);
-    for (const ca of treeData.customApis) roots.push(ca);
-    for (const ds of treeData.dataSources) roots.push(ds);
-    return roots;
+/**
+ * Returns true if this node or any descendant matches search text.
+ * Used to keep ancestor nodes visible when a descendant matches.
+ */
+function subtreeMatchesSearch(node: PluginTreeNode): boolean {
+    if (!searchText) return true;
+    if (node.name.toLowerCase().includes(searchText)) return true;
+    if (node.children) {
+        for (const child of node.children) {
+            if (subtreeMatchesSearch(child)) return true;
+        }
+    }
+    return false;
 }
 
-/** Flatten the tree recursively into FlatNode[], respecting expanded state and filters. */
+/** Collect all root nodes for the current view mode. */
+function getViewRootNodes(): PluginTreeNode[] {
+    if (!treeData) return [];
+    return reorganizeForView(treeData, currentViewMode);
+}
+
+/**
+ * Flatten the tree recursively into FlatNode[], respecting expanded state and filters.
+ * When searchText is active, ancestor nodes of matching descendants are kept visible
+ * and their branches are auto-expanded.
+ */
 function flattenTree(nodes: PluginTreeNode[], depth: number): FlatNode[] {
     const result: FlatNode[] = [];
     for (const node of nodes) {
         if (!nodeMatchesFilters(node)) continue;
+        // When searching, skip nodes whose entire subtree has no match
+        if (searchText && !subtreeMatchesSearch(node)) continue;
+        // Auto-expand this node if it contains a search match in a descendant
+        // (but the node itself doesn't match — we want to show the matching leaf)
+        const hasDescendantMatch = searchText
+            && !node.name.toLowerCase().includes(searchText)
+            && node.children
+            && node.children.some(c => subtreeMatchesSearch(c));
+        if (hasDescendantMatch) {
+            expandedIds.add(node.id);
+        }
         const expanded = expandedIds.has(node.id);
         result.push({ node, depth, expanded });
         if (expanded && node.children && node.children.length > 0) {
@@ -184,7 +380,7 @@ function rebuildFlatNodes(): void {
         flatNodes = [];
         return;
     }
-    flatNodes = flattenTree(getRootNodes(), 0);
+    flatNodes = flattenTree(getViewRootNodes(), 0);
 }
 
 function rebuildAndRender(): void {
@@ -270,17 +466,19 @@ function renderTree(): void {
 
 function getNodeIcon(nodeType: string): string {
     switch (nodeType) {
-        case 'package': return '\uD83D\uDCE6';         // 📦
-        case 'assembly': return '\u2699\uFE0F';         // ⚙️
-        case 'type': return '\uD83D\uDD0C';             // 🔌
-        case 'step': return '\u26A1';                   // ⚡
-        case 'image': return '\uD83D\uDDBC\uFE0F';     // 🖼️
-        case 'webhook': return '\uD83C\uDF10';          // 🌐
-        case 'serviceEndpoint': return '\uD83D\uDCE1';  // 📡
-        case 'customApi': return '\uD83D\uDCE8';        // 📨
-        case 'dataSource': return '\uD83D\uDDC3\uFE0F'; // 🗃️
-        case 'dataProvider': return '\uD83D\uDDC4\uFE0F'; // 🗄️
-        default: return '\uD83D\uDCC4';                 // 📄
+        case 'package': return '\uD83D\uDCE6';             // 📦
+        case 'assembly': return '\u2699\uFE0F';             // ⚙️
+        case 'type': return '\uD83D\uDD0C';                 // 🔌
+        case 'step': return '\u26A1';                       // ⚡
+        case 'image': return '\uD83D\uDDBC\uFE0F';         // 🖼️
+        case 'webhook': return '\uD83C\uDF10';              // 🌐
+        case 'serviceEndpoint': return '\uD83D\uDCE1';      // 📡
+        case 'customApi': return '\uD83D\uDCE8';            // 📨
+        case 'dataSource': return '\uD83D\uDDC3\uFE0F';    // 🗃️
+        case 'dataProvider': return '\uD83D\uDDC4\uFE0F';  // 🗄️
+        case 'messageGroup': return '\uD83D\uDCEC';         // 📬 (message group)
+        case 'entityGroup': return '\uD83D\uDDC2\uFE0F';   // 🗂️ (entity group)
+        default: return '\uD83D\uDCC4';                     // 📄
     }
 }
 
@@ -518,28 +716,48 @@ function handleNodeRemoved(nodeId: string): void {
     rebuildAndRender();
 }
 
-function handleDetailLoaded(detail: Record<string, unknown>): void {
-    if (!detailPanel) return;
-    detailPanel.innerHTML = '';
-    detailPanel.classList.add('visible');
+/**
+ * Convert a camelCase or PascalCase key to "Title Case With Spaces".
+ * e.g. "executionOrder" → "Execution Order", "isEnabled" → "Is Enabled"
+ */
+function formatKey(key: string): string {
+    // Insert space before each uppercase letter that follows a lowercase letter or digit
+    return key
+        .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/^./, (c) => c.toUpperCase());
+}
 
-    // Render key-value pairs from the detail record
-    const table = document.createElement('div');
-    table.className = 'detail-kv';
+function renderDetail(detail: Record<string, unknown>): void {
+    if (!detailPanel) return;
+    detailPanel.innerHTML = ''; // Safe: we control all content via createElement
+
+    const table = document.createElement('table');
+    table.className = 'detail-table';
 
     for (const [key, value] of Object.entries(detail)) {
-        const label = document.createElement('span');
-        label.className = 'detail-kv-label';
-        label.textContent = key;
-        table.appendChild(label);
+        const row = document.createElement('tr');
 
-        const val = document.createElement('span');
-        val.className = 'detail-kv-value';
-        val.textContent = value === null || value === undefined ? '\u2014' : String(value);
-        table.appendChild(val);
+        const keyCell = document.createElement('td');
+        keyCell.className = 'detail-key';
+        keyCell.textContent = formatKey(key);
+
+        const valueCell = document.createElement('td');
+        valueCell.className = 'detail-value';
+        valueCell.textContent = String(value ?? '');
+
+        row.appendChild(keyCell);
+        row.appendChild(valueCell);
+        table.appendChild(row);
     }
 
     detailPanel.appendChild(table);
+}
+
+function handleDetailLoaded(detail: Record<string, unknown>): void {
+    if (!detailPanel) return;
+    detailPanel.classList.add('visible');
+    renderDetail(detail);
 }
 
 function clearDetailPanel(): void {
