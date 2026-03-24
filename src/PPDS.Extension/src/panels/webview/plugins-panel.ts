@@ -1925,6 +1925,17 @@ function clearDetailPanel(): void {
     }
 }
 
+
+function showDetailError(message: string): void {
+    if (!detailPanel) return;
+    detailPanel.innerHTML = ''; // Safe: we control all content via createElement
+    detailPanel.classList.add('visible');
+    const state = document.createElement('div');
+    state.className = 'error-state';
+    state.textContent = message;
+    detailPanel.appendChild(state);
+}
+
 // ── Message router ────────────────────────────────────────────────────────────
 
 window.addEventListener('message', (event: MessageEvent<PluginsPanelHostToWebview>) => {
@@ -1947,6 +1958,9 @@ window.addEventListener('message', (event: MessageEvent<PluginsPanelHostToWebvie
             break;
         case 'detailLoaded':
             handleDetailLoaded(msg.detail);
+            break;
+        case 'detailError':
+            showDetailError(msg.message);
             break;
         case 'loading':
             showLoading();

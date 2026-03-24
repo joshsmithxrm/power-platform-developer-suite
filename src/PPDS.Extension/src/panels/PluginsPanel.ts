@@ -156,17 +156,17 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Build assemblies tree nodes
             const assemblies: PluginTreeNode[] = pluginsResult.assemblies.map(asm => ({
-                id: `assembly:${asm.name}`,
+                id: asm.id ?? `assembly:${asm.name}`,
                 name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
                 nodeType: 'assembly',
                 hasChildren: asm.types.length > 0,
                 children: asm.types.map(t => ({
-                    id: `type:${t.typeName}`,
+                    id: t.id ?? `type:${t.typeName}`,
                     name: t.typeName,
                     nodeType: 'type',
                     hasChildren: t.steps.length > 0,
                     children: t.steps.map(s => ({
-                        id: `step:${s.name}`,
+                        id: s.id ?? `step:${s.name}`,
                         name: s.name,
                         nodeType: 'step',
                         isEnabled: s.isEnabled,
@@ -177,17 +177,17 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Build packages tree nodes
             const mapAssemblyNode = (asm: PluginAssemblyInfoDto): PluginTreeNode => ({
-                id: `assembly:${asm.name}`,
+                id: asm.id ?? `assembly:${asm.name}`,
                 name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
                 nodeType: 'assembly',
                 hasChildren: asm.types.length > 0,
                 children: asm.types.map(t => ({
-                    id: `type:${t.typeName}`,
+                    id: t.id ?? `type:${t.typeName}`,
                     name: t.typeName,
                     nodeType: 'type',
                     hasChildren: t.steps.length > 0,
                     children: t.steps.map(s => ({
-                        id: `step:${s.name}`,
+                        id: s.id ?? `step:${s.name}`,
                         name: s.name,
                         nodeType: 'step',
                         isEnabled: s.isEnabled,
@@ -197,7 +197,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             });
 
             const packages: PluginTreeNode[] = pluginsResult.packages.map(pkg => ({
-                id: `package:${pkg.name}`,
+                id: pkg.id ?? `package:${pkg.name}`,
                 name: `${pkg.name}${pkg.version ? ` (${pkg.version})` : ''}`,
                 nodeType: 'package',
                 hasChildren: pkg.assemblies.length > 0,
@@ -318,7 +318,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             this.postMessage({ command: 'detailLoaded', detail: result.entity });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            this.postMessage({ command: 'error', message: `Failed to load detail: ${msg}` });
+            this.postMessage({ command: 'detailError', message: `Failed to load detail: ${msg}` });
         }
     }
 

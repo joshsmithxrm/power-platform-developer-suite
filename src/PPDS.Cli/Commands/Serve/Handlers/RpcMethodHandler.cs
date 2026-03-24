@@ -681,6 +681,7 @@ public class RpcMethodHandler : IDisposable
                 {
                     var assemblyOutput = new PluginAssemblyInfo
                     {
+                        Id = asm.Id.ToString(),
                         Name = asm.Name,
                         Version = asm.Version,
                         PublicKeyToken = asm.PublicKeyToken,
@@ -703,6 +704,7 @@ public class RpcMethodHandler : IDisposable
                 {
                     var packageOutput = new PluginPackageInfo
                     {
+                        Id = pkg.Id.ToString(),
                         Name = pkg.Name,
                         UniqueName = pkg.UniqueName,
                         Version = pkg.Version,
@@ -714,6 +716,7 @@ public class RpcMethodHandler : IDisposable
                     {
                         var assemblyOutput = new PluginAssemblyInfo
                         {
+                            Id = asm.Id.ToString(),
                             Name = asm.Name,
                             Version = asm.Version,
                             PublicKeyToken = asm.PublicKeyToken,
@@ -769,9 +772,11 @@ public class RpcMethodHandler : IDisposable
 
             var typeOutput = new PluginTypeInfoDto
             {
+                Id = type.Id.ToString(),
                 TypeName = type.TypeName,
                 Steps = stepsForType.Select(step => new PluginStepInfo
                 {
+                    Id = step.Id.ToString(),
                     Name = step.Name,
                     Message = step.Message,
                     Entity = step.PrimaryEntity,
@@ -787,6 +792,7 @@ public class RpcMethodHandler : IDisposable
                     Images = imagesByStepId.TryGetValue(step.Id, out var images)
                         ? images.Select(img => new PluginImageInfo
                         {
+                            Id = img.Id.ToString(),
                             Name = img.Name,
                             EntityAlias = img.EntityAlias ?? img.Name,
                             ImageType = img.ImageType,
@@ -5037,6 +5043,10 @@ public class PluginsListResponse
 /// </summary>
 public class PluginPackageInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -5057,6 +5067,10 @@ public class PluginPackageInfo
 /// </summary>
 public class PluginAssemblyInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -5077,6 +5091,10 @@ public class PluginAssemblyInfo
 /// </summary>
 public class PluginTypeInfoDto
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("typeName")]
     public string TypeName { get; set; } = "";
 
@@ -5089,6 +5107,10 @@ public class PluginTypeInfoDto
 /// </summary>
 public class PluginStepInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -5137,6 +5159,10 @@ public class PluginStepInfo
 /// </summary>
 public class PluginImageInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 

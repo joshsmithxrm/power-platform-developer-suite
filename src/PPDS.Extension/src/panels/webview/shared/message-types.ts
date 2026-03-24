@@ -484,6 +484,7 @@ export type PluginsPanelHostToWebview =
     | { command: 'showUpdateForm'; formType: 'step' | 'image' | 'assembly' | 'package' | 'webhook' | 'serviceendpoint' | 'customapi' | 'dataprovider'; id: string; data: Record<string, unknown>; contract?: string }
     | { command: 'loading' }
     | { command: 'error'; message: string }
+    | { command: 'detailError'; message: string }
     | { command: 'daemonReconnected' };
 
 /** Tree data sent on initial load. */

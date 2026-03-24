@@ -72,10 +72,10 @@ export interface PluginsListResponse {
     customApis: CustomApiDto[];
     dataSources: DataSourceDto[];
 }
-export interface PluginPackageInfoDto { name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
-export interface PluginAssemblyInfoDto { name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
-export interface PluginTypeInfoDto { typeName: string; steps: PluginStepInfoDto[] }
-export interface PluginStepInfoDto { name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
+export interface PluginPackageInfoDto { id?: string; name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
+export interface PluginAssemblyInfoDto { id?: string; name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
+export interface PluginTypeInfoDto { id?: string; typeName: string; steps: PluginStepInfoDto[] }
+export interface PluginStepInfoDto { id?: string; name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
 export interface PluginsGetResponse { entity: Record<string, unknown> }
 export interface PluginsMessagesResponse { messages: string[] }
 export interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
