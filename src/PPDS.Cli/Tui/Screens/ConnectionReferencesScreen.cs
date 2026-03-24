@@ -17,6 +17,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
     private List<ConnectionReferenceInfo> _references = [];
     private List<ConnectionInfo> _connections = [];
     private string? _solutionFilter;
+    private bool _staleFilterChecked;
     private Dialog? _detailDialog;
     private bool _isShowingDetail;
 
@@ -84,9 +85,10 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
 
-            // Stale filter check: verify persisted solution still exists
-            if (_solutionFilter != null)
+            // Stale filter check: verify persisted solution still exists (first load only)
+            if (_solutionFilter != null && !_staleFilterChecked)
             {
+                _staleFilterChecked = true;
                 var solutionService = provider.GetRequiredService<ISolutionService>();
                 var solutions = await solutionService.ListAsync(
                     includeManaged: false,

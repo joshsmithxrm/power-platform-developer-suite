@@ -208,7 +208,7 @@ internal sealed class TuiStateStore : IDisposable
             _cached = JsonSerializer.Deserialize<TuiStateCollection>(json, JsonOptions);
             return _cached;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -232,7 +232,7 @@ internal sealed class TuiStateStore : IDisposable
             _cached = JsonSerializer.Deserialize<TuiStateCollection>(json, JsonOptions);
             return _cached;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -244,7 +244,9 @@ internal sealed class TuiStateStore : IDisposable
     /// </summary>
     private async Task PersistAsync(TuiStateCollection collection, CancellationToken ct)
     {
-        ProfilePaths.EnsureDirectoryExists();
+        var dir = Path.GetDirectoryName(_filePath);
+        if (dir != null && !Directory.Exists(dir))
+            Directory.CreateDirectory(dir);
         collection.Version = 1;
 
         var json = JsonSerializer.Serialize(collection, JsonOptions);

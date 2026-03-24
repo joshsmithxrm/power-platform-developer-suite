@@ -48,9 +48,21 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
         Content.Add(_table, _statusLabel);
 
+        // Restore persisted filter state before initial load
         if (EnvironmentUrl != null)
         {
-            ErrorService.FireAndForget(LoadDataAsync(restoreState: true), "WebResources.InitialLoad");
+            var savedState = Session.GetTuiStateStore()
+                .LoadScreenState<WebResourcesScreenState>("WebResources", EnvironmentUrl);
+            if (savedState != null)
+            {
+                _selectedSolutionId = savedState.SelectedSolutionId;
+                _textOnly = savedState.TextOnly;
+            }
+        }
+
+        if (EnvironmentUrl != null)
+        {
+            ErrorService.FireAndForget(LoadDataAsync(), "WebResources.InitialLoad");
         }
         else
         {
@@ -69,24 +81,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
             ErrorService.FireAndForget(PublishAllAsync(), "WebResources.PublishAll"));
     }
 
-    private async Task LoadDataAsync(bool restoreState = false)
+    private async Task LoadDataAsync()
     {
         if (EnvironmentUrl == null)
         {
             _statusLabel.Text = "No environment selected. Use the status bar to connect.";
             return;
-        }
-
-        // Restore persisted filter state before first load
-        if (restoreState)
-        {
-            var savedState = await Session.GetTuiStateStore()
-                .LoadScreenStateAsync<WebResourcesScreenState>("WebResources", EnvironmentUrl);
-            if (savedState != null)
-            {
-                _selectedSolutionId = savedState.SelectedSolutionId;
-                _textOnly = savedState.TextOnly;
-            }
         }
 
         // Cancel any previous load
@@ -329,6 +329,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                         new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
                     "WebResources.ClearStaleState");
                 ErrorService.FireAndForget(LoadDataAsync(), "WebResources.StaleFilterReload");
+                return;
             }
 
             Application.MainLoop.Invoke(() =>

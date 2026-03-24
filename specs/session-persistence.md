@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Last Updated:** 2026-03-23
-**Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/), [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
+**Code:** [src/PPDS.Cli/Services/Settings/](../src/PPDS.Cli/Services/Settings/), [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/), [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** TUI | Extension
 
 ---

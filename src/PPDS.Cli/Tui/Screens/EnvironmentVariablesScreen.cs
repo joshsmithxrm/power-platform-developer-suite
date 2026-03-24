@@ -16,6 +16,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
     private readonly Label _statusLabel;
     private List<EnvironmentVariableInfo> _variables = [];
     private string? _solutionFilter;
+    private bool _staleFilterChecked;
     private Dialog? _detailDialog;
     private bool _isShowingDetail;
 
@@ -85,16 +86,18 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
 
-            // Validate persisted solution filter still exists
-            if (_solutionFilter != null)
+            // Validate persisted solution filter still exists (first load only)
+            if (_solutionFilter != null && !_staleFilterChecked)
             {
+                _staleFilterChecked = true;
                 var solutionService = provider.GetRequiredService<ISolutionService>();
                 var solutionsResult = await solutionService.ListAsync(
                     includeManaged: false,
                     cancellationToken: ScreenCancellation);
 
-                var solutionNames = solutionsResult.Items.Select(s => s.UniqueName).ToList();
-                if (!solutionNames.Contains(_solutionFilter))
+                var exists = solutionsResult.Items.Any(s =>
+                    string.Equals(s.UniqueName, _solutionFilter, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
                 {
                     var staleName = _solutionFilter;
                     _solutionFilter = null;
