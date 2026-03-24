@@ -4077,6 +4077,301 @@ public class RpcMethodHandler : IDisposable
         };
 
     #endregion
+
+    #region Custom APIs
+
+    // ── Custom APIs ──
+
+    /// <summary>
+    /// Lists all Custom APIs with parameters in the environment.
+    /// Maps to: ppds custom-apis list --json
+    /// </summary>
+    [JsonRpcMethod("customApis/list")]
+    public async Task<CustomApisListResponse> CustomApisListAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var apis = await service.ListAsync(ct);
+
+            return new CustomApisListResponse
+            {
+                Apis = apis.Select(MapCustomApiToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single Custom API by unique name or ID.
+    /// Maps to: ppds custom-apis get --json
+    /// </summary>
+    [JsonRpcMethod("customApis/get")]
+    public async Task<CustomApisGetResponse> CustomApisGetAsync(
+        string uniqueNameOrId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueNameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueNameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var api = await service.GetAsync(uniqueNameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Custom API '{uniqueNameOrId}' not found");
+
+            return new CustomApisGetResponse
+            {
+                Api = MapCustomApiToDto(api)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a new Custom API, optionally with request/response parameters.
+    /// Maps to: ppds custom-apis register --json
+    /// </summary>
+    [JsonRpcMethod("customApis/register")]
+    public async Task<CustomApisRegisterResponse> CustomApisRegisterAsync(
+        string uniqueName,
+        string displayName,
+        string pluginTypeId,
+        string? name = null,
+        string? description = null,
+        string? bindingType = null,
+        string? boundEntity = null,
+        bool isFunction = false,
+        bool isPrivate = false,
+        string? executePrivilegeName = null,
+        string? allowedProcessingStepType = null,
+        List<CustomApiParameterDto>? parameters = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueName' parameter is required");
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
+        if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var pluginTypeGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+
+            var paramRegistrations = parameters?
+                .Select(p => new CustomApiParameterRegistration(
+                    p.UniqueName ?? "",
+                    p.DisplayName ?? "",
+                    p.Name,
+                    p.Description,
+                    p.Type ?? "",
+                    p.LogicalEntityName,
+                    p.IsOptional,
+                    p.Direction ?? "Request"))
+                .ToList();
+
+            var newId = await service.RegisterAsync(
+                new CustomApiRegistration(
+                    uniqueName,
+                    displayName,
+                    name,
+                    description,
+                    pluginTypeGuid,
+                    bindingType,
+                    boundEntity,
+                    isFunction,
+                    isPrivate,
+                    executePrivilegeName,
+                    allowedProcessingStepType,
+                    paramRegistrations),
+                cancellationToken: ct);
+
+            return new CustomApisRegisterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates mutable properties of an existing Custom API.
+    /// Maps to: ppds custom-apis update --json
+    /// </summary>
+    [JsonRpcMethod("customApis/update")]
+    public async Task<CustomApisUpdateResponse> CustomApisUpdateAsync(
+        string id,
+        string? displayName = null,
+        string? description = null,
+        string? pluginTypeId = null,
+        bool? isFunction = null,
+        bool? isPrivate = null,
+        string? executePrivilegeName = null,
+        string? allowedProcessingStepType = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        Guid? pluginTypeGuid = null;
+        if (!string.IsNullOrWhiteSpace(pluginTypeId))
+        {
+            if (!Guid.TryParse(pluginTypeId, out var ptg))
+                throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+            pluginTypeGuid = ptg;
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UpdateAsync(
+                apiId,
+                new CustomApiUpdateRequest(
+                    displayName,
+                    description,
+                    pluginTypeGuid,
+                    isFunction,
+                    isPrivate,
+                    executePrivilegeName,
+                    allowedProcessingStepType),
+                ct);
+
+            return new CustomApisUpdateResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Unregisters a Custom API and optionally cascade-deletes its parameters.
+    /// Maps to: ppds custom-apis unregister --json
+    /// </summary>
+    [JsonRpcMethod("customApis/unregister")]
+    public async Task<CustomApisUnregisterResponse> CustomApisUnregisterAsync(
+        string id,
+        bool force = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UnregisterAsync(apiId, force, cancellationToken: ct);
+
+            return new CustomApisUnregisterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a request parameter or response property to an existing Custom API.
+    /// Maps to: ppds custom-apis add-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/addParameter")]
+    public async Task<CustomApisAddParameterResponse> CustomApisAddParameterAsync(
+        string apiId,
+        string uniqueName,
+        string displayName,
+        string type,
+        string direction,
+        string? name = null,
+        string? description = null,
+        string? logicalEntityName = null,
+        bool isOptional = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiId) || !Guid.TryParse(apiId, out var apiGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'apiId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueName' parameter is required");
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
+        if (string.IsNullOrWhiteSpace(type))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'type' parameter is required");
+        if (string.IsNullOrWhiteSpace(direction))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'direction' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var newId = await service.AddParameterAsync(
+                apiGuid,
+                new CustomApiParameterRegistration(
+                    uniqueName,
+                    displayName,
+                    name,
+                    description,
+                    type,
+                    logicalEntityName,
+                    isOptional,
+                    direction),
+                ct);
+
+            return new CustomApisAddParameterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes a request parameter or response property by ID.
+    /// Maps to: ppds custom-apis remove-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/removeParameter")]
+    public async Task<CustomApisRemoveParameterResponse> CustomApisRemoveParameterAsync(
+        string parameterId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'parameterId' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.RemoveParameterAsync(paramGuid, ct);
+
+            return new CustomApisRemoveParameterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    private static CustomApiDto MapCustomApiToDto(CustomApiInfo api) =>
+        new()
+        {
+            Id = api.Id.ToString(),
+            UniqueName = api.UniqueName,
+            DisplayName = api.DisplayName,
+            Name = api.Name,
+            Description = api.Description,
+            PluginTypeId = api.PluginTypeId?.ToString(),
+            PluginTypeName = api.PluginTypeName,
+            BindingType = api.BindingType,
+            BoundEntity = api.BoundEntity,
+            AllowedProcessingStepType = api.AllowedProcessingStepType,
+            IsFunction = api.IsFunction,
+            IsPrivate = api.IsPrivate,
+            ExecutePrivilegeName = api.ExecutePrivilegeName,
+            IsManaged = api.IsManaged,
+            CreatedOn = api.CreatedOn?.ToString("o"),
+            ModifiedOn = api.ModifiedOn?.ToString("o"),
+            RequestParameters = api.RequestParameters.Select(MapCustomApiParameterToDto).ToList(),
+            ResponseProperties = api.ResponseProperties.Select(MapCustomApiParameterToDto).ToList()
+        };
+
+    private static CustomApiParameterDto MapCustomApiParameterToDto(CustomApiParameterInfo p) =>
+        new()
+        {
+            Id = p.Id.ToString(),
+            UniqueName = p.UniqueName,
+            DisplayName = p.DisplayName,
+            Name = p.Name,
+            Description = p.Description,
+            Type = p.Type,
+            LogicalEntityName = p.LogicalEntityName,
+            IsOptional = p.IsOptional,
+            IsManaged = p.IsManaged
+        };
+
+    #endregion
 }
 
 #region Response DTOs
@@ -6499,6 +6794,152 @@ public class ServiceEndpointsUpdateResponse
 }
 
 public class ServiceEndpointsUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+// ── Custom APIs DTOs ─────────────────────────────────────────────────────────
+
+public class CustomApisListResponse
+{
+    [JsonPropertyName("apis")]
+    public List<CustomApiDto> Apis { get; set; } = [];
+}
+
+public class CustomApisGetResponse
+{
+    [JsonPropertyName("api")]
+    public CustomApiDto? Api { get; set; }
+}
+
+public class CustomApiDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("pluginTypeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeId { get; set; }
+
+    [JsonPropertyName("pluginTypeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeName { get; set; }
+
+    [JsonPropertyName("bindingType")]
+    public string BindingType { get; set; } = "Global";
+
+    [JsonPropertyName("boundEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundEntity { get; set; }
+
+    [JsonPropertyName("allowedProcessingStepType")]
+    public string AllowedProcessingStepType { get; set; } = "None";
+
+    [JsonPropertyName("isFunction")]
+    public bool IsFunction { get; set; }
+
+    [JsonPropertyName("isPrivate")]
+    public bool IsPrivate { get; set; }
+
+    [JsonPropertyName("executePrivilegeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutePrivilegeName { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+
+    [JsonPropertyName("requestParameters")]
+    public List<CustomApiParameterDto> RequestParameters { get; set; } = [];
+
+    [JsonPropertyName("responseProperties")]
+    public List<CustomApiParameterDto> ResponseProperties { get; set; } = [];
+}
+
+public class CustomApiParameterDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("logicalEntityName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogicalEntityName { get; set; }
+
+    [JsonPropertyName("isOptional")]
+    public bool IsOptional { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("direction")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Direction { get; set; }
+}
+
+public class CustomApisRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class CustomApisUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisAddParameterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class CustomApisRemoveParameterResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }
