@@ -20,15 +20,9 @@ public static class RegisterCommand
             Description = "Logical name in the format {prefix}_{name}"
         };
 
-        var descriptionOption = new Option<string?>("--description")
-        {
-            Description = "Optional description"
-        };
-
         var command = new Command("register", "Register a new data source entity in Dataverse")
         {
             nameArgument,
-            descriptionOption,
             DataSourcesCommandGroup.ProfileOption,
             DataSourcesCommandGroup.EnvironmentOption
         };
@@ -38,12 +32,11 @@ public static class RegisterCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var name = parseResult.GetValue(nameArgument)!;
-            var description = parseResult.GetValue(descriptionOption);
             var profile = parseResult.GetValue(DataSourcesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataSourcesCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(name, description, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(name, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -51,7 +44,6 @@ public static class RegisterCommand
 
     private static async Task<int> ExecuteAsync(
         string name,
-        string? description,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -79,9 +71,7 @@ public static class RegisterCommand
                 Console.Error.WriteLine($"Registering data source: {name}");
             }
 
-            var registration = new DataSourceRegistration(
-                Name: name,
-                Description: description);
+            var registration = new DataSourceRegistration(Name: name);
 
             var dataSourceId = await dataProviderService.RegisterDataSourceAsync(registration, cancellationToken);
 

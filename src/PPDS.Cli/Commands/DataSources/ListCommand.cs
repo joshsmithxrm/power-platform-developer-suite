@@ -84,11 +84,7 @@ public static class ListCommand
                     DataSources = dataSources.Select(ds => new DataSourceOutput
                     {
                         Id = ds.Id,
-                        Name = ds.Name,
-                        Description = ds.Description,
-                        IsManaged = ds.IsManaged,
-                        CreatedOn = ds.CreatedOn,
-                        ModifiedOn = ds.ModifiedOn
+                        Name = ds.Name
                     }).ToList()
                 };
                 writer.WriteSuccess(output);
@@ -97,10 +93,7 @@ public static class ListCommand
             {
                 foreach (var ds in dataSources)
                 {
-                    var managed = ds.IsManaged ? " [managed]" : "";
-                    Console.Error.WriteLine($"Data Source: {ds.Name}{managed}");
-                    if (!string.IsNullOrEmpty(ds.Description))
-                        Console.Error.WriteLine($"  Description: {ds.Description}");
+                    Console.Error.WriteLine($"Data Source: {ds.Name}");
                 }
 
                 Console.Error.WriteLine();
@@ -132,21 +125,6 @@ public static class ListCommand
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("description")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Description { get; set; }
-
-        [JsonPropertyName("isManaged")]
-        public bool IsManaged { get; set; }
-
-        [JsonPropertyName("createdOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? CreatedOn { get; set; }
-
-        [JsonPropertyName("modifiedOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? ModifiedOn { get; set; }
     }
 
     #endregion

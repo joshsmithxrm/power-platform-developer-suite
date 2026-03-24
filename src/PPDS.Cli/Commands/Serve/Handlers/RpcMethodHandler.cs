@@ -4612,7 +4612,6 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("dataSources/register")]
     public async Task<DataSourcesRegisterResponse> DataSourcesRegisterAsync(
         string name,
-        string? description = null,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
@@ -4623,7 +4622,7 @@ public class RpcMethodHandler : IDisposable
         {
             var service = sp.GetRequiredService<IDataProviderService>();
             var newId = await service.RegisterDataSourceAsync(
-                new DataSourceRegistration(name, description),
+                new DataSourceRegistration(name),
                 ct);
 
             return new DataSourcesRegisterResponse { Id = newId.ToString() };
@@ -4631,29 +4630,18 @@ public class RpcMethodHandler : IDisposable
     }
 
     /// <summary>
-    /// Updates mutable properties of an existing data source.
-    /// Maps to: ppds data-sources update --json
+    /// No-op stub: entitydatasource has no mutable attributes.
+    /// The logical name is assigned at creation time and cannot be changed.
     /// </summary>
     [JsonRpcMethod("dataSources/update")]
-    public async Task<DataSourcesUpdateResponse> DataSourcesUpdateAsync(
+    public Task<DataSourcesUpdateResponse> DataSourcesUpdateAsync(
         string id,
-        string? description = null,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var sourceId))
-            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
-
-        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
-        {
-            var service = sp.GetRequiredService<IDataProviderService>();
-            await service.UpdateDataSourceAsync(
-                sourceId,
-                new DataSourceUpdateRequest(description),
-                ct);
-
-            return new DataSourcesUpdateResponse { Success = true };
-        }, cancellationToken);
+        throw new RpcException(
+            ErrorCodes.Validation.InvalidArguments,
+            "Data sources have no mutable attributes. To rename, unregister and re-register.");
     }
 
     /// <summary>
@@ -4683,11 +4671,7 @@ public class RpcMethodHandler : IDisposable
         new()
         {
             Id = s.Id.ToString(),
-            Name = s.Name,
-            Description = s.Description,
-            IsManaged = s.IsManaged,
-            CreatedOn = s.CreatedOn?.ToString("o"),
-            ModifiedOn = s.ModifiedOn?.ToString("o")
+            Name = s.Name
         };
 
     #endregion
@@ -7370,21 +7354,6 @@ public class DataSourceDto
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
-
-    [JsonPropertyName("description")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Description { get; set; }
-
-    [JsonPropertyName("isManaged")]
-    public bool IsManaged { get; set; }
-
-    [JsonPropertyName("createdOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? CreatedOn { get; set; }
-
-    [JsonPropertyName("modifiedOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ModifiedOn { get; set; }
 }
 
 public class DataSourcesRegisterResponse

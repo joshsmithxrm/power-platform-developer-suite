@@ -39,10 +39,6 @@ public sealed class DataProvidersListTool
                 <entity name=""entitydatasource"">
                     <attribute name=""entitydatasourceid"" />
                     <attribute name=""name"" />
-                    <attribute name=""description"" />
-                    <attribute name=""ismanaged"" />
-                    <attribute name=""createdon"" />
-                    <attribute name=""modifiedon"" />
                     <order attribute=""name"" />
                 </entity>
             </fetch>";
@@ -75,11 +71,7 @@ public sealed class DataProvidersListTool
         var dataSources = dataSourceResult.Records.Select(record => new DataSourceSummary
         {
             Id = GetGuid(record, "entitydatasourceid"),
-            Name = GetString(record, "name") ?? "",
-            Description = GetString(record, "description"),
-            IsManaged = GetBool(record, "ismanaged"),
-            CreatedOn = GetDateTime(record, "createdon"),
-            ModifiedOn = GetDateTime(record, "modifiedon")
+            Name = GetString(record, "name") ?? ""
         }).ToList();
 
         var dataProviders = dataProviderResult.Records.Select(record => new DataProviderSummary
@@ -188,6 +180,7 @@ public sealed class DataProvidersListResult
 
 /// <summary>
 /// Summary information about a virtual entity data source.
+/// Note: entitydatasource is a metadata entity with limited queryable attributes (only name).
 /// </summary>
 public sealed class DataSourceSummary
 {
@@ -202,33 +195,6 @@ public sealed class DataSourceSummary
     /// </summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
-
-    /// <summary>
-    /// Optional description.
-    /// </summary>
-    [JsonPropertyName("description")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Description { get; set; }
-
-    /// <summary>
-    /// True when part of a managed solution.
-    /// </summary>
-    [JsonPropertyName("isManaged")]
-    public bool IsManaged { get; set; }
-
-    /// <summary>
-    /// UTC creation timestamp.
-    /// </summary>
-    [JsonPropertyName("createdOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public DateTime? CreatedOn { get; set; }
-
-    /// <summary>
-    /// UTC last-modified timestamp.
-    /// </summary>
-    [JsonPropertyName("modifiedOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public DateTime? ModifiedOn { get; set; }
 }
 
 /// <summary>

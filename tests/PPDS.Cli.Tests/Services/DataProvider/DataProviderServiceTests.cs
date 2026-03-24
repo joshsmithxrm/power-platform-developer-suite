@@ -103,14 +103,10 @@ public class DataProviderServiceTests
 
     #region Helper builders
 
-    private static Entity BuildDataSourceEntity(Guid id, string name, bool isManaged = false)
+    private static Entity BuildDataSourceEntity(Guid id, string name)
     {
         var e = new Entity("entitydatasource") { Id = id };
         e["name"] = name;
-        e["description"] = (string?)null;
-        e["ismanaged"] = isManaged;
-        e["createdon"] = (DateTime?)null;
-        e["modifiedon"] = (DateTime?)null;
         return e;
     }
 
@@ -163,20 +159,6 @@ public class DataProviderServiceTests
         Assert.Single(result);
         Assert.Equal(id, result[0].Id);
         Assert.Equal("cr123_contacts", result[0].Name);
-        Assert.False(result[0].IsManaged);
-    }
-
-    [Fact]
-    public async Task ListDataSourcesAsync_MapsIsManaged_WhenTrue()
-    {
-        var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_managed", isManaged: true);
-        _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
-
-        var result = await _sut.ListDataSourcesAsync();
-
-        Assert.Single(result);
-        Assert.True(result[0].IsManaged);
     }
 
     #endregion
@@ -225,7 +207,7 @@ public class DataProviderServiceTests
     [Fact]
     public async Task RegisterDataSourceAsync_ThrowsValidation_WhenNameIsEmpty()
     {
-        var reg = new DataSourceRegistration(Name: "", Description: null);
+        var reg = new DataSourceRegistration(Name: "");
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => _sut.RegisterDataSourceAsync(reg));
         Assert.Equal(ErrorCodes.DataProvider.ValidationFailed, ex.ErrorCode);
@@ -237,9 +219,7 @@ public class DataProviderServiceTests
         var expectedId = Guid.NewGuid();
         _createResult = expectedId;
 
-        var reg = new DataSourceRegistration(
-            Name: "cr123_contacts",
-            Description: "Test data source");
+        var reg = new DataSourceRegistration(Name: "cr123_contacts");
 
         var result = await _sut.RegisterDataSourceAsync(reg);
 
@@ -261,56 +241,12 @@ public class DataProviderServiceTests
             .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
             .ReturnsAsync(() => _createResult);
 
-        var reg = new DataSourceRegistration(
-            Name: "cr123_contacts",
-            Description: null);
+        var reg = new DataSourceRegistration(Name: "cr123_contacts");
 
         await _sut.RegisterDataSourceAsync(reg);
 
         Assert.NotNull(capturedEntity);
         Assert.Equal("cr123_contacts", capturedEntity!["name"]);
-    }
-
-    #endregion
-
-    #region UpdateDataSourceAsync
-
-    [Fact]
-    public async Task UpdateDataSourceAsync_ThrowsNotFound_WhenDataSourceDoesNotExist()
-    {
-        _retrieveMultipleResult = new EntityCollection();
-        var id = Guid.NewGuid();
-
-        var ex = await Assert.ThrowsAsync<PpdsException>(
-            () => _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest(Description: "New Description")));
-        Assert.Equal(ErrorCodes.DataSource.NotFound, ex.ErrorCode);
-    }
-
-    [Fact]
-    public async Task UpdateDataSourceAsync_UpdatesDescription_WhenProvided()
-    {
-        var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_contacts");
-        _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
-
-        await _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest(Description: "New description"));
-
-        Assert.NotNull(_updatedEntity);
-        Assert.Equal("New description", _updatedEntity!["description"]);
-    }
-
-    [Fact]
-    public async Task UpdateDataSourceAsync_DoesNotUpdate_WhenNoChanges()
-    {
-        var id = Guid.NewGuid();
-        var entity = BuildDataSourceEntity(id, "cr123_contacts");
-        _retrieveMultipleResult = new EntityCollection { Entities = { entity } };
-
-        await _sut.UpdateDataSourceAsync(id, new DataSourceUpdateRequest());
-
-        _mockClient.Verify(
-            s => s.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     #endregion

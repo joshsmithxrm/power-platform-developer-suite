@@ -230,7 +230,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     id: `datasource:${ds.id}`,
                     name: ds.name,
                     nodeType: 'dataSource',
-                    isManaged: ds.isManaged,
+                    isManaged: false,
                     hasChildren: providers.length > 0,
                     children: providers.map(p => ({
                         id: `dataprovider:${p.id}`,

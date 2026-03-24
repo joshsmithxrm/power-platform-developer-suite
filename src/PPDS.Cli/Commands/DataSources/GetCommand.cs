@@ -88,11 +88,7 @@ public static class GetCommand
                 var output = new DataSourceDetailOutput
                 {
                     Id = dataSource.Id,
-                    Name = dataSource.Name,
-                    Description = dataSource.Description,
-                    IsManaged = dataSource.IsManaged,
-                    CreatedOn = dataSource.CreatedOn,
-                    ModifiedOn = dataSource.ModifiedOn
+                    Name = dataSource.Name
                 };
                 writer.WriteSuccess(output);
             }
@@ -101,11 +97,7 @@ public static class GetCommand
                 var properties = new Dictionary<string, string?>
                 {
                     ["Name"] = dataSource.Name,
-                    ["ID"] = dataSource.Id.ToString(),
-                    ["Description"] = dataSource.Description ?? "-",
-                    ["Is Managed"] = dataSource.IsManaged ? "Yes" : "No",
-                    ["Created"] = dataSource.CreatedOn?.ToString("g") ?? "-",
-                    ["Modified"] = dataSource.ModifiedOn?.ToString("g") ?? "-"
+                    ["ID"] = dataSource.Id.ToString()
                 };
 
                 WritePropertyTable(properties);
@@ -143,21 +135,6 @@ public static class GetCommand
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("description")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Description { get; set; }
-
-        [JsonPropertyName("isManaged")]
-        public bool IsManaged { get; set; }
-
-        [JsonPropertyName("createdOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? CreatedOn { get; set; }
-
-        [JsonPropertyName("modifiedOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? ModifiedOn { get; set; }
     }
 
     #endregion

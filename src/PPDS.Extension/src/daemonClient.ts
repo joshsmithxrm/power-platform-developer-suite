@@ -160,8 +160,6 @@ export interface DataSourcesListResponse { dataSources: DataSourceDto[] }
 export interface DataSourceDto {
     id: string;
     name: string;
-    description?: string;
-    isManaged: boolean;
 }
 
 export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';

@@ -28,12 +28,6 @@ public interface IDataProviderService
     Task<Guid> RegisterDataSourceAsync(DataSourceRegistration registration, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Updates mutable properties of an existing data source.
-    /// All fields are optional; only non-null values are applied.
-    /// </summary>
-    Task UpdateDataSourceAsync(Guid id, DataSourceUpdateRequest request, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Unregisters a data source and cascade-deletes all child data providers.
     /// </summary>
     /// <param name="id">The data source ID.</param>
@@ -79,6 +73,7 @@ public interface IDataProviderService
 
 /// <summary>
 /// Read model for a Dataverse data source entity.
+/// Note: entitydatasource is a metadata entity with limited queryable attributes (only name).
 /// </summary>
 public record DataSourceInfo
 {
@@ -87,21 +82,6 @@ public record DataSourceInfo
 
     /// <summary>Logical name (e.g., <c>prefix_name</c>).</summary>
     public string Name { get; init; } = "";
-
-    /// <summary>Display name.</summary>
-    public string? DisplayName { get; init; }
-
-    /// <summary>Optional description.</summary>
-    public string? Description { get; init; }
-
-    /// <summary>True when part of a managed solution.</summary>
-    public bool IsManaged { get; init; }
-
-    /// <summary>UTC creation timestamp.</summary>
-    public DateTime? CreatedOn { get; init; }
-
-    /// <summary>UTC last-modified timestamp.</summary>
-    public DateTime? ModifiedOn { get; init; }
 }
 
 /// <summary>
@@ -147,15 +127,7 @@ public record DataProviderInfo
 /// Parameters for registering a new data source entity.
 /// </summary>
 /// <param name="Name">Logical name in the format <c>{prefix}_{name}</c>.</param>
-/// <param name="DisplayName">Human-readable display name.</param>
-/// <param name="Description">Optional description.</param>
-public record DataSourceRegistration(string Name, string DisplayName, string? Description);
-
-/// <summary>
-/// Request for updating an existing data source.
-/// All fields are optional; only non-null values are applied.
-/// </summary>
-public record DataSourceUpdateRequest(string? DisplayName = null, string? Description = null);
+public record DataSourceRegistration(string Name);
 
 /// <summary>
 /// Parameters for registering a new data provider.

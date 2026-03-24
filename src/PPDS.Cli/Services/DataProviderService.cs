@@ -20,13 +20,11 @@ public sealed class DataProviderService : IDataProviderService
     private readonly ILogger<DataProviderService> _logger;
 
     // Entity logical names (entitydatasource is not in the generated entities)
+    // entitydatasource has a very limited schema — only 'name' is reliably queryable
+    // It's a metadata entity, not a standard data entity (no displayname, createdon, modifiedon)
     private const string DataSourceEntityName = "entitydatasource";
     private const string DataSourceIdField = "entitydatasourceid";
     private const string DataSourceNameField = "name";
-    private const string DataSourceDescriptionField = "description";
-    private const string DataSourceIsManagedField = "ismanaged";
-    private const string DataSourceCreatedOnField = "createdon";
-    private const string DataSourceModifiedOnField = "modifiedon";
 
     /// <summary>
     /// Creates a new instance of <see cref="DataProviderService"/>.
@@ -83,44 +81,11 @@ public sealed class DataProviderService : IDataProviderService
         var entity = new Entity(DataSourceEntityName);
         entity[DataSourceNameField] = registration.Name;
 
-        if (!string.IsNullOrWhiteSpace(registration.Description))
-            entity[DataSourceDescriptionField] = registration.Description;
-
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var newId = await CreateAsync(entity, client, cancellationToken);
 
         _logger.LogInformation("Registered data source '{Name}' (ID: {Id})", registration.Name, newId);
         return newId;
-    }
-
-    #endregion
-
-    #region Data Source — Update Operations
-
-    /// <inheritdoc />
-    public async Task UpdateDataSourceAsync(Guid id, DataSourceUpdateRequest request, CancellationToken cancellationToken = default)
-    {
-        var existing = await GetDataSourceByIdInternalAsync(id, cancellationToken);
-        if (existing is null)
-        {
-            throw new PpdsException(
-                ErrorCodes.DataSource.NotFound,
-                $"Data source with ID '{id}' was not found.");
-        }
-
-        var update = new Entity(DataSourceEntityName) { Id = id };
-        var hasChanges = false;
-
-        if (request.Description is not null)
-        {
-            update[DataSourceDescriptionField] = request.Description;
-            hasChanges = true;
-        }
-
-        if (!hasChanges) return;
-
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await UpdateEntityAsync(update, client, cancellationToken);
     }
 
     #endregion
@@ -376,11 +341,7 @@ public sealed class DataProviderService : IDataProviderService
         new(DataSourceEntityName)
         {
             ColumnSet = new ColumnSet(
-                DataSourceNameField,
-                DataSourceDescriptionField,
-                DataSourceIsManagedField,
-                DataSourceCreatedOnField,
-                DataSourceModifiedOnField),
+                DataSourceNameField),
             Orders = { new OrderExpression(DataSourceNameField, OrderType.Ascending) }
         };
 
@@ -405,11 +366,7 @@ public sealed class DataProviderService : IDataProviderService
         new()
         {
             Id = e.Id,
-            Name = e.GetAttributeValue<string>(DataSourceNameField) ?? "",
-            Description = e.GetAttributeValue<string>(DataSourceDescriptionField),
-            IsManaged = e.GetAttributeValue<bool?>(DataSourceIsManagedField) ?? false,
-            CreatedOn = e.GetAttributeValue<DateTime?>(DataSourceCreatedOnField),
-            ModifiedOn = e.GetAttributeValue<DateTime?>(DataSourceModifiedOnField)
+            Name = e.GetAttributeValue<string>(DataSourceNameField) ?? ""
         };
 
     private static DataProviderInfo MapToDataProviderInfo(Entity e) =>
