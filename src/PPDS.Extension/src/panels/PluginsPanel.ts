@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import type { DaemonClient } from '../daemonClient.js';
+import type { DaemonClient, PluginAssemblyInfoDto } from '../daemonClient.js';
 import { handleAuthError } from '../utils/errorUtils.js';
 
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -175,30 +175,32 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             }));
 
             // Build packages tree nodes
+            const mapAssemblyNode = (asm: PluginAssemblyInfoDto): PluginTreeNode => ({
+                id: `assembly:${asm.name}`,
+                name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
+                nodeType: 'assembly',
+                hasChildren: asm.types.length > 0,
+                children: asm.types.map(t => ({
+                    id: `type:${t.typeName}`,
+                    name: t.typeName,
+                    nodeType: 'type',
+                    hasChildren: t.steps.length > 0,
+                    children: t.steps.map(s => ({
+                        id: `step:${s.name}`,
+                        name: s.name,
+                        nodeType: 'step',
+                        isEnabled: s.isEnabled,
+                        badge: s.isEnabled ? undefined : 'Disabled',
+                    })),
+                })),
+            });
+
             const packages: PluginTreeNode[] = pluginsResult.packages.map(pkg => ({
                 id: `package:${pkg.name}`,
                 name: `${pkg.name}${pkg.version ? ` (${pkg.version})` : ''}`,
                 nodeType: 'package',
                 hasChildren: pkg.assemblies.length > 0,
-                children: pkg.assemblies.map(asm => ({
-                    id: `assembly:${asm.name}`,
-                    name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
-                    nodeType: 'assembly',
-                    hasChildren: asm.types.length > 0,
-                    children: asm.types.map(t => ({
-                        id: `type:${t.typeName}`,
-                        name: t.typeName,
-                        nodeType: 'type',
-                        hasChildren: t.steps.length > 0,
-                        children: t.steps.map(s => ({
-                            id: `step:${s.name}`,
-                            name: s.name,
-                            nodeType: 'step',
-                            isEnabled: s.isEnabled,
-                            badge: s.isEnabled ? undefined : 'Disabled',
-                        })),
-                    })),
-                })),
+                children: pkg.assemblies.map(mapAssemblyNode),
             }));
 
             // Build service endpoints tree nodes (from consolidated plugins/list response)

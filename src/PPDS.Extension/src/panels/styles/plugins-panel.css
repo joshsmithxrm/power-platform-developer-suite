@@ -20,13 +20,12 @@
 /* ── Filter Bar ─────────────────────────────────────────────────── */
 #filter-bar {
     display: flex;
-    flex-direction: row;
+    flex-flow: row wrap;
     gap: 8px;
     padding: 6px 12px;
     border-bottom: 1px solid var(--vscode-panel-border);
     align-items: center;
     flex-shrink: 0;
-    flex-wrap: wrap;
 }
 
 #filter-bar input[type="search"],
