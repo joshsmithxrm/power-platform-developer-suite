@@ -147,14 +147,11 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
         try {
             this.postMessage({ command: 'loading' });
 
-            const [pluginsResult, serviceEndpointsResult, customApisResult, dataProvidersResult, dataSourcesResult] =
-                await Promise.all([
-                    this.daemon.pluginsList(this.environmentUrl),
-                    this.daemon.serviceEndpointsList(this.environmentUrl),
-                    this.daemon.customApisList(this.environmentUrl),
-                    this.daemon.dataProvidersList(undefined, this.environmentUrl),
-                    this.daemon.dataSourcesList(this.environmentUrl),
-                ]);
+            // plugins/list now returns all domain data in a single consolidated call
+            const [pluginsResult, dataProvidersResult] = await Promise.all([
+                this.daemon.pluginsList(this.environmentUrl),
+                this.daemon.dataProvidersList(undefined, this.environmentUrl),
+            ]);
 
             // Build assemblies tree nodes
             const assemblies: PluginTreeNode[] = pluginsResult.assemblies.map(asm => ({
@@ -204,8 +201,8 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 })),
             }));
 
-            // Build service endpoints tree nodes
-            const serviceEndpoints: PluginTreeNode[] = serviceEndpointsResult.endpoints.map(ep => ({
+            // Build service endpoints tree nodes (from consolidated plugins/list response)
+            const serviceEndpoints: PluginTreeNode[] = pluginsResult.serviceEndpoints.map(ep => ({
                 id: `serviceendpoint:${ep.id}`,
                 name: ep.name,
                 nodeType: 'serviceEndpoint',
@@ -213,8 +210,8 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 badge: ep.isWebhook ? 'Webhook' : ep.contractType,
             }));
 
-            // Build custom APIs tree nodes
-            const customApis: PluginTreeNode[] = customApisResult.apis.map(api => ({
+            // Build custom APIs tree nodes (from consolidated plugins/list response)
+            const customApis: PluginTreeNode[] = pluginsResult.customApis.map(api => ({
                 id: `customapi:${api.id}`,
                 name: api.displayName || api.uniqueName,
                 nodeType: 'customApi',
@@ -223,8 +220,8 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 hasChildren: (api.requestParameters.length + api.responseProperties.length) > 0,
             }));
 
-            // Build data sources tree nodes (with data providers as children)
-            const dataSources: PluginTreeNode[] = dataSourcesResult.dataSources.map(ds => {
+            // Build data sources tree nodes (from consolidated plugins/list response, with data providers as children)
+            const dataSources: PluginTreeNode[] = pluginsResult.dataSources.map(ds => {
                 const providers = dataProvidersResult.providers.filter(p => p.dataSourceId === ds.id);
                 return {
                     id: `datasource:${ds.id}`,
@@ -243,7 +240,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Add orphaned data providers (no matching data source)
             const orphanedProviders = dataProvidersResult.providers.filter(
-                p => !p.dataSourceId || !dataSourcesResult.dataSources.some(ds => ds.id === p.dataSourceId)
+                p => !p.dataSourceId || !pluginsResult.dataSources.some(ds => ds.id === p.dataSourceId)
             );
             for (const p of orphanedProviders) {
                 dataSources.push({

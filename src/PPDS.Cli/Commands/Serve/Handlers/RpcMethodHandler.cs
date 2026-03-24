@@ -636,16 +636,17 @@ public class RpcMethodHandler : IDisposable
     #region Plugins Methods
 
     /// <summary>
-    /// Lists registered plugins in the environment.
+    /// Lists registered plugins in the environment, including service endpoints, custom APIs, and data sources.
     /// Maps to: ppds plugins list --json
     /// </summary>
     [JsonRpcMethod("plugins/list")]
     public async Task<PluginsListResponse> PluginsListAsync(
         string? assembly = null,
         string? package = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
 
@@ -655,6 +656,21 @@ public class RpcMethodHandler : IDisposable
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
 
             var response = new PluginsListResponse();
+
+            // Fetch all domain data in parallel
+            var serviceEndpointService = sp.GetRequiredService<IServiceEndpointService>();
+            var customApiService = sp.GetRequiredService<ICustomApiService>();
+            var dataProviderService = sp.GetRequiredService<IDataProviderService>();
+
+            var serviceEndpointsTask = serviceEndpointService.ListAsync(ct);
+            var customApisTask = customApiService.ListAsync(ct);
+            var dataSourcesTask = dataProviderService.ListDataSourcesAsync(ct);
+
+            await Task.WhenAll(serviceEndpointsTask, customApisTask, dataSourcesTask);
+
+            response.ServiceEndpoints = (await serviceEndpointsTask).Select(MapServiceEndpointToDto).ToList();
+            response.CustomApis = (await customApisTask).Select(MapCustomApiToDto).ToList();
+            response.DataSources = (await dataSourcesTask).Select(MapDataSourceToDto).ToList();
 
             // Get assemblies (unless package filter is specified)
             if (string.IsNullOrEmpty(package))
@@ -5049,6 +5065,15 @@ public class PluginsListResponse
 
     [JsonPropertyName("packages")]
     public List<PluginPackageInfo> Packages { get; set; } = [];
+
+    [JsonPropertyName("serviceEndpoints")]
+    public List<ServiceEndpointDto> ServiceEndpoints { get; set; } = [];
+
+    [JsonPropertyName("customApis")]
+    public List<CustomApiDto> CustomApis { get; set; } = [];
+
+    [JsonPropertyName("dataSources")]
+    public List<DataSourceDto> DataSources { get; set; } = [];
 }
 
 /// <summary>

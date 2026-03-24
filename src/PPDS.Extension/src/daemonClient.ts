@@ -65,7 +65,13 @@ export type { AuthWhoResponse } from './types.js';
 
 // ── Plugins panel response types ─────────────────────────────────────────────
 
-export interface PluginsListResponse { assemblies: PluginAssemblyInfoDto[]; packages: PluginPackageInfoDto[] }
+export interface PluginsListResponse {
+    assemblies: PluginAssemblyInfoDto[];
+    packages: PluginPackageInfoDto[];
+    serviceEndpoints: ServiceEndpointDto[];
+    customApis: CustomApiDto[];
+    dataSources: DataSourceDto[];
+}
 export interface PluginPackageInfoDto { name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
 export interface PluginAssemblyInfoDto { name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
 export interface PluginTypeInfoDto { typeName: string; steps: PluginStepInfoDto[] }
