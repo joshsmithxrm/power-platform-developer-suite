@@ -63,6 +63,97 @@ import type {
 // Re-export AuthWhoResponse for profileCommands.ts convenience
 export type { AuthWhoResponse } from './types.js';
 
+// ── Plugins panel response types ─────────────────────────────────────────────
+
+export interface PluginsGetResponse { entity: Record<string, unknown> }
+export interface PluginsMessagesResponse { messages: string[] }
+export interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
+export interface AttributeInfoDto { logicalName: string; displayName: string; attributeType: string }
+export interface PluginsToggleStepResponse { success: boolean }
+export interface PluginsRegisterResponse { id: string }
+export interface PluginsUpdateResponse { success: boolean }
+export interface PluginsUnregisterResponse { deletedCount: number }
+export interface PluginsDownloadResponse { content: string; fileName: string }
+
+// ── Service endpoints response types ─────────────────────────────────────────
+
+export interface ServiceEndpointsListResponse { endpoints: ServiceEndpointDto[] }
+export interface ServiceEndpointDto {
+    id: string;
+    name: string;
+    description?: string;
+    contractType: string;
+    isWebhook: boolean;
+    url?: string;
+    namespaceAddress?: string;
+    path?: string;
+    authType: string;
+    messageFormat?: string;
+    userClaim?: string;
+    isManaged: boolean;
+}
+export interface ServiceEndpointsGetResponse { endpoint: ServiceEndpointDto }
+export interface ServiceEndpointsRegisterResponse { id: string }
+
+// ── Custom API response types ─────────────────────────────────────────────────
+
+export interface CustomApisListResponse { apis: CustomApiDto[] }
+export interface CustomApiDto {
+    id: string;
+    uniqueName: string;
+    displayName: string;
+    name?: string;
+    description?: string;
+    pluginTypeId?: string;
+    pluginTypeName?: string;
+    bindingType: string;
+    boundEntity?: string;
+    allowedProcessingStepType: string;
+    isFunction: boolean;
+    isPrivate: boolean;
+    executePrivilegeName?: string;
+    isManaged: boolean;
+    requestParameters: CustomApiParameterDto[];
+    responseProperties: CustomApiParameterDto[];
+}
+export interface CustomApiParameterDto {
+    id: string;
+    uniqueName: string;
+    displayName: string;
+    name?: string;
+    description?: string;
+    type: string;
+    logicalEntityName?: string;
+    isOptional: boolean;
+    isManaged: boolean;
+}
+export interface CustomApisGetResponse { api: CustomApiDto }
+export interface CustomApisRegisterResponse { id: string }
+
+// ── Data provider response types ──────────────────────────────────────────────
+
+export interface DataProvidersListResponse { providers: DataProviderDto[] }
+export interface DataProviderDto {
+    id: string;
+    name: string;
+    dataSourceId?: string;
+    dataSourceName?: string;
+    retrievePlugin?: string;
+    retrieveMultiplePlugin?: string;
+    createPlugin?: string;
+    updatePlugin?: string;
+    deletePlugin?: string;
+    isManaged: boolean;
+}
+export interface DataSourcesListResponse { dataSources: DataSourceDto[] }
+export interface DataSourceDto {
+    id: string;
+    name: string;
+    displayName?: string;
+    description?: string;
+    isManaged: boolean;
+}
+
 export type DaemonState = 'stopped' | 'starting' | 'ready' | 'error' | 'reconnecting';
 
 /**
@@ -1077,6 +1168,229 @@ export class DaemonClient implements vscode.Disposable {
         this.log.debug(`Got entity "${logicalName}" with ${result.entity.attributes.length} attributes`);
 
         return result;
+    }
+
+    // ── Plugins ─────────────────────────────────────────────────────────────
+
+    async pluginsGet(type: string, id: string, environmentUrl?: string): Promise<PluginsGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { type, id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/get for ${type} ${id}...`);
+        return await this.connection!.sendRequest<PluginsGetResponse>('plugins/get', params);
+    }
+
+    async pluginsMessages(filter?: string, environmentUrl?: string): Promise<PluginsMessagesResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (filter !== undefined) params.filter = filter;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/messages...');
+        return await this.connection!.sendRequest<PluginsMessagesResponse>('plugins/messages', params);
+    }
+
+    async pluginsEntityAttributes(entityLogicalName: string, environmentUrl?: string): Promise<PluginsEntityAttributesResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { entityLogicalName };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/entityAttributes for ${entityLogicalName}...`);
+        return await this.connection!.sendRequest<PluginsEntityAttributesResponse>('plugins/entityAttributes', params);
+    }
+
+    async pluginsToggleStep(id: string, enabled: boolean, environmentUrl?: string): Promise<PluginsToggleStepResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id, enabled };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/toggleStep for ${id} enabled=${enabled}...`);
+        return await this.connection!.sendRequest<PluginsToggleStepResponse>('plugins/toggleStep', params);
+    }
+
+    async pluginsRegisterAssembly(content: string, solutionName?: string, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { content };
+        if (solutionName !== undefined) params.solutionName = solutionName;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/registerAssembly...');
+        return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerAssembly', params);
+    }
+
+    async pluginsRegisterPackage(content: string, solutionName?: string, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { content };
+        if (solutionName !== undefined) params.solutionName = solutionName;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/registerPackage...');
+        return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerPackage', params);
+    }
+
+    async pluginsRegisterStep(config: Record<string, unknown>, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { ...config };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/registerStep...');
+        return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerStep', params);
+    }
+
+    async pluginsRegisterImage(config: Record<string, unknown>, environmentUrl?: string): Promise<PluginsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { ...config };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/registerImage...');
+        return await this.connection!.sendRequest<PluginsRegisterResponse>('plugins/registerImage', params);
+    }
+
+    async pluginsUpdateStep(id: string, updates: Record<string, unknown>, environmentUrl?: string): Promise<PluginsUpdateResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id, ...updates };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/updateStep for ${id}...`);
+        return await this.connection!.sendRequest<PluginsUpdateResponse>('plugins/updateStep', params);
+    }
+
+    async pluginsUpdateImage(id: string, updates: Record<string, unknown>, environmentUrl?: string): Promise<PluginsUpdateResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id, ...updates };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/updateImage for ${id}...`);
+        return await this.connection!.sendRequest<PluginsUpdateResponse>('plugins/updateImage', params);
+    }
+
+    async pluginsUnregister(type: string, id: string, force?: boolean, environmentUrl?: string): Promise<PluginsUnregisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { type, id };
+        if (force !== undefined) params.force = force;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/unregister for ${type} ${id}...`);
+        return await this.connection!.sendRequest<PluginsUnregisterResponse>('plugins/unregister', params);
+    }
+
+    async pluginsDownloadBinary(type: string, id: string, environmentUrl?: string): Promise<PluginsDownloadResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { type, id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling plugins/downloadBinary for ${type} ${id}...`);
+        return await this.connection!.sendRequest<PluginsDownloadResponse>('plugins/downloadBinary', params);
+    }
+
+    // ── Service Endpoints ────────────────────────────────────────────────────
+
+    async serviceEndpointsList(environmentUrl?: string): Promise<ServiceEndpointsListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling serviceEndpoints/list...');
+        return await this.connection!.sendRequest<ServiceEndpointsListResponse>('serviceEndpoints/list', params);
+    }
+
+    async serviceEndpointsGet(id: string, environmentUrl?: string): Promise<ServiceEndpointsGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling serviceEndpoints/get for ${id}...`);
+        return await this.connection!.sendRequest<ServiceEndpointsGetResponse>('serviceEndpoints/get', params);
+    }
+
+    async serviceEndpointsRegister(fields: Record<string, unknown>, environmentUrl?: string): Promise<ServiceEndpointsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { ...fields };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling serviceEndpoints/register...');
+        return await this.connection!.sendRequest<ServiceEndpointsRegisterResponse>('serviceEndpoints/register', params);
+    }
+
+    async serviceEndpointsUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<ServiceEndpointsRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id, ...fields };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling serviceEndpoints/update for ${id}...`);
+        return await this.connection!.sendRequest<ServiceEndpointsRegisterResponse>('serviceEndpoints/update', params);
+    }
+
+    async serviceEndpointsUnregister(id: string, force?: boolean, environmentUrl?: string): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id };
+        if (force !== undefined) params.force = force;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling serviceEndpoints/unregister for ${id}...`);
+        return await this.connection!.sendRequest<{ success: boolean }>('serviceEndpoints/unregister', params);
+    }
+
+    // ── Custom APIs ──────────────────────────────────────────────────────────
+
+    async customApisList(environmentUrl?: string): Promise<CustomApisListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling customApis/list...');
+        return await this.connection!.sendRequest<CustomApisListResponse>('customApis/list', params);
+    }
+
+    async customApisGet(uniqueNameOrId: string, environmentUrl?: string): Promise<CustomApisGetResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { uniqueNameOrId };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/get for ${uniqueNameOrId}...`);
+        return await this.connection!.sendRequest<CustomApisGetResponse>('customApis/get', params);
+    }
+
+    async customApisRegister(fields: Record<string, unknown>, environmentUrl?: string): Promise<CustomApisRegisterResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { ...fields };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling customApis/register...');
+        return await this.connection!.sendRequest<CustomApisRegisterResponse>('customApis/register', params);
+    }
+
+    async customApisUpdate(id: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id, ...fields };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/update for ${id}...`);
+        return await this.connection!.sendRequest<{ success: boolean }>('customApis/update', params);
+    }
+
+    async customApisUnregister(id: string, force?: boolean, environmentUrl?: string): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { id };
+        if (force !== undefined) params.force = force;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/unregister for ${id}...`);
+        return await this.connection!.sendRequest<{ success: boolean }>('customApis/unregister', params);
+    }
+
+    async customApisAddParameter(apiId: string, fields: Record<string, unknown>, environmentUrl?: string): Promise<{ id: string }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { apiId, ...fields };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/addParameter for api ${apiId}...`);
+        return await this.connection!.sendRequest<{ id: string }>('customApis/addParameter', params);
+    }
+
+    async customApisRemoveParameter(parameterId: string, environmentUrl?: string): Promise<{ success: boolean }> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = { parameterId };
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info(`Calling customApis/removeParameter for ${parameterId}...`);
+        return await this.connection!.sendRequest<{ success: boolean }>('customApis/removeParameter', params);
+    }
+
+    // ── Data Providers ───────────────────────────────────────────────────────
+
+    async dataProvidersList(dataSourceId?: string, environmentUrl?: string): Promise<DataProvidersListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (dataSourceId !== undefined) params.dataSourceId = dataSourceId;
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling dataProviders/list...');
+        return await this.connection!.sendRequest<DataProvidersListResponse>('dataProviders/list', params);
+    }
+
+    async dataSourcesList(environmentUrl?: string): Promise<DataSourcesListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling dataSources/list...');
+        return await this.connection!.sendRequest<DataSourcesListResponse>('dataSources/list', params);
     }
 
     // ── Notifications ───────────────────────────────────────────────────────
