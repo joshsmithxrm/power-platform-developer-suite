@@ -480,8 +480,8 @@ export type PluginsPanelHostToWebview =
     | { command: 'messagesLoaded'; messages: string[] }
     | { command: 'entitiesLoaded'; entities: string[] }
     | { command: 'attributesLoaded'; attributes: AttributeViewDto[] }
-    | { command: 'showRegisterForm'; formType: 'step' | 'image' | 'assembly' | 'package'; parentId?: string }
-    | { command: 'showUpdateForm'; formType: 'step' | 'image' | 'assembly' | 'package'; id: string; data: Record<string, unknown> }
+    | { command: 'showRegisterForm'; formType: 'step' | 'image' | 'assembly' | 'package' | 'webhook' | 'serviceendpoint' | 'customapi' | 'dataprovider'; parentId?: string; contract?: string }
+    | { command: 'showUpdateForm'; formType: 'step' | 'image' | 'assembly' | 'package' | 'webhook' | 'serviceendpoint' | 'customapi' | 'dataprovider'; id: string; data: Record<string, unknown>; contract?: string }
     | { command: 'loading' }
     | { command: 'error'; message: string }
     | { command: 'daemonReconnected' };

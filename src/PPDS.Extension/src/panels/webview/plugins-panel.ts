@@ -1134,6 +1134,592 @@ function showBinaryUpdateForm(type: 'assembly' | 'package', id: string): void {
     c.appendChild(createFormActions('Upload', onSubmit, modal.close));
 }
 
+// ── Webhook registration form ─────────────────────────────────────────────────
+
+function showWebhookForm(existing?: Record<string, unknown>): void {
+    const isUpdate = !!existing;
+    const modal = createModal(isUpdate ? 'Update Webhook' : 'Register Webhook');
+    const c = modal.content;
+
+    // Name
+    const nameInput = createTextInput(String(existing?.['name'] ?? ''));
+    c.appendChild(createField('Name *', nameInput));
+
+    // URL
+    const urlInput = createTextInput(String(existing?.['url'] ?? ''));
+    c.appendChild(createField('URL *', urlInput));
+
+    // Auth Type
+    const authTypeSelect = createSelect([
+        { value: 'HttpHeader', label: 'HTTP Header' },
+        { value: 'WebhookKey', label: 'Webhook Key' },
+        { value: 'HttpQueryString', label: 'HTTP Query String' },
+    ], String(existing?.['authType'] ?? 'HttpHeader'));
+    c.appendChild(createField('Auth Type', authTypeSelect));
+
+    // ── Conditional auth fields ──────────────────────────────────────────────
+
+    // WebhookKey → single Value field
+    const webhookKeyField = createField('Value', (() => {
+        const inp = document.createElement('input');
+        inp.type = 'password';
+        inp.className = 'form-input';
+        inp.value = '';
+        return inp;
+    })());
+    const webhookKeyInput = webhookKeyField.querySelector('input') as HTMLInputElement;
+    c.appendChild(webhookKeyField);
+
+    // HttpHeader / HttpQueryString → key-value pair list
+    const kvContainer = document.createElement('div');
+    kvContainer.className = 'form-field';
+    const kvLabel = document.createElement('label');
+    kvLabel.textContent = 'Key-Value Pairs';
+    kvContainer.appendChild(kvLabel);
+
+    const kvList = document.createElement('div');
+    kvList.className = 'kv-list';
+    kvContainer.appendChild(kvList);
+
+    const addKvBtn = document.createElement('button');
+    addKvBtn.className = 'form-btn form-btn-secondary form-btn-small';
+    addKvBtn.textContent = '+ Add Pair';
+    kvContainer.appendChild(addKvBtn);
+    c.appendChild(kvContainer);
+
+    // Populate existing kv pairs if any
+    const existingPairs = Array.isArray(existing?.['keyValuePairs'])
+        ? (existing['keyValuePairs'] as { key: string; value: string }[])
+        : [];
+    for (const pair of existingPairs) {
+        addKvRow(kvList, pair.key, pair.value);
+    }
+
+    addKvBtn.addEventListener('click', () => addKvRow(kvList, '', ''));
+
+    function updateAuthVisibility(): void {
+        const authType = authTypeSelect.value;
+        webhookKeyField.style.display = authType === 'WebhookKey' ? '' : 'none';
+        kvContainer.style.display = authType !== 'WebhookKey' ? '' : 'none';
+    }
+
+    authTypeSelect.addEventListener('change', updateAuthVisibility);
+    updateAuthVisibility();
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const name = nameInput.value.trim();
+        const url = urlInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        if (!url) { urlInput.focus(); return; }
+
+        const authType = authTypeSelect.value;
+        const fields: Record<string, unknown> = { name, url, authType };
+
+        if (authType === 'WebhookKey') {
+            fields['value'] = webhookKeyInput.value;
+        } else {
+            const rows = kvList.querySelectorAll<HTMLElement>('.kv-row');
+            const pairs: { key: string; value: string }[] = [];
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll<HTMLInputElement>('input');
+                const key = inputs[0]?.value.trim() ?? '';
+                const val = inputs[1]?.value.trim() ?? '';
+                if (key) pairs.push({ key, value: val });
+            });
+            fields['keyValuePairs'] = pairs;
+        }
+
+        if (isUpdate && existing) {
+            vscode.postMessage({ command: 'updateEntity', entityType: 'webhook', id: String(existing['id']), fields });
+        } else {
+            vscode.postMessage({ command: 'registerEntity', entityType: 'webhook', fields });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
+function addKvRow(container: HTMLElement, key: string, value: string): void {
+    const row = document.createElement('div');
+    row.className = 'kv-row';
+
+    const keyInput = createTextInput(key);
+    keyInput.placeholder = 'Key';
+    row.appendChild(keyInput);
+
+    const valInput = createTextInput(value);
+    valInput.placeholder = 'Value';
+    row.appendChild(valInput);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'form-btn form-btn-secondary form-btn-small';
+    removeBtn.textContent = '\u00D7';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(removeBtn);
+
+    container.appendChild(row);
+}
+
+// ── Service Bus endpoint registration form ────────────────────────────────────
+
+function showServiceBusForm(contract: string, existing?: Record<string, unknown>): void {
+    const isUpdate = !!existing;
+    const contractLabel = contract === 'queue' ? 'Queue'
+        : contract === 'topic' ? 'Topic'
+        : contract === 'eventhub' ? 'EventHub'
+        : 'Queue';
+    const isEventHub = contract === 'eventhub';
+
+    const modal = createModal(isUpdate ? `Update ${contractLabel} Endpoint` : `Register ${contractLabel} Endpoint`);
+    const c = modal.content;
+
+    // Name
+    const nameInput = createTextInput(String(existing?.['name'] ?? ''));
+    c.appendChild(createField('Name *', nameInput));
+
+    // Namespace Address
+    const namespaceInput = createTextInput(String(existing?.['namespaceAddress'] ?? ''));
+    namespaceInput.placeholder = 'sb://...';
+    c.appendChild(createField('Namespace Address *', namespaceInput));
+
+    // Path (label varies by contract)
+    const pathInput = createTextInput(String(existing?.['path'] ?? ''));
+    c.appendChild(createField(`${contractLabel} Name *`, pathInput));
+
+    // Auth Type
+    const authTypeSelect = createSelect([
+        { value: 'SASKey', label: 'SAS Key' },
+        { value: 'SASToken', label: 'SAS Token' },
+    ], String(existing?.['authType'] ?? 'SASKey'));
+    c.appendChild(createField('Auth Type', authTypeSelect));
+
+    // SASKey fields
+    const sasKeyNameInput = createTextInput(String(existing?.['sasKeyName'] ?? ''));
+    const sasKeyNameField = createField('SAS Key Name', sasKeyNameInput);
+    c.appendChild(sasKeyNameField);
+
+    const sasKeyInput = createTextInput(String(existing?.['sasKey'] ?? ''));
+    const sasKeyField = createField('SAS Key', sasKeyInput);
+    c.appendChild(sasKeyField);
+
+    // SASToken field
+    const sasTokenInput = createTextInput(String(existing?.['sasToken'] ?? ''));
+    const sasTokenField = createField('SAS Token', sasTokenInput);
+    c.appendChild(sasTokenField);
+
+    // Message Format (EventHub excludes .NETBinary)
+    const messageFormatOptions = isEventHub
+        ? [{ value: 'XML', label: 'XML' }, { value: 'JSON', label: 'JSON' }]
+        : [{ value: '.NETBinary', label: '.NET Binary' }, { value: 'XML', label: 'XML' }, { value: 'JSON', label: 'JSON' }];
+    const messageFormatSelect = createSelect(messageFormatOptions, String(existing?.['messageFormat'] ?? (isEventHub ? 'JSON' : '.NETBinary')));
+    c.appendChild(createField('Message Format', messageFormatSelect));
+
+    // User Claim
+    const userClaimSelect = createSelect([
+        { value: 'None', label: 'None' },
+        { value: 'UserId', label: 'User ID' },
+    ], String(existing?.['userClaim'] ?? 'None'));
+    c.appendChild(createField('User Claim', userClaimSelect));
+
+    // Description
+    const descriptionInput = createTextInput(String(existing?.['description'] ?? ''));
+    c.appendChild(createField('Description', descriptionInput));
+
+    function updateAuthVisibility(): void {
+        const isSASKey = authTypeSelect.value === 'SASKey';
+        sasKeyNameField.style.display = isSASKey ? '' : 'none';
+        sasKeyField.style.display = isSASKey ? '' : 'none';
+        sasTokenField.style.display = isSASKey ? 'none' : '';
+    }
+
+    authTypeSelect.addEventListener('change', updateAuthVisibility);
+    updateAuthVisibility();
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const name = nameInput.value.trim();
+        const namespaceAddress = namespaceInput.value.trim();
+        const path = pathInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        if (!namespaceAddress) { namespaceInput.focus(); return; }
+        if (!path) { pathInput.focus(); return; }
+
+        const authType = authTypeSelect.value;
+        const fields: Record<string, unknown> = {
+            name, namespaceAddress, path, authType,
+            messageFormat: messageFormatSelect.value,
+            userClaim: userClaimSelect.value,
+            description: descriptionInput.value.trim(),
+            contract,
+        };
+
+        if (authType === 'SASKey') {
+            fields['sasKeyName'] = sasKeyNameInput.value.trim();
+            fields['sasKey'] = sasKeyInput.value.trim();
+        } else {
+            fields['sasToken'] = sasTokenInput.value.trim();
+        }
+
+        const entityType = contract === 'queue' ? 'serviceendpoint_queue'
+            : contract === 'topic' ? 'serviceendpoint_topic'
+            : 'serviceendpoint_eventhub';
+
+        if (isUpdate && existing) {
+            vscode.postMessage({ command: 'updateEntity', entityType, id: String(existing['id']), fields });
+        } else {
+            vscode.postMessage({ command: 'registerEntity', entityType, fields });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
+// ── Service endpoint contract picker ─────────────────────────────────────────
+
+function showServiceEndpointContractPicker(): void {
+    const modal = createModal('Register Service Endpoint');
+    const c = modal.content;
+
+    const instruction = document.createElement('p');
+    instruction.className = 'form-instruction';
+    instruction.textContent = 'Select the Service Bus contract type:';
+    c.appendChild(instruction);
+
+    const contracts: { label: string; value: string }[] = [
+        { label: 'Queue', value: 'queue' },
+        { label: 'Topic', value: 'topic' },
+        { label: 'Event Hub', value: 'eventhub' },
+    ];
+
+    for (const contract of contracts) {
+        const btn = document.createElement('button');
+        btn.className = 'form-btn form-btn-secondary';
+        btn.textContent = contract.label;
+        btn.addEventListener('click', () => {
+            modal.close();
+            showServiceBusForm(contract.value);
+        });
+        c.appendChild(btn);
+    }
+
+    const cancelActions = document.createElement('div');
+    cancelActions.className = 'form-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'form-btn form-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', modal.close);
+    cancelActions.appendChild(cancelBtn);
+    c.appendChild(cancelActions);
+}
+
+// ── Custom API registration form ──────────────────────────────────────────────
+
+const CUSTOM_API_PARAM_TYPES = [
+    'Boolean', 'DateTime', 'Decimal', 'Entity', 'EntityCollection',
+    'EntityReference', 'Float', 'Integer', 'Money', 'Picklist',
+    'String', 'StringArray', 'Guid',
+];
+
+interface CustomApiParam {
+    name: string;
+    type: string;
+    direction: 'Input' | 'Output';
+    isOptional: boolean;
+    logicalEntityName: string;
+}
+
+function showCustomApiForm(existing?: Record<string, unknown>): void {
+    const isUpdate = !!existing;
+    const modal = createModal(isUpdate ? 'Update Custom API' : 'Register Custom API');
+    const c = modal.content;
+
+    // Unique Name
+    const uniqueNameInput = createTextInput(String(existing?.['uniqueName'] ?? ''));
+    c.appendChild(createField('Unique Name *', uniqueNameInput));
+
+    // Display Name
+    const displayNameInput = createTextInput(String(existing?.['displayName'] ?? ''));
+    c.appendChild(createField('Display Name *', displayNameInput));
+
+    // Name (auto-filled from DisplayName)
+    const nameInput = createTextInput(String(existing?.['name'] ?? ''));
+    c.appendChild(createField('Name (auto-filled)', nameInput));
+
+    let nameModifiedByUser = !!existing?.['name'];
+    displayNameInput.addEventListener('input', () => {
+        if (!nameModifiedByUser) {
+            nameInput.value = displayNameInput.value;
+        }
+    });
+    nameInput.addEventListener('input', () => { nameModifiedByUser = true; });
+
+    // Description
+    const descriptionInput = createTextInput(String(existing?.['description'] ?? ''));
+    c.appendChild(createField('Description', descriptionInput));
+
+    // Assembly (for new only)
+    const assemblyInput = createTextInput(String(existing?.['assembly'] ?? ''));
+    c.appendChild(createField('Assembly *', assemblyInput));
+
+    // Plugin Type Name
+    const pluginTypeNameInput = createTextInput(String(existing?.['pluginTypeName'] ?? ''));
+    c.appendChild(createField('Plugin Type Name *', pluginTypeNameInput));
+
+    // Binding Type
+    const bindingTypeSelect = createSelect([
+        { value: 'Global', label: 'Global' },
+        { value: 'Entity', label: 'Entity' },
+        { value: 'EntityCollection', label: 'Entity Collection' },
+    ], String(existing?.['bindingType'] ?? 'Global'));
+    c.appendChild(createField('Binding Type', bindingTypeSelect));
+
+    // Bound Entity (conditional on Entity binding)
+    const boundEntityInput = createTextInput(String(existing?.['boundEntity'] ?? ''));
+    const boundEntityField = createField('Bound Entity', boundEntityInput);
+    c.appendChild(boundEntityField);
+
+    function updateBoundEntityVisibility(): void {
+        boundEntityField.style.display = bindingTypeSelect.value === 'Entity' ? '' : 'none';
+        boundEntityInput.disabled = bindingTypeSelect.value !== 'Entity';
+    }
+
+    bindingTypeSelect.addEventListener('change', updateBoundEntityVisibility);
+    updateBoundEntityVisibility();
+
+    // Is Function
+    const isFunctionCheck = createCheckbox(Boolean(existing?.['isFunction'] ?? false));
+    c.appendChild(createField('Is Function', isFunctionCheck));
+
+    // Is Private
+    const isPrivateCheck = createCheckbox(Boolean(existing?.['isPrivate'] ?? false));
+    c.appendChild(createField('Is Private', isPrivateCheck));
+
+    // Execute Privilege Name
+    const executePrivilegeInput = createTextInput(String(existing?.['executePrivilegeName'] ?? ''));
+    c.appendChild(createField('Execute Privilege Name', executePrivilegeInput));
+
+    // Allowed Processing Step Type
+    const allowedStepTypeSelect = createSelect([
+        { value: 'None', label: 'None' },
+        { value: 'AsyncOnly', label: 'Async Only' },
+        { value: 'SyncAndAsync', label: 'Sync and Async' },
+    ], String(existing?.['allowedProcessingStepType'] ?? 'SyncAndAsync'));
+    c.appendChild(createField('Allowed Processing Step Type', allowedStepTypeSelect));
+
+    // ── Parameters section ───────────────────────────────────────────────────
+
+    const paramsSection = document.createElement('div');
+    paramsSection.className = 'form-section';
+
+    const paramsSectionHeader = document.createElement('div');
+    paramsSectionHeader.className = 'form-section-header';
+
+    const paramsSectionTitle = document.createElement('span');
+    paramsSectionTitle.textContent = 'Parameters';
+    paramsSectionHeader.appendChild(paramsSectionTitle);
+
+    const addParamBtn = document.createElement('button');
+    addParamBtn.className = 'form-btn form-btn-secondary form-btn-small';
+    addParamBtn.textContent = '+ Add Parameter';
+    paramsSectionHeader.appendChild(addParamBtn);
+
+    paramsSection.appendChild(paramsSectionHeader);
+
+    const paramsList = document.createElement('div');
+    paramsList.className = 'params-list';
+    paramsSection.appendChild(paramsList);
+    c.appendChild(paramsSection);
+
+    const params: CustomApiParam[] = Array.isArray(existing?.['parameters'])
+        ? (existing['parameters'] as CustomApiParam[])
+        : [];
+    for (const p of params) {
+        addParamRow(paramsList, p);
+    }
+
+    addParamBtn.addEventListener('click', () => {
+        addParamRow(paramsList, { name: '', type: 'String', direction: 'Input', isOptional: false, logicalEntityName: '' });
+    });
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const uniqueName = uniqueNameInput.value.trim();
+        const displayName = displayNameInput.value.trim();
+        const assembly = assemblyInput.value.trim();
+        const pluginTypeName = pluginTypeNameInput.value.trim();
+
+        if (!uniqueName) { uniqueNameInput.focus(); return; }
+        if (!displayName) { displayNameInput.focus(); return; }
+        if (!assembly) { assemblyInput.focus(); return; }
+        if (!pluginTypeName) { pluginTypeNameInput.focus(); return; }
+
+        const collectedParams: CustomApiParam[] = [];
+        const paramRows = paramsList.querySelectorAll<HTMLElement>('.param-row');
+        paramRows.forEach(row => {
+            const inputs = row.querySelectorAll<HTMLInputElement>('input');
+            const selects = row.querySelectorAll<HTMLSelectElement>('select');
+            const nameVal = inputs[0]?.value.trim() ?? '';
+            if (!nameVal) return;
+            const typeVal = selects[0]?.value ?? 'String';
+            const dirVal = (selects[1]?.value ?? 'Input') as 'Input' | 'Output';
+            const isOptionalVal = inputs[1]?.checked ?? false;
+            const logicalEntityVal = inputs[2]?.value.trim() ?? '';
+            collectedParams.push({ name: nameVal, type: typeVal, direction: dirVal, isOptional: isOptionalVal, logicalEntityName: logicalEntityVal });
+        });
+
+        const fields: Record<string, unknown> = {
+            uniqueName,
+            displayName,
+            name: nameInput.value.trim() || displayName,
+            description: descriptionInput.value.trim(),
+            assembly,
+            pluginTypeName,
+            bindingType: bindingTypeSelect.value,
+            boundEntity: bindingTypeSelect.value === 'Entity' ? boundEntityInput.value.trim() : '',
+            isFunction: isFunctionCheck.checked,
+            isPrivate: isPrivateCheck.checked,
+            executePrivilegeName: executePrivilegeInput.value.trim(),
+            allowedProcessingStepType: allowedStepTypeSelect.value,
+            parameters: collectedParams,
+        };
+
+        if (isUpdate && existing) {
+            vscode.postMessage({ command: 'updateEntity', entityType: 'customapi', id: String(existing['id']), fields });
+        } else {
+            vscode.postMessage({ command: 'registerEntity', entityType: 'customapi', fields });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
+function addParamRow(container: HTMLElement, param: CustomApiParam): void {
+    const ENTITY_TYPES = new Set(['Entity', 'EntityCollection', 'EntityReference']);
+
+    const row = document.createElement('div');
+    row.className = 'param-row';
+
+    // Name
+    const nameInput = createTextInput(param.name);
+    nameInput.placeholder = 'Name';
+    row.appendChild(nameInput);
+
+    // Type
+    const typeSelect = createSelect(
+        CUSTOM_API_PARAM_TYPES.map(t => ({ value: t, label: t })),
+        param.type,
+    );
+    row.appendChild(typeSelect);
+
+    // Direction
+    const dirSelect = createSelect([
+        { value: 'Input', label: 'Input' },
+        { value: 'Output', label: 'Output' },
+    ], param.direction);
+    row.appendChild(dirSelect);
+
+    // IsOptional checkbox (only relevant for Input)
+    const isOptionalCheck = createCheckbox(param.isOptional);
+    const isOptionalLabel = document.createElement('label');
+    isOptionalLabel.className = 'form-checkbox-label form-checkbox-label-inline';
+    isOptionalLabel.textContent = 'Optional';
+    isOptionalLabel.prepend(isOptionalCheck);
+    row.appendChild(isOptionalLabel);
+
+    // Logical Entity Name (for Entity/EntityRef/EntityCollection types)
+    const logicalEntityInput = createTextInput(param.logicalEntityName);
+    logicalEntityInput.placeholder = 'Entity Logical Name';
+    row.appendChild(logicalEntityInput);
+
+    function updateParamVisibility(): void {
+        isOptionalLabel.style.display = dirSelect.value === 'Input' ? '' : 'none';
+        isOptionalCheck.disabled = dirSelect.value !== 'Input';
+        const showEntityName = ENTITY_TYPES.has(typeSelect.value);
+        logicalEntityInput.style.display = showEntityName ? '' : 'none';
+        logicalEntityInput.disabled = !showEntityName;
+    }
+
+    typeSelect.addEventListener('change', updateParamVisibility);
+    dirSelect.addEventListener('change', updateParamVisibility);
+    updateParamVisibility();
+
+    // Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'form-btn form-btn-secondary form-btn-small';
+    removeBtn.textContent = '\u00D7';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(removeBtn);
+
+    container.appendChild(row);
+}
+
+// ── Data Provider registration form ──────────────────────────────────────────
+
+function showDataProviderForm(existing?: Record<string, unknown>): void {
+    const isUpdate = !!existing;
+    const modal = createModal(isUpdate ? 'Update Data Provider' : 'Register Data Provider');
+    const c = modal.content;
+
+    // Name
+    const nameInput = createTextInput(String(existing?.['name'] ?? ''));
+    c.appendChild(createField('Name *', nameInput));
+
+    // Data Source
+    const dataSourceInput = createTextInput(String(existing?.['dataSource'] ?? ''));
+    c.appendChild(createField('Data Source *', dataSourceInput));
+
+    // Plugin fields
+    const retrieveInput = createTextInput(String(existing?.['retrievePlugin'] ?? ''));
+    c.appendChild(createField('Retrieve Plugin', retrieveInput));
+
+    const retrieveMultipleInput = createTextInput(String(existing?.['retrieveMultiplePlugin'] ?? ''));
+    c.appendChild(createField('Retrieve Multiple Plugin', retrieveMultipleInput));
+
+    const createInput = createTextInput(String(existing?.['createPlugin'] ?? ''));
+    c.appendChild(createField('Create Plugin', createInput));
+
+    const updateInput = createTextInput(String(existing?.['updatePlugin'] ?? ''));
+    c.appendChild(createField('Update Plugin', updateInput));
+
+    const deleteInput = createTextInput(String(existing?.['deletePlugin'] ?? ''));
+    c.appendChild(createField('Delete Plugin', deleteInput));
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const name = nameInput.value.trim();
+        const dataSource = dataSourceInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        if (!dataSource) { dataSourceInput.focus(); return; }
+
+        const fields: Record<string, unknown> = {
+            name,
+            dataSource,
+            retrievePlugin: retrieveInput.value.trim(),
+            retrieveMultiplePlugin: retrieveMultipleInput.value.trim(),
+            createPlugin: createInput.value.trim(),
+            updatePlugin: updateInput.value.trim(),
+            deletePlugin: deleteInput.value.trim(),
+        };
+
+        if (isUpdate && existing) {
+            vscode.postMessage({ command: 'updateEntity', entityType: 'dataprovider', id: String(existing['id']), fields });
+        } else {
+            vscode.postMessage({ command: 'registerEntity', entityType: 'dataprovider', fields });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
 // ── Register toolbar dropdown ─────────────────────────────────────────────────
 
 function buildRegisterDropdown(): void {
@@ -1182,6 +1768,22 @@ function buildRegisterDropdown(): void {
                 if (!selectedNodeId) return;
                 showBinaryUpdateForm('package', selectedNodeId);
             },
+        },
+        {
+            label: 'Register Webhook',
+            action: () => showWebhookForm(),
+        },
+        {
+            label: 'Register Service Endpoint',
+            action: () => showServiceEndpointContractPicker(),
+        },
+        {
+            label: 'Register Custom API',
+            action: () => showCustomApiForm(),
+        },
+        {
+            label: 'Register Data Provider',
+            action: () => showDataProviderForm(),
         },
     ];
 
@@ -1369,6 +1971,14 @@ window.addEventListener('message', (event: MessageEvent<PluginsPanelHostToWebvie
                 showBinaryUpdateForm('assembly', msg.parentId ?? '');
             } else if (msg.formType === 'package') {
                 showBinaryUpdateForm('package', msg.parentId ?? '');
+            } else if (msg.formType === 'webhook') {
+                showWebhookForm();
+            } else if (msg.formType === 'serviceendpoint') {
+                showServiceBusForm(msg.contract ?? 'queue');
+            } else if (msg.formType === 'customapi') {
+                showCustomApiForm();
+            } else if (msg.formType === 'dataprovider') {
+                showDataProviderForm();
             }
             break;
         case 'showUpdateForm':
@@ -1380,6 +1990,14 @@ window.addEventListener('message', (event: MessageEvent<PluginsPanelHostToWebvie
                 showBinaryUpdateForm('assembly', msg.id);
             } else if (msg.formType === 'package') {
                 showBinaryUpdateForm('package', msg.id);
+            } else if (msg.formType === 'webhook') {
+                showWebhookForm(msg.data);
+            } else if (msg.formType === 'serviceendpoint') {
+                showServiceBusForm(msg.contract ?? 'queue', msg.data);
+            } else if (msg.formType === 'customapi') {
+                showCustomApiForm(msg.data);
+            } else if (msg.formType === 'dataprovider') {
+                showDataProviderForm(msg.data);
             }
             break;
         default:
