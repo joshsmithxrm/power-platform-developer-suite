@@ -1,5 +1,3 @@
-using PPDS.Cli.Infrastructure.Progress;
-
 namespace PPDS.Cli.Services;
 
 /// <summary>
@@ -39,9 +37,9 @@ public interface IDataProviderService
     /// Unregisters a data source and cascade-deletes all child data providers.
     /// </summary>
     /// <param name="id">The data source ID.</param>
-    /// <param name="progressReporter">Optional progress reporter used during cascade delete.</param>
+    /// <param name="force">If true, cascade delete all child data providers. If false, fails when providers exist.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task UnregisterDataSourceAsync(Guid id, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default);
+    Task UnregisterDataSourceAsync(Guid id, bool force = false, CancellationToken cancellationToken = default);
 
     // Data Providers
 
@@ -116,9 +114,6 @@ public record DataProviderInfo
 
     /// <summary>Display name of the data provider.</summary>
     public string Name { get; init; } = "";
-
-    /// <summary>Data source ID (resolved from <c>datasourcelogicalname</c> when available).</summary>
-    public Guid? DataSourceId { get; init; }
 
     /// <summary>Logical name of the associated data source.</summary>
     public string? DataSourceName { get; init; }

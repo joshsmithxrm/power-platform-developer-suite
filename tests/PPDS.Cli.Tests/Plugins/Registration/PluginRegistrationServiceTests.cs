@@ -654,21 +654,22 @@ public class PluginRegistrationServiceTests
     #region UpdateStepAsync Tests
 
     [Fact]
-    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepNotFound()
+    public async Task UpdateStepAsync_ThrowsPpdsException_WhenStepNotFound()
     {
         // Arrange
         var stepId = Guid.NewGuid();
         _retrieveMultipleResult = new EntityCollection();
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
 
+        Assert.Equal(ErrorCodes.Plugin.NotFound, exception.ErrorCode);
         Assert.Contains("not found", exception.Message);
     }
 
     [Fact]
-    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepIsManagedAndNotCustomizable()
+    public async Task UpdateStepAsync_ThrowsPpdsException_WhenStepIsManagedAndNotCustomizable()
     {
         // Arrange
         var stepId = Guid.NewGuid();
@@ -684,9 +685,10 @@ public class PluginRegistrationServiceTests
         _retrieveMultipleResult = entities;
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
 
+        Assert.Equal(ErrorCodes.Plugin.ManagedComponent, exception.ErrorCode);
         Assert.Contains("is managed", exception.Message);
     }
 
@@ -1438,7 +1440,7 @@ public class PluginRegistrationServiceTests
     }
 
     [Fact]
-    public async Task UpsertStepAsync_UsesInternalInvocationSource_WhenNotProvided()
+    public async Task UpsertStepAsync_UsesParentInvocationSource_WhenNotProvided()
     {
         // Arrange
         var pluginTypeId = Guid.NewGuid();
@@ -1462,12 +1464,12 @@ public class PluginRegistrationServiceTests
         // Act
         await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
 
-        // Assert - Falls back to Internal (-1)
+        // Assert - Falls back to Parent (0) per spec default
         _mockPooledClient.Verify(s => s.CreateAsync(
             It.Is<Entity>(e =>
                 e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
                 e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource) != null &&
-                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource).Value == (int)sdkmessageprocessingstep_invocationsource.Internal),
+                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource).Value == (int)sdkmessageprocessingstep_invocationsource.Parent),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }

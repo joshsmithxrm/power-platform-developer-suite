@@ -3,7 +3,6 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
 
@@ -144,7 +143,7 @@ public sealed class DataProviderService : IDataProviderService
     #region Data Source — Unregister Operations
 
     /// <inheritdoc />
-    public async Task UnregisterDataSourceAsync(Guid id, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public async Task UnregisterDataSourceAsync(Guid id, bool force = false, CancellationToken cancellationToken = default)
     {
         var existing = await GetDataSourceByIdInternalAsync(id, cancellationToken);
         if (existing is null)
@@ -165,28 +164,20 @@ public sealed class DataProviderService : IDataProviderService
         var provResults = await RetrieveMultipleAsync(providerQuery, provClient, cancellationToken);
         var providers = provResults.Entities.ToList();
 
-        if (providers.Count > 0 && progressReporter is null)
+        if (providers.Count > 0 && !force)
         {
             throw new PpdsException(
                 ErrorCodes.DataSource.HasDependents,
                 $"Data source '{existing.Name}' has {providers.Count} data provider(s). " +
-                "Pass a progress reporter to cascade delete.");
+                "Use force=true to cascade delete.");
         }
 
         if (providers.Count > 0)
         {
-            progressReporter!.ReportPhase("Deleting data providers", $"{providers.Count} provider(s)");
             for (var i = 0; i < providers.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var provider = providers[i];
-                progressReporter.ReportProgress(new ProgressSnapshot
-                {
-                    CurrentItem = i,
-                    TotalItems = providers.Count,
-                    CurrentEntity = provider.GetAttributeValue<string>(EntityDataProvider.Fields.Name),
-                    StatusMessage = "Deleting data provider"
-                });
                 await using var depClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
                 await DeleteEntityAsync(EntityDataProvider.EntityLogicalName, provider.Id, depClient, cancellationToken);
             }

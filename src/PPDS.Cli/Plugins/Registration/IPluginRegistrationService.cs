@@ -95,6 +95,26 @@ public interface IPluginRegistrationService
         Guid stepId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists available SDK messages, optionally filtered by name.
+    /// </summary>
+    /// <param name="filter">Optional substring filter applied to the message name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Sorted list of matching message names.</returns>
+    Task<List<string>> ListMessagesAsync(
+        string? filter,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns attribute metadata for an entity.
+    /// </summary>
+    /// <param name="entityLogicalName">The logical name of the entity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Sorted list of attribute metadata.</returns>
+    Task<List<AttributeMetadataInfo>> ListEntityAttributesAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Lookup Operations
@@ -476,4 +496,13 @@ public record StepUpdateRequest(
 public record ImageUpdateRequest(
     string? Attributes = null,
     string? Name = null
+);
+
+/// <summary>
+/// Attribute metadata for an entity field.
+/// </summary>
+public record AttributeMetadataInfo(
+    string LogicalName,
+    string DisplayName,
+    string AttributeType
 );

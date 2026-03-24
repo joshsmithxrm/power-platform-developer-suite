@@ -89,7 +89,6 @@ public static class GetCommand
                 {
                     Id = provider.Id,
                     Name = provider.Name,
-                    DataSourceId = provider.DataSourceId,
                     DataSourceName = provider.DataSourceName,
                     RetrievePlugin = provider.RetrievePlugin,
                     RetrieveMultiplePlugin = provider.RetrieveMultiplePlugin,
@@ -108,7 +107,7 @@ public static class GetCommand
                 {
                     ["Name"] = provider.Name,
                     ["ID"] = provider.Id.ToString(),
-                    ["Data Source"] = provider.DataSourceName ?? provider.DataSourceId?.ToString() ?? "-",
+                    ["Data Source"] = provider.DataSourceName ?? "-",
                     ["Is Managed"] = provider.IsManaged ? "Yes" : "No",
                     ["Retrieve"] = provider.RetrievePlugin?.ToString() ?? "-",
                     ["RetrieveMultiple"] = provider.RetrieveMultiplePlugin?.ToString() ?? "-",

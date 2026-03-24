@@ -515,3 +515,14 @@ export interface AttributeViewDto {
     displayName: string;
     attributeType: string;
 }
+
+/** Shape of a child entity returned by the daemon for lazy tree loading. */
+export interface PluginEntityChild {
+    id: string;
+    name?: string;
+    typeName?: string;
+    nodeType?: string;
+    isEnabled?: boolean;
+    isManaged?: boolean;
+    hasChildren?: boolean;
+}

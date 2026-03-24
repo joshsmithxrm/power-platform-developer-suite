@@ -726,6 +726,14 @@ function createTextInput(value = ''): HTMLInputElement {
     return input;
 }
 
+function createPasswordInput(value = ''): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.className = 'form-input';
+    input.value = value;
+    return input;
+}
+
 function createNumberInput(value = 1): HTMLInputElement {
     const input = document.createElement('input');
     input.type = 'number';
@@ -1301,12 +1309,12 @@ function showServiceBusForm(contract: string, existing?: Record<string, unknown>
     const sasKeyNameField = createField('SAS Key Name', sasKeyNameInput);
     c.appendChild(sasKeyNameField);
 
-    const sasKeyInput = createTextInput(String(existing?.['sasKey'] ?? ''));
+    const sasKeyInput = createPasswordInput(String(existing?.['sasKey'] ?? ''));
     const sasKeyField = createField('SAS Key', sasKeyInput);
     c.appendChild(sasKeyField);
 
     // SASToken field
-    const sasTokenInput = createTextInput(String(existing?.['sasToken'] ?? ''));
+    const sasTokenInput = createPasswordInput(String(existing?.['sasToken'] ?? ''));
     const sasTokenField = createField('SAS Token', sasTokenInput);
     c.appendChild(sasTokenField);
 

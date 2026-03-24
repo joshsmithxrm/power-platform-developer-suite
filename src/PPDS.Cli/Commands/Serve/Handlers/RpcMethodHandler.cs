@@ -885,34 +885,10 @@ public class RpcMethodHandler : IDisposable
         return await WithActiveProfileAsync(async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-
-            var query = new QueryExpression(SdkMessage.EntityLogicalName)
-            {
-                ColumnSet = new ColumnSet(SdkMessage.Fields.Name),
-                PageInfo = new PagingInfo { Count = 500, PageNumber = 1 }
-            };
-
-            if (!string.IsNullOrWhiteSpace(filter))
-            {
-                query.Criteria = new FilterExpression
-                {
-                    Conditions =
-                    {
-                        new ConditionExpression(SdkMessage.Fields.Name, ConditionOperator.Like,
-                            $"%{filter}%")
-                    }
-                };
-            }
-
-            await using var client = await pool.GetClientAsync(cancellationToken: ct);
-            var results = await client.RetrieveMultipleAsync(query, ct);
-
-            var messages = results.Entities
-                .Select(e => e.GetAttributeValue<string>(SdkMessage.Fields.Name) ?? "")
-                .Where(n => !string.IsNullOrEmpty(n))
-                .OrderBy(n => n)
-                .ToList();
-
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+            var messages = await registrationService.ListMessagesAsync(filter, ct);
             return new PluginsMessagesResponse { Messages = messages };
         }, cancellationToken);
     }
@@ -931,28 +907,19 @@ public class RpcMethodHandler : IDisposable
         return await WithActiveProfileAsync(async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
-            await using var client = await pool.GetClientAsync(cancellationToken: ct);
-
-            var request = new RetrieveEntityRequest
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+            var attributes = await registrationService.ListEntityAttributesAsync(entityLogicalName, ct);
+            return new PluginsEntityAttributesResponse
             {
-                LogicalName = entityLogicalName.ToLowerInvariant(),
-                EntityFilters = EntityFilters.Attributes,
-                RetrieveAsIfPublished = false
-            };
-
-            var response = (RetrieveEntityResponse)await client.ExecuteAsync(request);
-
-            var attributes = response.EntityMetadata.Attributes
-                .Select(a => new AttributeInfoDto
+                Attributes = attributes.Select(a => new AttributeInfoDto
                 {
                     LogicalName = a.LogicalName,
-                    DisplayName = a.DisplayName?.UserLocalizedLabel?.Label ?? a.LogicalName,
-                    AttributeType = a.AttributeType?.ToString() ?? "Unknown"
-                })
-                .OrderBy(a => a.LogicalName)
-                .ToList();
-
-            return new PluginsEntityAttributesResponse { Attributes = attributes };
+                    DisplayName = a.DisplayName,
+                    AttributeType = a.AttributeType
+                }).ToList()
+            };
         }, cancellationToken);
     }
 
@@ -4578,7 +4545,6 @@ public class RpcMethodHandler : IDisposable
         {
             Id = p.Id.ToString(),
             Name = p.Name,
-            DataSourceId = p.DataSourceId?.ToString(),
             DataSourceName = p.DataSourceName,
             RetrievePlugin = p.RetrievePlugin?.ToString(),
             RetrieveMultiplePlugin = p.RetrieveMultiplePlugin?.ToString(),
@@ -4701,6 +4667,7 @@ public class RpcMethodHandler : IDisposable
     [JsonRpcMethod("dataSources/unregister")]
     public async Task<DataSourcesUnregisterResponse> DataSourcesUnregisterAsync(
         string id,
+        bool force = false,
         string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
@@ -4710,7 +4677,7 @@ public class RpcMethodHandler : IDisposable
         return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var service = sp.GetRequiredService<IDataProviderService>();
-            await service.UnregisterDataSourceAsync(sourceId, cancellationToken: ct);
+            await service.UnregisterDataSourceAsync(sourceId, force, ct);
 
             return new DataSourcesUnregisterResponse { Success = true };
         }, cancellationToken);

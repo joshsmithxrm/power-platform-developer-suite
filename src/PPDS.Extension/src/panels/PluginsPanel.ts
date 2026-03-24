@@ -11,6 +11,7 @@ import type {
     PluginsPanelHostToWebview,
     PluginTreeData,
     PluginTreeNode,
+    PluginEntityChild,
 } from './webview/shared/message-types.js';
 import { assertNever } from './webview/shared/assert-never.js';
 
@@ -288,14 +289,14 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             if (Array.isArray(childArray)) {
                 for (const child of childArray) {
                     if (child && typeof child === 'object') {
-                        const c = child as Record<string, unknown>;
+                        const c = child as PluginEntityChild;
                         children.push({
-                            id: String(c['id'] ?? ''),
-                            name: String(c['name'] ?? c['typeName'] ?? c['id'] ?? ''),
-                            nodeType: String(c['nodeType'] ?? nodeType),
-                            isEnabled: typeof c['isEnabled'] === 'boolean' ? c['isEnabled'] : undefined,
-                            isManaged: typeof c['isManaged'] === 'boolean' ? c['isManaged'] : undefined,
-                            hasChildren: typeof c['hasChildren'] === 'boolean' ? c['hasChildren'] : false,
+                            id: String(c.id ?? ''),
+                            name: String(c.name ?? c.typeName ?? c.id ?? ''),
+                            nodeType: String(c.nodeType ?? nodeType),
+                            isEnabled: typeof c.isEnabled === 'boolean' ? c.isEnabled : undefined,
+                            isManaged: typeof c.isManaged === 'boolean' ? c.isManaged : undefined,
+                            hasChildren: typeof c.hasChildren === 'boolean' ? c.hasChildren : false,
                         });
                     }
                 }
@@ -524,28 +525,30 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 <div class="toolbar">
     <vscode-button id="refresh-btn" appearance="secondary" title="Refresh plugin registrations">Refresh</vscode-button>
     <div class="view-mode-group">
-        <vscode-button id="view-assembly-btn" appearance="secondary" title="View by assembly">Assembly</vscode-button>
-        <vscode-button id="view-message-btn" appearance="secondary" title="View by message">Message</vscode-button>
-        <vscode-button id="view-entity-btn" appearance="secondary" title="View by entity">Entity</vscode-button>
+        <vscode-button id="view-mode-assembly" appearance="secondary" title="View by assembly">Assembly</vscode-button>
+        <vscode-button id="view-mode-message" appearance="secondary" title="View by message">Message</vscode-button>
+        <vscode-button id="view-mode-entity" appearance="secondary" title="View by entity">Entity</vscode-button>
     </div>
+    <vscode-button id="expand-all-btn" appearance="secondary" title="Expand all nodes">Expand All</vscode-button>
+    <vscode-button id="collapse-all-btn" appearance="secondary" title="Collapse all nodes">Collapse All</vscode-button>
     <vscode-button id="register-btn" appearance="secondary" title="Register new plugin assembly or step">Register</vscode-button>
     <span class="toolbar-spacer"></span>
     <input type="text" id="search-input" class="toolbar-search" placeholder="Search registrations..." title="Filter by name, message, or entity" />
     <label class="filter-checkbox" title="Hide disabled steps">
-        <input type="checkbox" id="filter-hide-hidden" /> Hide Disabled
+        <input type="checkbox" id="hide-hidden-check" /> Hide Disabled
     </label>
     <label class="filter-checkbox" title="Hide Microsoft-managed assemblies">
-        <input type="checkbox" id="filter-hide-microsoft" /> Hide Microsoft
+        <input type="checkbox" id="hide-microsoft-check" /> Hide Microsoft
     </label>
     ${getEnvironmentPickerHtml()}
 </div>
 
 <div class="panel-content">
-    <div id="tree-pane" class="tree-pane">
+    <div id="tree-container" class="tree-pane">
         <div class="empty-state" id="empty-state">Loading plugin registrations...</div>
     </div>
     <div id="resize-handle" class="resize-handle"></div>
-    <div id="detail-pane" class="detail-pane">
+    <div id="detail-panel" class="detail-pane">
         <div class="detail-tabs-bar">
             <button class="detail-tab active" data-tab="details">Details</button>
             <button class="detail-tab" data-tab="steps">Steps</button>

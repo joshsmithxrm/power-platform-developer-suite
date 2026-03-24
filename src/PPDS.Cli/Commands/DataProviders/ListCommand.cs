@@ -116,7 +116,6 @@ public static class ListCommand
                     {
                         Id = p.Id,
                         Name = p.Name,
-                        DataSourceId = p.DataSourceId,
                         DataSourceName = p.DataSourceName,
                         RetrievePlugin = p.RetrievePlugin,
                         RetrieveMultiplePlugin = p.RetrieveMultiplePlugin,

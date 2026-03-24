@@ -3,7 +3,6 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
-using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Services;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
@@ -422,8 +421,7 @@ public class DataProviderServiceTests
                 return new EntityCollection { Entities = { provider } };
             });
 
-        var mockReporter = new Mock<IProgressReporter>();
-        await _sut.UnregisterDataSourceAsync(id, mockReporter.Object);
+        await _sut.UnregisterDataSourceAsync(id, force: true);
 
         // Should delete: 1 provider + 1 data source
         Assert.Equal(2, _deletedEntities.Count);

@@ -452,6 +452,90 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }).ToList();
     }
 
+    /// <summary>
+    /// Lists available SDK messages, optionally filtered by name.
+    /// Fetches all pages to ensure complete results.
+    /// </summary>
+    public async Task<List<string>> ListMessagesAsync(string? filter, CancellationToken cancellationToken = default)
+    {
+        var query = new QueryExpression(SdkMessage.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(SdkMessage.Fields.Name)
+        };
+
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            query.Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessage.Fields.Name, ConditionOperator.Like,
+                        $"%{filter}%")
+                }
+            };
+        }
+
+        var messages = new List<string>();
+        int pageNumber = 1;
+        string? pagingCookie = null;
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            query.PageInfo = new PagingInfo
+            {
+                Count = 5000,
+                PageNumber = pageNumber,
+                PagingCookie = pagingCookie
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+
+            foreach (var e in results.Entities)
+            {
+                var name = e.GetAttributeValue<string>(SdkMessage.Fields.Name);
+                if (!string.IsNullOrEmpty(name))
+                    messages.Add(name);
+            }
+
+            if (!results.MoreRecords) break;
+            pagingCookie = results.PagingCookie;
+            pageNumber++;
+        }
+
+        messages.Sort(StringComparer.OrdinalIgnoreCase);
+        return messages;
+    }
+
+    /// <summary>
+    /// Returns attribute metadata for an entity.
+    /// </summary>
+    public async Task<List<AttributeMetadataInfo>> ListEntityAttributesAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.ToLowerInvariant(),
+            EntityFilters = EntityFilters.Attributes,
+            RetrieveAsIfPublished = false
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var response = (RetrieveEntityResponse)await ExecuteAsync(request, client, cancellationToken);
+
+        return response.EntityMetadata.Attributes
+            .Select(a => new AttributeMetadataInfo(
+                a.LogicalName,
+                a.DisplayName?.UserLocalizedLabel?.Label ?? a.LogicalName,
+                a.AttributeType?.ToString() ?? "Unknown"))
+            .OrderBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     #endregion
 
     #region Lookup Operations
@@ -1399,7 +1483,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var existingStep = await GetStepByIdWithManagedStateAsync(stepId, cancellationToken);
         if (existingStep == null)
         {
-            throw new InvalidOperationException($"Step with ID '{stepId}' not found.");
+            throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Step with ID '{stepId}' not found.");
         }
 
         // Check managed state
@@ -1409,7 +1493,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (isManaged && !isCustomizable)
         {
             var stepName = existingStep.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name);
-            throw new InvalidOperationException($"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
+            throw new PpdsException(ErrorCodes.Plugin.ManagedComponent, $"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
         }
 
         // Build update entity with only changed properties
