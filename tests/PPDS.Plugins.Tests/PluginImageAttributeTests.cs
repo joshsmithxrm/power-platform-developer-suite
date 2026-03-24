@@ -17,6 +17,8 @@ public class PluginImageAttributeTests
         Assert.Null(attribute.Attributes);
         Assert.Null(attribute.EntityAlias);
         Assert.Null(attribute.StepId);
+        Assert.Null(attribute.Description);
+        Assert.Null(attribute.MessagePropertyName);
     }
 
     [Fact]
@@ -103,6 +105,34 @@ public class PluginImageAttributeTests
     {
         var attribute = new PluginImageAttribute { StepId = "step1" };
         Assert.Equal("step1", attribute.StepId);
+    }
+
+    [Fact]
+    public void Description_DefaultsToNull()
+    {
+        var attribute = new PluginImageAttribute();
+        Assert.Null(attribute.Description);
+    }
+
+    [Fact]
+    public void Description_CanBeSet()
+    {
+        var attribute = new PluginImageAttribute { Description = "Captures account name before update" };
+        Assert.Equal("Captures account name before update", attribute.Description);
+    }
+
+    [Fact]
+    public void MessagePropertyName_DefaultsToNull()
+    {
+        var attribute = new PluginImageAttribute();
+        Assert.Null(attribute.MessagePropertyName);
+    }
+
+    [Fact]
+    public void MessagePropertyName_CanBeSet()
+    {
+        var attribute = new PluginImageAttribute { MessagePropertyName = "Target" };
+        Assert.Equal("Target", attribute.MessagePropertyName);
     }
 
     #endregion

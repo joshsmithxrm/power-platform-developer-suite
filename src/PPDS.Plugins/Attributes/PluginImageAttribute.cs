@@ -58,6 +58,19 @@ namespace PPDS.Plugins
         public string? StepId { get; set; }
 
         /// <summary>
+        /// Gets or sets a description of this image's purpose.
+        /// Stored as metadata in Dataverse.
+        /// </summary>
+        public string? Description { get; set; }
+
+        /// <summary>
+        /// Gets or sets the message property name that carries the entity.
+        /// If null, auto-inferred from the message name (e.g., "Target" for Create/Update).
+        /// Override for non-standard messages.
+        /// </summary>
+        public string? MessagePropertyName { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the PluginImageAttribute class.
         /// </summary>
         public PluginImageAttribute()
