@@ -193,7 +193,7 @@ After ALL agents return, compile findings into:
 
 ## Output
 
-Present findings to the user for discussion — do NOT save to `docs/plans/` or create an action plan. Wait for the user's input before proposing changes.
+Present findings to the user for discussion — do NOT save to `.plans/` or create an action plan. Wait for the user's input before proposing changes.
 
 ## Structured Output
 

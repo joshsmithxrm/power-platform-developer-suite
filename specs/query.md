@@ -20,7 +20,7 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 
 ### Non-Goals
 
-- Full SQL compatibility (subqueries, UNION not yet supported; see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md) for planned phases)
+- Full SQL compatibility (subqueries, UNION, CASE, functions not yet supported — see Unsupported SQL Features and Roadmap sections below)
 - Query optimization beyond plan-layer routing (FetchXML pushdown is maximized; client-side operators are fallbacks)
 - OData query generation (FetchXML is the target format)
 
@@ -120,7 +120,7 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 
 ### Unsupported SQL Features
 
-- Subqueries (`SELECT * FROM (SELECT...)`) — planned, see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md)
+- Subqueries (`SELECT * FROM (SELECT...)`, `WHERE id IN (SELECT ...)`, `EXISTS`) — planned
 - UNION/INTERSECT/EXCEPT — planned
 - Complex expressions (`revenue * 1.1`, `CASE WHEN`) — planned
 - Functions (`CONCAT()`, `UPPER()`) — planned
@@ -605,7 +605,7 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 - **Query builder TUI**: Interactive query construction with autocomplete
 - **Explain plan**: Show how FetchXML will be executed (`ExplainAsync()` infrastructure exists)
 - **Query templates**: Parameterized saved queries
-- **Advanced SQL features**: Subqueries, UNION, CASE, functions, window functions — see [query engine roadmap](../docs/plans/2026-03-18-query-engine-roadmap.md)
+- **Advanced SQL features**: Subqueries, UNION/INTERSECT/EXCEPT, CASE/IIF, scalar functions (string, date, CAST), window functions, variables
 
 ---
 

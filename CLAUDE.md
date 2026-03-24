@@ -31,7 +31,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 - `src/PPDS.Dataverse/Generated/` - Early-bound entities (DO NOT edit)
 - `specs/` - Feature specifications
 - `specs/CONSTITUTION.md` - Non-negotiable principles (read before any work)
-- `docs/plans/` - Implementation plans
+- `.plans/` - Implementation plans (ephemeral, gitignored)
 
 ## Testing
 
@@ -49,7 +49,7 @@ SDK, CLI, TUI, VS Code Extension, and MCP server for Power Platform development.
 
 ## Extension Versioning
 
-Odd/even minor convention: odd minor = pre-release, even minor = stable. See `docs/plans/2026-03-03-vscode-extension-prerelease-design.md`.
+Odd/even minor convention: odd minor = pre-release, even minor = stable. See `.plans/2026-03-03-vscode-extension-prerelease-design.md`.
 
 ## Architecture
 

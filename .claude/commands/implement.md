@@ -25,7 +25,7 @@ Key tools and skills used throughout:
 - `/converge` for review-fix convergence loops
 
 ## Input
-$ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3-design.md`)
+$ARGUMENTS = path to the plan file (e.g., `.plans/2026-02-08-query-engine-v3-design.md`)
 
 ## Process
 

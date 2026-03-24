@@ -66,7 +66,7 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 **SL1.** One spec per domain concept, named after the thing — not the project, surface, or enhancement. `plugin-traces.md` not `tui-plugin-traces.md`. `data-explorer.md` not `vscode-data-explorer-monaco-editor.md`. Cross-cutting architectural patterns are legitimate standalone specs.
 
-**SL2.** Specs are living documents — updated as the feature evolves. Plans (`docs/plans/`) are ephemeral and consumed by implementation. Project coordination documents (parity, polish, audit) are plans, not specs.
+**SL2.** Specs are living documents — updated as the feature evolves. Plans (`.plans/`) are ephemeral and consumed by implementation. Project coordination documents (parity, polish, audit) are plans, not specs. Specs must never reference plans — a spec must stand on its own. If a plan contains design context the spec needs, absorb that content into the spec; do not link to the plan.
 
 **SL3.** Surface-specific behavior (TUI screen layout, Extension panel wiring, MCP tool schema) lives in surface sections within the domain spec, not in separate spec files.
 

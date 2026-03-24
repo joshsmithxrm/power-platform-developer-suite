@@ -92,7 +92,7 @@ A mechanical enforcement system that ensures AI agents follow the PPDS developme
 {
   "branch": "feature/import-jobs",
   "spec": "specs/import-jobs.md",
-  "plan": "docs/plans/2026-03-16-import-jobs.md",
+  "plan": ".plans/2026-03-16-import-jobs.md",
   "started": "2026-03-16T15:00:00Z",
   "last_commit": "abc1234",
   "gates": {

@@ -55,19 +55,19 @@ When the design is approved:
 ### 6. Transition
 
 After user approves the written spec:
-1. Write an implementation plan to `docs/plans/`
+1. Write an implementation plan to `.plans/`
 2. Commit the spec and plan
 3. Present the plan path and pipeline command:
 
-> Plan saved to `docs/plans/<filename>.md`.
+> Plan saved to `.plans/<filename>.md`.
 >
-> To execute: `python scripts/pipeline.py docs/plans/<filename>.md`
+> To execute: `python scripts/pipeline.py .plans/<filename>.md`
 >
 > Or say "run it" and I'll invoke the pipeline from here.
 
 If the user wants to proceed immediately, invoke the pipeline:
 ```bash
-python scripts/pipeline.py docs/plans/<filename>.md
+python scripts/pipeline.py .plans/<filename>.md
 ```
 Run this in the background so the user can check `/status` while it runs.
 

@@ -100,7 +100,7 @@ enhancement. `plugin-traces.md` not `tui-plugin-traces.md`. `data-explorer.md` n
 `vscode-data-explorer-monaco-editor.md`. Cross-cutting architectural patterns are legitimate
 standalone specs.
 
-**SL2.** Specs are living documents — updated as the feature evolves. Plans (`docs/plans/`) are
+**SL2.** Specs are living documents — updated as the feature evolves. Plans (`.plans/`) are
 ephemeral and consumed by implementation. Project coordination documents (parity, polish, audit)
 are plans, not specs.
 
@@ -272,18 +272,18 @@ Session 2 applies the governance rules to restructure the existing specs. Not al
 
 | Current Spec | Action | Target |
 |-------------|--------|--------|
-| `panel-parity.md` | Decompose into individual feature specs. Project coordination content → `docs/plans/`. | `import-jobs.md`, `connection-references.md`, `environment-variables.md`, `metadata-browser.md`, `web-resources.md` (plugin-traces.md already exists) |
+| `panel-parity.md` | Decompose into individual feature specs. Project coordination content → `.plans/`. | `import-jobs.md`, `connection-references.md`, `environment-variables.md`, `metadata-browser.md`, `web-resources.md` (plugin-traces.md already exists) |
 | `tui-plugin-traces.md` | Merge as TUI Surface section into `plugin-traces.md`. Delete original. | `plugin-traces.md` |
 | `tui-solutions.md` | Merge as TUI Surface section into `solutions.md` (new). Delete original. | `solutions.md` |
 | `tui-migration.md` | Merge as TUI Surface section into `migration.md`. Delete original. | `migration.md` |
 | `tui-plugin-registration.md` | Merge as TUI Surface section into `plugins.md`. Delete original. | `plugins.md` |
 | `tui-environment-dashboard.md` | Merge as TUI Surface section into new spec or `architecture.md`. Delete original. | TBD during session 2 |
-| `tui-foundation.md` | Project spec (refactoring). Move to `docs/plans/`. | `docs/plans/` |
-| `query-parity.md` | Project spec (A2 alignment). Absorb "how it should work" into `query.md`. Move project tracking to `docs/plans/`. Delete original. | `query.md` + `docs/plans/` |
-| `query-engine-v2.md` | Phased roadmap. Absorb implemented phases into `query.md`. Move unimplemented phases to `docs/plans/`. Delete original. | `query.md` + `docs/plans/` |
+| `tui-foundation.md` | Project spec (refactoring). Move to `.plans/`. | `.plans/` |
+| `query-parity.md` | Project spec (A2 alignment). Absorb "how it should work" into `query.md`. Move project tracking to `.plans/`. Delete original. | `query.md` + `.plans/` |
+| `query-engine-v2.md` | Phased roadmap. Absorb implemented phases into `query.md`. Move unimplemented phases to `.plans/`. Delete original. | `query.md` + `.plans/` |
 | `vscode-data-explorer-monaco-editor.md` | Enhancement spec. Absorb into `data-explorer.md` (new). Delete original. | `data-explorer.md` |
 | `vscode-data-explorer-selection-copy.md` | Enhancement spec. Absorb into `data-explorer.md` (new). Delete original. | `data-explorer.md` |
-| `vscode-persistence-and-solutions-polish.md` | Enhancement project spec. Absorb relevant content into `solutions.md` and other feature specs. Delete original. | Multiple feature specs + `docs/plans/` |
+| `vscode-persistence-and-solutions-polish.md` | Enhancement project spec. Absorb relevant content into `solutions.md` and other feature specs. Delete original. | Multiple feature specs + `.plans/` |
 | `solution-component-names.md` | Enhancement spec. Absorb into `solutions.md`. Delete original. | `solutions.md` |
 | `vscode-webview-cdp-tool.md` | Rename to `ext-verify-tool.md` (name after the thing). | `ext-verify-tool.md` |
 | `tui-verify-tool.md` | Already named correctly (it IS a tool). Keep. | No change |
