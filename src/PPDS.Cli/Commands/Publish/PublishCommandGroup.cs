@@ -88,7 +88,7 @@ public static class PublishCommandGroup
             {
                 result.AddError("--type is required with --solution. Supported types: webresource");
             }
-            else if (!all && names.Length == 0 && solution == null)
+            else if (names.Length == 0 && solution == null)
             {
                 // Bare "ppds publish" with no flags — we let it through and show help in execute
             }
