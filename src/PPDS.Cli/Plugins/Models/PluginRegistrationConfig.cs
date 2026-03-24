@@ -60,6 +60,14 @@ public sealed class PluginRegistrationConfig
     public List<PluginAssemblyConfig> Assemblies { get; set; } = [];
 
     /// <summary>
+    /// Custom API definitions extracted from annotated plugin types.
+    /// Null when no custom APIs are present (omitted from JSON output).
+    /// </summary>
+    [JsonPropertyName("customApis")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiConfig>? CustomApis { get; set; }
+
+    /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
     /// </summary>
     [JsonExtensionData]
@@ -143,6 +151,14 @@ public sealed class PluginAssemblyConfig
     /// </summary>
     [JsonPropertyName("types")]
     public List<PluginTypeConfig> Types { get; set; } = [];
+
+    /// <summary>
+    /// Custom API definitions extracted from annotated plugin types in this assembly.
+    /// Null when no custom APIs are present (omitted from JSON output).
+    /// </summary>
+    [JsonPropertyName("customApis")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiConfig>? CustomApis { get; set; }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
@@ -330,6 +346,98 @@ public sealed class PluginStepConfig
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
     /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Configuration for a Custom API registration derived from a <c>CustomApiAttribute</c>-annotated type.
+/// </summary>
+public sealed class CustomApiConfig
+{
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("pluginTypeName")]
+    public string PluginTypeName { get; set; } = "";
+
+    [JsonPropertyName("bindingType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BindingType { get; set; }
+
+    [JsonPropertyName("boundEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundEntity { get; set; }
+
+    [JsonPropertyName("isFunction")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsFunction { get; set; }
+
+    [JsonPropertyName("isPrivate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPrivate { get; set; }
+
+    [JsonPropertyName("executePrivilegeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutePrivilegeName { get; set; }
+
+    [JsonPropertyName("allowedProcessingStepType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AllowedProcessingStepType { get; set; }
+
+    [JsonPropertyName("parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiParameterConfig>? Parameters { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Configuration for a Custom API request or response parameter.
+/// </summary>
+public sealed class CustomApiParameterConfig
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    [JsonPropertyName("logicalEntityName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogicalEntityName { get; set; }
+
+    [JsonPropertyName("isOptional")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsOptional { get; set; }
+
+    [JsonPropertyName("direction")]
+    public string Direction { get; set; } = "Input";
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }

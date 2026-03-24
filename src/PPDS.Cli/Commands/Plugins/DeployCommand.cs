@@ -9,6 +9,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -95,7 +96,20 @@ public static class DeployCommand
             var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
             var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
 
-            if (config?.Assemblies == null || config.Assemblies.Count == 0)
+            // Collect custom APIs from both root-level and per-assembly sections
+            var allCustomApis = new List<CustomApiConfig>();
+            if (config?.CustomApis != null)
+                allCustomApis.AddRange(config.CustomApis);
+            if (config?.Assemblies != null)
+            {
+                foreach (var asm in config.Assemblies)
+                {
+                    if (asm.CustomApis != null)
+                        allCustomApis.AddRange(asm.CustomApis);
+                }
+            }
+
+            if ((config?.Assemblies == null || config.Assemblies.Count == 0) && allCustomApis.Count == 0)
             {
                 writer.WriteError(new StructuredError(
                     ErrorCodes.Validation.InvalidValue,
@@ -105,7 +119,7 @@ public static class DeployCommand
             }
 
             // Validate configuration
-            config.Validate();
+            config!.Validate();
 
             // Connect to Dataverse
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
@@ -117,6 +131,7 @@ public static class DeployCommand
                 cancellationToken);
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
             if (!globalOptions.IsJsonMode)
             {
@@ -134,19 +149,34 @@ public static class DeployCommand
             var configDir = configFile.DirectoryName ?? ".";
             var results = new List<DeploymentResult>();
 
-            foreach (var assemblyConfig in config.Assemblies)
+            if (config.Assemblies != null)
             {
-                var result = await DeployAssemblyAsync(
+                foreach (var assemblyConfig in config.Assemblies)
+                {
+                    var result = await DeployAssemblyAsync(
+                        registrationService,
+                        assemblyConfig,
+                        configDir,
+                        solutionOverride,
+                        clean,
+                        dryRun,
+                        globalOptions,
+                        cancellationToken);
+
+                    results.Add(result);
+                }
+            }
+
+            // Deploy custom APIs
+            if (allCustomApis.Count > 0)
+            {
+                await DeployCustomApisAsync(
                     registrationService,
-                    assemblyConfig,
-                    configDir,
-                    solutionOverride,
-                    clean,
+                    customApiService,
+                    allCustomApis,
                     dryRun,
                     globalOptions,
                     cancellationToken);
-
-                results.Add(result);
             }
 
             if (globalOptions.IsJsonMode)
@@ -413,6 +443,78 @@ public static class DeployCommand
         }
 
         return result;
+    }
+
+    private static async Task DeployCustomApisAsync(
+        IPluginRegistrationService registrationService,
+        ICustomApiService customApiService,
+        List<CustomApiConfig> customApis,
+        bool dryRun,
+        GlobalOptionValues globalOptions,
+        CancellationToken cancellationToken)
+    {
+        if (!globalOptions.IsJsonMode)
+            Console.Error.WriteLine($"Deploying {customApis.Count} custom API(s)...");
+
+        foreach (var apiConfig in customApis)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Look up the plugin type by fully qualified name
+            var pluginType = await registrationService.GetPluginTypeByNameAsync(
+                apiConfig.PluginTypeName,
+                cancellationToken);
+
+            if (pluginType == null)
+            {
+                if (!globalOptions.IsJsonMode)
+                    Console.Error.WriteLine($"  [Skip] Plugin type not found: {apiConfig.PluginTypeName}");
+                continue;
+            }
+
+            // Build parameter registrations
+            List<CustomApiParameterRegistration>? parameters = null;
+            if (apiConfig.Parameters != null && apiConfig.Parameters.Count > 0)
+            {
+                parameters = apiConfig.Parameters
+                    .Select(p => new CustomApiParameterRegistration(
+                        UniqueName: p.UniqueName ?? p.Name,
+                        DisplayName: p.DisplayName ?? p.Name,
+                        Name: p.Name,
+                        Description: p.Description,
+                        Type: p.Type,
+                        LogicalEntityName: p.LogicalEntityName,
+                        IsOptional: p.IsOptional,
+                        Direction: p.Direction))
+                    .ToList();
+            }
+
+            var registration = new CustomApiRegistration(
+                UniqueName: apiConfig.UniqueName,
+                DisplayName: apiConfig.DisplayName,
+                Name: apiConfig.Name,
+                Description: apiConfig.Description,
+                PluginTypeId: pluginType.Id,
+                BindingType: apiConfig.BindingType,
+                BoundEntity: apiConfig.BoundEntity,
+                IsFunction: apiConfig.IsFunction,
+                IsPrivate: apiConfig.IsPrivate,
+                ExecutePrivilegeName: apiConfig.ExecutePrivilegeName,
+                AllowedProcessingStepType: apiConfig.AllowedProcessingStepType,
+                Parameters: parameters);
+
+            if (dryRun)
+            {
+                if (!globalOptions.IsJsonMode)
+                    Console.Error.WriteLine($"  [Dry-Run] Would register custom API: {apiConfig.UniqueName}");
+            }
+            else
+            {
+                var apiId = await customApiService.RegisterAsync(registration, cancellationToken: cancellationToken);
+                if (!globalOptions.IsJsonMode)
+                    Console.Error.WriteLine($"  Custom API registered: {apiConfig.UniqueName} ({apiId})");
+            }
+        }
     }
 
     private static string? ResolveAssemblyPath(PluginAssemblyConfig config, string configDir)

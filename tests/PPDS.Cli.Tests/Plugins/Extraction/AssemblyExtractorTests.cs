@@ -446,4 +446,321 @@ public sealed class AssemblyExtractorTests : IDisposable
     }
 
     #endregion
+
+    #region CustomApi extraction tests
+
+    [Fact]
+    public void Extract_CustomApiAttribute_ExtractsBasicProperties()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        Assert.NotNull(config.CustomApis);
+        Assert.Single(config.CustomApis);
+
+        var api = config.CustomApis[0];
+        Assert.Equal("ppds_TestApi", api.UniqueName);
+        Assert.Equal("Test Api", api.DisplayName);
+        Assert.Equal("TestApiPlugin", api.PluginTypeName);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_PluginTypeNameIsFullyQualified()
+    {
+        var dllPath = CompileTestAssembly("""
+            namespace MyCompany.Plugins
+            {
+                [CustomApi(UniqueName = "ppds_MyApi", DisplayName = "My Api")]
+                public class MyApiPlugin { }
+            }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        Assert.NotNull(config.CustomApis);
+        Assert.Single(config.CustomApis);
+        Assert.Equal("MyCompany.Plugins.MyApiPlugin", config.CustomApis[0].PluginTypeName);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_WithOptionalProperties()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(
+                UniqueName = "ppds_TestApi",
+                DisplayName = "Test Api",
+                Name = "test_api",
+                Description = "Does something useful",
+                IsFunction = true,
+                IsPrivate = true,
+                ExecutePrivilegeName = "prvTestApi")]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Equal("test_api", api.Name);
+        Assert.Equal("Does something useful", api.Description);
+        Assert.True(api.IsFunction);
+        Assert.True(api.IsPrivate);
+        Assert.Equal("prvTestApi", api.ExecutePrivilegeName);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_BindingTypeGlobal_OmitsBindingType()
+    {
+        // Global is the default — should be omitted (null) from config
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                BindingType = ApiBindingType.Global)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Null(api.BindingType);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_BindingTypeEntity_WritesBindingType()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                BindingType = ApiBindingType.Entity,
+                BoundEntity = "account")]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Equal("Entity", api.BindingType);
+        Assert.Equal("account", api.BoundEntity);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_BindingTypeEntityCollection_WritesBindingType()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                BindingType = ApiBindingType.EntityCollection,
+                BoundEntity = "contact")]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Equal("EntityCollection", api.BindingType);
+        Assert.Equal("contact", api.BoundEntity);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_AllowedProcessingStepTypeNone_OmitsFromConfig()
+    {
+        // None is the default — should be omitted (null) from config
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                AllowedProcessingStepType = ApiProcessingStepType.None)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Null(api.AllowedProcessingStepType);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_AllowedProcessingStepTypeAsyncOnly_WritesToConfig()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                AllowedProcessingStepType = ApiProcessingStepType.AsyncOnly)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Equal("AsyncOnly", api.AllowedProcessingStepType);
+    }
+
+    [Fact]
+    public void Extract_CustomApiAttribute_AllowedProcessingStepTypeSyncAndAsync_WritesToConfig()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api",
+                AllowedProcessingStepType = ApiProcessingStepType.SyncAndAsync)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.Equal("SyncAndAsync", api.AllowedProcessingStepType);
+    }
+
+    [Fact]
+    public void Extract_CustomApiWithParameter_ExtractsParameters()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            [CustomApiParameter(Name = "OrderId", Type = ApiParameterType.Guid, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "Result", Type = ApiParameterType.String, Direction = ParameterDirection.Output)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var api = config.CustomApis![0];
+        Assert.NotNull(api.Parameters);
+        Assert.Equal(2, api.Parameters.Count);
+
+        var input = api.Parameters.First(p => p.Direction == "Input");
+        Assert.Equal("OrderId", input.Name);
+        Assert.Equal("Guid", input.Type);
+
+        var output = api.Parameters.First(p => p.Direction == "Output");
+        Assert.Equal("Result", output.Name);
+        Assert.Equal("String", output.Type);
+    }
+
+    [Fact]
+    public void Extract_CustomApiParameter_AllApiParameterTypes_MapCorrectly()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            [CustomApiParameter(Name = "BoolParam", Type = ApiParameterType.Boolean, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "DateParam", Type = ApiParameterType.DateTime, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "DecParam", Type = ApiParameterType.Decimal, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "EntParam", Type = ApiParameterType.Entity, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "EntColParam", Type = ApiParameterType.EntityCollection, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "EntRefParam", Type = ApiParameterType.EntityReference, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "FloatParam", Type = ApiParameterType.Float, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "IntParam", Type = ApiParameterType.Integer, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "MoneyParam", Type = ApiParameterType.Money, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "PicklistParam", Type = ApiParameterType.Picklist, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "StrParam", Type = ApiParameterType.String, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "StrArrParam", Type = ApiParameterType.StringArray, Direction = ParameterDirection.Input)]
+            [CustomApiParameter(Name = "GuidParam", Type = ApiParameterType.Guid, Direction = ParameterDirection.Input)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var parameters = config.CustomApis![0].Parameters!;
+        Assert.Equal(13, parameters.Count);
+
+        Assert.Equal("Boolean", parameters.First(p => p.Name == "BoolParam").Type);
+        Assert.Equal("DateTime", parameters.First(p => p.Name == "DateParam").Type);
+        Assert.Equal("Decimal", parameters.First(p => p.Name == "DecParam").Type);
+        Assert.Equal("Entity", parameters.First(p => p.Name == "EntParam").Type);
+        Assert.Equal("EntityCollection", parameters.First(p => p.Name == "EntColParam").Type);
+        Assert.Equal("EntityReference", parameters.First(p => p.Name == "EntRefParam").Type);
+        Assert.Equal("Float", parameters.First(p => p.Name == "FloatParam").Type);
+        Assert.Equal("Integer", parameters.First(p => p.Name == "IntParam").Type);
+        Assert.Equal("Money", parameters.First(p => p.Name == "MoneyParam").Type);
+        Assert.Equal("Picklist", parameters.First(p => p.Name == "PicklistParam").Type);
+        Assert.Equal("String", parameters.First(p => p.Name == "StrParam").Type);
+        Assert.Equal("StringArray", parameters.First(p => p.Name == "StrArrParam").Type);
+        Assert.Equal("Guid", parameters.First(p => p.Name == "GuidParam").Type);
+    }
+
+    [Fact]
+    public void Extract_CustomApiParameter_WithOptionalProperties()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            [CustomApiParameter(
+                Name = "Notes",
+                UniqueName = "ppds_Notes",
+                DisplayName = "Notes Display",
+                Description = "Optional notes",
+                Type = ApiParameterType.String,
+                Direction = ParameterDirection.Input,
+                IsOptional = true,
+                LogicalEntityName = null)]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var param = config.CustomApis![0].Parameters![0];
+        Assert.Equal("Notes", param.Name);
+        Assert.Equal("ppds_Notes", param.UniqueName);
+        Assert.Equal("Notes Display", param.DisplayName);
+        Assert.Equal("Optional notes", param.Description);
+        Assert.True(param.IsOptional);
+    }
+
+    [Fact]
+    public void Extract_CustomApiParameter_WithLogicalEntityName()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            [CustomApiParameter(Name = "Target", Type = ApiParameterType.EntityReference,
+                Direction = ParameterDirection.Input, LogicalEntityName = "account")]
+            public class TestApiPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        var param = config.CustomApis![0].Parameters![0];
+        Assert.Equal("account", param.LogicalEntityName);
+    }
+
+    [Fact]
+    public void Extract_NoCustomApiAttribute_CustomApisIsNull()
+    {
+        var dllPath = CompileTestAssembly("""
+            [PluginStep(Message = "Create", EntityLogicalName = "account", Stage = PluginStage.PostOperation)]
+            public class TestPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        Assert.Null(config.CustomApis);
+    }
+
+    [Fact]
+    public void Extract_TypeWithCustomApiAndPluginStep_ExtractsBoth()
+    {
+        var dllPath = CompileTestAssembly("""
+            [CustomApi(UniqueName = "ppds_TestApi", DisplayName = "Test Api")]
+            public class ApiPlugin { }
+
+            [PluginStep(Message = "Create", EntityLogicalName = "account", Stage = PluginStage.PostOperation)]
+            public class StepPlugin { }
+            """);
+
+        using var extractor = AssemblyExtractor.Create(dllPath);
+        var config = extractor.Extract();
+
+        Assert.NotNull(config.CustomApis);
+        Assert.Single(config.CustomApis);
+        Assert.Single(config.Types);
+    }
+
+    #endregion
 }

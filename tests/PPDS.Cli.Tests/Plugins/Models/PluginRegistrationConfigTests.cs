@@ -299,6 +299,274 @@ public class PluginRegistrationConfigTests
 
     #endregion
 
+    #region CustomApi Serialization Tests
+
+    [Fact]
+    public void Serialize_ConfigWithCustomApis_IncludesCustomApisSection()
+    {
+        var config = new PluginRegistrationConfig
+        {
+            Assemblies =
+            [
+                new PluginAssemblyConfig
+                {
+                    Name = "MyPlugins",
+                    CustomApis =
+                    [
+                        new CustomApiConfig
+                        {
+                            UniqueName = "ppds_TestApi",
+                            DisplayName = "Test Api",
+                            PluginTypeName = "MyPlugins.TestApiPlugin"
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var json = JsonSerializer.Serialize(config, JsonOptions);
+
+        Assert.Contains("\"customApis\"", json);
+        Assert.Contains("\"ppds_TestApi\"", json);
+        Assert.Contains("\"Test Api\"", json);
+        Assert.Contains("\"MyPlugins.TestApiPlugin\"", json);
+    }
+
+    [Fact]
+    public void Serialize_CustomApiConfig_OmitsNullOptionalProperties()
+    {
+        var api = new CustomApiConfig
+        {
+            UniqueName = "ppds_TestApi",
+            DisplayName = "Test Api",
+            PluginTypeName = "MyPlugins.TestApiPlugin"
+            // Name, Description, BindingType, etc. left null
+        };
+
+        var json = JsonSerializer.Serialize(api, JsonOptions);
+
+        Assert.DoesNotContain("\"name\"", json);
+        Assert.DoesNotContain("\"description\"", json);
+        Assert.DoesNotContain("\"bindingType\"", json);
+        Assert.DoesNotContain("\"boundEntity\"", json);
+        Assert.DoesNotContain("\"executePrivilegeName\"", json);
+        Assert.DoesNotContain("\"allowedProcessingStepType\"", json);
+        Assert.DoesNotContain("\"parameters\"", json);
+    }
+
+    [Fact]
+    public void Serialize_CustomApiConfig_OmitsDefaultBoolProperties()
+    {
+        var api = new CustomApiConfig
+        {
+            UniqueName = "ppds_TestApi",
+            DisplayName = "Test Api",
+            PluginTypeName = "MyPlugins.TestApiPlugin",
+            IsFunction = false,
+            IsPrivate = false
+        };
+
+        var json = JsonSerializer.Serialize(api, JsonOptions);
+
+        // WhenWritingDefault means false bools are omitted
+        Assert.DoesNotContain("\"isFunction\"", json);
+        Assert.DoesNotContain("\"isPrivate\"", json);
+    }
+
+    [Fact]
+    public void Serialize_CustomApiConfig_IncludesNonDefaultBoolProperties()
+    {
+        var api = new CustomApiConfig
+        {
+            UniqueName = "ppds_TestApi",
+            DisplayName = "Test Api",
+            PluginTypeName = "MyPlugins.TestApiPlugin",
+            IsFunction = true,
+            IsPrivate = true
+        };
+
+        var json = JsonSerializer.Serialize(api, JsonOptions);
+
+        Assert.Contains("\"isFunction\": true", json);
+        Assert.Contains("\"isPrivate\": true", json);
+    }
+
+    [Fact]
+    public void Serialize_CustomApiConfig_WithParameters_IncludesParametersSection()
+    {
+        var api = new CustomApiConfig
+        {
+            UniqueName = "ppds_TestApi",
+            DisplayName = "Test Api",
+            PluginTypeName = "MyPlugins.TestApiPlugin",
+            Parameters =
+            [
+                new CustomApiParameterConfig
+                {
+                    Name = "OrderId",
+                    Type = "Guid",
+                    Direction = "Input"
+                },
+                new CustomApiParameterConfig
+                {
+                    Name = "Result",
+                    Type = "String",
+                    Direction = "Output"
+                }
+            ]
+        };
+
+        var json = JsonSerializer.Serialize(api, JsonOptions);
+
+        Assert.Contains("\"parameters\"", json);
+        Assert.Contains("\"OrderId\"", json);
+        Assert.Contains("\"Guid\"", json);
+        Assert.Contains("\"Input\"", json);
+        Assert.Contains("\"Result\"", json);
+        Assert.Contains("\"Output\"", json);
+    }
+
+    [Fact]
+    public void Deserialize_ConfigWithCustomApis_RestoresCustomApis()
+    {
+        var json = """
+        {
+            "version": "1.0",
+            "assemblies": [
+                {
+                    "name": "MyPlugins",
+                    "types": [],
+                    "customApis": [
+                        {
+                            "uniqueName": "ppds_TestApi",
+                            "displayName": "Test Api",
+                            "pluginTypeName": "MyPlugins.TestApiPlugin",
+                            "bindingType": "Entity",
+                            "boundEntity": "account",
+                            "isFunction": true,
+                            "parameters": [
+                                {
+                                    "name": "OrderId",
+                                    "type": "Guid",
+                                    "direction": "Input"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        """;
+
+        var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(json, JsonOptions);
+
+        Assert.NotNull(config);
+        var assembly = config.Assemblies[0];
+        Assert.NotNull(assembly.CustomApis);
+        Assert.Single(assembly.CustomApis);
+
+        var api = assembly.CustomApis[0];
+        Assert.Equal("ppds_TestApi", api.UniqueName);
+        Assert.Equal("Test Api", api.DisplayName);
+        Assert.Equal("MyPlugins.TestApiPlugin", api.PluginTypeName);
+        Assert.Equal("Entity", api.BindingType);
+        Assert.Equal("account", api.BoundEntity);
+        Assert.True(api.IsFunction);
+        Assert.NotNull(api.Parameters);
+        Assert.Single(api.Parameters);
+        Assert.Equal("OrderId", api.Parameters[0].Name);
+        Assert.Equal("Guid", api.Parameters[0].Type);
+        Assert.Equal("Input", api.Parameters[0].Direction);
+    }
+
+    [Fact]
+    public void Deserialize_ConfigWithoutCustomApis_CustomApisIsNull()
+    {
+        var json = """
+        {
+            "version": "1.0",
+            "assemblies": [
+                {
+                    "name": "MyPlugins",
+                    "types": []
+                }
+            ]
+        }
+        """;
+
+        var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(json, JsonOptions);
+
+        Assert.NotNull(config);
+        Assert.Null(config.Assemblies[0].CustomApis);
+    }
+
+    [Fact]
+    public void RoundTrip_CustomApiConfig_PreservesAllProperties()
+    {
+        var original = new CustomApiConfig
+        {
+            UniqueName = "ppds_ProcessOrder",
+            DisplayName = "Process Order",
+            Name = "process_order",
+            Description = "Processes an order",
+            PluginTypeName = "MyPlugins.ProcessOrderPlugin",
+            BindingType = "Entity",
+            BoundEntity = "salesorder",
+            IsFunction = true,
+            IsPrivate = false,
+            ExecutePrivilegeName = "prvProcessOrder",
+            AllowedProcessingStepType = "AsyncOnly",
+            Parameters =
+            [
+                new CustomApiParameterConfig
+                {
+                    Name = "OrderId",
+                    UniqueName = "ppds_OrderId",
+                    DisplayName = "Order ID",
+                    Description = "The order to process",
+                    Type = "Guid",
+                    IsOptional = false,
+                    Direction = "Input"
+                },
+                new CustomApiParameterConfig
+                {
+                    Name = "ConfirmationNumber",
+                    Type = "String",
+                    IsOptional = false,
+                    Direction = "Output"
+                }
+            ]
+        };
+
+        var json = JsonSerializer.Serialize(original, JsonOptions);
+        var deserialized = JsonSerializer.Deserialize<CustomApiConfig>(json, JsonOptions);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(original.UniqueName, deserialized.UniqueName);
+        Assert.Equal(original.DisplayName, deserialized.DisplayName);
+        Assert.Equal(original.Name, deserialized.Name);
+        Assert.Equal(original.Description, deserialized.Description);
+        Assert.Equal(original.PluginTypeName, deserialized.PluginTypeName);
+        Assert.Equal(original.BindingType, deserialized.BindingType);
+        Assert.Equal(original.BoundEntity, deserialized.BoundEntity);
+        Assert.Equal(original.IsFunction, deserialized.IsFunction);
+        Assert.Equal(original.ExecutePrivilegeName, deserialized.ExecutePrivilegeName);
+        Assert.Equal(original.AllowedProcessingStepType, deserialized.AllowedProcessingStepType);
+        Assert.NotNull(deserialized.Parameters);
+        Assert.Equal(2, deserialized.Parameters.Count);
+
+        var origParam = original.Parameters[0];
+        var deserParam = deserialized.Parameters[0];
+        Assert.Equal(origParam.Name, deserParam.Name);
+        Assert.Equal(origParam.UniqueName, deserParam.UniqueName);
+        Assert.Equal(origParam.DisplayName, deserParam.DisplayName);
+        Assert.Equal(origParam.Description, deserParam.Description);
+        Assert.Equal(origParam.Type, deserParam.Type);
+        Assert.Equal(origParam.Direction, deserParam.Direction);
+    }
+
+    #endregion
+
     #region Validation Tests
 
     [Fact]
