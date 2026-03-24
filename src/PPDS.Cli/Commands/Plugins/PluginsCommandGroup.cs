@@ -36,7 +36,7 @@ public static class PluginsCommandGroup
     /// </summary>
     public static Command Create()
     {
-        var command = new Command("plugins", "Plugin registration management: extract, deploy, register, diff, list, get, clean, download, update, unregister");
+        var command = new Command("plugins", "Plugin registration management: extract, deploy, register, diff, list, get, clean, download, update, unregister, enable, disable");
 
         command.Subcommands.Add(ExtractCommand.Create());
         command.Subcommands.Add(DeployCommand.Create());
@@ -48,6 +48,8 @@ public static class PluginsCommandGroup
         command.Subcommands.Add(DownloadCommand.Create());
         command.Subcommands.Add(UpdateCommand.Create());
         command.Subcommands.Add(UnregisterCommand.Create());
+        command.Subcommands.Add(EnableCommand.Create());
+        command.Subcommands.Add(DisableCommand.Create());
 
         return command;
     }
