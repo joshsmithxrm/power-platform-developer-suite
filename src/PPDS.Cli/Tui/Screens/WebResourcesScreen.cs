@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
 using Terminal.Gui;
@@ -17,6 +18,7 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     private CancellationTokenSource? _loadCts;
     private bool _textOnly = true;
     private Guid? _selectedSolutionId;
+    private bool _staleFilterChecked;
 
     public override string Title => "Web Resources";
 
@@ -46,6 +48,18 @@ internal sealed class WebResourcesScreen : TuiScreenBase
         _table.CellActivated += OnCellActivated;
 
         Content.Add(_table, _statusLabel);
+
+        // Restore persisted filter state before initial load
+        if (EnvironmentUrl != null)
+        {
+            var savedState = Session.GetTuiStateStore()
+                .LoadScreenState<WebResourcesScreenState>("WebResources", EnvironmentUrl);
+            if (savedState != null)
+            {
+                _selectedSolutionId = savedState.SelectedSolutionId;
+                _textOnly = savedState.TextOnly;
+            }
+        }
 
         if (EnvironmentUrl != null)
         {
@@ -90,6 +104,26 @@ internal sealed class WebResourcesScreen : TuiScreenBase
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ct);
             var service = provider.GetRequiredService<IWebResourceService>();
+
+            // Stale reference check: verify persisted solution still exists (first load only)
+            if (_selectedSolutionId.HasValue && !_staleFilterChecked)
+            {
+                _staleFilterChecked = true;
+                var solutionService = provider.GetRequiredService<ISolutionService>();
+                var solutions = await solutionService.ListAsync(cancellationToken: ct);
+                if (!solutions.Items.Any(s => s.Id == _selectedSolutionId.Value))
+                {
+                    _selectedSolutionId = null;
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
+                            new WebResourcesScreenState { SelectedSolutionId = null, TextOnly = _textOnly }),
+                        "WebResources.ClearStaleState");
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        _statusLabel.Text = "Previously filtered solution not found \u2014 showing all";
+                    });
+                }
+            }
 
             var wrResult = await service.ListAsync(_selectedSolutionId, _textOnly, cancellationToken: ct);
             _resources = wrResult.Items.ToList();
@@ -340,6 +374,12 @@ internal sealed class WebResourcesScreen : TuiScreenBase
                 Application.Run(dialog);
                 dialog.Dispose();
 
+                // Persist updated filter state
+                ErrorService.FireAndForget(
+                    Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl!,
+                        new WebResourcesScreenState { SelectedSolutionId = _selectedSolutionId, TextOnly = _textOnly }),
+                    "WebResources.SaveState");
+
                 // Reload with new filter
                 ErrorService.FireAndForget(LoadDataAsync(), "WebResources.FilterReload");
             });
@@ -357,6 +397,16 @@ internal sealed class WebResourcesScreen : TuiScreenBase
     private void ToggleTextOnly()
     {
         _textOnly = !_textOnly;
+
+        if (EnvironmentUrl != null)
+        {
+            // Persist updated filter state
+            ErrorService.FireAndForget(
+                Session.GetTuiStateStore().SaveScreenStateAsync("WebResources", EnvironmentUrl,
+                    new WebResourcesScreenState { SelectedSolutionId = _selectedSolutionId, TextOnly = _textOnly }),
+                "WebResources.SaveState");
+        }
+
         ErrorService.FireAndForget(LoadDataAsync(), "WebResources.ToggleTextOnly");
     }
 

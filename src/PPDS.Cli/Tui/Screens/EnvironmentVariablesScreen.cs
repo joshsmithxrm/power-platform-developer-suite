@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
 using Terminal.Gui;
@@ -15,6 +16,7 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
     private readonly Label _statusLabel;
     private List<EnvironmentVariableInfo> _variables = [];
     private string? _solutionFilter;
+    private bool _staleFilterChecked;
     private Dialog? _detailDialog;
     private bool _isShowingDetail;
 
@@ -49,6 +51,12 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
 
         if (EnvironmentUrl != null)
         {
+            // Restore persisted filter state
+            var savedState = Session.GetTuiStateStore()
+                .LoadScreenState<SolutionFilterScreenState>("EnvironmentVariables", EnvironmentUrl);
+            if (savedState != null)
+                _solutionFilter = savedState.SolutionFilter;
+
             ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.InitialLoad");
         }
         else
@@ -77,6 +85,35 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
             var service = provider.GetRequiredService<IEnvironmentVariableService>();
+
+            // Validate persisted solution filter still exists (first load only)
+            if (_solutionFilter != null && !_staleFilterChecked)
+            {
+                _staleFilterChecked = true;
+                var solutionService = provider.GetRequiredService<ISolutionService>();
+                var solutionsResult = await solutionService.ListAsync(
+                    includeManaged: false,
+                    cancellationToken: ScreenCancellation);
+
+                var exists = solutionsResult.Items.Any(s =>
+                    string.Equals(s.UniqueName, _solutionFilter, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    var staleName = _solutionFilter;
+                    _solutionFilter = null;
+
+                    // Persist cleared state
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
+                            new SolutionFilterScreenState { SolutionFilter = null }),
+                        "EnvironmentVariables.ClearStaleState");
+
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        _statusLabel.Text = $"Solution '{staleName}' no longer exists — filter cleared";
+                    });
+                }
+            }
 
             var evResult = await service.ListAsync(
                 solutionName: _solutionFilter,
@@ -526,6 +563,13 @@ internal sealed class EnvironmentVariablesScreen : TuiScreenBase
                 {
                     var idx = listView.SelectedItem;
                     _solutionFilter = idx == 0 ? null : names[idx];
+
+                    // Persist updated filter state
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("EnvironmentVariables", EnvironmentUrl!,
+                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                        "EnvironmentVariables.SaveState");
+
                     ErrorService.FireAndForget(LoadDataAsync(), "EnvironmentVariables.FilterApply");
                 }
             });

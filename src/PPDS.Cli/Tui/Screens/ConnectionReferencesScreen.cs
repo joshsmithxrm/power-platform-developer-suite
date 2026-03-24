@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Services;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Services;
 using Terminal.Gui;
@@ -16,6 +17,7 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
     private List<ConnectionReferenceInfo> _references = [];
     private List<ConnectionInfo> _connections = [];
     private string? _solutionFilter;
+    private bool _staleFilterChecked;
     private Dialog? _detailDialog;
     private bool _isShowingDetail;
 
@@ -50,6 +52,11 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
 
         if (EnvironmentUrl != null)
         {
+            var savedState = Session.GetTuiStateStore()
+                .LoadScreenState<SolutionFilterScreenState>("ConnectionReferences", EnvironmentUrl);
+            if (savedState != null)
+                _solutionFilter = savedState.SolutionFilter;
+
             ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.InitialLoad");
         }
         else
@@ -77,6 +84,32 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
             Application.Refresh();
 
             var provider = await Session.GetServiceProviderAsync(EnvironmentUrl!, ScreenCancellation);
+
+            // Stale filter check: verify persisted solution still exists (first load only)
+            if (_solutionFilter != null && !_staleFilterChecked)
+            {
+                _staleFilterChecked = true;
+                var solutionService = provider.GetRequiredService<ISolutionService>();
+                var solutions = await solutionService.ListAsync(
+                    includeManaged: false,
+                    cancellationToken: ScreenCancellation);
+                var exists = solutions.Items.Any(s =>
+                    string.Equals(s.UniqueName, _solutionFilter, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    var staleName = _solutionFilter;
+                    _solutionFilter = null;
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
+                            new SolutionFilterScreenState { SolutionFilter = null }),
+                        "ConnectionReferences.ClearStaleState");
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        _statusLabel.Text = $"Previously filtered solution '{staleName}' not found \u2014 showing all";
+                    });
+                }
+            }
+
             var crService = provider.GetRequiredService<IConnectionReferenceService>();
 
             var crResult = await crService.ListAsync(
@@ -457,6 +490,10 @@ internal sealed class ConnectionReferencesScreen : TuiScreenBase
                 {
                     var idx = listView.SelectedItem;
                     _solutionFilter = idx == 0 ? null : names[idx];
+                    ErrorService.FireAndForget(
+                        Session.GetTuiStateStore().SaveScreenStateAsync("ConnectionReferences", EnvironmentUrl!,
+                            new SolutionFilterScreenState { SolutionFilter = _solutionFilter }),
+                        "ConnectionReferences.SaveState");
                     ErrorService.FireAndForget(LoadDataAsync(), "ConnectionReferences.FilterApply");
                 }
             });

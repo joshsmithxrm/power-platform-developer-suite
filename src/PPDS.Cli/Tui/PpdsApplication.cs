@@ -3,6 +3,7 @@ using PPDS.Auth;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using Terminal.Gui;
 
@@ -87,11 +88,15 @@ internal sealed class PpdsApplication : IDisposable
             return result;
         };
 
+        // Create TUI state store for persisting screen filter selections
+        var tuiStateStore = new TuiStateStore(ProfilePaths.TuiStateFile);
+
         // Create session for connection pool reuse across screens
         _session = new InteractiveSession(
             _profileName,
             _profileStore,
             authProvider.GetRequiredService<EnvironmentConfigStore>(),
+            tuiStateStore,
             serviceProviderFactory: null,
             _deviceCodeCallback,
             beforeInteractiveAuth);

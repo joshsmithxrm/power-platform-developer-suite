@@ -1,4 +1,6 @@
+using System.IO;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
@@ -18,7 +20,7 @@ public sealed class TabManagerTests : IDisposable
     public TabManagerTests()
     {
         _tempStore = new TempProfileStore();
-        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new MockServiceProviderFactory());
+        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()), new MockServiceProviderFactory());
         _manager = new TabManager(new TuiThemeService());
     }
 

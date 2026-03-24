@@ -39,6 +39,11 @@ public static class ProfilePaths
     public const string CredentialCacheFileName = "ppds.credentials.dat";
 
     /// <summary>
+    /// TUI state persistence file name.
+    /// </summary>
+    public const string TuiStateFileName = "tui-state.json";
+
+    /// <summary>
     /// Gets the PPDS data directory for the current platform.
     /// </summary>
     /// <remarks>
@@ -89,6 +94,11 @@ public static class ProfilePaths
     /// Gets the full path to the secure credential cache file.
     /// </summary>
     public static string CredentialCacheFile => Path.Combine(DataDirectory, CredentialCacheFileName);
+
+    /// <summary>
+    /// Gets the full path to the TUI state persistence file.
+    /// </summary>
+    public static string TuiStateFile => Path.Combine(DataDirectory, TuiStateFileName);
 
     /// <summary>
     /// Ensures the data directory exists.

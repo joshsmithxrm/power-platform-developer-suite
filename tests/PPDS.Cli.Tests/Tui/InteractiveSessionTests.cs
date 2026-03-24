@@ -1,6 +1,8 @@
+using System.IO;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.Profile;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Cli.Tests.Mocks;
@@ -23,7 +25,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public Task InitializeAsync()
     {
         _profileStore = new ProfileStore();
-        _session = new InteractiveSession(profileName: null, _profileStore, new EnvironmentConfigStore());
+        _session = new InteractiveSession(profileName: null, _profileStore, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
         return Task.CompletedTask;
     }
 
@@ -38,7 +40,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public void Constructor_WithNullProfileName_DoesNotThrow()
     {
         using var store = new ProfileStore();
-        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore());
+        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
 
         Assert.NotNull(session);
     }
@@ -47,7 +49,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public void Constructor_WithProfileName_DoesNotThrow()
     {
         using var store = new ProfileStore();
-        var session = new InteractiveSession(profileName: "TestProfile", store, new EnvironmentConfigStore());
+        var session = new InteractiveSession(profileName: "TestProfile", store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
 
         Assert.NotNull(session);
     }
@@ -56,7 +58,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public void Constructor_WithNullProfileStore_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new InteractiveSession(profileName: null, profileStore: null!, envConfigStore: new EnvironmentConfigStore()));
+            new InteractiveSession(profileName: null, profileStore: null!, envConfigStore: new EnvironmentConfigStore(), tuiStateStore: new TuiStateStore(Path.GetTempFileName())));
     }
 
     [Fact]
@@ -67,6 +69,7 @@ public class InteractiveSessionTests : IAsyncLifetime
             profileName: null,
             store,
             new EnvironmentConfigStore(),
+            new TuiStateStore(Path.GetTempFileName()),
             deviceCodeCallback: info => { /* handle device code */ });
 
         Assert.NotNull(session);
@@ -149,7 +152,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public void CurrentEnvironmentUrl_InitiallyNull()
     {
         using var store = new ProfileStore();
-        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore());
+        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
 
         Assert.Null(session.CurrentEnvironmentUrl);
     }
@@ -182,7 +185,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public async Task DisposeAsync_MultipleCallsDoNotThrow()
     {
         using var store = new ProfileStore();
-        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore());
+        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
 
         // Multiple dispose calls should be safe
         await session.DisposeAsync();
@@ -194,7 +197,7 @@ public class InteractiveSessionTests : IAsyncLifetime
     public async Task DisposeAsync_LocalServicesStillWork()
     {
         using var store = new ProfileStore();
-        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore());
+        var session = new InteractiveSession(profileName: null, store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()));
 
         await session.DisposeAsync();
 

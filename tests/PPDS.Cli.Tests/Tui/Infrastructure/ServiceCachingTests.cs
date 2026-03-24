@@ -1,4 +1,6 @@
+using System.IO;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Cli.Tui;
 using Xunit;
@@ -18,6 +20,7 @@ public sealed class ServiceCachingTests : IDisposable
             null,
             _tempStore.Store,
             new EnvironmentConfigStore(),
+            new TuiStateStore(Path.GetTempFileName()),
             new MockServiceProviderFactory());
     }
 

@@ -12,6 +12,7 @@ using PPDS.Cli.Services.Export;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tui.Infrastructure;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Metadata;
@@ -50,6 +51,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private bool _disposed;
     private readonly EnvironmentConfigStore _envConfigStore;
     private readonly EnvironmentConfigService _envConfigService;
+    private readonly TuiStateStore _tuiStateStore;
     private ProfileResolutionService? _profileResolutionService;
     private readonly Lazy<ITuiErrorService> _errorService;
     private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
@@ -105,6 +107,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     /// <param name="profileName">The profile name (null for active profile).</param>
     /// <param name="profileStore">Shared profile store instance.</param>
     /// <param name="envConfigStore">Shared environment config store instance.</param>
+    /// <param name="tuiStateStore">Shared TUI state store for persisting screen filter state.</param>
     /// <param name="serviceProviderFactory">Factory for creating service providers (null for default).</param>
     /// <param name="deviceCodeCallback">Callback for device code display.</param>
     /// <param name="beforeInteractiveAuth">Callback invoked before browser opens for interactive auth.
@@ -113,6 +116,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         string? profileName,
         ProfileStore profileStore,
         EnvironmentConfigStore envConfigStore,
+        TuiStateStore tuiStateStore,
         IServiceProviderFactory? serviceProviderFactory = null,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null)
@@ -120,6 +124,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         _profileName = profileName ?? string.Empty;
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _envConfigStore = envConfigStore ?? throw new ArgumentNullException(nameof(envConfigStore));
+        _tuiStateStore = tuiStateStore ?? throw new ArgumentNullException(nameof(tuiStateStore));
         _serviceProviderFactory = serviceProviderFactory ?? new ProfileBasedServiceProviderFactory();
         _deviceCodeCallback = deviceCodeCallback;
         _beforeInteractiveAuth = beforeInteractiveAuth;
@@ -654,6 +659,15 @@ internal sealed class InteractiveSession : IAsyncDisposable
         return _exportService.Value;
     }
 
+    /// <summary>
+    /// Gets the TUI state store for persisting screen filter selections across sessions.
+    /// </summary>
+    /// <returns>The shared TUI state store.</returns>
+    public TuiStateStore GetTuiStateStore()
+    {
+        return _tuiStateStore;
+    }
+
     #endregion
 
     /// <inheritdoc />
@@ -699,6 +713,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
         }
 
         _envConfigStore.Dispose();
+        _tuiStateStore.Dispose();
         _lock.Dispose();
         TuiDebugLog.Log("InteractiveSession disposed");
     }
