@@ -303,6 +303,30 @@ public static class ErrorCodes
     }
 
     /// <summary>
+    /// Data provider operation errors.
+    /// </summary>
+    public static class DataProvider
+    {
+        /// <summary>Data provider not found by ID or name.</summary>
+        public const string NotFound = "DataProvider.NotFound";
+
+        /// <summary>Input validation failed (name, data source, plugin type, etc.).</summary>
+        public const string ValidationFailed = "DataProvider.ValidationFailed";
+    }
+
+    /// <summary>
+    /// Data source operation errors.
+    /// </summary>
+    public static class DataSource
+    {
+        /// <summary>Data source not found by ID or name.</summary>
+        public const string NotFound = "DataSource.NotFound";
+
+        /// <summary>Data source has dependent data providers that must be removed first.</summary>
+        public const string HasDependents = "DataSource.HasDependents";
+    }
+
+    /// <summary>
     /// Web resource operation errors.
     /// </summary>
     public static class WebResource

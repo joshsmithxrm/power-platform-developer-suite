@@ -98,6 +98,14 @@ public static class ServiceRegistration
             return new CustomApiService(pool, logger);
         });
 
+        // Data provider service - manages virtual entity data providers and data sources
+        services.AddTransient<IDataProviderService>(sp =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var logger = sp.GetRequiredService<ILogger<DataProviderService>>();
+            return new DataProviderService(pool, logger);
+        });
+
         // SQL language service - uses ICachedMetadataProvider when available
         services.AddTransient<ISqlLanguageService>(sp =>
         {
