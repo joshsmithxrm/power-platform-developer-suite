@@ -36,10 +36,9 @@ public static class WebResourceNameResolver
             return new ResolveResult(exact.Count == 1, exact);
         }
 
-        // 3. Partial match: name ends with /identifier or equals identifier
+        // 3. Partial match: name ends with /identifier (path-boundary match only)
         var partial = resources
-            .Where(r => r.Name.EndsWith("/" + identifier, StringComparison.OrdinalIgnoreCase)
-                     || r.Name.EndsWith(identifier, StringComparison.OrdinalIgnoreCase))
+            .Where(r => r.Name.EndsWith("/" + identifier, StringComparison.OrdinalIgnoreCase))
             .ToList();
         return new ResolveResult(partial.Count == 1, partial);
     }
