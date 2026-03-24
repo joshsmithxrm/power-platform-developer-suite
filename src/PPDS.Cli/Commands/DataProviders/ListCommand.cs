@@ -122,9 +122,7 @@ public static class ListCommand
                         CreatePlugin = p.CreatePlugin,
                         UpdatePlugin = p.UpdatePlugin,
                         DeletePlugin = p.DeletePlugin,
-                        IsManaged = p.IsManaged,
-                        CreatedOn = p.CreatedOn,
-                        ModifiedOn = p.ModifiedOn
+                        IsManaged = p.IsManaged
                     }).ToList()
                 };
                 writer.WriteSuccess(output);
@@ -205,14 +203,6 @@ public static class ListCommand
 
         [JsonPropertyName("isManaged")]
         public bool IsManaged { get; set; }
-
-        [JsonPropertyName("createdOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? CreatedOn { get; set; }
-
-        [JsonPropertyName("modifiedOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? ModifiedOn { get; set; }
     }
 
     #endregion

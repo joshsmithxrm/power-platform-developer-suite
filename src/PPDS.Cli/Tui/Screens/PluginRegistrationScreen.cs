@@ -603,8 +603,6 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                 sb.AppendLine($"Update:     {FormatGuid(dp.UpdatePlugin)}");
                 sb.AppendLine($"Delete:     {FormatGuid(dp.DeletePlugin)}");
                 sb.AppendLine($"Managed:    {FormatBool(dp.IsManaged)}");
-                sb.AppendLine($"Created:    {FormatDate(dp.CreatedOn)}");
-                sb.AppendLine($"Modified:   {FormatDate(dp.ModifiedOn)}");
                 break;
 
             default:

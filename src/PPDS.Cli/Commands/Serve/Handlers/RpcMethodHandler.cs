@@ -4551,9 +4551,7 @@ public class RpcMethodHandler : IDisposable
             CreatePlugin = p.CreatePlugin?.ToString(),
             UpdatePlugin = p.UpdatePlugin?.ToString(),
             DeletePlugin = p.DeletePlugin?.ToString(),
-            IsManaged = p.IsManaged,
-            CreatedOn = p.CreatedOn?.ToString("o"),
-            ModifiedOn = p.ModifiedOn?.ToString("o")
+            IsManaged = p.IsManaged
         };
 
     // ── Data Sources ──
@@ -7305,14 +7303,6 @@ public class DataProviderDto
 
     [JsonPropertyName("isManaged")]
     public bool IsManaged { get; set; }
-
-    [JsonPropertyName("createdOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? CreatedOn { get; set; }
-
-    [JsonPropertyName("modifiedOn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ModifiedOn { get; set; }
 }
 
 public class DataProvidersRegisterResponse

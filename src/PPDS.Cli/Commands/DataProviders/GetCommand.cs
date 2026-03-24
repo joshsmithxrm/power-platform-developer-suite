@@ -95,9 +95,7 @@ public static class GetCommand
                     CreatePlugin = provider.CreatePlugin,
                     UpdatePlugin = provider.UpdatePlugin,
                     DeletePlugin = provider.DeletePlugin,
-                    IsManaged = provider.IsManaged,
-                    CreatedOn = provider.CreatedOn,
-                    ModifiedOn = provider.ModifiedOn
+                    IsManaged = provider.IsManaged
                 };
                 writer.WriteSuccess(output);
             }
@@ -113,9 +111,7 @@ public static class GetCommand
                     ["RetrieveMultiple"] = provider.RetrieveMultiplePlugin?.ToString() ?? "-",
                     ["Create"] = provider.CreatePlugin?.ToString() ?? "-",
                     ["Update"] = provider.UpdatePlugin?.ToString() ?? "-",
-                    ["Delete"] = provider.DeletePlugin?.ToString() ?? "-",
-                    ["Created"] = provider.CreatedOn?.ToString("g") ?? "-",
-                    ["Modified"] = provider.ModifiedOn?.ToString("g") ?? "-"
+                    ["Delete"] = provider.DeletePlugin?.ToString() ?? "-"
                 };
 
                 WritePropertyTable(properties);
@@ -180,14 +176,6 @@ public static class GetCommand
 
         [JsonPropertyName("isManaged")]
         public bool IsManaged { get; set; }
-
-        [JsonPropertyName("createdOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? CreatedOn { get; set; }
-
-        [JsonPropertyName("modifiedOn")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public DateTime? ModifiedOn { get; set; }
     }
 
     #endregion

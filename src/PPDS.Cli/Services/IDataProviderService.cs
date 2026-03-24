@@ -115,12 +115,6 @@ public record DataProviderInfo
 
     /// <summary>True when part of a managed solution.</summary>
     public bool IsManaged { get; init; }
-
-    /// <summary>UTC creation timestamp.</summary>
-    public DateTime? CreatedOn { get; init; }
-
-    /// <summary>UTC last-modified timestamp.</summary>
-    public DateTime? ModifiedOn { get; init; }
 }
 
 /// <summary>

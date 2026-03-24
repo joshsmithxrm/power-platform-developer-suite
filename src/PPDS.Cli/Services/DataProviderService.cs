@@ -348,6 +348,7 @@ public sealed class DataProviderService : IDataProviderService
     private static QueryExpression BuildDataProviderListQuery() =>
         new(EntityDataProvider.EntityLogicalName)
         {
+            // entitydataprovider is a metadata entity — no createdon/modifiedon
             ColumnSet = new ColumnSet(
                 EntityDataProvider.Fields.Name,
                 EntityDataProvider.Fields.DataSourceLogicalName,
@@ -356,9 +357,7 @@ public sealed class DataProviderService : IDataProviderService
                 EntityDataProvider.Fields.CreatePlugin,
                 EntityDataProvider.Fields.UpdatePlugin,
                 EntityDataProvider.Fields.DeletePlugin,
-                EntityDataProvider.Fields.IsManaged,
-                "createdon",
-                "modifiedon"),
+                EntityDataProvider.Fields.IsManaged),
             Orders = { new OrderExpression(EntityDataProvider.Fields.Name, OrderType.Ascending) }
         };
 
@@ -380,9 +379,7 @@ public sealed class DataProviderService : IDataProviderService
             CreatePlugin = e.GetAttributeValue<Guid?>(EntityDataProvider.Fields.CreatePlugin),
             UpdatePlugin = e.GetAttributeValue<Guid?>(EntityDataProvider.Fields.UpdatePlugin),
             DeletePlugin = e.GetAttributeValue<Guid?>(EntityDataProvider.Fields.DeletePlugin),
-            IsManaged = e.GetAttributeValue<bool?>(EntityDataProvider.Fields.IsManaged) ?? false,
-            CreatedOn = e.GetAttributeValue<DateTime?>("createdon"),
-            ModifiedOn = e.GetAttributeValue<DateTime?>("modifiedon")
+            IsManaged = e.GetAttributeValue<bool?>(EntityDataProvider.Fields.IsManaged) ?? false
         };
 
     // Async Dataverse helpers (same pattern as CustomApiService)
