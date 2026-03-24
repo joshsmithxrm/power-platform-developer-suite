@@ -153,11 +153,15 @@ def create_worktree(repo_root, name, logger):
         return None
 
     # Initialize workflow state
-    subprocess.run(
+    result = subprocess.run(
         ["python", "scripts/workflow-state.py", "init", branch],
         cwd=worktree_path,
         capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        log(logger, "worktree", "STATE_INIT_FAILED", error=result.stderr.strip())
+        return None
 
     log(logger, "worktree", "CREATED", path=worktree_path, branch=branch)
     return worktree_path
@@ -238,9 +242,10 @@ def process_retro_findings(worktree_path, logger, repo_root):
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=True,
             )
             log(logger, "retro", "ISSUE_CREATED", finding=finding_id)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
             log(logger, "retro", "ISSUE_FAILED", finding=finding_id)
 
     # For auto-fix and draft-fix, spawn pipeline recursively
@@ -387,23 +392,19 @@ def main():
                     log_path = new_log_path
                     logger = open(log_path, "a")
 
-                # Set plan path in workflow state
-                subprocess.run(
-                    ["python", "scripts/workflow-state.py", "set", "plan", plan_rel],
-                    cwd=worktree_path,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    [
-                        "python",
-                        "scripts/workflow-state.py",
-                        "set",
-                        "started",
-                        "now",
-                    ],
-                    cwd=worktree_path,
-                    capture_output=True,
-                )
+                # Set plan path and started timestamp in workflow state
+                for state_args in [
+                    ["set", "plan", plan_rel],
+                    ["set", "started", "now"],
+                ]:
+                    result = subprocess.run(
+                        ["python", "scripts/workflow-state.py"] + state_args,
+                        cwd=worktree_path,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode != 0:
+                        log(logger, "worktree", "STATE_SET_FAILED", error=result.stderr.strip())
 
             elif stage == "implement":
                 exit_code = run_claude(
