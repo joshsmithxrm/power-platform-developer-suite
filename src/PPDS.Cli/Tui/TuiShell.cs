@@ -284,6 +284,7 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             new("Connection References", "View connection references", () => NavigateToConnectionReferences()),
             new("Environment Variables", "View and edit environment variables", () => NavigateToEnvironmentVariables()),
             new("Plugin Traces", "Browse plugin trace logs", () => NavigateToPluginTraces()),
+            new("Plugin Registration", "Browse and manage plugin registrations", () => NavigateToPluginRegistration()),
             new("Metadata Browser", "Browse entity metadata", () => NavigateToMetadataBrowser()),
             new("Web Resources", "Browse and manage web resources", () => NavigateToWebResources()),
             new("", "", () => {}, null, null, Key.Null), // Separator
@@ -559,6 +560,31 @@ internal sealed class TuiShell : Window, ITuiStateCapture<TuiShellState>
             _contentArea.Remove(loadingLabel);
 
             var screen = new PluginTracesScreen(_session);
+            NavigateTo(screen);
+
+            return false;
+        });
+    }
+
+    private void NavigateToPluginRegistration()
+    {
+        HideSplash();
+
+        var loadingLabel = new Label("Loading Plugin Registration...")
+        {
+            X = Pos.Center(),
+            Y = Pos.Center()
+        };
+        _contentArea.Add(loadingLabel);
+        _contentArea.Title = "Loading";
+
+        Application.Refresh();
+
+        Application.MainLoop?.AddIdle(() =>
+        {
+            _contentArea.Remove(loadingLabel);
+
+            var screen = new PluginRegistrationScreen(_session);
             NavigateTo(screen);
 
             return false;
