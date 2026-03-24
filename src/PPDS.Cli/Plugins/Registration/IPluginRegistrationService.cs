@@ -454,12 +454,18 @@ public interface IPluginRegistrationService
 /// <param name="Rank">Execution order (1-999999).</param>
 /// <param name="FilteringAttributes">Comma-separated list of attributes that trigger the step.</param>
 /// <param name="Description">Step description.</param>
+/// <param name="CanBeBypassed">Whether this step can be bypassed via BypassBusinessLogicExecution.</param>
+/// <param name="CanUseReadOnlyConnection">Whether this step can use a read-only database connection.</param>
+/// <param name="InvocationSource">Pipeline invocation source: Parent or Child.</param>
 public record StepUpdateRequest(
     string? Mode = null,
     string? Stage = null,
     int? Rank = null,
     string? FilteringAttributes = null,
-    string? Description = null
+    string? Description = null,
+    bool? CanBeBypassed = null,
+    bool? CanUseReadOnlyConnection = null,
+    string? InvocationSource = null
 );
 
 /// <summary>
