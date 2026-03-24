@@ -66,6 +66,47 @@ public class EnumTests
 
     #endregion
 
+    #region PluginDeployment Tests
+
+    [Theory]
+    [InlineData(PluginDeployment.ServerOnly, 0)]
+    [InlineData(PluginDeployment.Offline, 1)]
+    [InlineData(PluginDeployment.Both, 2)]
+    public void PluginDeployment_ValuesMatchDataverseSDK(PluginDeployment deployment, int expectedValue)
+    {
+        // These values must match the Dataverse SDK for proper registration
+        Assert.Equal(expectedValue, (int)deployment);
+    }
+
+    [Fact]
+    public void PluginDeployment_HasExactlyThreeValues()
+    {
+        var values = Enum.GetValues<PluginDeployment>();
+        Assert.Equal(3, values.Length);
+    }
+
+    #endregion
+
+    #region PluginInvocationSource Tests
+
+    [Theory]
+    [InlineData(PluginInvocationSource.Parent, 0)]
+    [InlineData(PluginInvocationSource.Child, 1)]
+    public void PluginInvocationSource_ValuesMatchDataverseSDK(PluginInvocationSource invocationSource, int expectedValue)
+    {
+        // These values must match the Dataverse SDK for proper registration
+        Assert.Equal(expectedValue, (int)invocationSource);
+    }
+
+    [Fact]
+    public void PluginInvocationSource_HasExactlyTwoValues()
+    {
+        var values = Enum.GetValues<PluginInvocationSource>();
+        Assert.Equal(2, values.Length);
+    }
+
+    #endregion
+
     #region Cross-Enum Tests
 
     [Fact]
@@ -74,12 +115,16 @@ public class EnumTests
         Assert.Equal("PPDS.Plugins", typeof(PluginStage).Namespace);
         Assert.Equal("PPDS.Plugins", typeof(PluginMode).Namespace);
         Assert.Equal("PPDS.Plugins", typeof(PluginImageType).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(PluginDeployment).Namespace);
+        Assert.Equal("PPDS.Plugins", typeof(PluginInvocationSource).Namespace);
     }
 
     [Theory]
     [InlineData(typeof(PluginStage))]
     [InlineData(typeof(PluginMode))]
     [InlineData(typeof(PluginImageType))]
+    [InlineData(typeof(PluginDeployment))]
+    [InlineData(typeof(PluginInvocationSource))]
     public void AllEnums_AreValidAndNotEmpty(Type enumType)
     {
         // Verify the enum type exists and is an enum
