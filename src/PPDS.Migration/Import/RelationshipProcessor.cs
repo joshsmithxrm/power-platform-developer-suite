@@ -30,6 +30,11 @@ namespace PPDS.Migration.Import
         private ConcurrentDictionary<string, string>? _relationshipNameCache;
 
         /// <summary>
+        /// Tracks whether the metadata cache load failed, for surfacing to callers.
+        /// </summary>
+        private bool _metadataCacheLoadFailed;
+
+        /// <summary>
         /// Tracks the last reported progress count for throttling.
         /// Thread-safe via Interlocked operations.
         /// </summary>
@@ -96,8 +101,8 @@ namespace PPDS.Migration.Import
             _logger?.LogDebug("Processing {Count} M2M operations with parallelism {DOP}",
                 allOperations.Count, parallelism);
 
-            // Track first exception for non-ContinueOnError mode
-            Exception? firstException = null;
+            // Track all exceptions for non-ContinueOnError mode
+            var exceptions = new ConcurrentBag<Exception>();
             var shouldStop = false;
 
             await Parallel.ForEachAsync(
@@ -240,16 +245,19 @@ namespace PPDS.Migration.Import
                             if (!context.Options.ContinueOnError)
                             {
                                 shouldStop = true;
-                                firstException ??= ex;
+                                exceptions.Add(ex);
                             }
                         }
                     }
                 }).ConfigureAwait(false);
 
-            // If we stopped due to an error in non-ContinueOnError mode, rethrow
-            if (firstException != null)
+            // If we stopped due to errors in non-ContinueOnError mode, rethrow all
+            if (!exceptions.IsEmpty)
             {
-                throw firstException;
+                var allExceptions = exceptions.ToArray();
+                throw allExceptions.Length == 1
+                    ? allExceptions[0]
+                    : new AggregateException("Multiple M2M association failures", allExceptions);
             }
 
             // Report final completion (parallel counting may not hit exact total)
@@ -281,9 +289,14 @@ namespace PPDS.Migration.Import
                     successCount, stopwatch.ElapsedMilliseconds, parallelism);
             }
 
+            if (_metadataCacheLoadFailed)
+            {
+                _logger?.LogError("M2M relationship metadata cache failed to load — relationship name resolution may have used unresolved names");
+            }
+
             return new PhaseResult
             {
-                Success = failureCount == 0,
+                Success = failureCount == 0 && !_metadataCacheLoadFailed,
                 RecordsProcessed = successCount + failureCount,
                 SuccessCount = successCount,
                 FailureCount = failureCount,
@@ -336,8 +349,7 @@ namespace PPDS.Migration.Import
             }
             catch (Exception ex)
             {
-                // Role lookup failed - this is expected when source role ID doesn't exist in target
-                _logger?.LogDebug(ex, "Role lookup by ID {RoleId} failed (expected for cross-environment migrations)", sourceRoleId);
+                _logger?.LogWarning(ex, "Role lookup by ID {RoleId} failed — role may not exist in target environment", sourceRoleId);
             }
 
             // Role doesn't exist with source ID - this is the common case
@@ -430,8 +442,8 @@ namespace PPDS.Migration.Import
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to load M2M relationship metadata - relationship name resolution may fail");
-                // Don't throw - we'll try with the original names
+                _logger?.LogError(ex, "Failed to load M2M relationship metadata - relationship name resolution may fail");
+                _metadataCacheLoadFailed = true;
             }
         }
 

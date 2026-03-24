@@ -20,13 +20,15 @@ public sealed class ProfileResolutionService
             if (!string.IsNullOrEmpty(config.Label))
             {
                 if (string.Equals(config.Label, "dbo", StringComparison.OrdinalIgnoreCase))
-                    throw new ArgumentException(
-                        $"'{config.Label}' cannot be used as an environment label (reserved for SQL schema convention).",
-                        nameof(configs));
+                {
+                    TuiDebugLog.Log($"Warning: Environment label '{config.Label}' is reserved (SQL schema convention) — skipping");
+                    continue;
+                }
 
                 if (_labelIndex.ContainsKey(config.Label))
                 {
-                    TuiDebugLog.Log($"Warning: Duplicate environment label '{config.Label}' — using last occurrence");
+                    TuiDebugLog.Log($"Warning: Duplicate environment label '{config.Label}' — keeping first occurrence");
+                    continue;
                 }
 
                 _labelIndex[config.Label] = config;

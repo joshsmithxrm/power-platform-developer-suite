@@ -194,7 +194,7 @@ namespace PPDS.Migration.Import
             }
             finally
             {
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress).ConfigureAwait(false);
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
             }
         }
 
@@ -310,7 +310,8 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task EnablePluginsAfterImportAsync(
             IReadOnlyList<Guid> disabledPluginSteps,
-            IProgressReporter? progress)
+            IProgressReporter? progress,
+            IWarningCollector warnings)
         {
             if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
             {
@@ -333,6 +334,12 @@ namespace PPDS.Migration.Import
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Failed to re-enable some plugin steps");
+                warnings.AddWarning(new ImportWarning
+                {
+                    Code = ImportWarningCodes.PluginReenableFailed,
+                    Message = $"Failed to re-enable {disabledPluginSteps.Count} plugin steps: {ex.Message}",
+                    Impact = $"{disabledPluginSteps.Count} plugin step(s) may remain disabled"
+                });
             }
         }
 

@@ -138,9 +138,16 @@ namespace PPDS.Migration.Formats
                 }
             }
 
-            // Check for filter element
+            // Check for filter element — use inner XML to preserve nested <filter>/<condition> elements
+            // (.Value only returns concatenated text content, losing element structure)
             var filterElement = element.Element("filter");
-            var fetchXmlFilter = filterElement?.Value;
+            string? fetchXmlFilter = null;
+            if (filterElement != null)
+            {
+                fetchXmlFilter = filterElement.HasElements
+                    ? string.Concat(filterElement.Nodes())
+                    : filterElement.Value;
+            }
 
             return new EntitySchema
             {
