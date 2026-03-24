@@ -2351,7 +2351,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             "Parent" => sdkmessageprocessingstep_invocationsource.Parent,
             "Child" => sdkmessageprocessingstep_invocationsource.Child,
-            _ => sdkmessageprocessingstep_invocationsource.Internal
+            "Internal" => sdkmessageprocessingstep_invocationsource.Internal,
+            _ => sdkmessageprocessingstep_invocationsource.Parent
         };
 
     // Native async helpers - use async SDK when available, otherwise fall back to Task.Run

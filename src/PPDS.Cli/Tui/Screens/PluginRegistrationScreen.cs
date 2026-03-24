@@ -18,8 +18,8 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
     private readonly FrameView _detailPanel;
     private readonly Label _detailLabel;
     private readonly Label _statusLabel;
-    private bool _includeHidden = false;
-    private bool _includeMicrosoft = false;
+    private readonly bool _includeHidden = false;
+    private readonly bool _includeMicrosoft = false;
     private CancellationTokenSource? _loadCts;
     private bool _isShowingDialog;
 
@@ -167,11 +167,6 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
             var dataSources = await dataSourcesTask;
 
             // Standalone assemblies = those not belonging to any package
-            var packagedAssemblyIds = new HashSet<Guid>(
-                allAssemblies
-                    .Where(a => a.PackageId.HasValue)
-                    .Select(a => a.PackageId!.Value));
-
             var standaloneAssemblies = allAssemblies
                 .Where(a => !a.PackageId.HasValue)
                 .ToList();
@@ -890,13 +885,12 @@ internal sealed class PluginRegistrationScreen : TuiScreenBase
                 if (_isShowingDialog) return;
                 _isShowingDialog = true;
 
-                var saveDialog = new SaveDialog("Save Binary", fileName)
+                using var saveDialog = new SaveDialog("Save Binary", fileName)
                 {
                     ColorScheme = TuiColorPalette.Default
                 };
                 Application.Run(saveDialog);
                 savePath = saveDialog.FilePath?.ToString();
-                saveDialog.Dispose();
 
                 _isShowingDialog = false;
             });

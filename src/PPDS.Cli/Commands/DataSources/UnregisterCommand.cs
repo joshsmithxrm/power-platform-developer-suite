@@ -20,9 +20,15 @@ public static class UnregisterCommand
             Description = "Data source logical name or GUID"
         };
 
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Cascade-delete all child data providers. Required if any providers exist."
+        };
+
         var command = new Command("unregister", "Unregister a data source and cascade-delete all child data providers")
         {
             nameOrIdArgument,
+            forceOption,
             DataSourcesCommandGroup.ProfileOption,
             DataSourcesCommandGroup.EnvironmentOption
         };
@@ -32,11 +38,12 @@ public static class UnregisterCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var nameOrId = parseResult.GetValue(nameOrIdArgument)!;
+            var force = parseResult.GetValue(forceOption);
             var profile = parseResult.GetValue(DataSourcesCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(DataSourcesCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(nameOrId, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteAsync(nameOrId, force, profile, environment, globalOptions, cancellationToken);
         });
 
         return command;
@@ -44,6 +51,7 @@ public static class UnregisterCommand
 
     private static async Task<int> ExecuteAsync(
         string nameOrId,
+        bool force,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -81,7 +89,7 @@ public static class UnregisterCommand
                 return ExitCodes.NotFoundError;
             }
 
-            await dataProviderService.UnregisterDataSourceAsync(existing.Id, cancellationToken: cancellationToken);
+            await dataProviderService.UnregisterDataSourceAsync(existing.Id, force: force, cancellationToken: cancellationToken);
 
             var result = new UnregisterResult
             {
