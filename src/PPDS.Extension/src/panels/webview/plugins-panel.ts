@@ -666,6 +666,554 @@ function removeNodeFromArray(nodes: PluginTreeNode[], id: string): boolean {
     return false;
 }
 
+// ── Modal infrastructure ──────────────────────────────────────────────────────
+
+interface ModalHandle {
+    overlay: HTMLElement;
+    content: HTMLElement;
+    close: () => void;
+}
+
+function createModal(title: string): ModalHandle {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-dialog';
+
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = title;
+    header.appendChild(titleEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'modal-close';
+    closeBtn.textContent = '\u00D7'; // ×
+    closeBtn.addEventListener('click', () => close());
+    header.appendChild(closeBtn);
+
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+
+    modal.appendChild(header);
+    modal.appendChild(content);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function close(): void { overlay.remove(); }
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    return { overlay, content, close };
+}
+
+function createField(label: string, input: HTMLElement): HTMLElement {
+    const field = document.createElement('div');
+    field.className = 'form-field';
+    const labelEl = document.createElement('label');
+    labelEl.textContent = label;
+    field.appendChild(labelEl);
+    field.appendChild(input);
+    return field;
+}
+
+function createTextInput(value = ''): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-input';
+    input.value = value;
+    return input;
+}
+
+function createNumberInput(value = 1): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'form-input';
+    input.value = String(value);
+    return input;
+}
+
+function createTextarea(value = ''): HTMLTextAreaElement {
+    const ta = document.createElement('textarea');
+    ta.className = 'form-textarea';
+    ta.value = value;
+    return ta;
+}
+
+function createSelect(options: { value: string; label: string }[], selected = ''): HTMLSelectElement {
+    const sel = document.createElement('select');
+    sel.className = 'form-select';
+    for (const opt of options) {
+        const el = document.createElement('option');
+        el.value = opt.value;
+        el.textContent = opt.label;
+        if (opt.value === selected) el.selected = true;
+        sel.appendChild(el);
+    }
+    return sel;
+}
+
+function createCheckbox(checked = false): HTMLInputElement {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'form-checkbox';
+    cb.checked = checked;
+    return cb;
+}
+
+function createFormActions(submitLabel: string, onSubmit: () => void, onCancel: () => void): HTMLElement {
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'form-btn form-btn-primary';
+    submitBtn.textContent = submitLabel;
+    submitBtn.addEventListener('click', onSubmit);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'form-btn form-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', onCancel);
+
+    actions.appendChild(submitBtn);
+    actions.appendChild(cancelBtn);
+    return actions;
+}
+
+// ── Step registration form ────────────────────────────────────────────────────
+
+/** Messages that support filtering attributes. */
+const MESSAGES_SUPPORTING_FILTERING = new Set([
+    'create', 'update', 'delete', 'retrieve', 'retrievemultiple',
+    'associate', 'disassociate', 'merge', 'setstate', 'setstatedynamicentity',
+]);
+
+function showStepForm(parentTypeId?: string, existingStep?: Record<string, unknown>): void {
+    const isUpdate = !!existingStep;
+    const modal = createModal(isUpdate ? 'Update Step' : 'Register Step');
+    const c = modal.content;
+
+    // Message
+    const messageInput = createTextInput(String(existingStep?.['message'] ?? ''));
+    c.appendChild(createField('Message *', messageInput));
+
+    // Primary Entity
+    const primaryEntityInput = createTextInput(String(existingStep?.['primaryEntity'] ?? ''));
+    c.appendChild(createField('Primary Entity *', primaryEntityInput));
+
+    // Secondary Entity
+    const secondaryEntityInput = createTextInput(String(existingStep?.['secondaryEntity'] ?? ''));
+    c.appendChild(createField('Secondary Entity', secondaryEntityInput));
+
+    // Step Name
+    const stepNameInput = createTextInput(String(existingStep?.['name'] ?? ''));
+    c.appendChild(createField('Step Name (auto-generated if empty)', stepNameInput));
+
+    // Description
+    const descriptionInput = createTextInput(String(existingStep?.['description'] ?? ''));
+    c.appendChild(createField('Description', descriptionInput));
+
+    // Stage
+    const stageSelect = createSelect([
+        { value: 'PreValidation', label: 'PreValidation (10)' },
+        { value: 'PreOperation', label: 'PreOperation (20)' },
+        { value: 'PostOperation', label: 'PostOperation (40)' },
+    ], String(existingStep?.['stage'] ?? 'PreValidation'));
+    c.appendChild(createField('Stage *', stageSelect));
+
+    // Mode
+    const modeSelect = createSelect([
+        { value: 'Synchronous', label: 'Synchronous' },
+        { value: 'Asynchronous', label: 'Asynchronous' },
+    ], String(existingStep?.['mode'] ?? 'Synchronous'));
+    c.appendChild(createField('Mode *', modeSelect));
+
+    // Execution Order
+    const executionOrderInput = createNumberInput(Number(existingStep?.['executionOrder'] ?? 1));
+    c.appendChild(createField('Execution Order *', executionOrderInput));
+
+    // Filtering Attributes
+    const filteringAttrsInput = createTextarea(String(existingStep?.['filteringAttributes'] ?? ''));
+    const filteringAttrsField = createField('Filtering Attributes (comma-separated)', filteringAttrsInput);
+    c.appendChild(filteringAttrsField);
+
+    // Deployment
+    const deploymentSelect = createSelect([
+        { value: 'ServerOnly', label: 'Server Only' },
+        { value: 'Offline', label: 'Offline' },
+        { value: 'Both', label: 'Both' },
+    ], String(existingStep?.['deployment'] ?? 'ServerOnly'));
+    c.appendChild(createField('Deployment', deploymentSelect));
+
+    // Unsecure Configuration
+    const unsecureConfigInput = createTextarea(String(existingStep?.['unsecureConfiguration'] ?? ''));
+    c.appendChild(createField('Unsecure Configuration', unsecureConfigInput));
+
+    // Secure Configuration (shows indicator if already set on existing step)
+    const secureConfigInput = createTextarea('');
+    const secureConfigLabel = existingStep?.['hasSecureConfig']
+        ? 'Secure Configuration (currently set — leave blank to keep)'
+        : 'Secure Configuration';
+    c.appendChild(createField(secureConfigLabel, secureConfigInput));
+
+    // Async Auto Delete
+    const asyncAutoDeleteCheck = createCheckbox(Boolean(existingStep?.['asyncAutoDelete'] ?? false));
+    c.appendChild(createField('Async Auto Delete', asyncAutoDeleteCheck));
+
+    // Can Be Bypassed
+    const canBeBypassedCheck = createCheckbox(Boolean(existingStep?.['canBeBypassed'] ?? true));
+    c.appendChild(createField('Can Be Bypassed', canBeBypassedCheck));
+
+    // Can Use Read-Only Connection
+    const readOnlyConnectionCheck = createCheckbox(Boolean(existingStep?.['canUseReadOnlyConnection'] ?? false));
+    c.appendChild(createField('Can Use Read-Only Connection', readOnlyConnectionCheck));
+
+    // ── Conditional logic ────────────────────────────────────────────────────
+
+    function applyStageConstraints(): void {
+        const stage = stageSelect.value;
+        const asyncOption = modeSelect.querySelector<HTMLOptionElement>('option[value="Asynchronous"]');
+        if (stage !== 'PostOperation') {
+            modeSelect.value = 'Synchronous';
+            if (asyncOption) asyncOption.disabled = true;
+        } else {
+            if (asyncOption) asyncOption.disabled = false;
+        }
+        applyModeConstraints();
+    }
+
+    function applyModeConstraints(): void {
+        const isAsync = modeSelect.value === 'Asynchronous';
+        asyncAutoDeleteCheck.disabled = !isAsync;
+        if (!isAsync) asyncAutoDeleteCheck.checked = false;
+    }
+
+    function applyMessageConstraints(): void {
+        const msg = messageInput.value.trim().toLowerCase();
+        const supportsFiltering = MESSAGES_SUPPORTING_FILTERING.has(msg);
+        filteringAttrsInput.disabled = !supportsFiltering;
+        if (!supportsFiltering) filteringAttrsInput.value = '';
+    }
+
+    stageSelect.addEventListener('change', applyStageConstraints);
+    modeSelect.addEventListener('change', applyModeConstraints);
+    messageInput.addEventListener('input', applyMessageConstraints);
+
+    // Apply initial constraints
+    applyStageConstraints();
+    applyMessageConstraints();
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const messageName = messageInput.value.trim();
+        const primaryEntity = primaryEntityInput.value.trim();
+
+        if (!messageName) {
+            messageInput.focus();
+            return;
+        }
+        if (!primaryEntity) {
+            primaryEntityInput.focus();
+            return;
+        }
+
+        const fields: Record<string, unknown> = {
+            message: messageName,
+            primaryEntity,
+            secondaryEntity: secondaryEntityInput.value.trim(),
+            name: stepNameInput.value.trim(),
+            description: descriptionInput.value.trim(),
+            stage: stageSelect.value,
+            mode: modeSelect.value,
+            executionOrder: Number(executionOrderInput.value),
+            filteringAttributes: filteringAttrsInput.value.trim(),
+            deployment: deploymentSelect.value,
+            unsecureConfiguration: unsecureConfigInput.value.trim(),
+            asyncAutoDelete: asyncAutoDeleteCheck.checked,
+            canBeBypassed: canBeBypassedCheck.checked,
+            canUseReadOnlyConnection: readOnlyConnectionCheck.checked,
+        };
+
+        // Only include secure config if something was typed
+        const secureConfigValue = secureConfigInput.value.trim();
+        if (secureConfigValue) {
+            fields['secureConfiguration'] = secureConfigValue;
+        }
+
+        if (isUpdate && existingStep) {
+            vscode.postMessage({
+                command: 'updateEntity',
+                entityType: 'step',
+                id: String(existingStep['id']),
+                fields,
+            });
+        } else {
+            vscode.postMessage({
+                command: 'registerEntity',
+                entityType: 'step',
+                parentId: parentTypeId,
+                fields,
+            });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
+// ── Image registration form ───────────────────────────────────────────────────
+
+function showImageForm(parentStepId: string, existingImage?: Record<string, unknown>): void {
+    const isUpdate = !!existingImage;
+    const modal = createModal(isUpdate ? 'Update Image' : 'Register Image');
+    const c = modal.content;
+
+    // ImageType checkboxes (Pre / Post)
+    const imageTypeField = document.createElement('div');
+    imageTypeField.className = 'form-field';
+    const imageTypeLabel = document.createElement('label');
+    imageTypeLabel.textContent = 'Image Type * (at least one required)';
+    imageTypeField.appendChild(imageTypeLabel);
+
+    const imageTypeRow = document.createElement('div');
+    imageTypeRow.className = 'form-checkbox-row';
+
+    const preCheck = createCheckbox(Boolean(existingImage?.['imageTypePre'] ?? false));
+    const preLabel = document.createElement('label');
+    preLabel.className = 'form-checkbox-label';
+    preLabel.textContent = 'Pre';
+    preLabel.prepend(preCheck);
+
+    const postCheck = createCheckbox(Boolean(existingImage?.['imageTypePost'] ?? false));
+    const postLabel = document.createElement('label');
+    postLabel.className = 'form-checkbox-label';
+    postLabel.textContent = 'Post';
+    postLabel.prepend(postCheck);
+
+    imageTypeRow.appendChild(preLabel);
+    imageTypeRow.appendChild(postLabel);
+    imageTypeField.appendChild(imageTypeRow);
+    c.appendChild(imageTypeField);
+
+    // Name
+    const nameInput = createTextInput(String(existingImage?.['name'] ?? ''));
+    c.appendChild(createField('Name *', nameInput));
+
+    // Entity Alias (defaults to Name)
+    const entityAliasInput = createTextInput(String(existingImage?.['entityAlias'] ?? ''));
+    const entityAliasField = createField('Entity Alias (defaults to Name)', entityAliasInput);
+    c.appendChild(entityAliasField);
+
+    // Keep entity alias in sync with name if user hasn't changed it
+    let aliasModifiedByUser = !!existingImage?.['entityAlias'];
+    nameInput.addEventListener('input', () => {
+        if (!aliasModifiedByUser) {
+            entityAliasInput.value = nameInput.value;
+        }
+    });
+    entityAliasInput.addEventListener('input', () => {
+        aliasModifiedByUser = true;
+    });
+
+    // Attributes
+    const attributesInput = createTextarea(String(existingImage?.['attributes'] ?? ''));
+    c.appendChild(createField('Attributes * (comma-separated logical names)', attributesInput));
+
+    // Description
+    const descriptionInput = createTextInput(String(existingImage?.['description'] ?? ''));
+    c.appendChild(createField('Description', descriptionInput));
+
+    // Message Property Name
+    const messagePropertyInput = createTextInput(String(existingImage?.['messagePropertyName'] ?? ''));
+    c.appendChild(createField('Message Property Name (override auto-inferred)', messagePropertyInput));
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    function onSubmit(): void {
+        const name = nameInput.value.trim();
+        const attributes = attributesInput.value.trim();
+
+        if (!preCheck.checked && !postCheck.checked) {
+            preCheck.focus();
+            return;
+        }
+        if (!name) {
+            nameInput.focus();
+            return;
+        }
+        if (!attributes) {
+            attributesInput.focus();
+            return;
+        }
+
+        const fields: Record<string, unknown> = {
+            imageTypePre: preCheck.checked,
+            imageTypePost: postCheck.checked,
+            name,
+            entityAlias: entityAliasInput.value.trim() || name,
+            attributes,
+            description: descriptionInput.value.trim(),
+            messagePropertyName: messagePropertyInput.value.trim(),
+        };
+
+        if (isUpdate && existingImage) {
+            vscode.postMessage({
+                command: 'updateEntity',
+                entityType: 'image',
+                id: String(existingImage['id']),
+                fields,
+            });
+        } else {
+            vscode.postMessage({
+                command: 'registerEntity',
+                entityType: 'image',
+                parentId: parentStepId,
+                fields,
+            });
+        }
+        modal.close();
+    }
+
+    c.appendChild(createFormActions(isUpdate ? 'Update' : 'Register', onSubmit, modal.close));
+}
+
+// ── Assembly / Package binary update form ─────────────────────────────────────
+
+function showBinaryUpdateForm(type: 'assembly' | 'package', id: string): void {
+    const modal = createModal(`Update ${type === 'assembly' ? 'Assembly' : 'Package'} Binary`);
+    const c = modal.content;
+
+    const instruction = document.createElement('p');
+    instruction.className = 'form-instruction';
+    instruction.textContent = `Select the updated ${type === 'assembly' ? '.dll' : '.nupkg'} file to upload.`;
+    c.appendChild(instruction);
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.className = 'form-file-input';
+    fileInput.accept = type === 'assembly' ? '.dll' : '.nupkg';
+    c.appendChild(createField('Select file', fileInput));
+
+    const statusEl = document.createElement('p');
+    statusEl.className = 'form-status';
+    c.appendChild(statusEl);
+
+    function onSubmit(): void {
+        const file = fileInput.files?.[0];
+        if (!file) {
+            statusEl.textContent = 'Please select a file.';
+            return;
+        }
+        statusEl.textContent = 'Reading file\u2026';
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result as string;
+            // dataUrl is "data:<mime>;base64,<content>" — extract the base64 part
+            const base64 = dataUrl.split(',')[1] ?? '';
+            vscode.postMessage({
+                command: 'registerEntity',
+                entityType: type,
+                parentId: id,
+                fields: {
+                    id,
+                    fileName: file.name,
+                    content: base64,
+                },
+            });
+            modal.close();
+        };
+        reader.onerror = () => {
+            statusEl.textContent = 'Failed to read file.';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    c.appendChild(createFormActions('Upload', onSubmit, modal.close));
+}
+
+// ── Register toolbar dropdown ─────────────────────────────────────────────────
+
+function buildRegisterDropdown(): void {
+    const toolbar = document.querySelector('.toolbar');
+    if (!toolbar) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'register-dropdown-wrapper';
+
+    const btn = document.createElement('button');
+    btn.className = 'toolbar-btn register-dropdown-btn';
+    btn.textContent = 'Register \u25BE'; // ▾
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    wrapper.appendChild(btn);
+
+    const menu = document.createElement('div');
+    menu.className = 'register-dropdown-menu hidden';
+    wrapper.appendChild(menu);
+
+    const items: { label: string; action: () => void }[] = [
+        {
+            label: 'Register Step',
+            action: () => {
+                const nodeId = selectedNodeId ?? undefined;
+                showStepForm(nodeId);
+            },
+        },
+        {
+            label: 'Register Image',
+            action: () => {
+                if (!selectedNodeId) return;
+                showImageForm(selectedNodeId);
+            },
+        },
+        {
+            label: 'Update Assembly Binary',
+            action: () => {
+                if (!selectedNodeId) return;
+                showBinaryUpdateForm('assembly', selectedNodeId);
+            },
+        },
+        {
+            label: 'Update Package Binary',
+            action: () => {
+                if (!selectedNodeId) return;
+                showBinaryUpdateForm('package', selectedNodeId);
+            },
+        },
+    ];
+
+    for (const item of items) {
+        const menuItem = document.createElement('button');
+        menuItem.className = 'register-dropdown-item';
+        menuItem.textContent = item.label;
+        menuItem.addEventListener('click', () => {
+            menu.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+            item.action();
+        });
+        menu.appendChild(menuItem);
+    }
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', isOpen);
+        btn.setAttribute('aria-expanded', String(!isOpen));
+    });
+
+    // Close on outside click
+    document.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+    });
+
+    // Insert before the first existing toolbar separator or at the end
+    toolbar.appendChild(wrapper);
+}
+
 // ── Message handlers ──────────────────────────────────────────────────────────
 
 function handleTreeLoaded(data: PluginTreeData): void {
@@ -812,6 +1360,28 @@ window.addEventListener('message', (event: MessageEvent<PluginsPanelHostToWebvie
         case 'attributesLoaded':
             // Reserved for future step image attribute support
             break;
+        case 'showRegisterForm':
+            if (msg.formType === 'step') {
+                showStepForm(msg.parentId);
+            } else if (msg.formType === 'image') {
+                showImageForm(msg.parentId ?? '');
+            } else if (msg.formType === 'assembly') {
+                showBinaryUpdateForm('assembly', msg.parentId ?? '');
+            } else if (msg.formType === 'package') {
+                showBinaryUpdateForm('package', msg.parentId ?? '');
+            }
+            break;
+        case 'showUpdateForm':
+            if (msg.formType === 'step') {
+                showStepForm(undefined, msg.data);
+            } else if (msg.formType === 'image') {
+                showImageForm(msg.id, msg.data);
+            } else if (msg.formType === 'assembly') {
+                showBinaryUpdateForm('assembly', msg.id);
+            } else if (msg.formType === 'package') {
+                showBinaryUpdateForm('package', msg.id);
+            }
+            break;
         default:
             assertNever(msg);
     }
@@ -834,4 +1404,5 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 });
 
 // ── Ready signal ──────────────────────────────────────────────────────────────
+buildRegisterDropdown();
 vscode.postMessage({ command: 'ready' });
