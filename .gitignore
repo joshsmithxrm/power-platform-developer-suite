@@ -99,5 +99,8 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 
 # Git worktrees
 .worktrees/
+
+# Implementation plans (ephemeral, consumed by /implement)
+.plans/
 .muse/
 .dotnet

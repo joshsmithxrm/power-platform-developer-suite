@@ -1,5 +1,17 @@
 # Implement Plan
 
+## Pipeline Mode Detection
+
+If `.workflow/pipeline.log` exists and has an active pipeline entry, this skill is being
+invoked by the pipeline orchestrator. In pipeline mode:
+- Execute Steps 1-5 only (plan analysis through phase execution)
+- Skip Step 6 (Mandatory Tail) — the pipeline handles gates/verify/review/pr
+- Exit cleanly after all phases are committed
+
+In interactive mode (no pipeline.log or no active entry), execute the full process including Step 6.
+
+---
+
 Execute a checked-in implementation plan end-to-end using parallel agents for maximum throughput. You are the orchestrator - agents do the work, you review, fix, commit, and advance.
 
 ## Prerequisites
@@ -13,7 +25,7 @@ Key tools and skills used throughout:
 - `/converge` for review-fix convergence loops
 
 ## Input
-$ARGUMENTS = path to the plan file (e.g., `docs/plans/2026-02-08-query-engine-v3-design.md`)
+$ARGUMENTS = path to the plan file (e.g., `.plans/2026-02-08-query-engine-v3-design.md`)
 
 ## Process
 

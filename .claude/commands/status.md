@@ -43,6 +43,31 @@ List what the PR gate hook would block on:
 - No QA entries → "/qa"
 - No review → "/review"
 
+### Pipeline Status
+
+If `.workflow/pipeline.log` exists, also display pipeline progress:
+
+1. Parse the log file for `START` and `DONE` entries
+2. Show each stage with its status and duration:
+
+```
+PIPELINE STATUS:
+  ✓ worktree     (2s)
+  ✓ implement    (13m 24s)
+  ✓ gates        (1m 14s)
+  → verify       (running for 2m 30s)
+  ○ review       (pending)
+  ○ pr           (pending)
+  ○ retro        (pending)
+```
+
+- `✓` = completed (has both START and DONE)
+- `→` = in progress (has START but no DONE)
+- `○` = pending (no START yet)
+- `✗` = failed (DONE with non-zero exit)
+
+Include the overall pipeline duration and plan file path from the first log entry.
+
 ## Notes
 
 - This command does NOT write to `.workflow/state.json`. It is read-only.

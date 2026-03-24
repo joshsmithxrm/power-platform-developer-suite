@@ -503,7 +503,6 @@ Selection & Copy edge cases:
 ## Related Specs
 
 - TUI completion: `src/PPDS.Cli/Tui/Views/SyntaxHighlightedTextView.cs`
-- TUI copy design: `docs/plans/2026-02-08-copy-paste-design.md`
 - TUI copy implementation: `src/PPDS.Cli/Tui/Helpers/TableCopyHelper.cs`
 - Daemon endpoint: `query/complete` in `RpcMethodHandler.cs`
 - Extension client: `daemonClient.queryComplete()` in `daemonClient.ts`

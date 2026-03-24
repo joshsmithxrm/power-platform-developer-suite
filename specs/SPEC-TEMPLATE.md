@@ -56,6 +56,9 @@
 
 ### Dependencies
 
+{Never reference `.plans/` files. Plans are ephemeral and deleted after implementation.
+If a plan contains context this spec needs, absorb it into this spec. See Constitution SL2.}
+
 - Depends on: [{other-spec}](./other-spec.md)
 - Uses patterns from: [architecture.md](./architecture.md)
 

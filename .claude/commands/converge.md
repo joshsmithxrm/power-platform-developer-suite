@@ -12,6 +12,18 @@ Evidence from vscode-extension-mvp:
 
 Without convergence tracking, review cycles can actually diverge — each round creating more problems than it solves.
 
+## Pipeline Mode Detection
+
+If `.workflow/pipeline.log` exists and has an active pipeline entry (a `START` line without
+a matching `DONE` for the current stage), this skill is being invoked by the pipeline
+orchestrator. In pipeline mode:
+- Read review findings from `.workflow/state.json`
+- Dispatch fix agents for CRITICAL findings first, then IMPORTANT
+- Commit the fixes
+- Exit cleanly — the pipeline handles the retry loop (converge → gates → verify → review)
+
+In interactive mode (no active pipeline), run the full convergence loop as currently defined.
+
 ## Input
 
 $ARGUMENTS = optional max cycles (default: 5). Set lower for small changes.
