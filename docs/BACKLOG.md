@@ -85,6 +85,7 @@ Epics track initiatives that span areas. They close when the initiative is done.
 3. **Monthly review:** Check inbox is empty. Review `status:backlog` + `priority:high` for promotion to a milestone.
 4. **Epics vs milestones:** Epics track initiatives across areas. Milestones track releases. An issue can have both.
 5. **Staleness:** Close issues >6 months with no activity and no milestone, unless they have `priority:high` or above.
+6. **Pipeline-created issues** land in the inbox unlabeled. The pipeline retro stage files issues for findings but cannot reliably assign `type:` or `area:`. These issues are triaged during the next `/backlog triage` pass.
 
 ## Useful Queries
 

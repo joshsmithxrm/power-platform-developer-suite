@@ -28,12 +28,33 @@ git rebase origin/main
 
 If conflicts exist, present them to the user — do NOT auto-resolve.
 
-### 2. Create PR
+### 2. Check for Linked Issues
+
+Before creating the PR, check if there are GitHub issues to close:
+
+```bash
+python scripts/workflow-state.py get issues
+```
+
+If the result is a JSON array (e.g., `[602, 596]`), include `Closes #NNN` lines in the PR body for each issue.
+
+If no issues are in workflow state and this is an **interactive session** (not headless `claude -p`), ask the user:
+> "Does this PR close any GitHub issues? If so, provide the numbers (comma-separated), or press Enter to skip."
+
+Parse the response as a comma-separated list of integers. Store them:
+```bash
+python scripts/workflow-state.py append issues <N>
+```
+
+### 3. Create PR
 
 ```bash
 gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <1-3 bullet points>
+
+Closes #NNN
+Closes #NNN
 
 ## Test Plan
 <bulleted checklist>
@@ -49,9 +70,9 @@ EOF
 )"
 ```
 
-Keep title under 70 characters. Use conventional commit format.
+Omit the `Closes` lines if there are no linked issues. Keep title under 70 characters. Use conventional commit format.
 
-### 3. Wait for Gemini Review
+### 4. Wait for Gemini Review
 
 Gemini posts review comments within 2-3 minutes of PR creation. Do NOT skip this step.
 
@@ -72,7 +93,7 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'
 
 Stop polling when reviews or comments appear (length > 0). CI status is NOT monitored — `/gates` already verified build/tests locally. The user checks CI on the PR page when ready to merge.
 
-### 4. Triage EVERY Review Comment
+### 5. Triage EVERY Review Comment
 
 This step is MANDATORY. Do not skip it. Do not defer it. Do not declare done without completing it.
 
@@ -111,7 +132,7 @@ git commit -m "fix: address review feedback from {reviewer}"
 git push
 ```
 
-### 5. Present Summary
+### 6. Present Summary
 
 After comments are triaged and responded to:
 
@@ -127,7 +148,7 @@ CI: running — check PR page for status.
 Awaiting your review.
 ```
 
-### 6. Write Workflow State
+### 7. Write Workflow State
 
 After PR is created:
 

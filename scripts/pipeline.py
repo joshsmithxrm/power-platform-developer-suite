@@ -15,6 +15,7 @@ Options:
     --no-retro          Skip the post-PR retro step
     --max-converge <n>  Max converge rounds (default: 3)
     --worktree <path>   Use existing worktree instead of creating one
+    --issue <N>         GitHub issue number(s) this work closes (repeatable)
 """
 import argparse
 import json
@@ -224,6 +225,7 @@ def process_retro_findings(worktree_path, logger, repo_root):
             body += "\n\n**Root cause chain:**\n"
             for i, cause in enumerate(finding["root_cause_chain"]):
                 body += f"{'  ' * i}→ {cause}\n"
+        body += "\n\n---\n*Filed automatically by pipeline retro. Needs triage: assign `type:`, `area:`, and milestone or `status:` label.*"
 
         try:
             subprocess.run(
@@ -235,8 +237,6 @@ def process_retro_findings(worktree_path, logger, repo_root):
                     f"retro: {desc[:70]}",
                     "--body",
                     body,
-                    "--label",
-                    "retro",
                 ],
                 cwd=repo_root,
                 capture_output=True,
@@ -287,6 +287,13 @@ def main():
     )
     parser.add_argument(
         "--worktree", help="Use existing worktree instead of creating one"
+    )
+    parser.add_argument(
+        "--issue",
+        type=int,
+        action="append",
+        default=[],
+        help="GitHub issue number(s) this work closes (repeatable)",
     )
     args = parser.parse_args()
 
@@ -405,6 +412,17 @@ def main():
                     )
                     if result.returncode != 0:
                         log(logger, "worktree", "STATE_SET_FAILED", error=result.stderr.strip())
+
+                # Store linked issue numbers in workflow state
+                for issue_num in args.issue:
+                    subprocess.run(
+                        ["python", "scripts/workflow-state.py", "append", "issues", str(issue_num)],
+                        cwd=worktree_path,
+                        capture_output=True,
+                        text=True,
+                    )
+                if args.issue:
+                    log(logger, "worktree", "ISSUES_LINKED", issues=args.issue)
 
             elif stage == "implement":
                 exit_code = run_claude(

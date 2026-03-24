@@ -9,6 +9,8 @@ Usage:
   python scripts/workflow-state.py set review.findings 3
   python scripts/workflow-state.py set pr.gemini_triaged true
   python scripts/workflow-state.py set-null gates.passed
+  python scripts/workflow-state.py append issues 602
+  python scripts/workflow-state.py get issues
   python scripts/workflow-state.py init feature/my-branch
   python scripts/workflow-state.py show
   python scripts/workflow-state.py delete
@@ -132,6 +134,44 @@ def main():
         state = read_state()
         set_nested(state, key, None)
         write_state(state)
+        sys.exit(0)
+
+    if command == "append":
+        if len(sys.argv) < 4:
+            print("Usage: workflow-state.py append <key> <value>", file=sys.stderr)
+            sys.exit(1)
+        key = sys.argv[2]
+        value = coerce_value(sys.argv[3])
+        state = read_state()
+        # Navigate to parent, get or create list at final key
+        parts = key.split(".")
+        current = state
+        for part in parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                current[part] = {}
+            current = current[part]
+        final_key = parts[-1]
+        if final_key not in current or not isinstance(current[final_key], list):
+            current[final_key] = []
+        if value not in current[final_key]:
+            current[final_key].append(value)
+        write_state(state)
+        sys.exit(0)
+
+    if command == "get":
+        if len(sys.argv) < 3:
+            print("Usage: workflow-state.py get <key>", file=sys.stderr)
+            sys.exit(1)
+        key = sys.argv[2]
+        state = read_state()
+        parts = key.split(".")
+        current = state
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                sys.exit(0)
+        print(json.dumps(current))
         sys.exit(0)
 
     print(f"Unknown command: {command}", file=sys.stderr)
