@@ -65,6 +65,11 @@ export type { AuthWhoResponse } from './types.js';
 
 // ── Plugins panel response types ─────────────────────────────────────────────
 
+export interface PluginsListResponse { assemblies: PluginAssemblyInfoDto[]; packages: PluginPackageInfoDto[] }
+export interface PluginPackageInfoDto { name: string; uniqueName?: string; version?: string; assemblies: PluginAssemblyInfoDto[] }
+export interface PluginAssemblyInfoDto { name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
+export interface PluginTypeInfoDto { typeName: string; steps: PluginStepInfoDto[] }
+export interface PluginStepInfoDto { name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
 export interface PluginsGetResponse { entity: Record<string, unknown> }
 export interface PluginsMessagesResponse { messages: string[] }
 export interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
@@ -1171,6 +1176,14 @@ export class DaemonClient implements vscode.Disposable {
     }
 
     // ── Plugins ─────────────────────────────────────────────────────────────
+
+    async pluginsList(environmentUrl?: string): Promise<PluginsListResponse> {
+        await this.ensureConnected();
+        const params: Record<string, unknown> = {};
+        if (environmentUrl !== undefined) params.environmentUrl = environmentUrl;
+        this.log.info('Calling plugins/list...');
+        return await this.connection!.sendRequest<PluginsListResponse>('plugins/list', params);
+    }
 
     async pluginsGet(type: string, id: string, environmentUrl?: string): Promise<PluginsGetResponse> {
         await this.ensureConnected();
