@@ -23,6 +23,11 @@ public class PluginStepAttributeTests
         Assert.False(attribute.AsyncAutoDelete);
         Assert.Null(attribute.StepId);
         Assert.Null(attribute.SecondaryEntityLogicalName);
+        Assert.Equal(PluginDeployment.ServerOnly, attribute.Deployment);
+        Assert.Null(attribute.RunAsUser);
+        Assert.True(attribute.CanBeBypassed);
+        Assert.False(attribute.CanUseReadOnlyConnection);
+        Assert.Equal(PluginInvocationSource.Parent, attribute.InvocationSource);
     }
 
     [Fact]
@@ -171,6 +176,86 @@ public class PluginStepAttributeTests
     {
         var attribute = new PluginStepAttribute { StepId = "step1" };
         Assert.Equal("step1", attribute.StepId);
+    }
+
+    [Fact]
+    public void Deployment_DefaultsToServerOnly()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.Equal(PluginDeployment.ServerOnly, attribute.Deployment);
+    }
+
+    [Theory]
+    [InlineData(PluginDeployment.ServerOnly)]
+    [InlineData(PluginDeployment.Offline)]
+    [InlineData(PluginDeployment.Both)]
+    public void Deployment_AcceptsAllValidValues(PluginDeployment deployment)
+    {
+        var attribute = new PluginStepAttribute { Deployment = deployment };
+        Assert.Equal(deployment, attribute.Deployment);
+    }
+
+    [Fact]
+    public void RunAsUser_DefaultsToNull()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.Null(attribute.RunAsUser);
+    }
+
+    [Theory]
+    [InlineData("CallingUser")]
+    [InlineData("System")]
+    [InlineData("user@example.com")]
+    [InlineData("DOMAIN\\user")]
+    [InlineData("b6a7f9e2-3c1d-4a5b-8f0e-2d6c9a7b3e4f")]
+    public void RunAsUser_CanBeSetToValidValues(string runAsUser)
+    {
+        var attribute = new PluginStepAttribute { RunAsUser = runAsUser };
+        Assert.Equal(runAsUser, attribute.RunAsUser);
+    }
+
+    [Fact]
+    public void CanBeBypassed_DefaultsToTrue()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.True(attribute.CanBeBypassed);
+    }
+
+    [Fact]
+    public void CanBeBypassed_CanBeSetToFalse()
+    {
+        var attribute = new PluginStepAttribute { CanBeBypassed = false };
+        Assert.False(attribute.CanBeBypassed);
+    }
+
+    [Fact]
+    public void CanUseReadOnlyConnection_DefaultsToFalse()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.False(attribute.CanUseReadOnlyConnection);
+    }
+
+    [Fact]
+    public void CanUseReadOnlyConnection_CanBeSetToTrue()
+    {
+        var attribute = new PluginStepAttribute { CanUseReadOnlyConnection = true };
+        Assert.True(attribute.CanUseReadOnlyConnection);
+    }
+
+    [Fact]
+    public void InvocationSource_DefaultsToParent()
+    {
+        var attribute = new PluginStepAttribute();
+        Assert.Equal(PluginInvocationSource.Parent, attribute.InvocationSource);
+    }
+
+    [Theory]
+    [InlineData(PluginInvocationSource.Parent)]
+    [InlineData(PluginInvocationSource.Child)]
+    public void InvocationSource_AcceptsAllValidValues(PluginInvocationSource source)
+    {
+        var attribute = new PluginStepAttribute { InvocationSource = source };
+        Assert.Equal(source, attribute.InvocationSource);
     }
 
     #endregion

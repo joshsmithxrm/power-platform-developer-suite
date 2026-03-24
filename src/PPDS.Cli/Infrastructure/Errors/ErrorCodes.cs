@@ -234,6 +234,9 @@ public static class ErrorCodes
 
         /// <summary>Specified user for impersonation was not found.</summary>
         public const string UserNotFound = "Plugin.UserNotFound";
+
+        /// <summary>Failed to enable or disable a plugin processing step.</summary>
+        public const string SetStateFailed = "Plugin.SetStateFailed";
     }
 
     /// <summary>
@@ -252,6 +255,75 @@ public static class ErrorCodes
 
         /// <summary>The dotnet tool update process exited with non-zero.</summary>
         public const string UpdateFailed = "UpdateCheck.UpdateFailed";
+    }
+
+    /// <summary>
+    /// Service endpoint operation errors.
+    /// </summary>
+    public static class ServiceEndpoint
+    {
+        /// <summary>Service endpoint not found by ID or name.</summary>
+        public const string NotFound = "ServiceEndpoint.NotFound";
+
+        /// <summary>Service endpoint name is already in use.</summary>
+        public const string NameInUse = "ServiceEndpoint.NameInUse";
+
+        /// <summary>Input validation failed (URL, SAS key length, namespace format, etc.).</summary>
+        public const string ValidationFailed = "ServiceEndpoint.ValidationFailed";
+
+        /// <summary>Cannot modify a managed service endpoint.</summary>
+        public const string ManagedComponent = "ServiceEndpoint.ManagedComponent";
+
+        /// <summary>Service endpoint has dependent step registrations that must be removed first.</summary>
+        public const string HasDependents = "ServiceEndpoint.HasDependents";
+    }
+
+    /// <summary>
+    /// Custom API operation errors.
+    /// </summary>
+    public static class CustomApi
+    {
+        /// <summary>Custom API not found by ID or unique name.</summary>
+        public const string NotFound = "CustomApi.NotFound";
+
+        /// <summary>Custom API unique name is already in use.</summary>
+        public const string NameInUse = "CustomApi.NameInUse";
+
+        /// <summary>Input validation failed (binding type, bound entity, parameter type, etc.).</summary>
+        public const string ValidationFailed = "CustomApi.ValidationFailed";
+
+        /// <summary>Cannot modify a managed Custom API.</summary>
+        public const string ManagedComponent = "CustomApi.ManagedComponent";
+
+        /// <summary>Custom API has parameters/properties that must be removed first (use --force to cascade).</summary>
+        public const string HasDependents = "CustomApi.HasDependents";
+
+        /// <summary>Parameter or response property not found by ID.</summary>
+        public const string ParameterNotFound = "CustomApi.ParameterNotFound";
+    }
+
+    /// <summary>
+    /// Data provider operation errors.
+    /// </summary>
+    public static class DataProvider
+    {
+        /// <summary>Data provider not found by ID or name.</summary>
+        public const string NotFound = "DataProvider.NotFound";
+
+        /// <summary>Input validation failed (name, data source, plugin type, etc.).</summary>
+        public const string ValidationFailed = "DataProvider.ValidationFailed";
+    }
+
+    /// <summary>
+    /// Data source operation errors.
+    /// </summary>
+    public static class DataSource
+    {
+        /// <summary>Data source not found by ID or name.</summary>
+        public const string NotFound = "DataSource.NotFound";
+
+        /// <summary>Data source has dependent data providers that must be removed first.</summary>
+        public const string HasDependents = "DataSource.HasDependents";
     }
 
     /// <summary>

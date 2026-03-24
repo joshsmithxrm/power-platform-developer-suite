@@ -4,15 +4,20 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
+using Microsoft.Xrm.Sdk.Query;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
+using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
@@ -29,6 +34,9 @@ using StreamJsonRpc;
 // Aliases to disambiguate from local DTOs
 using PluginTypeInfoModel = PPDS.Cli.Plugins.Registration.PluginTypeInfo;
 using PluginImageInfoModel = PPDS.Cli.Plugins.Registration.PluginImageInfo;
+using PluginAssemblyInfoModel = PPDS.Cli.Plugins.Registration.PluginAssemblyInfo;
+using PluginPackageInfoModel = PPDS.Cli.Plugins.Registration.PluginPackageInfo;
+using PluginStepInfoModel = PPDS.Cli.Plugins.Registration.PluginStepInfo;
 using ConnRefRelationshipType = PPDS.Dataverse.Services.RelationshipType;
 using WebResourceInfoModel = PPDS.Dataverse.Services.WebResourceInfo;
 
@@ -628,16 +636,17 @@ public class RpcMethodHandler : IDisposable
     #region Plugins Methods
 
     /// <summary>
-    /// Lists registered plugins in the environment.
+    /// Lists registered plugins in the environment, including service endpoints, custom APIs, and data sources.
     /// Maps to: ppds plugins list --json
     /// </summary>
     [JsonRpcMethod("plugins/list")]
     public async Task<PluginsListResponse> PluginsListAsync(
         string? assembly = null,
         string? package = null,
+        string? environmentUrl = null,
         CancellationToken cancellationToken = default)
     {
-        return await WithActiveProfileAsync(async (sp, ct) =>
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
         {
             var pool = sp.GetRequiredService<IDataverseConnectionPool>();
 
@@ -648,6 +657,21 @@ public class RpcMethodHandler : IDisposable
 
             var response = new PluginsListResponse();
 
+            // Fetch all domain data in parallel
+            var serviceEndpointService = sp.GetRequiredService<IServiceEndpointService>();
+            var customApiService = sp.GetRequiredService<ICustomApiService>();
+            var dataProviderService = sp.GetRequiredService<IDataProviderService>();
+
+            var serviceEndpointsTask = serviceEndpointService.ListAsync(ct);
+            var customApisTask = customApiService.ListAsync(ct);
+            var dataSourcesTask = dataProviderService.ListDataSourcesAsync(ct);
+
+            await Task.WhenAll(serviceEndpointsTask, customApisTask, dataSourcesTask);
+
+            response.ServiceEndpoints = (await serviceEndpointsTask).Select(MapServiceEndpointToDto).ToList();
+            response.CustomApis = (await customApisTask).Select(MapCustomApiToDto).ToList();
+            response.DataSources = (await dataSourcesTask).Select(MapDataSourceToDto).ToList();
+
             // Get assemblies (unless package filter is specified)
             if (string.IsNullOrEmpty(package))
             {
@@ -657,6 +681,7 @@ public class RpcMethodHandler : IDisposable
                 {
                     var assemblyOutput = new PluginAssemblyInfo
                     {
+                        Id = asm.Id.ToString(),
                         Name = asm.Name,
                         Version = asm.Version,
                         PublicKeyToken = asm.PublicKeyToken,
@@ -679,6 +704,7 @@ public class RpcMethodHandler : IDisposable
                 {
                     var packageOutput = new PluginPackageInfo
                     {
+                        Id = pkg.Id.ToString(),
                         Name = pkg.Name,
                         UniqueName = pkg.UniqueName,
                         Version = pkg.Version,
@@ -690,6 +716,7 @@ public class RpcMethodHandler : IDisposable
                     {
                         var assemblyOutput = new PluginAssemblyInfo
                         {
+                            Id = asm.Id.ToString(),
                             Name = asm.Name,
                             Version = asm.Version,
                             PublicKeyToken = asm.PublicKeyToken,
@@ -745,9 +772,11 @@ public class RpcMethodHandler : IDisposable
 
             var typeOutput = new PluginTypeInfoDto
             {
+                Id = type.Id.ToString(),
                 TypeName = type.TypeName,
                 Steps = stepsForType.Select(step => new PluginStepInfo
                 {
+                    Id = step.Id.ToString(),
                     Name = step.Name,
                     Message = step.Message,
                     Entity = step.PrimaryEntity,
@@ -763,6 +792,7 @@ public class RpcMethodHandler : IDisposable
                     Images = imagesByStepId.TryGetValue(step.Id, out var images)
                         ? images.Select(img => new PluginImageInfo
                         {
+                            Id = img.Id.ToString(),
                             Name = img.Name,
                             EntityAlias = img.EntityAlias ?? img.Name,
                             ImageType = img.ImageType,
@@ -775,6 +805,589 @@ public class RpcMethodHandler : IDisposable
             typeOutputs.Add(typeOutput);
         }
     }
+
+    #endregion
+
+    #region Plugin Registration Mutations
+
+    /// <summary>
+    /// Gets detailed information about a single plugin entity by type and ID.
+    /// Supports: assembly, package, type, step, image.
+    /// </summary>
+    [JsonRpcMethod("plugins/get")]
+    public async Task<PluginsGetResponse> PluginsGetAsync(
+        string type,
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'type' parameter is required");
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var response = new PluginsGetResponse { Type = type };
+
+            switch (type.ToLowerInvariant())
+            {
+                case "assembly":
+                {
+                    var asm = await registrationService.GetAssemblyByIdAsync(entityId, ct)
+                        ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Assembly '{id}' not found");
+                    response.Assembly = MapAssemblyInfoToDetail(asm);
+                    break;
+                }
+                case "package":
+                {
+                    var pkg = await registrationService.GetPackageByIdAsync(entityId, ct)
+                        ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Package '{id}' not found");
+                    response.Package = MapPackageInfoToDetail(pkg);
+                    break;
+                }
+                case "type":
+                {
+                    var t = await registrationService.GetPluginTypeByNameOrIdAsync(id, ct)
+                        ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Plugin type '{id}' not found");
+                    response.PluginType = MapPluginTypeInfoToDetail(t);
+                    break;
+                }
+                case "step":
+                {
+                    var step = await registrationService.GetStepByNameOrIdAsync(id, ct)
+                        ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Step '{id}' not found");
+                    response.Step = MapStepInfoToDetail(step);
+                    break;
+                }
+                case "image":
+                {
+                    var img = await registrationService.GetImageByNameOrIdAsync(id, ct)
+                        ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Image '{id}' not found");
+                    response.Image = MapImageInfoToDetail(img);
+                    break;
+                }
+                default:
+                    throw new RpcException(ErrorCodes.Validation.InvalidArguments,
+                        $"Unknown type '{type}'. Valid values: assembly, package, type, step, image");
+            }
+
+            return response;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists available SDK messages, optionally filtered by name.
+    /// </summary>
+    [JsonRpcMethod("plugins/messages")]
+    public async Task<PluginsMessagesResponse> PluginsMessagesAsync(
+        string? filter = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+            var messages = await registrationService.ListMessagesAsync(filter, ct);
+            return new PluginsMessagesResponse { Messages = messages };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Returns attribute metadata for an entity.
+    /// </summary>
+    [JsonRpcMethod("plugins/entityAttributes")]
+    public async Task<PluginsEntityAttributesResponse> PluginsEntityAttributesAsync(
+        string entityLogicalName,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(entityLogicalName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entityLogicalName' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+            var attributes = await registrationService.ListEntityAttributesAsync(entityLogicalName, ct);
+            return new PluginsEntityAttributesResponse
+            {
+                Attributes = attributes.Select(a => new AttributeInfoDto
+                {
+                    LogicalName = a.LogicalName,
+                    DisplayName = a.DisplayName,
+                    AttributeType = a.AttributeType
+                }).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Enables or disables a plugin processing step.
+    /// </summary>
+    [JsonRpcMethod("plugins/toggleStep")]
+    public async Task<PluginsToggleStepResponse> PluginsToggleStepAsync(
+        string id,
+        bool enabled,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            if (enabled)
+                await registrationService.EnableStepAsync(stepId, ct);
+            else
+                await registrationService.DisableStepAsync(stepId, ct);
+
+            return new PluginsToggleStepResponse { Id = id, Enabled = enabled };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers or updates a plugin assembly from base64-encoded DLL content.
+    /// </summary>
+    [JsonRpcMethod("plugins/registerAssembly")]
+    public async Task<PluginsRegisterResponse> PluginsRegisterAssemblyAsync(
+        string name,
+        string content,
+        string? solutionName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+        if (string.IsNullOrWhiteSpace(content))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var bytes = Convert.FromBase64String(content);
+            var assemblyId = await registrationService.UpsertAssemblyAsync(name, bytes, solutionName, ct);
+
+            return new PluginsRegisterResponse { Id = assemblyId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers or updates a plugin package from base64-encoded .nupkg content.
+    /// </summary>
+    [JsonRpcMethod("plugins/registerPackage")]
+    public async Task<PluginsRegisterResponse> PluginsRegisterPackageAsync(
+        string name,
+        string content,
+        string? solutionName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+        if (string.IsNullOrWhiteSpace(content))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'content' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var bytes = Convert.FromBase64String(content);
+            var packageId = await registrationService.UpsertPackageAsync(name, bytes, solutionName, ct);
+
+            return new PluginsRegisterResponse { Id = packageId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers or updates a plugin step.
+    /// </summary>
+    [JsonRpcMethod("plugins/registerStep")]
+    public async Task<PluginsRegisterResponse> PluginsRegisterStepAsync(
+        string pluginTypeId,
+        string message,
+        string entity,
+        string stage,
+        string mode = "Synchronous",
+        int executionOrder = 1,
+        string? filteringAttributes = null,
+        string? description = null,
+        string? unsecureConfiguration = null,
+        string? deployment = null,
+        string? runAsUser = null,
+        bool? canBeBypassed = null,
+        bool? canUseReadOnlyConnection = null,
+        string? invocationSource = null,
+        bool asyncAutoDelete = false,
+        string? secondaryEntity = null,
+        string? solutionName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var typeId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(message))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'message' parameter is required");
+        if (string.IsNullOrWhiteSpace(entity))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'entity' parameter is required");
+        if (string.IsNullOrWhiteSpace(stage))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'stage' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var messageId = await registrationService.GetSdkMessageIdAsync(message, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"SDK message '{message}' not found");
+
+            var filterId = await registrationService.GetSdkMessageFilterIdAsync(messageId, entity, secondaryEntity, ct);
+
+            var stepConfig = new PluginStepConfig
+            {
+                Message = message,
+                Entity = entity,
+                Stage = stage,
+                Mode = mode,
+                ExecutionOrder = executionOrder,
+                FilteringAttributes = filteringAttributes,
+                Description = description,
+                UnsecureConfiguration = unsecureConfiguration,
+                Deployment = deployment,
+                RunAsUser = runAsUser,
+                CanBeBypassed = canBeBypassed,
+                CanUseReadOnlyConnection = canUseReadOnlyConnection,
+                InvocationSource = invocationSource,
+                AsyncAutoDelete = asyncAutoDelete,
+                SecondaryEntity = secondaryEntity
+            };
+
+            var stepId = await registrationService.UpsertStepAsync(typeId, stepConfig, messageId, filterId, solutionName, ct);
+
+            return new PluginsRegisterResponse { Id = stepId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers or updates a step image.
+    /// </summary>
+    [JsonRpcMethod("plugins/registerImage")]
+    public async Task<PluginsRegisterResponse> PluginsRegisterImageAsync(
+        string stepId,
+        string name,
+        string imageType,
+        string? attributes = null,
+        string? entityAlias = null,
+        string? messageName = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(stepId) || !Guid.TryParse(stepId, out var parsedStepId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'stepId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+        if (string.IsNullOrWhiteSpace(imageType))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'imageType' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            // Resolve message name from step if not provided
+            string resolvedMessageName = messageName ?? "Create";
+            if (string.IsNullOrWhiteSpace(messageName))
+            {
+                var step = await registrationService.GetStepByNameOrIdAsync(stepId, ct);
+                if (step != null)
+                    resolvedMessageName = step.Message;
+            }
+
+            var imageConfig = new PluginImageConfig
+            {
+                Name = name,
+                ImageType = imageType,
+                Attributes = attributes,
+                EntityAlias = entityAlias
+            };
+
+            var imageId = await registrationService.UpsertImageAsync(parsedStepId, imageConfig, resolvedMessageName, ct);
+
+            return new PluginsRegisterResponse { Id = imageId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates a plugin processing step.
+    /// </summary>
+    [JsonRpcMethod("plugins/updateStep")]
+    public async Task<PluginsUpdateResponse> PluginsUpdateStepAsync(
+        string id,
+        string? mode = null,
+        string? stage = null,
+        int? rank = null,
+        string? filteringAttributes = null,
+        string? description = null,
+        bool? canBeBypassed = null,
+        bool? canUseReadOnlyConnection = null,
+        string? invocationSource = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var stepId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var request = new StepUpdateRequest(
+                Mode: mode,
+                Stage: stage,
+                Rank: rank,
+                FilteringAttributes: filteringAttributes,
+                Description: description,
+                CanBeBypassed: canBeBypassed,
+                CanUseReadOnlyConnection: canUseReadOnlyConnection,
+                InvocationSource: invocationSource
+            );
+
+            await registrationService.UpdateStepAsync(stepId, request, ct);
+
+            return new PluginsUpdateResponse { Id = id };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates a step image.
+    /// </summary>
+    [JsonRpcMethod("plugins/updateImage")]
+    public async Task<PluginsUpdateResponse> PluginsUpdateImageAsync(
+        string id,
+        string? imageAttributes = null,
+        string? name = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var imageId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            var request = new ImageUpdateRequest(
+                Attributes: imageAttributes,
+                Name: name
+            );
+
+            await registrationService.UpdateImageAsync(imageId, request, ct);
+
+            return new PluginsUpdateResponse { Id = id };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Unregisters a plugin entity (assembly, package, type, step, or image).
+    /// </summary>
+    [JsonRpcMethod("plugins/unregister")]
+    public async Task<PluginsUnregisterResponse> PluginsUnregisterAsync(
+        string type,
+        string id,
+        bool force = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'type' parameter is required");
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            UnregisterResult result = type.ToLowerInvariant() switch
+            {
+                "assembly" => await registrationService.UnregisterAssemblyAsync(entityId, force, ct),
+                "package" => await registrationService.UnregisterPackageAsync(entityId, force, ct),
+                "type" => await registrationService.UnregisterPluginTypeAsync(entityId, force, ct),
+                "step" => await registrationService.UnregisterStepAsync(entityId, force, ct),
+                "image" => await registrationService.UnregisterImageAsync(entityId, ct),
+                _ => throw new RpcException(ErrorCodes.Validation.InvalidArguments,
+                    $"Unknown type '{type}'. Valid values: assembly, package, type, step, image")
+            };
+
+            return new PluginsUnregisterResponse
+            {
+                EntityName = result.EntityName,
+                EntityType = result.EntityType,
+                PackagesDeleted = result.PackagesDeleted,
+                AssembliesDeleted = result.AssembliesDeleted,
+                TypesDeleted = result.TypesDeleted,
+                StepsDeleted = result.StepsDeleted,
+                ImagesDeleted = result.ImagesDeleted,
+                TotalDeleted = result.TotalDeleted
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Downloads the binary content of a plugin assembly or package as base64.
+    /// </summary>
+    [JsonRpcMethod("plugins/downloadBinary")]
+    public async Task<PluginsDownloadResponse> PluginsDownloadBinaryAsync(
+        string type,
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'type' parameter is required");
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var entityId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var pool = sp.GetRequiredService<IDataverseConnectionPool>();
+            var registrationService = new PluginRegistrationService(
+                pool,
+                NullLogger<PluginRegistrationService>.Instance);
+
+            (byte[] bytes, string fileName) = type.ToLowerInvariant() switch
+            {
+                "assembly" => await registrationService.DownloadAssemblyAsync(entityId, ct),
+                "package" => await registrationService.DownloadPackageAsync(entityId, ct),
+                _ => throw new RpcException(ErrorCodes.Validation.InvalidArguments,
+                    $"Unknown type '{type}'. Valid values: assembly, package")
+            };
+
+            return new PluginsDownloadResponse
+            {
+                Content = Convert.ToBase64String(bytes),
+                FileName = fileName
+            };
+        }, cancellationToken);
+    }
+
+    private static PluginAssemblyDetailDto MapAssemblyInfoToDetail(PluginAssemblyInfoModel asm) =>
+        new()
+        {
+            Id = asm.Id.ToString(),
+            Name = asm.Name,
+            Version = asm.Version,
+            PublicKeyToken = asm.PublicKeyToken,
+            IsolationMode = asm.IsolationMode,
+            SourceType = asm.SourceType,
+            IsManaged = asm.IsManaged,
+            PackageId = asm.PackageId?.ToString(),
+            CreatedOn = asm.CreatedOn?.ToString("O"),
+            ModifiedOn = asm.ModifiedOn?.ToString("O")
+        };
+
+    private static PluginPackageDetailDto MapPackageInfoToDetail(PluginPackageInfoModel pkg) =>
+        new()
+        {
+            Id = pkg.Id.ToString(),
+            Name = pkg.Name,
+            UniqueName = pkg.UniqueName,
+            Version = pkg.Version,
+            IsManaged = pkg.IsManaged,
+            CreatedOn = pkg.CreatedOn?.ToString("O"),
+            ModifiedOn = pkg.ModifiedOn?.ToString("O")
+        };
+
+    private static PluginTypeDetailDto MapPluginTypeInfoToDetail(PluginTypeInfoModel t) =>
+        new()
+        {
+            Id = t.Id.ToString(),
+            TypeName = t.TypeName,
+            FriendlyName = t.FriendlyName,
+            AssemblyId = t.AssemblyId?.ToString(),
+            AssemblyName = t.AssemblyName,
+            IsManaged = t.IsManaged,
+            CreatedOn = t.CreatedOn?.ToString("O"),
+            ModifiedOn = t.ModifiedOn?.ToString("O")
+        };
+
+    private static PluginStepDetailDto MapStepInfoToDetail(PluginStepInfoModel step) =>
+        new()
+        {
+            Id = step.Id.ToString(),
+            Name = step.Name,
+            Message = step.Message,
+            PrimaryEntity = step.PrimaryEntity,
+            SecondaryEntity = step.SecondaryEntity,
+            Stage = step.Stage,
+            Mode = step.Mode,
+            ExecutionOrder = step.ExecutionOrder,
+            FilteringAttributes = step.FilteringAttributes,
+            Configuration = step.Configuration,
+            IsEnabled = step.IsEnabled,
+            Description = step.Description,
+            Deployment = step.Deployment,
+            ImpersonatingUserId = step.ImpersonatingUserId?.ToString(),
+            ImpersonatingUserName = step.ImpersonatingUserName,
+            AsyncAutoDelete = step.AsyncAutoDelete,
+            PluginTypeId = step.PluginTypeId?.ToString(),
+            PluginTypeName = step.PluginTypeName,
+            IsManaged = step.IsManaged,
+            IsCustomizable = step.IsCustomizable,
+            CreatedOn = step.CreatedOn?.ToString("O"),
+            ModifiedOn = step.ModifiedOn?.ToString("O")
+        };
+
+    private static PluginImageDetailDto MapImageInfoToDetail(PluginImageInfoModel img) =>
+        new()
+        {
+            Id = img.Id.ToString(),
+            Name = img.Name,
+            EntityAlias = img.EntityAlias,
+            ImageType = img.ImageType,
+            Attributes = img.Attributes,
+            MessagePropertyName = img.MessagePropertyName,
+            StepId = img.StepId?.ToString(),
+            StepName = img.StepName,
+            IsManaged = img.IsManaged,
+            IsCustomizable = img.IsCustomizable,
+            CreatedOn = img.CreatedOn?.ToString("O"),
+            ModifiedOn = img.ModifiedOn?.ToString("O")
+        };
 
     #endregion
 
@@ -3264,6 +3877,850 @@ public class RpcMethodHandler : IDisposable
     }
 
     #endregion
+
+    #region Service Endpoints
+
+    // ── Service Endpoints ──
+
+    /// <summary>
+    /// Lists all service endpoints and webhooks in the environment.
+    /// Maps to: ppds service-endpoints list --json
+    /// </summary>
+    [JsonRpcMethod("serviceEndpoints/list")]
+    public async Task<ServiceEndpointsListResponse> ServiceEndpointsListAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IServiceEndpointService>();
+            var endpoints = await service.ListAsync(ct);
+
+            return new ServiceEndpointsListResponse
+            {
+                Endpoints = endpoints.Select(MapServiceEndpointToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single service endpoint by ID.
+    /// Maps to: ppds service-endpoints get --json
+    /// </summary>
+    [JsonRpcMethod("serviceEndpoints/get")]
+    public async Task<ServiceEndpointsGetResponse> ServiceEndpointsGetAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IServiceEndpointService>();
+            var endpoint = await service.GetByIdAsync(endpointId, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Service endpoint '{id}' not found");
+
+            return new ServiceEndpointsGetResponse
+            {
+                Endpoint = MapServiceEndpointToDto(endpoint)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a new service endpoint or webhook.
+    /// Maps to: ppds service-endpoints register --json
+    /// </summary>
+    [JsonRpcMethod("serviceEndpoints/register")]
+    public async Task<ServiceEndpointsRegisterResponse> ServiceEndpointsRegisterAsync(
+        string name,
+        string contractType,
+        // Webhook fields
+        string? url = null,
+        // Service Bus fields
+        string? namespaceAddress = null,
+        string? path = null,
+        // Auth
+        string? authType = null,
+        string? authValue = null,
+        string? sasKeyName = null,
+        string? sasKey = null,
+        string? sasToken = null,
+        // Optional service bus extras
+        string? messageFormat = null,
+        string? userClaim = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+        if (string.IsNullOrWhiteSpace(contractType))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'contractType' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IServiceEndpointService>();
+            Guid newId;
+
+            // Webhook: contractType == "Webhook"
+            if (string.Equals(contractType, "Webhook", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'url' parameter is required for webhook registration");
+                if (string.IsNullOrWhiteSpace(authType))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'authType' parameter is required for webhook registration");
+
+                newId = await service.RegisterWebhookAsync(
+                    new WebhookRegistration(name, url, authType, authValue),
+                    ct);
+            }
+            else
+            {
+                // Service Bus: Queue, Topic, EventHub, OneWay, TwoWay, Rest
+                if (string.IsNullOrWhiteSpace(namespaceAddress))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'namespaceAddress' parameter is required for service bus registration");
+                if (string.IsNullOrWhiteSpace(path))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'path' parameter is required for service bus registration");
+                if (string.IsNullOrWhiteSpace(authType))
+                    throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'authType' parameter is required for service bus registration");
+
+                newId = await service.RegisterServiceBusAsync(
+                    new ServiceBusRegistration(
+                        name,
+                        namespaceAddress,
+                        path,
+                        contractType,
+                        authType,
+                        sasKeyName,
+                        sasKey,
+                        sasToken,
+                        messageFormat,
+                        userClaim),
+                    ct);
+            }
+
+            return new ServiceEndpointsRegisterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates properties of an existing service endpoint.
+    /// Maps to: ppds service-endpoints update --json
+    /// </summary>
+    [JsonRpcMethod("serviceEndpoints/update")]
+    public async Task<ServiceEndpointsUpdateResponse> ServiceEndpointsUpdateAsync(
+        string id,
+        string? name = null,
+        string? description = null,
+        string? url = null,
+        string? authType = null,
+        string? authValue = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IServiceEndpointService>();
+            await service.UpdateAsync(
+                endpointId,
+                new ServiceEndpointUpdateRequest(name, description, url, authType, authValue),
+                ct);
+
+            return new ServiceEndpointsUpdateResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Unregisters (deletes) a service endpoint.
+    /// Maps to: ppds service-endpoints unregister --json
+    /// </summary>
+    [JsonRpcMethod("serviceEndpoints/unregister")]
+    public async Task<ServiceEndpointsUnregisterResponse> ServiceEndpointsUnregisterAsync(
+        string id,
+        bool force = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var endpointId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IServiceEndpointService>();
+            await service.UnregisterAsync(endpointId, force, cancellationToken: ct);
+
+            return new ServiceEndpointsUnregisterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    private static ServiceEndpointDto MapServiceEndpointToDto(ServiceEndpointInfo e) =>
+        new()
+        {
+            Id = e.Id.ToString(),
+            Name = e.Name,
+            Description = e.Description,
+            ContractType = e.ContractType,
+            IsWebhook = e.IsWebhook,
+            Url = e.Url,
+            NamespaceAddress = e.NamespaceAddress,
+            Path = e.Path,
+            AuthType = e.AuthType,
+            MessageFormat = e.MessageFormat,
+            UserClaim = e.UserClaim,
+            IsManaged = e.IsManaged,
+            CreatedOn = e.CreatedOn?.ToString("o"),
+            ModifiedOn = e.ModifiedOn?.ToString("o")
+        };
+
+    #endregion
+
+    #region Custom APIs
+
+    // ── Custom APIs ──
+
+    /// <summary>
+    /// Lists all Custom APIs with parameters in the environment.
+    /// Maps to: ppds custom-apis list --json
+    /// </summary>
+    [JsonRpcMethod("customApis/list")]
+    public async Task<CustomApisListResponse> CustomApisListAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var apis = await service.ListAsync(ct);
+
+            return new CustomApisListResponse
+            {
+                Apis = apis.Select(MapCustomApiToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single Custom API by unique name or ID.
+    /// Maps to: ppds custom-apis get --json
+    /// </summary>
+    [JsonRpcMethod("customApis/get")]
+    public async Task<CustomApisGetResponse> CustomApisGetAsync(
+        string uniqueNameOrId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueNameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueNameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var api = await service.GetAsync(uniqueNameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Custom API '{uniqueNameOrId}' not found");
+
+            return new CustomApisGetResponse
+            {
+                Api = MapCustomApiToDto(api)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a new Custom API, optionally with request/response parameters.
+    /// Maps to: ppds custom-apis register --json
+    /// </summary>
+    [JsonRpcMethod("customApis/register")]
+    public async Task<CustomApisRegisterResponse> CustomApisRegisterAsync(
+        string uniqueName,
+        string displayName,
+        string pluginTypeId,
+        string? name = null,
+        string? description = null,
+        string? bindingType = null,
+        string? boundEntity = null,
+        bool isFunction = false,
+        bool isPrivate = false,
+        string? executePrivilegeName = null,
+        string? allowedProcessingStepType = null,
+        List<CustomApiParameterDto>? parameters = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueName' parameter is required");
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
+        if (string.IsNullOrWhiteSpace(pluginTypeId) || !Guid.TryParse(pluginTypeId, out var pluginTypeGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+
+            var paramRegistrations = parameters?
+                .Select(p => new CustomApiParameterRegistration(
+                    p.UniqueName ?? "",
+                    p.DisplayName ?? "",
+                    p.Name,
+                    p.Description,
+                    p.Type ?? "",
+                    p.LogicalEntityName,
+                    p.IsOptional,
+                    p.Direction ?? "Request"))
+                .ToList();
+
+            var newId = await service.RegisterAsync(
+                new CustomApiRegistration(
+                    uniqueName,
+                    displayName,
+                    name,
+                    description,
+                    pluginTypeGuid,
+                    bindingType,
+                    boundEntity,
+                    isFunction,
+                    isPrivate,
+                    executePrivilegeName,
+                    allowedProcessingStepType,
+                    paramRegistrations),
+                cancellationToken: ct);
+
+            return new CustomApisRegisterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates mutable properties of an existing Custom API.
+    /// Maps to: ppds custom-apis update --json
+    /// </summary>
+    [JsonRpcMethod("customApis/update")]
+    public async Task<CustomApisUpdateResponse> CustomApisUpdateAsync(
+        string id,
+        string? displayName = null,
+        string? description = null,
+        string? pluginTypeId = null,
+        bool? isFunction = null,
+        bool? isPrivate = null,
+        string? executePrivilegeName = null,
+        string? allowedProcessingStepType = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        Guid? pluginTypeGuid = null;
+        if (!string.IsNullOrWhiteSpace(pluginTypeId))
+        {
+            if (!Guid.TryParse(pluginTypeId, out var ptg))
+                throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'pluginTypeId' parameter must be a valid GUID");
+            pluginTypeGuid = ptg;
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UpdateAsync(
+                apiId,
+                new CustomApiUpdateRequest(
+                    displayName,
+                    description,
+                    pluginTypeGuid,
+                    isFunction,
+                    isPrivate,
+                    executePrivilegeName,
+                    allowedProcessingStepType),
+                ct);
+
+            return new CustomApisUpdateResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Unregisters a Custom API and optionally cascade-deletes its parameters.
+    /// Maps to: ppds custom-apis unregister --json
+    /// </summary>
+    [JsonRpcMethod("customApis/unregister")]
+    public async Task<CustomApisUnregisterResponse> CustomApisUnregisterAsync(
+        string id,
+        bool force = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var apiId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UnregisterAsync(apiId, force, cancellationToken: ct);
+
+            return new CustomApisUnregisterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a request parameter or response property to an existing Custom API.
+    /// Maps to: ppds custom-apis add-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/addParameter")]
+    public async Task<CustomApisAddParameterResponse> CustomApisAddParameterAsync(
+        string apiId,
+        string uniqueName,
+        string displayName,
+        string type,
+        string direction,
+        string? name = null,
+        string? description = null,
+        string? logicalEntityName = null,
+        bool isOptional = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiId) || !Guid.TryParse(apiId, out var apiGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'apiId' parameter must be a valid GUID");
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'uniqueName' parameter is required");
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'displayName' parameter is required");
+        if (string.IsNullOrWhiteSpace(type))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'type' parameter is required");
+        if (string.IsNullOrWhiteSpace(direction))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'direction' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            var newId = await service.AddParameterAsync(
+                apiGuid,
+                new CustomApiParameterRegistration(
+                    uniqueName,
+                    displayName,
+                    name,
+                    description,
+                    type,
+                    logicalEntityName,
+                    isOptional,
+                    direction),
+                ct);
+
+            return new CustomApisAddParameterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates mutable properties (display name, description) of a parameter.
+    /// Maps to: ppds custom-apis update-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/updateParameter")]
+    public async Task<CustomApisUpdateParameterResponse> CustomApisUpdateParameterAsync(
+        string parameterId,
+        string? displayName = null,
+        string? description = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'parameterId' parameter must be a valid GUID");
+
+        if (displayName == null && description == null)
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "At least one of 'displayName' or 'description' must be provided");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.UpdateParameterAsync(
+                paramGuid,
+                new CustomApiParameterUpdateRequest(displayName, description),
+                ct);
+
+            return new CustomApisUpdateParameterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes a request parameter or response property by ID.
+    /// Maps to: ppds custom-apis remove-parameter --json
+    /// </summary>
+    [JsonRpcMethod("customApis/removeParameter")]
+    public async Task<CustomApisRemoveParameterResponse> CustomApisRemoveParameterAsync(
+        string parameterId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !Guid.TryParse(parameterId, out var paramGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'parameterId' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<ICustomApiService>();
+            await service.RemoveParameterAsync(paramGuid, ct);
+
+            return new CustomApisRemoveParameterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    private static CustomApiDto MapCustomApiToDto(CustomApiInfo api) =>
+        new()
+        {
+            Id = api.Id.ToString(),
+            UniqueName = api.UniqueName,
+            DisplayName = api.DisplayName,
+            Name = api.Name,
+            Description = api.Description,
+            PluginTypeId = api.PluginTypeId?.ToString(),
+            PluginTypeName = api.PluginTypeName,
+            BindingType = api.BindingType,
+            BoundEntity = api.BoundEntity,
+            AllowedProcessingStepType = api.AllowedProcessingStepType,
+            IsFunction = api.IsFunction,
+            IsPrivate = api.IsPrivate,
+            ExecutePrivilegeName = api.ExecutePrivilegeName,
+            IsManaged = api.IsManaged,
+            CreatedOn = api.CreatedOn?.ToString("o"),
+            ModifiedOn = api.ModifiedOn?.ToString("o"),
+            RequestParameters = api.RequestParameters.Select(MapCustomApiParameterToDto).ToList(),
+            ResponseProperties = api.ResponseProperties.Select(MapCustomApiParameterToDto).ToList()
+        };
+
+    private static CustomApiParameterDto MapCustomApiParameterToDto(CustomApiParameterInfo p) =>
+        new()
+        {
+            Id = p.Id.ToString(),
+            UniqueName = p.UniqueName,
+            DisplayName = p.DisplayName,
+            Name = p.Name,
+            Description = p.Description,
+            Type = p.Type,
+            LogicalEntityName = p.LogicalEntityName,
+            IsOptional = p.IsOptional,
+            IsManaged = p.IsManaged
+        };
+
+    #endregion
+
+    #region Data Providers and Data Sources
+
+    // ── Data Providers ──
+
+    /// <summary>
+    /// Lists all data providers, optionally filtered by data source.
+    /// Maps to: ppds data-providers list --json
+    /// </summary>
+    [JsonRpcMethod("dataProviders/list")]
+    public async Task<DataProvidersListResponse> DataProvidersListAsync(
+        string? dataSourceId = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        Guid? dataSourceGuid = null;
+        if (!string.IsNullOrWhiteSpace(dataSourceId))
+        {
+            if (!Guid.TryParse(dataSourceId, out var dsGuid))
+                throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'dataSourceId' parameter must be a valid GUID");
+            dataSourceGuid = dsGuid;
+        }
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var providers = await service.ListDataProvidersAsync(dataSourceGuid, ct);
+
+            return new DataProvidersListResponse
+            {
+                Providers = providers.Select(MapDataProviderToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single data provider by name or ID.
+    /// Maps to: ppds data-providers get --json
+    /// </summary>
+    [JsonRpcMethod("dataProviders/get")]
+    public async Task<DataProvidersGetResponse> DataProvidersGetAsync(
+        string nameOrId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(nameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var provider = await service.GetDataProviderAsync(nameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Data provider '{nameOrId}' not found");
+
+            return new DataProvidersGetResponse
+            {
+                Provider = MapDataProviderToDto(provider)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a new data provider with plugin operation bindings.
+    /// Maps to: ppds data-providers register --json
+    /// </summary>
+    [JsonRpcMethod("dataProviders/register")]
+    public async Task<DataProvidersRegisterResponse> DataProvidersRegisterAsync(
+        string name,
+        string dataSourceId,
+        string? retrievePlugin = null,
+        string? retrieveMultiplePlugin = null,
+        string? createPlugin = null,
+        string? updatePlugin = null,
+        string? deletePlugin = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+        if (string.IsNullOrWhiteSpace(dataSourceId) || !Guid.TryParse(dataSourceId, out var dataSourceGuid))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'dataSourceId' parameter must be a valid GUID");
+
+        static Guid? ParseOptionalGuid(string? value, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            if (!Guid.TryParse(value, out var g))
+                throw new RpcException(ErrorCodes.Validation.RequiredField, $"The '{paramName}' parameter must be a valid GUID");
+            return g;
+        }
+
+        var retrieveGuid = ParseOptionalGuid(retrievePlugin, "retrievePlugin");
+        var retrieveMultipleGuid = ParseOptionalGuid(retrieveMultiplePlugin, "retrieveMultiplePlugin");
+        var createGuid = ParseOptionalGuid(createPlugin, "createPlugin");
+        var updateGuid = ParseOptionalGuid(updatePlugin, "updatePlugin");
+        var deleteGuid = ParseOptionalGuid(deletePlugin, "deletePlugin");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var newId = await service.RegisterDataProviderAsync(
+                new DataProviderRegistration(
+                    name,
+                    dataSourceGuid,
+                    retrieveGuid,
+                    retrieveMultipleGuid,
+                    createGuid,
+                    updateGuid,
+                    deleteGuid),
+                ct);
+
+            return new DataProvidersRegisterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates plugin bindings on an existing data provider.
+    /// Maps to: ppds data-providers update --json
+    /// </summary>
+    [JsonRpcMethod("dataProviders/update")]
+    public async Task<DataProvidersUpdateResponse> DataProvidersUpdateAsync(
+        string id,
+        string? retrievePlugin = null,
+        string? retrieveMultiplePlugin = null,
+        string? createPlugin = null,
+        string? updatePlugin = null,
+        string? deletePlugin = null,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var providerId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        static Guid? ParseOptionalGuid(string? value, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            if (!Guid.TryParse(value, out var g))
+                throw new RpcException(ErrorCodes.Validation.RequiredField, $"The '{paramName}' parameter must be a valid GUID");
+            return g;
+        }
+
+        var retrieveGuid = ParseOptionalGuid(retrievePlugin, "retrievePlugin");
+        var retrieveMultipleGuid = ParseOptionalGuid(retrieveMultiplePlugin, "retrieveMultiplePlugin");
+        var createGuid = ParseOptionalGuid(createPlugin, "createPlugin");
+        var updateGuid = ParseOptionalGuid(updatePlugin, "updatePlugin");
+        var deleteGuid = ParseOptionalGuid(deletePlugin, "deletePlugin");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            await service.UpdateDataProviderAsync(
+                providerId,
+                new DataProviderUpdateRequest(
+                    retrieveGuid,
+                    retrieveMultipleGuid,
+                    createGuid,
+                    updateGuid,
+                    deleteGuid),
+                ct);
+
+            return new DataProvidersUpdateResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Unregisters a data provider.
+    /// Maps to: ppds data-providers unregister --json
+    /// </summary>
+    [JsonRpcMethod("dataProviders/unregister")]
+    public async Task<DataProvidersUnregisterResponse> DataProvidersUnregisterAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var providerId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            await service.UnregisterDataProviderAsync(providerId, ct);
+
+            return new DataProvidersUnregisterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    private static DataProviderDto MapDataProviderToDto(DataProviderInfo p) =>
+        new()
+        {
+            Id = p.Id.ToString(),
+            Name = p.Name,
+            DataSourceName = p.DataSourceName,
+            RetrievePlugin = p.RetrievePlugin?.ToString(),
+            RetrieveMultiplePlugin = p.RetrieveMultiplePlugin?.ToString(),
+            CreatePlugin = p.CreatePlugin?.ToString(),
+            UpdatePlugin = p.UpdatePlugin?.ToString(),
+            DeletePlugin = p.DeletePlugin?.ToString(),
+            IsManaged = p.IsManaged
+        };
+
+    // ── Data Sources ──
+
+    /// <summary>
+    /// Lists all data sources in the environment.
+    /// Maps to: ppds data-sources list --json
+    /// </summary>
+    [JsonRpcMethod("dataSources/list")]
+    public async Task<DataSourcesListResponse> DataSourcesListAsync(
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var sources = await service.ListDataSourcesAsync(ct);
+
+            return new DataSourcesListResponse
+            {
+                DataSources = sources.Select(MapDataSourceToDto).ToList()
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a single data source by name or ID.
+    /// Maps to: ppds data-sources get --json
+    /// </summary>
+    [JsonRpcMethod("dataSources/get")]
+    public async Task<DataSourcesGetResponse> DataSourcesGetAsync(
+        string nameOrId,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(nameOrId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'nameOrId' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var source = await service.GetDataSourceAsync(nameOrId, ct)
+                ?? throw new RpcException(ErrorCodes.Operation.NotFound, $"Data source '{nameOrId}' not found");
+
+            return new DataSourcesGetResponse
+            {
+                DataSource = MapDataSourceToDto(source)
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a new data source entity.
+    /// Maps to: ppds data-sources register --json
+    /// </summary>
+    [JsonRpcMethod("dataSources/register")]
+    public async Task<DataSourcesRegisterResponse> DataSourcesRegisterAsync(
+        string name,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'name' parameter is required");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            var newId = await service.RegisterDataSourceAsync(
+                new DataSourceRegistration(name),
+                ct);
+
+            return new DataSourcesRegisterResponse { Id = newId.ToString() };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// No-op stub: entitydatasource has no mutable attributes.
+    /// The logical name is assigned at creation time and cannot be changed.
+    /// </summary>
+    [JsonRpcMethod("dataSources/update")]
+    public Task<DataSourcesUpdateResponse> DataSourcesUpdateAsync(
+        string id,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        throw new RpcException(
+            ErrorCodes.Validation.InvalidArguments,
+            "Data sources have no mutable attributes. To rename, unregister and re-register.");
+    }
+
+    /// <summary>
+    /// Unregisters a data source and cascade-deletes all child data providers.
+    /// Maps to: ppds data-sources unregister --json
+    /// </summary>
+    [JsonRpcMethod("dataSources/unregister")]
+    public async Task<DataSourcesUnregisterResponse> DataSourcesUnregisterAsync(
+        string id,
+        bool force = false,
+        string? environmentUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out var sourceId))
+            throw new RpcException(ErrorCodes.Validation.RequiredField, "The 'id' parameter must be a valid GUID");
+
+        return await WithProfileAndEnvironmentAsync(environmentUrl, async (sp, ct) =>
+        {
+            var service = sp.GetRequiredService<IDataProviderService>();
+            await service.UnregisterDataSourceAsync(sourceId, force, ct);
+
+            return new DataSourcesUnregisterResponse { Success = true };
+        }, cancellationToken);
+    }
+
+    private static DataSourceDto MapDataSourceToDto(DataSourceInfo s) =>
+        new()
+        {
+            Id = s.Id.ToString(),
+            Name = s.Name
+        };
+
+    #endregion
 }
 
 #region Response DTOs
@@ -3600,6 +5057,15 @@ public class PluginsListResponse
 
     [JsonPropertyName("packages")]
     public List<PluginPackageInfo> Packages { get; set; } = [];
+
+    [JsonPropertyName("serviceEndpoints")]
+    public List<ServiceEndpointDto> ServiceEndpoints { get; set; } = [];
+
+    [JsonPropertyName("customApis")]
+    public List<CustomApiDto> CustomApis { get; set; } = [];
+
+    [JsonPropertyName("dataSources")]
+    public List<DataSourceDto> DataSources { get; set; } = [];
 }
 
 /// <summary>
@@ -3607,6 +5073,10 @@ public class PluginsListResponse
 /// </summary>
 public class PluginPackageInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -3627,6 +5097,10 @@ public class PluginPackageInfo
 /// </summary>
 public class PluginAssemblyInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -3647,6 +5121,10 @@ public class PluginAssemblyInfo
 /// </summary>
 public class PluginTypeInfoDto
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("typeName")]
     public string TypeName { get; set; } = "";
 
@@ -3659,6 +5137,10 @@ public class PluginTypeInfoDto
 /// </summary>
 public class PluginStepInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -3707,6 +5189,10 @@ public class PluginStepInfo
 /// </summary>
 public class PluginImageInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -5254,5 +6740,702 @@ public class WebResourceDetailDto
 }
 
 #endregion
+
+// ── Plugin Registration Mutation DTOs ────────────────────────────────────────
+
+/// <summary>
+/// Response for plugins/get — returns detailed entity info.
+/// </summary>
+public class PluginsGetResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    [JsonPropertyName("assembly")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginAssemblyDetailDto? Assembly { get; set; }
+
+    [JsonPropertyName("package")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginPackageDetailDto? Package { get; set; }
+
+    [JsonPropertyName("pluginType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginTypeDetailDto? PluginType { get; set; }
+
+    [JsonPropertyName("step")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginStepDetailDto? Step { get; set; }
+
+    [JsonPropertyName("image")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginImageDetailDto? Image { get; set; }
+}
+
+public class PluginAssemblyDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; set; }
+
+    [JsonPropertyName("publicKeyToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PublicKeyToken { get; set; }
+
+    [JsonPropertyName("isolationMode")]
+    public int IsolationMode { get; set; }
+
+    [JsonPropertyName("sourceType")]
+    public int SourceType { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("packageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PackageId { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class PluginPackageDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class PluginTypeDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonPropertyName("friendlyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FriendlyName { get; set; }
+
+    [JsonPropertyName("assemblyId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AssemblyId { get; set; }
+
+    [JsonPropertyName("assemblyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AssemblyName { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class PluginStepDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("primaryEntity")]
+    public string PrimaryEntity { get; set; } = "";
+
+    [JsonPropertyName("secondaryEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecondaryEntity { get; set; }
+
+    [JsonPropertyName("stage")]
+    public string Stage { get; set; } = "";
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonPropertyName("executionOrder")]
+    public int ExecutionOrder { get; set; }
+
+    [JsonPropertyName("filteringAttributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FilteringAttributes { get; set; }
+
+    [JsonPropertyName("configuration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Configuration { get; set; }
+
+    [JsonPropertyName("isEnabled")]
+    public bool IsEnabled { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("deployment")]
+    public string Deployment { get; set; } = "ServerOnly";
+
+    [JsonPropertyName("impersonatingUserId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ImpersonatingUserId { get; set; }
+
+    [JsonPropertyName("impersonatingUserName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ImpersonatingUserName { get; set; }
+
+    [JsonPropertyName("asyncAutoDelete")]
+    public bool AsyncAutoDelete { get; set; }
+
+    [JsonPropertyName("pluginTypeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeId { get; set; }
+
+    [JsonPropertyName("pluginTypeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeName { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("isCustomizable")]
+    public bool IsCustomizable { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+public class PluginImageDetailDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("entityAlias")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntityAlias { get; set; }
+
+    [JsonPropertyName("imageType")]
+    public string ImageType { get; set; } = "";
+
+    [JsonPropertyName("attributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Attributes { get; set; }
+
+    [JsonPropertyName("messagePropertyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessagePropertyName { get; set; }
+
+    [JsonPropertyName("stepId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StepId { get; set; }
+
+    [JsonPropertyName("stepName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StepName { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("isCustomizable")]
+    public bool IsCustomizable { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+}
+
+/// <summary>
+/// Response for plugins/messages.
+/// </summary>
+public class PluginsMessagesResponse
+{
+    [JsonPropertyName("messages")]
+    public List<string> Messages { get; set; } = [];
+}
+
+/// <summary>
+/// Response for plugins/entityAttributes.
+/// </summary>
+public class PluginsEntityAttributesResponse
+{
+    [JsonPropertyName("attributes")]
+    public List<AttributeInfoDto> Attributes { get; set; } = [];
+}
+
+/// <summary>
+/// Attribute metadata for an entity field.
+/// </summary>
+public class AttributeInfoDto
+{
+    [JsonPropertyName("logicalName")]
+    public string LogicalName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("attributeType")]
+    public string AttributeType { get; set; } = "";
+}
+
+/// <summary>
+/// Response for plugins/toggleStep.
+/// </summary>
+public class PluginsToggleStepResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+}
+
+/// <summary>
+/// Response for plugins/register* endpoints.
+/// </summary>
+public class PluginsRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+/// <summary>
+/// Response for plugins/update* endpoints.
+/// </summary>
+public class PluginsUpdateResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+/// <summary>
+/// Response for plugins/unregister.
+/// </summary>
+public class PluginsUnregisterResponse
+{
+    [JsonPropertyName("entityName")]
+    public string EntityName { get; set; } = "";
+
+    [JsonPropertyName("entityType")]
+    public string EntityType { get; set; } = "";
+
+    [JsonPropertyName("packagesDeleted")]
+    public int PackagesDeleted { get; set; }
+
+    [JsonPropertyName("assembliesDeleted")]
+    public int AssembliesDeleted { get; set; }
+
+    [JsonPropertyName("typesDeleted")]
+    public int TypesDeleted { get; set; }
+
+    [JsonPropertyName("stepsDeleted")]
+    public int StepsDeleted { get; set; }
+
+    [JsonPropertyName("imagesDeleted")]
+    public int ImagesDeleted { get; set; }
+
+    [JsonPropertyName("totalDeleted")]
+    public int TotalDeleted { get; set; }
+}
+
+/// <summary>
+/// Response for plugins/downloadBinary.
+/// </summary>
+public class PluginsDownloadResponse
+{
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+}
+
+// ── Service Endpoints DTOs ──────────────────────────────────────────────────
+
+public class ServiceEndpointsListResponse
+{
+    [JsonPropertyName("endpoints")]
+    public List<ServiceEndpointDto> Endpoints { get; set; } = [];
+}
+
+public class ServiceEndpointsGetResponse
+{
+    [JsonPropertyName("endpoint")]
+    public ServiceEndpointDto? Endpoint { get; set; }
+}
+
+public class ServiceEndpointDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("contractType")]
+    public string ContractType { get; set; } = "";
+
+    [JsonPropertyName("isWebhook")]
+    public bool IsWebhook { get; set; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("namespaceAddress")]
+    public string? NamespaceAddress { get; set; }
+
+    [JsonPropertyName("path")]
+    public string? Path { get; set; }
+
+    [JsonPropertyName("authType")]
+    public string AuthType { get; set; } = "";
+
+    [JsonPropertyName("messageFormat")]
+    public string? MessageFormat { get; set; }
+
+    [JsonPropertyName("userClaim")]
+    public string? UserClaim { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    public string? ModifiedOn { get; set; }
+}
+
+public class ServiceEndpointsRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class ServiceEndpointsUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class ServiceEndpointsUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+// ── Custom APIs DTOs ─────────────────────────────────────────────────────────
+
+public class CustomApisListResponse
+{
+    [JsonPropertyName("apis")]
+    public List<CustomApiDto> Apis { get; set; } = [];
+}
+
+public class CustomApisGetResponse
+{
+    [JsonPropertyName("api")]
+    public CustomApiDto? Api { get; set; }
+}
+
+public class CustomApiDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("pluginTypeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeId { get; set; }
+
+    [JsonPropertyName("pluginTypeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginTypeName { get; set; }
+
+    [JsonPropertyName("bindingType")]
+    public string BindingType { get; set; } = "Global";
+
+    [JsonPropertyName("boundEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundEntity { get; set; }
+
+    [JsonPropertyName("allowedProcessingStepType")]
+    public string AllowedProcessingStepType { get; set; } = "None";
+
+    [JsonPropertyName("isFunction")]
+    public bool IsFunction { get; set; }
+
+    [JsonPropertyName("isPrivate")]
+    public bool IsPrivate { get; set; }
+
+    [JsonPropertyName("executePrivilegeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutePrivilegeName { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("createdOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedOn { get; set; }
+
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModifiedOn { get; set; }
+
+    [JsonPropertyName("requestParameters")]
+    public List<CustomApiParameterDto> RequestParameters { get; set; } = [];
+
+    [JsonPropertyName("responseProperties")]
+    public List<CustomApiParameterDto> ResponseProperties { get; set; } = [];
+}
+
+public class CustomApiParameterDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("logicalEntityName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogicalEntityName { get; set; }
+
+    [JsonPropertyName("isOptional")]
+    public bool IsOptional { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+
+    [JsonPropertyName("direction")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Direction { get; set; }
+}
+
+public class CustomApisRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class CustomApisUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisAddParameterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class CustomApisUpdateParameterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class CustomApisRemoveParameterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+// ── Data Providers DTOs ───────────────────────────────────────────────────────
+
+public class DataProvidersListResponse
+{
+    [JsonPropertyName("providers")]
+    public List<DataProviderDto> Providers { get; set; } = [];
+}
+
+public class DataProvidersGetResponse
+{
+    [JsonPropertyName("provider")]
+    public DataProviderDto? Provider { get; set; }
+}
+
+public class DataProviderDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("dataSourceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DataSourceName { get; set; }
+
+    [JsonPropertyName("retrievePlugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RetrievePlugin { get; set; }
+
+    [JsonPropertyName("retrieveMultiplePlugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RetrieveMultiplePlugin { get; set; }
+
+    [JsonPropertyName("createPlugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatePlugin { get; set; }
+
+    [JsonPropertyName("updatePlugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UpdatePlugin { get; set; }
+
+    [JsonPropertyName("deletePlugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeletePlugin { get; set; }
+
+    [JsonPropertyName("isManaged")]
+    public bool IsManaged { get; set; }
+}
+
+public class DataProvidersRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class DataProvidersUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class DataProvidersUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+// ── Data Sources DTOs ─────────────────────────────────────────────────────────
+
+public class DataSourcesListResponse
+{
+    [JsonPropertyName("dataSources")]
+    public List<DataSourceDto> DataSources { get; set; } = [];
+}
+
+public class DataSourcesGetResponse
+{
+    [JsonPropertyName("dataSource")]
+    public DataSourceDto? DataSource { get; set; }
+}
+
+public class DataSourceDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+}
+
+public class DataSourcesRegisterResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
+public class DataSourcesUpdateResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
+
+public class DataSourcesUnregisterResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+}
 
 #endregion

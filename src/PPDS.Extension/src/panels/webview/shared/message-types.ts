@@ -449,3 +449,84 @@ export type WebResourcesPanelHostToWebview =
     | { command: 'error'; message: string }
     | { command: 'publishResult'; count: number; error?: string }
     | { command: 'daemonReconnected' };
+
+// ── Plugins Panel ────────────────────────────────────────────────────────────
+
+/** Messages the Plugins Panel webview sends to the extension host. */
+export type PluginsPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'setViewMode'; mode: 'assembly' | 'message' | 'entity' }
+    | { command: 'expandNode'; nodeId: string; nodeType: string }
+    | { command: 'selectNode'; nodeId: string; nodeType: string }
+    | { command: 'search'; text: string }
+    | { command: 'applyFilter'; hideHidden: boolean; hideMicrosoft: boolean }
+    | { command: 'registerEntity'; entityType: string; parentId?: string; fields: Record<string, unknown> }
+    | { command: 'updateEntity'; entityType: string; id: string; fields: Record<string, unknown> }
+    | { command: 'toggleStep'; id: string; enabled: boolean }
+    | { command: 'unregister'; entityType: string; id: string; force: boolean }
+    | { command: 'downloadBinary'; entityType: string; id: string }
+    | { command: 'requestEnvironmentList' }
+    | { command: 'openHelp' }
+    | { command: 'webviewError'; error: string; stack?: string }
+    | { command: 'copyToClipboard'; text: string };
+
+/** Messages the extension host sends to the Plugins Panel webview. */
+export type PluginsPanelHostToWebview =
+    | { command: 'updateEnvironment'; name: string; envType: string | null; envColor: string | null }
+    | { command: 'treeLoaded'; data: PluginTreeData }
+    | { command: 'childrenLoaded'; parentId: string; children: PluginTreeNode[] }
+    | { command: 'nodeUpdated'; node: PluginTreeNode }
+    | { command: 'nodeRemoved'; nodeId: string }
+    | { command: 'detailLoaded'; detail: Record<string, unknown> }
+    | { command: 'messagesLoaded'; messages: string[] }
+    | { command: 'entitiesLoaded'; entities: string[] }
+    | { command: 'attributesLoaded'; attributes: AttributeViewDto[] }
+    | { command: 'showRegisterForm'; formType: 'step' | 'image' | 'assembly' | 'package' | 'webhook' | 'serviceendpoint' | 'customapi' | 'dataprovider'; parentId?: string; contract?: string }
+    | { command: 'showUpdateForm'; formType: 'step' | 'image' | 'assembly' | 'package' | 'webhook' | 'serviceendpoint' | 'customapi' | 'dataprovider'; id: string; data: Record<string, unknown>; contract?: string }
+    | { command: 'loading' }
+    | { command: 'error'; message: string }
+    | { command: 'detailError'; message: string }
+    | { command: 'daemonReconnected' };
+
+/** Tree data sent on initial load. */
+export interface PluginTreeData {
+    assemblies: PluginTreeNode[];
+    packages: PluginTreeNode[];
+    serviceEndpoints: PluginTreeNode[];
+    customApis: PluginTreeNode[];
+    dataSources: PluginTreeNode[];
+    /** Human-readable summary e.g. "2 packages — 3 assemblies — 336 custom APIs" */
+    statusSummary?: string;
+}
+
+/** A single node in the plugin tree. */
+export interface PluginTreeNode {
+    id: string;
+    name: string;
+    nodeType: string;
+    icon?: string;
+    badge?: string;
+    isEnabled?: boolean;
+    isManaged?: boolean;
+    isHidden?: boolean;
+    children?: PluginTreeNode[];
+    hasChildren?: boolean;
+}
+
+/** Attribute info sent when entity attributes are loaded. */
+export interface AttributeViewDto {
+    logicalName: string;
+    displayName: string;
+    attributeType: string;
+}
+
+/** Shape of a child entity returned by the daemon for lazy tree loading. */
+export interface PluginEntityChild {
+    id: string;
+    name?: string;
+    typeName?: string;
+    nodeType?: string;
+    isEnabled?: boolean;
+    isManaged?: boolean;
+    hasChildren?: boolean;
+}

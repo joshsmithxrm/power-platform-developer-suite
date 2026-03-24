@@ -60,6 +60,14 @@ public sealed class PluginRegistrationConfig
     public List<PluginAssemblyConfig> Assemblies { get; set; } = [];
 
     /// <summary>
+    /// Custom API definitions extracted from annotated plugin types.
+    /// Null when no custom APIs are present (omitted from JSON output).
+    /// </summary>
+    [JsonPropertyName("customApis")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiConfig>? CustomApis { get; set; }
+
+    /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
     /// </summary>
     [JsonExtensionData]
@@ -143,6 +151,14 @@ public sealed class PluginAssemblyConfig
     /// </summary>
     [JsonPropertyName("types")]
     public List<PluginTypeConfig> Types { get; set; } = [];
+
+    /// <summary>
+    /// Custom API definitions extracted from annotated plugin types in this assembly.
+    /// Null when no custom APIs are present (omitted from JSON output).
+    /// </summary>
+    [JsonPropertyName("customApis")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiConfig>? CustomApis { get; set; }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.
@@ -263,6 +279,39 @@ public sealed class PluginStepConfig
     public string? RunAsUser { get; set; }
 
     /// <summary>
+    /// Whether this step can be bypassed via BypassBusinessLogicExecution.
+    /// Only written when false (non-default). Default (true) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("canBeBypassed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanBeBypassed { get; set; }
+
+    /// <summary>
+    /// Whether this step can use a read-only database connection for improved performance.
+    /// Only written when true (non-default). Default (false) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("canUseReadOnlyConnection")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanUseReadOnlyConnection { get; set; }
+
+    /// <summary>
+    /// Pipeline invocation source: Parent (default) or Child.
+    /// Only written when non-default (Child). Default (Parent) is omitted from JSON.
+    /// </summary>
+    [JsonPropertyName("invocationSource")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvocationSource { get; set; }
+
+    /// <summary>
+    /// Secure configuration string passed to plugin constructor.
+    /// Write-only at runtime — never extracted from assemblies, never stored in source control.
+    /// Provided separately at deploy time via CLI flags or environment variables.
+    /// </summary>
+    [JsonPropertyName("secureConfiguration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SecureConfiguration { get; set; }
+
+    /// <summary>
     /// Whether the step is enabled. Default is true.
     /// When false, the step is registered but disabled (won't execute).
     /// </summary>
@@ -302,6 +351,98 @@ public sealed class PluginStepConfig
 }
 
 /// <summary>
+/// Configuration for a Custom API registration derived from a <c>CustomApiAttribute</c>-annotated type.
+/// </summary>
+public sealed class CustomApiConfig
+{
+    [JsonPropertyName("uniqueName")]
+    public string UniqueName { get; set; } = "";
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("pluginTypeName")]
+    public string PluginTypeName { get; set; } = "";
+
+    [JsonPropertyName("bindingType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BindingType { get; set; }
+
+    [JsonPropertyName("boundEntity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundEntity { get; set; }
+
+    [JsonPropertyName("isFunction")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsFunction { get; set; }
+
+    [JsonPropertyName("isPrivate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPrivate { get; set; }
+
+    [JsonPropertyName("executePrivilegeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutePrivilegeName { get; set; }
+
+    [JsonPropertyName("allowedProcessingStepType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AllowedProcessingStepType { get; set; }
+
+    [JsonPropertyName("parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CustomApiParameterConfig>? Parameters { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Configuration for a Custom API request or response parameter.
+/// </summary>
+public sealed class CustomApiParameterConfig
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("uniqueName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UniqueName { get; set; }
+
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    [JsonPropertyName("logicalEntityName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogicalEntityName { get; set; }
+
+    [JsonPropertyName("isOptional")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsOptional { get; set; }
+
+    [JsonPropertyName("direction")]
+    public string Direction { get; set; } = "Input";
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
 /// Configuration for a plugin step image (pre-image or post-image).
 /// </summary>
 public sealed class PluginImageConfig
@@ -329,6 +470,21 @@ public sealed class PluginImageConfig
     /// </summary>
     [JsonPropertyName("entityAlias")]
     public string? EntityAlias { get; set; }
+
+    /// <summary>
+    /// Description of this image's purpose. Stored as metadata in Dataverse.
+    /// </summary>
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// The message property name that carries the entity.
+    /// If null, auto-inferred from the message name (e.g., "Target" for Create/Update).
+    /// </summary>
+    [JsonPropertyName("messagePropertyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessagePropertyName { get; set; }
 
     /// <summary>
     /// Preserves unknown JSON properties during round-trip serialization.

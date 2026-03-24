@@ -94,6 +94,38 @@ namespace PPDS.Plugins
         public bool AsyncAutoDelete { get; set; }
 
         /// <summary>
+        /// Gets or sets the deployment target.
+        /// Default: ServerOnly.
+        /// </summary>
+        public PluginDeployment Deployment { get; set; } = PluginDeployment.ServerOnly;
+
+        /// <summary>
+        /// Gets or sets the impersonation user for step execution.
+        /// Values: null (calling user), "CallingUser", "System", a GUID, email, or domain name.
+        /// </summary>
+        public string? RunAsUser { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether this step can be bypassed via BypassBusinessLogicExecution.
+        /// Default: true (matches Dataverse default).
+        /// </summary>
+        public bool CanBeBypassed { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether this step can use a read-only database connection.
+        /// Set to true for steps that only read data, for improved performance.
+        /// Default: false.
+        /// </summary>
+        public bool CanUseReadOnlyConnection { get; set; }
+
+        /// <summary>
+        /// Gets or sets the pipeline invocation source.
+        /// Parent executes in the parent pipeline, Child in child pipelines only.
+        /// Default: Parent.
+        /// </summary>
+        public PluginInvocationSource InvocationSource { get; set; } = PluginInvocationSource.Parent;
+
+        /// <summary>
         /// Gets or sets a unique identifier for this step when a plugin has multiple steps.
         /// Used to associate PluginImageAttribute with a specific step.
         /// </summary>

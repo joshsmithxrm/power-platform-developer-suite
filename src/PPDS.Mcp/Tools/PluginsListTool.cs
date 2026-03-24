@@ -28,14 +28,20 @@ public sealed class PluginsListTool
     /// Lists registered plugin assemblies in the environment.
     /// </summary>
     /// <param name="nameFilter">Filter by assembly name (contains).</param>
+    /// <param name="includeHidden">Include hidden system steps.</param>
+    /// <param name="includeMicrosoft">Include Microsoft assemblies.</param>
     /// <param name="maxRows">Maximum rows to return (default 50).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of plugin assemblies with types and steps.</returns>
     [McpServerTool(Name = "ppds_plugins_list")]
-    [Description("List registered plugin assemblies in the Dataverse environment. Shows plugin types and their registered steps (message/entity combinations).")]
+    [Description("List registered plugin assemblies in the Dataverse environment. Shows plugin types and their registered steps (message/entity combinations). By default excludes hidden system assemblies and Microsoft.* assemblies.")]
     public async Task<PluginsListResult> ExecuteAsync(
         [Description("Filter by assembly name (partial match)")]
         string? nameFilter = null,
+        [Description("Include hidden system steps (default false)")]
+        bool includeHidden = false,
+        [Description("Include Microsoft assemblies (default false)")]
+        bool includeMicrosoft = false,
         [Description("Maximum rows to return (default 50, max 200)")]
         int maxRows = 50,
         CancellationToken cancellationToken = default)
@@ -46,7 +52,7 @@ public sealed class PluginsListTool
         var queryExecutor = serviceProvider.GetRequiredService<IQueryExecutor>();
 
         // Query plugin assemblies.
-        var assemblyQuery = BuildAssemblyQuery(nameFilter, maxRows);
+        var assemblyQuery = BuildAssemblyQuery(nameFilter, maxRows, includeHidden, includeMicrosoft);
         var assemblyResult = await queryExecutor.ExecuteFetchXmlAsync(
             assemblyQuery, null, null, false, cancellationToken).ConfigureAwait(false);
 
@@ -99,14 +105,32 @@ public sealed class PluginsListTool
         };
     }
 
-    private static string BuildAssemblyQuery(string? nameFilter, int maxRows)
+    private static string BuildAssemblyQuery(string? nameFilter, int maxRows, bool includeHidden = false, bool includeMicrosoft = false)
     {
-        var filter = "";
+        var conditions = new System.Text.StringBuilder();
+
         if (!string.IsNullOrWhiteSpace(nameFilter))
         {
-            filter = $@"
-                <filter type=""and"">
-                    <condition attribute=""name"" operator=""like"" value=""%{EscapeXmlValue(nameFilter)}%"" />
+            conditions.Append($@"<condition attribute=""name"" operator=""like"" value=""%{EscapeXmlValue(nameFilter)}%"" />");
+        }
+
+        if (!includeHidden)
+        {
+            conditions.Append(@"<condition attribute=""ishidden"" operator=""eq"" value=""0"" />");
+        }
+
+        var filterXml = "";
+        if (conditions.Length > 0)
+        {
+            filterXml = $@"<filter type=""and"">{conditions}</filter>";
+        }
+
+        var microsoftFilter = "";
+        if (!includeMicrosoft)
+        {
+            microsoftFilter = @"<filter type=""or"">
+                    <condition attribute=""name"" operator=""not-like"" value=""Microsoft%"" />
+                    <condition attribute=""name"" operator=""eq"" value=""Microsoft.Crm.ServiceBus"" />
                 </filter>";
         }
 
@@ -119,7 +143,8 @@ public sealed class PluginsListTool
                     <attribute name=""publickeytoken"" />
                     <attribute name=""isolationmode"" />
                     <attribute name=""sourcetype"" />
-                    {filter}
+                    {filterXml}
+                    {microsoftFilter}
                     <order attribute=""name"" />
                 </entity>
             </fetch>";

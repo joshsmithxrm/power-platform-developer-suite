@@ -27,9 +27,9 @@ class ToolTreeItem extends vscode.TreeItem {
 /**
  * Static tree data provider for the Tools view in the PPDS activity bar.
  *
- * Displays a fixed set of tool entries: Data Explorer, Notebooks, and
- * Solutions. Each item opens the corresponding panel or command when clicked.
- * Items are disabled (grayed out) when no profile is active.
+ * Displays a fixed set of tool entries. Each item opens the corresponding
+ * panel or command when clicked. Items are disabled (grayed out) when no
+ * profile is active.
  */
 export class ToolsTreeDataProvider
     implements vscode.TreeDataProvider<ToolTreeItem>, vscode.Disposable {
@@ -41,6 +41,7 @@ export class ToolsTreeDataProvider
         { label: 'Connection References', commandId: 'ppds.openConnectionReferences', icon: 'plug' },
         { label: 'Environment Variables', commandId: 'ppds.openEnvironmentVariables', icon: 'symbol-variable' },
         { label: 'Plugin Traces', commandId: 'ppds.openPluginTraces', icon: 'debug-stackframe' },
+        { label: 'Plugin Registration', commandId: 'ppds.openPlugins', icon: 'extensions' },
         { label: 'Metadata Browser', commandId: 'ppds.openMetadataBrowser', icon: 'symbol-class' },
         { label: 'Web Resources', commandId: 'ppds.openWebResources', icon: 'file-code' },
         { label: 'Show Logs', commandId: 'ppds.showLogs', icon: 'output', alwaysEnabled: true },

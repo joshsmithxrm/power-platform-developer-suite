@@ -654,21 +654,22 @@ public class PluginRegistrationServiceTests
     #region UpdateStepAsync Tests
 
     [Fact]
-    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepNotFound()
+    public async Task UpdateStepAsync_ThrowsPpdsException_WhenStepNotFound()
     {
         // Arrange
         var stepId = Guid.NewGuid();
         _retrieveMultipleResult = new EntityCollection();
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
 
+        Assert.Equal(ErrorCodes.Plugin.NotFound, exception.ErrorCode);
         Assert.Contains("not found", exception.Message);
     }
 
     [Fact]
-    public async Task UpdateStepAsync_ThrowsInvalidOperationException_WhenStepIsManagedAndNotCustomizable()
+    public async Task UpdateStepAsync_ThrowsPpdsException_WhenStepIsManagedAndNotCustomizable()
     {
         // Arrange
         var stepId = Guid.NewGuid();
@@ -684,9 +685,10 @@ public class PluginRegistrationServiceTests
         _retrieveMultipleResult = entities;
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PpdsException>(
             () => _sut.UpdateStepAsync(stepId, new StepUpdateRequest(Mode: "Asynchronous")));
 
+        Assert.Equal(ErrorCodes.Plugin.ManagedComponent, exception.ErrorCode);
         Assert.Contains("is managed", exception.Message);
     }
 
@@ -1220,6 +1222,641 @@ public class PluginRegistrationServiceTests
                 e.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.ImpersonatingUserId) == null),
             It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    #endregion
+
+    #region EnableStepAsync / DisableStepAsync Tests
+
+    [Fact]
+    public async Task EnableStepAsync_SendsSetStateRequest_WithEnabledState()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _executedRequests.Clear();
+
+        // Act
+        await _sut.EnableStepAsync(stepId);
+
+        // Assert
+        var setStateRequest = _executedRequests.OfType<SetStateRequest>().SingleOrDefault();
+        Assert.NotNull(setStateRequest);
+        Assert.Equal(stepId, setStateRequest.EntityMoniker.Id);
+        Assert.Equal(SdkMessageProcessingStep.EntityLogicalName, setStateRequest.EntityMoniker.LogicalName);
+        Assert.Equal((int)sdkmessageprocessingstep_statecode.Enabled, setStateRequest.State.Value);
+    }
+
+    [Fact]
+    public async Task DisableStepAsync_SendsSetStateRequest_WithDisabledState()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _executedRequests.Clear();
+
+        // Act
+        await _sut.DisableStepAsync(stepId);
+
+        // Assert
+        var setStateRequest = _executedRequests.OfType<SetStateRequest>().SingleOrDefault();
+        Assert.NotNull(setStateRequest);
+        Assert.Equal(stepId, setStateRequest.EntityMoniker.Id);
+        Assert.Equal(SdkMessageProcessingStep.EntityLogicalName, setStateRequest.EntityMoniker.LogicalName);
+        Assert.Equal((int)sdkmessageprocessingstep_statecode.Disabled, setStateRequest.State.Value);
+    }
+
+    [Fact]
+    public async Task EnableStepAsync_ThrowsPpdsException_WhenDataverseFails()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Network failure"));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.EnableStepAsync(stepId));
+
+        Assert.NotNull(exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task DisableStepAsync_ThrowsPpdsException_WhenDataverseFails()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        _mockPooledClient
+            .Setup(s => s.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Network failure"));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.DisableStepAsync(stepId));
+
+        Assert.NotNull(exception.ErrorCode);
+    }
+
+    #endregion
+
+    #region UpsertStepAsync New Properties Tests
+
+    [Fact]
+    public async Task UpsertStepAsync_SetsCanBeBypassed_WhenProvided()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            CanBeBypassed = false
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanBeBypassed) == false),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_DoesNotSetCanBeBypassed_WhenNotProvided()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            CanBeBypassed = null
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - CanBeBypassed attribute should not be set in the entity
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                !e.Attributes.ContainsKey(SdkMessageProcessingStep.Fields.CanBeBypassed)),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_SetsCanUseReadOnlyConnection_WhenProvided()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            CanUseReadOnlyConnection = true
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                e.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection) == true),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Parent", (int)sdkmessageprocessingstep_invocationsource.Parent)]
+    [InlineData("Child", (int)sdkmessageprocessingstep_invocationsource.Child)]
+    public async Task UpsertStepAsync_SetsInvocationSource_WhenProvided(string invocationSource, int expectedValue)
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            InvocationSource = invocationSource
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource) != null &&
+                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource).Value == expectedValue),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_UsesParentInvocationSource_WhenNotProvided()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var expectedStepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = expectedStepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            InvocationSource = null
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - Falls back to Parent (0) per spec default
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource) != null &&
+                e.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource).Value == (int)sdkmessageprocessingstep_invocationsource.Parent),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_CreatesSecureConfig_WhenProvided_NewStep()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var secureConfigId = Guid.NewGuid();
+        var stepId = Guid.NewGuid();
+        var createdEntities = new List<Entity>();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _mockPooledClient
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntities.Add(e))
+            .ReturnsAsync(() =>
+            {
+                var last = createdEntities.Last();
+                return last.LogicalName == "sdkmessageprocessingstepsecureconfig" ? secureConfigId : stepId;
+            });
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            SecureConfiguration = "my-secret-value"
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - secure config entity was created
+        var secureConfigEntity = createdEntities.FirstOrDefault(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig");
+        Assert.NotNull(secureConfigEntity);
+        Assert.Equal("my-secret-value", secureConfigEntity.GetAttributeValue<string>("secureconfig"));
+
+        // Assert - step was created with reference to the secure config
+        var stepEntity = createdEntities.FirstOrDefault(e => e.LogicalName == SdkMessageProcessingStep.EntityLogicalName);
+        Assert.NotNull(stepEntity);
+        var secureConfigRef = stepEntity.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
+        Assert.NotNull(secureConfigRef);
+        Assert.Equal(secureConfigId, secureConfigRef.Id);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_DoesNotCreateSecureConfig_WhenNotProvided()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var stepId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = stepId;
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            SecureConfiguration = null
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - no secure config entity created
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig"),
+            It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        // Assert - step created without secure config reference
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStep.EntityLogicalName &&
+                !e.Attributes.ContainsKey(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId)),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_UpdatesSecureConfig_WhenProvided_ExistingStep()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var existingStepId = Guid.NewGuid();
+        var existingSecureConfigId = Guid.NewGuid();
+        var updatedEntities = new List<Entity>();
+
+        var existingStep = new SdkMessageProcessingStep
+        {
+            Id = existingStepId,
+            Name = "TestPlugin: Create of account"
+        };
+        existingStep[SdkMessageProcessingStep.Fields.StateCode] = new OptionSetValue((int)sdkmessageprocessingstep_statecode.Enabled);
+        existingStep[SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId] =
+            new EntityReference("sdkmessageprocessingstepsecureconfig", existingSecureConfigId);
+
+        _retrieveMultipleResult = new EntityCollection();
+        _retrieveMultipleResult.Entities.Add(existingStep);
+        _executedRequests.Clear();
+
+        _mockPooledClient
+            .Setup(s => s.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => updatedEntities.Add(e))
+            .Returns(Task.CompletedTask);
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            SecureConfiguration = "updated-secret"
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - secure config entity was updated (not created)
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig"),
+            It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        var secureConfigUpdate = updatedEntities.FirstOrDefault(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig");
+        Assert.NotNull(secureConfigUpdate);
+        Assert.Equal(existingSecureConfigId, secureConfigUpdate.Id);
+        Assert.Equal("updated-secret", secureConfigUpdate.GetAttributeValue<string>("secureconfig"));
+    }
+
+    [Fact]
+    public async Task UpsertStepAsync_CreatesSecureConfig_WhenProvided_ExistingStepWithoutSecureConfig()
+    {
+        // Arrange
+        var pluginTypeId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var filterId = Guid.NewGuid();
+        var existingStepId = Guid.NewGuid();
+        var newSecureConfigId = Guid.NewGuid();
+        var createdEntities = new List<Entity>();
+
+        var existingStep = new SdkMessageProcessingStep
+        {
+            Id = existingStepId,
+            Name = "TestPlugin: Create of account"
+        };
+        existingStep[SdkMessageProcessingStep.Fields.StateCode] = new OptionSetValue((int)sdkmessageprocessingstep_statecode.Enabled);
+        // No existing SdkMessageProcessingStepSecureConfigId
+
+        _retrieveMultipleResult = new EntityCollection();
+        _retrieveMultipleResult.Entities.Add(existingStep);
+        _executedRequests.Clear();
+
+        _mockPooledClient
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntities.Add(e))
+            .ReturnsAsync(newSecureConfigId);
+
+        var stepConfig = new PluginStepConfig
+        {
+            Name = "TestPlugin: Create of account",
+            Message = "Create",
+            Entity = "account",
+            Stage = "PreOperation",
+            Mode = "Synchronous",
+            SecureConfiguration = "new-secret"
+        };
+
+        // Act
+        await _sut.UpsertStepAsync(pluginTypeId, stepConfig, messageId, filterId);
+
+        // Assert - secure config entity was created
+        var secureConfigEntity = createdEntities.FirstOrDefault(e => e.LogicalName == "sdkmessageprocessingstepsecureconfig");
+        Assert.NotNull(secureConfigEntity);
+        Assert.Equal("new-secret", secureConfigEntity.GetAttributeValue<string>("secureconfig"));
+    }
+
+    #endregion
+
+    #region UpsertImageAsync New Properties Tests
+
+    [Fact]
+    public async Task UpsertImageAsync_SetsDescription_WhenProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = imageId;
+
+        var imageConfig = new PluginImageConfig
+        {
+            Name = "PreImage",
+            ImageType = "PreImage",
+            Description = "My image description"
+        };
+
+        // Act
+        await _sut.UpsertImageAsync(stepId, imageConfig, "Create");
+
+        // Assert
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStepImage.EntityLogicalName &&
+                e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Description) == "My image description"),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertImageAsync_DoesNotSetDescription_WhenNull()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = imageId;
+
+        var imageConfig = new PluginImageConfig
+        {
+            Name = "PreImage",
+            ImageType = "PreImage",
+            Description = null
+        };
+
+        // Act
+        await _sut.UpsertImageAsync(stepId, imageConfig, "Create");
+
+        // Assert - Description attribute should not be set
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStepImage.EntityLogicalName &&
+                !e.Attributes.ContainsKey(SdkMessageProcessingStepImage.Fields.Description)),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertImageAsync_UsesMessagePropertyName_WhenProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = imageId;
+
+        var imageConfig = new PluginImageConfig
+        {
+            Name = "PreImage",
+            ImageType = "PreImage",
+            MessagePropertyName = "CustomProperty"
+        };
+
+        // Act
+        await _sut.UpsertImageAsync(stepId, imageConfig, "Create");
+
+        // Assert - Uses config value instead of auto-inferred
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStepImage.EntityLogicalName &&
+                e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.MessagePropertyName) == "CustomProperty"),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpsertImageAsync_UsesAutoInferredMessagePropertyName_WhenNotProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+
+        _retrieveMultipleResult = new EntityCollection();
+        _createResult = imageId;
+
+        var imageConfig = new PluginImageConfig
+        {
+            Name = "PreImage",
+            ImageType = "PreImage",
+            MessagePropertyName = null // Should auto-infer from message
+        };
+
+        // Act
+        await _sut.UpsertImageAsync(stepId, imageConfig, "Create");
+
+        // Assert - Auto-inferred "id" for Create message (Create message uses "id" not "Target")
+        _mockPooledClient.Verify(s => s.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == SdkMessageProcessingStepImage.EntityLogicalName &&
+                e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.MessagePropertyName) == "id"),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    #endregion
+
+    #region UpdateStepAsync New Properties Tests
+
+    [Fact]
+    public async Task UpdateStepAsync_SetsCanBeBypassed_WhenProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(true)
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(CanBeBypassed: true));
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(true, _updatedEntity!.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanBeBypassed));
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_SetsCanUseReadOnlyConnection_WhenProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(true)
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(CanUseReadOnlyConnection: false));
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(false, _updatedEntity!.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection));
+    }
+
+    [Fact]
+    public async Task UpdateStepAsync_SetsInvocationSource_WhenProvided()
+    {
+        // Arrange
+        var stepId = Guid.NewGuid();
+        var entities = new EntityCollection();
+        var step = new SdkMessageProcessingStep
+        {
+            Id = stepId,
+            Name = "TestStep: Create of account",
+            IsCustomizable = new BooleanManagedProperty(true)
+        };
+        step[SdkMessageProcessingStep.Fields.IsManaged] = false;
+        entities.Entities.Add(step);
+        _retrieveMultipleResult = entities;
+
+        // Act
+        await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(InvocationSource: "Child"));
+
+        // Assert
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal((int)sdkmessageprocessingstep_invocationsource.Child,
+            _updatedEntity!.GetAttributeValue<OptionSetValue>(SdkMessageProcessingStep.Fields.InvocationSource)?.Value);
     }
 
     #endregion

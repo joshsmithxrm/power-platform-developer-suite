@@ -6,6 +6,8 @@ using Microsoft.Extensions.Options;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Pooling;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Configuration;
@@ -408,6 +410,24 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
                 metadataExecutor,
                 pool.GetTotalRecommendedParallelism());
         });
+
+        // Plugin registration services — used by plugins/* and domain-specific RPC handlers
+        services.AddTransient<IPluginRegistrationService>(sp =>
+            new PluginRegistrationService(
+                sp.GetRequiredService<IDataverseConnectionPool>(),
+                sp.GetRequiredService<ILogger<PluginRegistrationService>>()));
+        services.AddTransient<Services.IServiceEndpointService>(sp =>
+            new Services.ServiceEndpointService(
+                sp.GetRequiredService<IDataverseConnectionPool>(),
+                sp.GetRequiredService<ILogger<Services.ServiceEndpointService>>()));
+        services.AddTransient<Services.ICustomApiService>(sp =>
+            new Services.CustomApiService(
+                sp.GetRequiredService<IDataverseConnectionPool>(),
+                sp.GetRequiredService<ILogger<Services.CustomApiService>>()));
+        services.AddTransient<Services.IDataProviderService>(sp =>
+            new Services.DataProviderService(
+                sp.GetRequiredService<IDataverseConnectionPool>(),
+                sp.GetRequiredService<ILogger<Services.DataProviderService>>()));
 
         return services.BuildServiceProvider();
     }

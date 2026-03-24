@@ -288,6 +288,21 @@ public static class UpdateCommand
             Description = "Step description"
         };
 
+        var canBeBypassedOption = new Option<bool?>("--can-be-bypassed")
+        {
+            Description = "Whether this step can be bypassed via BypassBusinessLogicExecution"
+        };
+
+        var canUseReadonlyOption = new Option<bool?>("--can-use-readonly")
+        {
+            Description = "Whether this step can use a read-only database connection"
+        };
+
+        var invocationSourceOption = new Option<string?>("--invocation-source")
+        {
+            Description = "Pipeline invocation source: Parent or Child"
+        };
+
         var command = new Command("step", "Update step properties")
         {
             nameOrIdArgument,
@@ -296,6 +311,9 @@ public static class UpdateCommand
             rankOption,
             filteringAttributesOption,
             descriptionOption,
+            canBeBypassedOption,
+            canUseReadonlyOption,
+            invocationSourceOption,
             PluginsCommandGroup.ProfileOption,
             PluginsCommandGroup.EnvironmentOption
         };
@@ -310,12 +328,16 @@ public static class UpdateCommand
             var rank = parseResult.GetValue(rankOption);
             var filteringAttributes = parseResult.GetValue(filteringAttributesOption);
             var description = parseResult.GetValue(descriptionOption);
+            var canBeBypassed = parseResult.GetValue(canBeBypassedOption);
+            var canUseReadonly = parseResult.GetValue(canUseReadonlyOption);
+            var invocationSource = parseResult.GetValue(invocationSourceOption);
             var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
             return await ExecuteStepUpdateAsync(
                 nameOrId, mode, stage, rank, filteringAttributes, description,
+                canBeBypassed, canUseReadonly, invocationSource,
                 profile, environment, globalOptions, cancellationToken);
         });
 
@@ -329,6 +351,9 @@ public static class UpdateCommand
         int? rank,
         string? filteringAttributes,
         string? description,
+        bool? canBeBypassed,
+        bool? canUseReadonly,
+        string? invocationSource,
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
@@ -378,15 +403,20 @@ public static class UpdateCommand
                 Stage: normalizedStage,
                 Rank: rank,
                 FilteringAttributes: filteringAttributes,
-                Description: description);
+                Description: description,
+                CanBeBypassed: canBeBypassed,
+                CanUseReadOnlyConnection: canUseReadonly,
+                InvocationSource: invocationSource);
 
             // Check if any changes were specified
             if (request.Mode == null && request.Stage == null && request.Rank == null &&
-                request.FilteringAttributes == null && request.Description == null)
+                request.FilteringAttributes == null && request.Description == null &&
+                request.CanBeBypassed == null && request.CanUseReadOnlyConnection == null &&
+                request.InvocationSource == null)
             {
                 writer.WriteError(new StructuredError(
                     ErrorCodes.Validation.InvalidArguments,
-                    "No changes specified. Use --mode, --stage, --rank, --filtering-attributes, or --description.",
+                    "No changes specified. Use --mode, --stage, --rank, --filtering-attributes, --description, --can-be-bypassed, --can-use-readonly, or --invocation-source.",
                     Target: nameOrId));
                 return ExitCodes.InvalidArguments;
             }
@@ -400,6 +430,9 @@ public static class UpdateCommand
             if (rank != null) changes.Add($"rank -> {rank}");
             if (filteringAttributes != null) changes.Add($"filteringAttributes -> {filteringAttributes}");
             if (description != null) changes.Add($"description -> {description}");
+            if (canBeBypassed != null) changes.Add($"canBeBypassed -> {canBeBypassed}");
+            if (canUseReadonly != null) changes.Add($"canUseReadonly -> {canUseReadonly}");
+            if (invocationSource != null) changes.Add($"invocationSource -> {invocationSource}");
 
             var result = new UpdateResult
             {

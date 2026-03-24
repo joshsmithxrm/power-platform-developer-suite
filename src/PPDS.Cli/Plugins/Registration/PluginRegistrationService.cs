@@ -452,6 +452,90 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }).ToList();
     }
 
+    /// <summary>
+    /// Lists available SDK messages, optionally filtered by name.
+    /// Fetches all pages to ensure complete results.
+    /// </summary>
+    public async Task<List<string>> ListMessagesAsync(string? filter, CancellationToken cancellationToken = default)
+    {
+        var query = new QueryExpression(SdkMessage.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(SdkMessage.Fields.Name)
+        };
+
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            query.Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(SdkMessage.Fields.Name, ConditionOperator.Like,
+                        $"%{filter}%")
+                }
+            };
+        }
+
+        var messages = new List<string>();
+        int pageNumber = 1;
+        string? pagingCookie = null;
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            query.PageInfo = new PagingInfo
+            {
+                Count = 5000,
+                PageNumber = pageNumber,
+                PagingCookie = pagingCookie
+            };
+
+            var results = await RetrieveMultipleAsync(query, client, cancellationToken);
+
+            foreach (var e in results.Entities)
+            {
+                var name = e.GetAttributeValue<string>(SdkMessage.Fields.Name);
+                if (!string.IsNullOrEmpty(name))
+                    messages.Add(name);
+            }
+
+            if (!results.MoreRecords) break;
+            pagingCookie = results.PagingCookie;
+            pageNumber++;
+        }
+
+        messages.Sort(StringComparer.OrdinalIgnoreCase);
+        return messages;
+    }
+
+    /// <summary>
+    /// Returns attribute metadata for an entity.
+    /// </summary>
+    public async Task<List<AttributeMetadataInfo>> ListEntityAttributesAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.ToLowerInvariant(),
+            EntityFilters = EntityFilters.Attributes,
+            RetrieveAsIfPublished = false
+        };
+
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var response = (RetrieveEntityResponse)await ExecuteAsync(request, client, cancellationToken);
+
+        return response.EntityMetadata.Attributes
+            .Select(a => new AttributeMetadataInfo(
+                a.LogicalName,
+                a.DisplayName?.UserLocalizedLabel?.Label ?? a.LogicalName,
+                a.AttributeType?.ToString() ?? "Unknown"))
+            .OrderBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     #endregion
 
     #region Lookup Operations
@@ -1173,7 +1257,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Mode = (sdkmessageprocessingstep_mode)MapModeToValue(stepConfig.Mode),
             Rank = stepConfig.ExecutionOrder,
             SupportedDeployment = (sdkmessageprocessingstep_supporteddeployment)MapDeploymentToValue(stepConfig.Deployment),
-            InvocationSource = sdkmessageprocessingstep_invocationsource.Internal
+            InvocationSource = MapInvocationSourceToValue(stepConfig.InvocationSource)
         };
 
         if (filterId.HasValue)
@@ -1194,6 +1278,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (!string.IsNullOrEmpty(stepConfig.Description))
         {
             entity.Description = stepConfig.Description;
+        }
+
+        if (stepConfig.CanBeBypassed.HasValue)
+        {
+            entity.CanBeBypassed = stepConfig.CanBeBypassed.Value;
+        }
+
+        if (stepConfig.CanUseReadOnlyConnection.HasValue)
+        {
+            entity.CanUseReadOnlyConnection = stepConfig.CanUseReadOnlyConnection.Value;
         }
 
         // Handle impersonating user (Run in User's Context)
@@ -1232,6 +1326,31 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         {
             stepId = existing.Id;
             entity.Id = stepId;
+
+            // Handle secure configuration for existing step
+            if (stepConfig.SecureConfiguration != null)
+            {
+                var existingSecureConfigRef = existing.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
+                if (existingSecureConfigRef != null)
+                {
+                    // Update existing secure config entity
+                    var secureConfigUpdate = new Entity("sdkmessageprocessingstepsecureconfig")
+                    {
+                        Id = existingSecureConfigRef.Id
+                    };
+                    secureConfigUpdate["secureconfig"] = stepConfig.SecureConfiguration;
+                    await UpdateAsync(secureConfigUpdate, client, cancellationToken);
+                }
+                else
+                {
+                    // Create new secure config entity and link to step
+                    var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                    secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
+                    var newSecureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
+                    entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", newSecureConfigId);
+                }
+            }
+
             await UpdateAsync(entity, client, cancellationToken);
 
             // Add to solution even on update (handles case where component exists but isn't in solution)
@@ -1252,6 +1371,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         }
         else
         {
+            // Handle secure configuration for new step
+            if (stepConfig.SecureConfiguration != null)
+            {
+                var secureConfigEntity = new Entity("sdkmessageprocessingstepsecureconfig");
+                secureConfigEntity["secureconfig"] = stepConfig.SecureConfiguration;
+                var secureConfigId = await CreateAsync(secureConfigEntity, client, cancellationToken);
+                entity.SdkMessageProcessingStepSecureConfigId = new EntityReference("sdkmessageprocessingstepsecureconfig", secureConfigId);
+            }
+
             stepId = await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
 
             // New steps are created enabled by default - disable if needed
@@ -1278,10 +1406,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         string messageName,
         CancellationToken cancellationToken = default)
     {
-        var messagePropertyName = GetDefaultImagePropertyName(messageName)
+        var defaultMessagePropertyName = GetDefaultImagePropertyName(messageName)
             ?? throw new PpdsException(
                 ErrorCodes.Plugin.ImageNotSupported,
                 $"Message '{messageName}' does not support plugin images.");
+
+        // Use config-provided MessagePropertyName if present, otherwise use the auto-inferred default
+        var messagePropertyName = imageConfig.MessagePropertyName ?? defaultMessagePropertyName;
 
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
@@ -1313,6 +1444,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (!string.IsNullOrEmpty(imageConfig.Attributes))
         {
             entity.Attributes1 = imageConfig.Attributes;
+        }
+
+        if (!string.IsNullOrEmpty(imageConfig.Description))
+        {
+            entity.Description = imageConfig.Description;
         }
 
         if (existing != null)
@@ -1347,7 +1483,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         var existingStep = await GetStepByIdWithManagedStateAsync(stepId, cancellationToken);
         if (existingStep == null)
         {
-            throw new InvalidOperationException($"Step with ID '{stepId}' not found.");
+            throw new PpdsException(ErrorCodes.Plugin.NotFound, $"Step with ID '{stepId}' not found.");
         }
 
         // Check managed state
@@ -1357,7 +1493,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (isManaged && !isCustomizable)
         {
             var stepName = existingStep.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name);
-            throw new InvalidOperationException($"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
+            throw new PpdsException(ErrorCodes.Plugin.ManagedComponent, $"Cannot update: {stepName} is managed. Managed components cannot be modified in this environment.");
         }
 
         // Build update entity with only changed properties
@@ -1391,6 +1527,24 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (request.Description != null)
         {
             entity.Description = request.Description;
+            hasChanges = true;
+        }
+
+        if (request.CanBeBypassed != null)
+        {
+            entity.CanBeBypassed = request.CanBeBypassed.Value;
+            hasChanges = true;
+        }
+
+        if (request.CanUseReadOnlyConnection != null)
+        {
+            entity.CanUseReadOnlyConnection = request.CanUseReadOnlyConnection.Value;
+            hasChanges = true;
+        }
+
+        if (request.InvocationSource != null)
+        {
+            entity.InvocationSource = MapInvocationSourceToValue(request.InvocationSource);
             hasChanges = true;
         }
 
@@ -1974,6 +2128,60 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     #endregion
 
+    #region Enable/Disable Operations
+
+    /// <summary>
+    /// Enables a plugin processing step.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task EnableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Enabled, client, cancellationToken);
+        }
+        catch (PpdsException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.SetStateFailed,
+                $"Failed to enable plugin step '{stepId}'.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Disables a plugin processing step.
+    /// </summary>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DisableStepAsync(Guid stepId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await SetStepStateAsync(stepId, sdkmessageprocessingstep_statecode.Disabled, client, cancellationToken);
+        }
+        catch (PpdsException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new PpdsException(
+                ErrorCodes.Plugin.SetStateFailed,
+                $"Failed to disable plugin step '{stepId}'.",
+                ex);
+        }
+    }
+
+    #endregion
+
     #region Private Helpers
 
     /// <summary>
@@ -2137,6 +2345,15 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         "Both" => 2,
         _ => int.TryParse(deployment, out var v) ? v : 0
     };
+
+    private static sdkmessageprocessingstep_invocationsource MapInvocationSourceToValue(string? invocationSource) =>
+        invocationSource switch
+        {
+            "Parent" => sdkmessageprocessingstep_invocationsource.Parent,
+            "Child" => sdkmessageprocessingstep_invocationsource.Child,
+            "Internal" => sdkmessageprocessingstep_invocationsource.Internal,
+            _ => sdkmessageprocessingstep_invocationsource.Parent
+        };
 
     // Native async helpers - use async SDK when available, otherwise fall back to Task.Run
     private static async Task<EntityCollection> RetrieveMultipleAsync(

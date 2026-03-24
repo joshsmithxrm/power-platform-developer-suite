@@ -95,6 +95,26 @@ public interface IPluginRegistrationService
         Guid stepId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists available SDK messages, optionally filtered by name.
+    /// </summary>
+    /// <param name="filter">Optional substring filter applied to the message name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Sorted list of matching message names.</returns>
+    Task<List<string>> ListMessagesAsync(
+        string? filter,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns attribute metadata for an entity.
+    /// </summary>
+    /// <param name="entityLogicalName">The logical name of the entity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Sorted list of attribute metadata.</returns>
+    Task<List<AttributeMetadataInfo>> ListEntityAttributesAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Lookup Operations
@@ -414,6 +434,20 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    #region Enable/Disable Operations
+
+    /// <summary>
+    /// Enables a plugin processing step.
+    /// </summary>
+    Task EnableStepAsync(Guid stepId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Disables a plugin processing step.
+    /// </summary>
+    Task DisableStepAsync(Guid stepId, CancellationToken cancellationToken = default);
+
+    #endregion
+
     #region Solution Operations
 
     /// <summary>
@@ -440,12 +474,18 @@ public interface IPluginRegistrationService
 /// <param name="Rank">Execution order (1-999999).</param>
 /// <param name="FilteringAttributes">Comma-separated list of attributes that trigger the step.</param>
 /// <param name="Description">Step description.</param>
+/// <param name="CanBeBypassed">Whether this step can be bypassed via BypassBusinessLogicExecution.</param>
+/// <param name="CanUseReadOnlyConnection">Whether this step can use a read-only database connection.</param>
+/// <param name="InvocationSource">Pipeline invocation source: Parent or Child.</param>
 public record StepUpdateRequest(
     string? Mode = null,
     string? Stage = null,
     int? Rank = null,
     string? FilteringAttributes = null,
-    string? Description = null
+    string? Description = null,
+    bool? CanBeBypassed = null,
+    bool? CanUseReadOnlyConnection = null,
+    string? InvocationSource = null
 );
 
 /// <summary>
@@ -456,4 +496,13 @@ public record StepUpdateRequest(
 public record ImageUpdateRequest(
     string? Attributes = null,
     string? Name = null
+);
+
+/// <summary>
+/// Attribute metadata for an entity field.
+/// </summary>
+public record AttributeMetadataInfo(
+    string LogicalName,
+    string DisplayName,
+    string AttributeType
 );
