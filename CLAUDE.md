@@ -59,6 +59,11 @@ TUI-first multi-interface platform. All business logic in Application Services, 
 
 Pre-commit hook (`scripts/hooks/`) runs dotnet build, dotnet test, and extension typecheck + eslint. Auto-configured by `npm install`. Manual: `git config core.hooksPath scripts/hooks`.
 
+## Backlog
+
+- Rules and label taxonomy: `docs/BACKLOG.md`
+- Use `/backlog` skill for issue triage and management
+
 ## Gotchas
 
 - VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`, NOT `N-Name.log`
