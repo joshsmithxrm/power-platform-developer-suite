@@ -293,13 +293,13 @@
       },
       {
         "command": "ppds.openPlugins",
-        "title": "Open Plugins",
+        "title": "Open Plugin Registration",
         "category": "PPDS",
         "icon": "$(extensions)"
       },
       {
         "command": "ppds.openPluginsForEnv",
-        "title": "Open Plugins",
+        "title": "Open Plugin Registration",
         "icon": "$(extensions)"
       },
       {
