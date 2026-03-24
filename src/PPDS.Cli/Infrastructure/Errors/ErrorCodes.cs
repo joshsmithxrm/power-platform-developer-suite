@@ -270,5 +270,8 @@ public static class ErrorCodes
 
         /// <summary>Publish failed for one or more web resources.</summary>
         public const string PublishFailed = "WebResource.PublishFailed";
+
+        /// <summary>Multiple web resources matched a partial name.</summary>
+        public const string Ambiguous = "WebResource.Ambiguous";
     }
 }
