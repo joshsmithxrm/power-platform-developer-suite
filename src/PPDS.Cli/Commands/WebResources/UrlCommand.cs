@@ -71,7 +71,7 @@ public static class UrlCommand
             }
 
             // Resolve name to ID
-            var resources = await webResourceService.ListAsync(cancellationToken: cancellationToken);
+            var resources = (await webResourceService.ListAsync(cancellationToken: cancellationToken)).Items;
             var resolveResult = WebResourceNameResolver.Resolve(name, resources);
 
             if (!resolveResult.IsSuccess)

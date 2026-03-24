@@ -250,9 +250,9 @@ public static class PublishCommandGroup
         }
 
         // Get all resources (filtered by solution if provided) for name resolution
-        var resources = await webResourceService.ListAsync(
+        var resources = (await webResourceService.ListAsync(
             solutionId: solutionId,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken)).Items;
 
         List<Guid> idsToPublish;
 

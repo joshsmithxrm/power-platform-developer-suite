@@ -87,7 +87,7 @@ public static class GetCommand
             }
 
             // Resolve name to ID
-            var resources = await webResourceService.ListAsync(cancellationToken: cancellationToken);
+            var resources = (await webResourceService.ListAsync(cancellationToken: cancellationToken)).Items;
             var resolveResult = WebResourceNameResolver.Resolve(name, resources);
 
             if (!resolveResult.IsSuccess)
@@ -118,12 +118,12 @@ public static class GetCommand
 
             var resource = resolveResult.Matches[0];
 
-            // Check binary to stdout
-            if (!resource.IsTextType && outputPath == null && !globalOptions.IsJsonMode)
+            // Block binary types — service decodes content as UTF-8 text, binary would be garbled
+            if (!resource.IsTextType)
             {
                 var error = new StructuredError(
                     ErrorCodes.WebResource.NotEditable,
-                    $"Web resource '{resource.Name}' is a {resource.TypeName} file (binary). Use --output <path> to save to a file.",
+                    $"Web resource '{resource.Name}' is a {resource.TypeName} file (binary). Only text-based web resources can be retrieved.",
                     null,
                     resource.Name);
                 writer.WriteError(error);

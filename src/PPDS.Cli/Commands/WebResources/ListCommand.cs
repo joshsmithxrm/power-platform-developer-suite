@@ -156,11 +156,17 @@ public static class ListCommand
             // Use textOnly if type filter is specifically "text"
             var textOnly = type != null && type.Equals("text", StringComparison.OrdinalIgnoreCase);
 
-            var resources = await webResourceService.ListAsync(
+            var listResult = await webResourceService.ListAsync(
                 solutionId: solutionId,
                 textOnly: textOnly,
-                top: top ?? 5000,
                 cancellationToken: cancellationToken);
+            var resources = listResult.Items.ToList();
+
+            // Apply client-side top truncation if requested
+            if (top.HasValue)
+            {
+                resources = resources.Take(top.Value).ToList();
+            }
 
             // Apply type filter (for specific types, not "text" shortcut which is handled server-side)
             if (typeCodes != null && !textOnly)
