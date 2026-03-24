@@ -94,8 +94,7 @@ Fix any issues with missing required labels during triage.
 Pull high-priority backlog items that might be ready for a milestone:
 
 ```bash
-gh issue list --state open --label "status:backlog" --label "priority:high" --json number,title,labels
-gh issue list --state open --label "status:backlog" --label "priority:critical" --json number,title,labels
+gh issue list --search 'is:open label:"status:backlog" (label:"priority:high" OR label:"priority:critical")' --json number,title,labels
 ```
 
 Present each to user: promote to milestone, keep in backlog, or re-prioritize.
@@ -105,7 +104,7 @@ Present each to user: promote to milestone, keep in backlog, or re-prioritize.
 Find issues with no activity in 6+ months:
 
 ```bash
-gh issue list --state open --json number,title,updatedAt,milestone,labels --jq '[.[] | select(.updatedAt < "YYYY-MM-DD")] | sort_by(.updatedAt) | .[] | "\(.number) | \(.updatedAt[0:10]) | \(.title)"'
+gh issue list --search 'is:open updated:<YYYY-MM-DD' --json number,title,updatedAt,milestone,labels --jq 'sort_by(.updatedAt) | .[] | "\(.number) | \(.updatedAt[0:10]) | \(.title)"'
 ```
 
 Replace `YYYY-MM-DD` with the date 6 months ago.

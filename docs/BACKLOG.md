@@ -94,7 +94,7 @@ Epics track initiatives that span areas. They close when the initiative is done.
 gh issue list --state open --no-milestone --json number,labels --jq '[.[] | select(.labels | map(.name) | any(startswith("status:")) | not)] | .[].number'
 
 # High-priority backlog candidates for promotion
-gh issue list --state open --label "status:backlog" --label "priority:high" --json number,title
+gh issue list --search 'is:open label:"status:backlog" (label:"priority:high" OR label:"priority:critical")' --json number,title
 
 # All v1.0 blockers
 gh issue list --state open --milestone "v1.0" --json number,title,labels
