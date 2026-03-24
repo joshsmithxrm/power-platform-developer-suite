@@ -1,4 +1,6 @@
+using System.IO;
 using PPDS.Auth.Profiles;
+using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Cli.Tui;
 using PPDS.Cli.Tui.Infrastructure;
@@ -19,7 +21,7 @@ public sealed class TabBarTests : IDisposable
     public TabBarTests()
     {
         _tempStore = new TempProfileStore();
-        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new MockServiceProviderFactory());
+        _session = new InteractiveSession(null, _tempStore.Store, new EnvironmentConfigStore(), new TuiStateStore(Path.GetTempFileName()), new MockServiceProviderFactory());
         _tabManager = new TabManager(new TuiThemeService());
         _tabBar = new TabBar(_tabManager, new TuiThemeService());
     }
