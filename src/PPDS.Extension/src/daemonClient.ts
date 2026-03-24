@@ -76,7 +76,14 @@ export interface PluginPackageInfoDto { id?: string; name: string; uniqueName?: 
 export interface PluginAssemblyInfoDto { id?: string; name: string; version?: string; publicKeyToken?: string; types: PluginTypeInfoDto[] }
 export interface PluginTypeInfoDto { id?: string; typeName: string; steps: PluginStepInfoDto[] }
 export interface PluginStepInfoDto { id?: string; name: string; message: string; entity: string; stage: string; mode: string; executionOrder: number; filteringAttributes?: string; isEnabled: boolean; description?: string }
-export interface PluginsGetResponse { entity: Record<string, unknown> }
+export interface PluginsGetResponse {
+    type: string;
+    assembly?: Record<string, unknown>;
+    package?: Record<string, unknown>;
+    pluginType?: Record<string, unknown>;
+    step?: Record<string, unknown>;
+    image?: Record<string, unknown>;
+}
 export interface PluginsMessagesResponse { messages: string[] }
 export interface PluginsEntityAttributesResponse { attributes: AttributeInfoDto[] }
 export interface AttributeInfoDto { logicalName: string; displayName: string; attributeType: string }

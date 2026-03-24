@@ -281,11 +281,13 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
 
             const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
-            const entity = result.entity;
+            // Map type to property name ('type' nodeType maps to 'pluginType' property)
+            const propName = nodeType === 'type' ? 'pluginType' : nodeType;
+            const entity = (result as unknown as Record<string, unknown>)[propName] as Record<string, unknown> | undefined;
 
             // Build child nodes from entity data
             const children: PluginTreeNode[] = [];
-            const childArray = entity['children'];
+            const childArray = entity?.['children'];
             if (Array.isArray(childArray)) {
                 for (const child of childArray) {
                     if (child && typeof child === 'object') {
@@ -315,7 +317,9 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
 
             const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl);
-            this.postMessage({ command: 'detailLoaded', detail: result.entity });
+            // Extract entity from type-specific property
+            const entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? {};
+            this.postMessage({ command: 'detailLoaded', detail: entity });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'detailError', message: `Failed to load detail: ${msg}` });
@@ -333,12 +337,13 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Reload detail for the updated node to get fresh state
             const result = await this.daemon.pluginsGet('step', id, this.environmentUrl);
-            const entity = result.entity;
+            // Extract entity from type-specific property
+            const entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? undefined;
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
                     id: `step:${id}`,
-                    name: String(entity['name'] ?? id),
+                    name: String(entity?.['name'] ?? id),
                     nodeType: 'step',
                     isEnabled: enabled,
                 },
@@ -480,11 +485,13 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             // Reload detail for the updated node
             const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl);
+            // Extract entity from type-specific property
+            const updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
                     id: `${entityType}:${id}`,
-                    name: String(result.entity['name'] ?? id),
+                    name: String(updatedEntity?.['name'] ?? id),
                     nodeType: entityType,
                 },
             });
