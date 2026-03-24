@@ -1,9 +1,9 @@
 # Plugin System
 
-**Status:** Implemented
-**Last Updated:** 2026-01-28
-**Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/)
-**Surfaces:** CLI, TUI
+**Status:** Draft
+**Last Updated:** 2026-03-23
+**Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
+**Surfaces:** All
 
 ---
 
@@ -21,7 +21,11 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 
 - Plugin runtime/execution (that's Dataverse's responsibility)
 - Plugin base class implementation (use Microsoft's `IPlugin` interface)
-- Secure configuration storage (use environment variables or Azure Key Vault)
+- Secure configuration in annotations (write-only at runtime; can't be read back from Dataverse)
+- Service endpoints, webhooks → [service-endpoints.md](./service-endpoints.md)
+- Custom APIs → [custom-apis.md](./custom-apis.md)
+- Data providers → [data-providers.md](./data-providers.md)
+- Plugin profiler (deferred)
 
 ---
 
@@ -105,6 +109,7 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 - Plugin assemblies must target .NET 4.6.2 (Dataverse sandbox requirement)
 - Assemblies must be strong-named for Dataverse registration
 - `ExecutionOrder` must be 1-999999
+- All service methods for operations >1 second must accept `IProgressReporter` (Constitution A3): deploy, extract, cascade unregister, bulk enable/disable
 
 ### Validation Rules
 
@@ -149,6 +154,11 @@ The implementation ([`PluginStepAttribute.cs:1-122`](../src/PPDS.Plugins/Attribu
 | `Description` | string | null | Description of what the step does (stored as Dataverse metadata) |
 | `StepId` | string | null | ID for associating images with specific steps |
 | `AsyncAutoDelete` | bool | false | Auto-delete async job on success |
+| `Deployment` | PluginDeployment | ServerOnly | Deployment target (ServerOnly, Offline, Both) |
+| `RunAsUser` | string | null | Impersonation: "CallingUser", "System", GUID, email, or domain name |
+| `CanBeBypassed` | bool | true | Whether `BypassBusinessLogicExecution` can skip this step |
+| `CanUseReadOnlyConnection` | bool | false | Whether step can use read-only DB connection (perf optimization) |
+| `InvocationSource` | PluginInvocationSource | Parent | Pipeline invocation: Parent or Child |
 
 ### PluginImageAttribute
 
@@ -170,6 +180,8 @@ The implementation ([`PluginImageAttribute.cs:1-91`](../src/PPDS.Plugins/Attribu
 | `Attributes` | string | null | Comma-separated attributes (null = all) |
 | `EntityAlias` | string | null | Entity alias (defaults to Name) |
 | `StepId` | string | null | Associates image with specific step |
+| `Description` | string | null | Documentation for the image purpose |
+| `MessagePropertyName` | string | null | Override auto-inferred message property (e.g., "Target") |
 
 ### PluginStage Enum
 
@@ -208,6 +220,27 @@ public enum PluginImageType
 ```
 
 ([`PluginImageType.cs:1-26`](../src/PPDS.Plugins/Enums/PluginImageType.cs#L1-L26))
+
+### PluginDeployment Enum
+
+```csharp
+public enum PluginDeployment
+{
+    ServerOnly = 0, // Execute on server only (default)
+    Offline = 1,    // Execute in Outlook offline client only
+    Both = 2        // Execute on server and offline client
+}
+```
+
+### PluginInvocationSource Enum
+
+```csharp
+public enum PluginInvocationSource
+{
+    Parent = 0, // Execute in parent pipeline (default)
+    Child = 1   // Execute in child pipeline only
+}
+```
 
 ### IPluginRegistrationService
 
@@ -599,6 +632,201 @@ ppds plugins clean --config registrations.json --dry-run
 | `--config` | Path to registrations.json |
 | `--dry-run` | Preview orphans without deleting |
 
+### ppds plugins enable / disable
+
+Toggles step enabled state.
+
+```bash
+ppds plugins enable <step-name-or-id>
+ppds plugins disable <step-name-or-id>
+```
+
+---
+
+## RPC Surface
+
+RPC endpoints support the Extension panel and other RPC clients. All endpoints use the `plugins/` namespace.
+
+### Browsing Endpoints
+
+| Method | Parameters | Returns |
+|--------|-----------|---------|
+| `plugins/list` | `assembly?`, `package?`, `includeHidden?`, `includeMicrosoft?` | Full hierarchy: assemblies, packages, types, steps, images |
+| `plugins/get` | `type` (assembly\|package\|type\|step\|image), `id` | Detailed info for specific entity |
+| `plugins/messages` | `filter?` | Available SDK messages for step registration |
+| `plugins/entityAttributes` | `entityLogicalName` | Entity attributes for filtering attributes picker and image attributes |
+
+### Mutation Endpoints
+
+| Method | Parameters | Returns |
+|--------|-----------|---------|
+| `plugins/registerAssembly` | `path` (base64 content), `solutionName?` | `{ id }` |
+| `plugins/registerPackage` | `path` (base64 content), `solutionName?` | `{ id }` |
+| `plugins/registerStep` | Step config fields | `{ id }` |
+| `plugins/registerImage` | Image config fields | `{ id }` |
+| `plugins/updateStep` | `id`, update fields | Success |
+| `plugins/updateImage` | `id`, update fields | Success |
+| `plugins/toggleStep` | `id`, `enabled` (bool) | Success |
+| `plugins/unregister` | `type`, `id`, `force?` | `UnregisterResult` |
+| `plugins/downloadBinary` | `type` (assembly\|package), `id` | Base64 content + filename |
+
+---
+
+## Extension Surface
+
+### PluginsPanel
+
+The Extension provides a single webview panel (`PluginsPanel extends WebviewPanelBase`) that serves as the shared container for all plugin-related entities. The panel hosts node types from multiple domain specs: plugin assemblies/types/steps/images (this spec), service endpoints/webhooks ([service-endpoints.md](./service-endpoints.md)), custom APIs ([custom-apis.md](./custom-apis.md)), and data providers ([data-providers.md](./data-providers.md)).
+
+**Command:** `ppds.openPlugins` / "Plugins"
+
+### Layout
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ [Assembly ▾] [🔍 Search...] [⊞] [⊟] [↻]               │
+│ [☐ Hide hidden] [☐ Hide Microsoft]                      │
+├─────────────────────────────────────────────────────────┤
+│ ▼ 📦 MyPlugin.Package (1.0.0)                           │
+│   ▼ ⚙️ MyPlugin.dll (1.0.0.0)                           │
+│     ▼ 🔌 MyPlugin.AccountHandler                        │
+│       ▶ ⚡ Create of account (PreOp, Sync) ✓            │
+│       ▶ ⚡ Update of account (PostOp, Async) ✗          │
+│     ▶ 🔌 MyPlugin.ContactHandler                        │
+│   ⚙️ StandalonePlugin.dll (2.0.0.0)                     │
+│ ▼ 🌐 My Webhook                                         │
+│   ⚡ Update of account (PostOp, Async)                   │
+│ 📨 myorg_ApproveInvoice                                  │
+│ 🗃️ Virtual Data Source                                   │
+├─────────────────────────────────────────────────────────┤
+│ ▼ Details                                                │
+│ Name:    Create of account                               │
+│ Stage:   PreOperation    Mode: Synchronous               │
+│ Rank:    1               Enabled: Yes                    │
+│ Entity:  account         Message: Create                 │
+│ ...                                                      │
+└─────────────────────────────────────────────────────────┘
+```
+
+### View Modes
+
+Three view modes, switchable via dropdown:
+
+| Mode | Root Nodes | Hierarchy |
+|------|-----------|-----------|
+| **Assembly** (default) | Packages, Standalone Assemblies, Service Endpoints, Webhooks, Custom APIs, Data Sources | Package → Assembly → Type → Step → Image |
+| **Message** | SDK Messages, Custom APIs | Message → Entity → Step → Image |
+| **Entity** | Entities | Entity → Message → Step → Image |
+
+Assembly view is the primary browsing mode. Message and Entity views help find steps by what they respond to.
+
+### Tree Behavior
+
+- **Lazy loading**: Children load on first expand. Cached per session; Refresh clears cache.
+- **Virtual scrolling**: Activates above 500 visible nodes. Fixed 30px node height, 10-node overscan.
+- **Node states**: Enabled steps show ✓, disabled show ✗. Managed items show `(managed)` label. Hidden items show `(hidden)` label.
+- **No gatekeeping**: All operations available on all items. No artificial protection for managed components.
+
+### Toolbar Actions
+
+| Action | Icon | Behavior |
+|--------|------|----------|
+| View mode | Dropdown | Switch Assembly/Message/Entity |
+| Search | 🔍 | Text search across tree, expand matching branches |
+| Expand All | ⊞ | Expand all visible nodes |
+| Collapse All | ⊟ | Collapse all nodes |
+| Refresh | ↻ | Clear cache, reload from Dataverse |
+
+### Filter Bar
+
+| Filter | Default | Behavior |
+|--------|---------|----------|
+| Hide hidden steps | Off | Toggles visibility of `IsHidden=true` steps |
+| Hide Microsoft | Off | Toggles visibility of `Microsoft.*` assemblies (except `Microsoft.Crm.ServiceBus`) |
+
+### Context Actions
+
+Available via right-click menu. Availability depends on node type:
+
+| Action | Node Types | Behavior |
+|--------|-----------|----------|
+| Register Assembly | Root | Opens assembly registration form |
+| Register Package | Root | Opens package registration form |
+| Register Step | Type | Opens step registration form pre-bound to type |
+| Register Image | Step | Opens image registration form pre-bound to step |
+| Update | Assembly, Package, Step, Image | Opens update form |
+| Enable / Disable | Step | Toggles step state via `plugins/toggleStep` RPC |
+| Unregister | All | Confirmation dialog → `plugins/unregister` RPC |
+| Download Binary | Assembly, Package | Save dialog → `plugins/downloadBinary` RPC |
+| View Traces | Step | Opens Plugin Traces panel filtered to this step |
+
+### Registration Forms
+
+Step registration form fields (modal dialog within webview):
+
+| Field | Type | Required | Populated From |
+|-------|------|----------|---------------|
+| Message | Autocomplete | Yes | `plugins/messages` RPC |
+| Primary Entity | Autocomplete | Conditional | Loaded per message |
+| Secondary Entity | Autocomplete | No | Loaded per message |
+| Step Name | Text | Yes | Auto-generated if empty |
+| Description | Text | No | Auto-generated if empty |
+| Stage | Select | Yes | PreValidation, PreOperation, PostOperation |
+| Mode | Radio | Yes | Synchronous (default), Asynchronous (PostOperation only) |
+| Execution Order | Number | Yes | Default: 1 |
+| Filtering Attributes | Multi-select | No | `plugins/entityAttributes` RPC; disabled if message doesn't support |
+| Deployment | Select | Yes | ServerOnly (default), Offline, Both |
+| User Context | Select | No | CallingUser (default), system users |
+| Unsecure Configuration | Textarea | No | |
+| Secure Configuration | Textarea | No | Write-only; shows "(set)" on update |
+| Async Auto Delete | Checkbox | No | Enabled only when Mode=Async |
+| Can Be Bypassed | Checkbox | No | Default: true |
+| Can Use Read-Only Connection | Checkbox | No | Default: false |
+
+Image registration form follows the same pattern with fields for ImageType, Name, EntityAlias, Attributes (multi-select picker), Description, MessagePropertyName.
+
+### Message Protocol
+
+```typescript
+type PluginsPanelWebviewToHost =
+    | { command: 'ready' }
+    | { command: 'setViewMode'; mode: 'assembly' | 'message' | 'entity' }
+    | { command: 'expandNode'; nodeId: string; nodeType: string }
+    | { command: 'selectNode'; nodeId: string; nodeType: string }
+    | { command: 'search'; text: string }
+    | { command: 'applyFilter'; hideHidden: boolean; hideMicrosoft: boolean }
+    | { command: 'registerEntity'; entityType: string; parentId?: string; fields: Record<string, unknown> }
+    | { command: 'updateEntity'; entityType: string; id: string; fields: Record<string, unknown> }
+    | { command: 'toggleStep'; id: string; enabled: boolean }
+    | { command: 'unregister'; entityType: string; id: string; force: boolean }
+    | { command: 'downloadBinary'; entityType: string; id: string }
+    | /* standard: requestEnvironmentList, webviewError, copyToClipboard */;
+
+type PluginsPanelHostToWebview =
+    | { command: 'treeLoaded'; data: PluginTreeData }
+    | { command: 'childrenLoaded'; parentId: string; children: PluginTreeNode[] }
+    | { command: 'nodeUpdated'; node: PluginTreeNode }
+    | { command: 'nodeRemoved'; nodeId: string }
+    | { command: 'detailLoaded'; detail: PluginEntityDetail }
+    | { command: 'messagesLoaded'; messages: string[] }
+    | { command: 'entitiesLoaded'; entities: string[] }
+    | { command: 'attributesLoaded'; attributes: AttributeInfo[] }
+    | /* standard: updateEnvironment, loading, error, daemonReconnected */;
+```
+
+---
+
+## MCP Surface
+
+Read-only tools for AI-assisted plugin browsing. Mutation operations are intentionally excluded — plugin registration should happen with a human in the loop.
+
+### Tools
+
+| Tool | Parameters | Returns |
+|------|-----------|---------|
+| `plugins_list` | `assembly?`, `package?`, `includeHidden?`, `includeMicrosoft?` | Full hierarchy |
+| `plugins_get` | `type`, `nameOrId` | Detailed entity info |
+
 ---
 
 ## TUI Surface
@@ -819,6 +1047,10 @@ Extend `AssemblyExtractor` to read additional metadata:
               "executionOrder": 1,
               "filteringAttributes": "name,telephone1",
               "deployment": "ServerOnly",
+              "runAsUser": "CallingUser",
+              "canBeBypassed": true,
+              "canUseReadOnlyConnection": false,
+              "invocationSource": "Parent",
               "enabled": true,
               "images": [
                 {
@@ -873,7 +1105,7 @@ Also provides `Validate()` method to check all steps have valid execution order.
 | `steps` | List | [] | Step registrations |
 | `ExtensionData` | Dictionary? | null | Round-trip preservation |
 
-**PluginStepConfig** (17 properties + 2 constants):
+**PluginStepConfig** (22 properties + 2 constants):
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -886,18 +1118,22 @@ Also provides `Validate()` method to check all steps have valid execution order.
 | `executionOrder` | int | 1 | Priority (1-999999, lower = first) |
 | `filteringAttributes` | string? | null | Comma-separated triggering attributes |
 | `unsecureConfiguration` | string? | null | Plain-text config for plugin constructor |
+| `secureConfiguration` | string? | null | Write-only secure config (set during registration, cannot be read back) |
 | `deployment` | string? | null | ServerOnly, Offline, or Both |
 | `runAsUser` | string? | null | CallingUser, System, GUID, domain, or email |
 | `enabled` | bool | true | Register but disable if false |
 | `description` | string? | null | Step description metadata |
 | `asyncAutoDelete` | bool? | null | Auto-delete async job on success |
+| `canBeBypassed` | bool? | null | Whether step can be bypassed (default: true) |
+| `canUseReadOnlyConnection` | bool? | null | Whether step can use read-only DB connection |
+| `invocationSource` | string? | null | Parent or Child pipeline invocation |
 | `stepId` | string? | null | ID for associating images with steps |
 | `images` | List | [] | Image configurations |
 | `ExtensionData` | Dictionary? | null | Round-trip preservation |
 
 Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 
-**PluginImageConfig** (5 properties):
+**PluginImageConfig** (7 properties):
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -905,19 +1141,40 @@ Constants: `MinExecutionOrder = 1`, `MaxExecutionOrder = 999999`
 | `imageType` | string | "" | PreImage, PostImage, or Both |
 | `attributes` | string? | null | Comma-separated attributes (null = all) |
 | `entityAlias` | string? | null | Entity alias (defaults to name) |
+| `description` | string? | null | Image documentation |
+| `messagePropertyName` | string? | null | Override auto-inferred message property |
 | `ExtensionData` | Dictionary? | null | Round-trip preservation |
 
 ---
 
-## Testing
+## Acceptance Criteria
 
-### Acceptance Criteria
-
-- [ ] Extracting assembly with PluginStepAttribute produces valid JSON
-- [ ] Extracting assembly with PluginImageAttribute associates images with steps
-- [ ] Deploying configuration creates PluginAssembly in Dataverse
-- [ ] Deploying with `--clean` removes orphaned steps
-- [ ] Re-deploying same configuration is idempotent
+| ID | Criterion | Status |
+|----|-----------|--------|
+| AC-01 | Extracting assembly with PluginStepAttribute produces valid JSON including Deployment, RunAsUser, CanBeBypassed, CanUseReadOnlyConnection, InvocationSource | ❌ |
+| AC-02 | Extracting assembly with PluginImageAttribute produces JSON including Description and MessagePropertyName | ❌ |
+| AC-03 | Deploying configuration creates PluginAssembly in Dataverse | ✅ |
+| AC-04 | Deploying with `--clean` removes orphaned steps | ✅ |
+| AC-05 | Re-deploying same configuration is idempotent | ✅ |
+| AC-06 | `ppds plugins enable <step>` sets StateCode=Enabled | ❌ |
+| AC-07 | `ppds plugins disable <step>` sets StateCode=Disabled | ❌ |
+| AC-08 | Secure configuration is set during step registration but not returned in queries | ❌ |
+| AC-09 | Extension: PluginsPanel loads tree with packages, assemblies, types, steps, images | ❌ |
+| AC-10 | Extension: Three view modes (Assembly, Message, Entity) switch correctly | ❌ |
+| AC-11 | Extension: Step registration form validates async requires PostOperation | ❌ |
+| AC-12 | Extension: Enable/disable step toggles state immediately | ❌ |
+| AC-13 | Extension: Unregister with cascade shows confirmation, executes delete | ❌ |
+| AC-14 | Extension: Filtering attributes picker loads from entity metadata | ❌ |
+| AC-15 | Extension: Virtual scrolling handles 1000+ nodes without lag | ❌ |
+| AC-16 | Extension: Search filters tree and expands matching branches | ❌ |
+| AC-17 | TUI: PluginRegistrationScreen loads root packages and standalone assemblies | ❌ |
+| AC-18 | TUI: Expanding each level lazy-loads the next | ❌ |
+| AC-19 | TUI: Space on step toggles enabled/disabled | ❌ |
+| AC-20 | TUI: Delete key opens ConfirmDestructiveActionDialog with cascade preview | ❌ |
+| AC-21 | MCP: `plugins_list` returns full hierarchy | ❌ |
+| AC-22 | MCP: `plugins_get` returns detailed entity info | ❌ |
+| AC-23 | RPC: All browsing and mutation endpoints return correct data | ❌ |
+| AC-24 | No artificial protection on managed components — all operations available | ❌ |
 
 ### Edge Cases
 
@@ -968,6 +1225,9 @@ public async Task Deploy_IdempotentOnSecondRun()
 - [connection-pooling.md](./connection-pooling.md) - Connection pool used for Dataverse access
 - [cli.md](./cli.md) - CLI command structure
 - [plugin-traces.md](./plugin-traces.md) - Plugin trace log inspection and management
+- [service-endpoints.md](./service-endpoints.md) - Service endpoints and webhooks (extends shared Plugins panel)
+- [custom-apis.md](./custom-apis.md) - Custom API registration (extends shared Plugins panel)
+- [data-providers.md](./data-providers.md) - Virtual entity data providers (extends shared Plugins panel)
 
 ---
 
@@ -976,8 +1236,8 @@ public async Task Deploy_IdempotentOnSecondRun()
 - Workflow assembly support (custom workflow activities)
 - Plugin dependency graph visualization
 - Assembly signature validation before deployment
+- Plugin profiler integration (install/uninstall, start/stop per-step profiling)
 - TUI: inline step editing (filtering attributes, execution order) without separate dialog
-- TUI: drag-and-drop reordering of step execution order
 - TUI: direct navigation from step to its trace history (link to PluginTraceScreen with filter)
 
 ---
@@ -986,4 +1246,5 @@ public async Task Deploy_IdempotentOnSecondRun()
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added Extension, MCP, RPC surfaces; new annotation properties; CLI enable/disable; updated ACs |
 | 2026-03-18 | Merged TUI surface content from tui-plugin-registration.md per SL3 |
