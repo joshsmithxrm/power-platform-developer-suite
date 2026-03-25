@@ -1,16 +1,23 @@
-"""Desktop toast notification hook for Claude Code.
+"""Desktop toast notification for Claude Code.
 
-Fires on idle_prompt only when a PR URL exists in workflow state.
-Clicking the toast opens the PR in the default browser.
-
-Hook event: Notification
-Matcher: idle_prompt
-Input: JSON on stdin with message, title, notification_type, cwd
+Two modes:
+  1. Direct invocation (from /pr skill or ad-hoc):
+       python notify.py --title "PR Ready" --msg "Click to open" --url "https://..."
+  2. Hook mode (Notification event, idle_prompt matcher):
+       Reads JSON from stdin, pulls PR URL from workflow state.
 """
 
+import argparse
 import json
 import os
 import sys
+
+
+def _is_worktree(cwd):
+    """Return True if cwd is a git worktree (not the main repo)."""
+    git_path = os.path.join(cwd, ".git")
+    # In a worktree, .git is a file (not a directory) containing "gitdir: ..."
+    return os.path.isfile(git_path)
 
 
 def get_pr_url(cwd):
@@ -26,33 +33,51 @@ def get_pr_url(cwd):
         return None
 
 
-def main():
+def show_toast(title, msg, url):
+    """Show a Windows desktop toast notification."""
     try:
         from winotify import Notification, audio
     except ImportError:
         # winotify not installed — skip silently
         return
 
-    try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        return
-
-    cwd = data.get("cwd", ".")
-    pr_url = get_pr_url(cwd)
-
-    # Only notify when a PR is ready
-    if not pr_url:
-        return
-
     toast = Notification(
         app_id="Claude Code",
-        title="PR Ready",
-        msg="Click to open pull request",
-        launch=pr_url,
+        title=title,
+        msg=msg,
+        launch=url,
     )
     toast.set_audio(audio.Default, loop=False)
     toast.show()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Desktop toast notification")
+    parser.add_argument("--title", default="PR Ready")
+    parser.add_argument("--msg", default="Click to open pull request")
+    parser.add_argument("--url", default=None, help="URL to open on click")
+    args = parser.parse_args()
+
+    # Direct invocation — URL provided via CLI
+    if args.url:
+        show_toast(args.title, args.msg, args.url)
+        return
+
+    # Hook mode — only fires inside a worktree (never on main repo root)
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    cwd = data.get("cwd", ".")
+
+    # Worktree check: .workflow/state.json should only exist in .worktrees/<name>/
+    if not _is_worktree(cwd):
+        return
+
+    pr_url = get_pr_url(cwd)
+    if pr_url:
+        show_toast(args.title, args.msg, pr_url)
 
 
 if __name__ == "__main__":

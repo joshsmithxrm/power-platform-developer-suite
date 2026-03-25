@@ -23,13 +23,47 @@ Magic values for 'set':
 """
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 
 
+def _get_worktree_root():
+    """Return the git toplevel for the current working tree.
+
+    In a worktree this returns .worktrees/<name>/, on main it returns
+    the repo root.  We use this instead of CLAUDE_PROJECT_DIR so that
+    workflow state lands in the worktree, not the main repo.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+
+def _is_main_branch():
+    """Return True if the current branch is main/master."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() in ("main", "master")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return False
+
+
 def get_state_path():
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-    state_dir = os.path.join(project_dir, ".workflow")
+    root = _get_worktree_root()
+    state_dir = os.path.join(root, ".workflow")
     os.makedirs(state_dir, exist_ok=True)
     return os.path.join(state_dir, "state.json")
 
@@ -88,6 +122,16 @@ def main():
         sys.exit(1)
 
     command = sys.argv[1]
+
+    # Read-only commands are fine anywhere; writes are blocked on main
+    write_commands = ("set", "set-null", "init", "append", "delete")
+    if command in write_commands and _is_main_branch():
+        print(
+            "BLOCKED: Cannot write workflow state on main. "
+            "Workflow state belongs in a worktree.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     if command == "show":
         state = read_state()

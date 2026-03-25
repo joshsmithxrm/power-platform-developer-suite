@@ -157,13 +157,23 @@ python scripts/workflow-state.py set pr.url "{pr-url}"
 python scripts/workflow-state.py set pr.created now
 ```
 
-After Gemini comments are triaged (step 4 complete):
+After Gemini comments are triaged (step 5 complete):
 
 ```bash
 python scripts/workflow-state.py set pr.gemini_triaged true
 ```
 
-The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 4.
+The stop hook will BLOCK the session from ending if `gemini_triaged` is not set after PR creation. Do not skip step 5.
+
+### 8. Notify
+
+Fire a desktop toast so the user knows the PR is ready:
+
+```bash
+python .claude/hooks/notify.py --title "PR Ready" --msg "Gemini triaged — click to review" --url "{pr-url}"
+```
+
+This fires immediately — do not rely on idle_prompt for notification.
 
 ## Timeout Behavior
 
