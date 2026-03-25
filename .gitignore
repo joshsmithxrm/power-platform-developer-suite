@@ -104,3 +104,7 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 .plans/
 .muse/
 .dotnet
+
+# Python
+__pycache__/
+*.pyc

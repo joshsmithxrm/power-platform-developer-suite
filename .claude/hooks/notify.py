@@ -1,11 +1,10 @@
 """Desktop toast notification hook for Claude Code.
 
-Fires on idle_prompt (Claude waiting for input) and permission_prompt
-(Claude needs permission). Reads .workflow/state.json to detect PR URLs
-and makes the toast clickable to open the PR in the browser.
+Fires on idle_prompt only when a PR URL exists in workflow state.
+Clicking the toast opens the PR in the default browser.
 
 Hook event: Notification
-Matcher: idle_prompt|permission_prompt
+Matcher: idle_prompt
 Input: JSON on stdin with message, title, notification_type, cwd
 """
 
@@ -39,32 +38,18 @@ def main():
     except Exception:
         return
 
-    notification_type = data.get("notification_type", "")
-    message = data.get("message", "Claude Code")
-    title = data.get("title", "Claude Code")
     cwd = data.get("cwd", ".")
+    pr_url = get_pr_url(cwd)
 
-    launch_url = None
-
-    if notification_type == "idle_prompt":
-        pr_url = get_pr_url(cwd)
-        if pr_url:
-            launch_url = pr_url
-            title = "PR Ready"
-            message = "Click to open pull request"
-        else:
-            title = "Claude Code"
-            message = "Waiting for input"
-
-    elif notification_type == "permission_prompt":
-        title = "Claude Code"
-        # message already contains the permission request details
+    # Only notify when a PR is ready
+    if not pr_url:
+        return
 
     toast = Notification(
         app_id="Claude Code",
-        title=title,
-        msg=message,
-        launch=launch_url or "",
+        title="PR Ready",
+        msg="Click to open pull request",
+        launch=pr_url,
     )
     toast.set_audio(audio.Default, loop=False)
     toast.show()
