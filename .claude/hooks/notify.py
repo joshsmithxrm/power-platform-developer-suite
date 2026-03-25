@@ -13,6 +13,13 @@ import os
 import sys
 
 
+def _is_worktree(cwd):
+    """Return True if cwd is a git worktree (not the main repo)."""
+    git_path = os.path.join(cwd, ".git")
+    # In a worktree, .git is a file (not a directory) containing "gitdir: ..."
+    return os.path.isfile(git_path)
+
+
 def get_pr_url(cwd):
     """Read PR URL from workflow state if available."""
     state_path = os.path.join(cwd, ".workflow", "state.json")
@@ -56,13 +63,18 @@ def main():
         show_toast(args.title, args.msg, args.url)
         return
 
-    # Hook mode — read from stdin, get URL from workflow state
+    # Hook mode — only fires inside a worktree (never on main repo root)
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return
 
     cwd = data.get("cwd", ".")
+
+    # Worktree check: .workflow/state.json should only exist in .worktrees/<name>/
+    if not _is_worktree(cwd):
+        return
+
     pr_url = get_pr_url(cwd)
     if pr_url:
         show_toast(args.title, args.msg, pr_url)
