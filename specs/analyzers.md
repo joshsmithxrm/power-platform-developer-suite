@@ -92,7 +92,8 @@ PPDS.Analyzers is a Roslyn-based static code analysis package that enforces arch
 
 | Range | Category | Purpose |
 |-------|----------|---------|
-| PPDS001-007 | Architecture | Layer separation, dependency rules |
+| PPDS001-005, 007 | Architecture | Layer separation, dependency rules |
+| PPDS006 | Style | Early-bound entity usage |
 | PPDS008-010 | Performance | Query efficiency, bulk operations |
 | PPDS011-013 | Correctness | Async/await, cancellation, concurrency |
 

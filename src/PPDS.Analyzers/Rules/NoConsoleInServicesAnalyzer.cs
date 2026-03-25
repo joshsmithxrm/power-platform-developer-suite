@@ -71,32 +71,36 @@ public sealed class NoConsoleInServicesAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            // Console.Error.Write/WriteLine — Error returns TextWriter
-            if (IsConsoleErrorAccess(context, invocation))
+            // Console.Error.Write/WriteLine or Console.Out.Write/WriteLine — returns TextWriter
+            var consoleProperty = GetConsolePropertyAccess(context, invocation);
+            if (consoleProperty is not null)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    Rule, invocation.GetLocation(), $"Console.Error.{symbol.Name}"));
+                    Rule, invocation.GetLocation(), $"Console.{consoleProperty}.{symbol.Name}"));
                 return;
             }
         }
 
         // Fallback: if symbol didn't resolve (e.g. missing TextWriter reference),
-        // check syntactically for Console.Error.Write/Console.Error.WriteLine
+        // check syntactically for Console.Error|Out.Write/Console.Error|Out.WriteLine
         if (symbol is null && invocation.Expression is MemberAccessExpressionSyntax fallbackMember)
         {
             var methodName = fallbackMember.Name.Identifier.Text;
             if (Array.IndexOf(FlaggedMethodNames, methodName) < 0)
                 return;
 
-            if (IsConsoleErrorAccessSyntactic(context, fallbackMember))
+            var fallbackProperty = GetConsolePropertyAccessSyntactic(context, fallbackMember);
+            if (fallbackProperty is not null)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    Rule, invocation.GetLocation(), $"Console.Error.{methodName}"));
+                    Rule, invocation.GetLocation(), $"Console.{fallbackProperty}.{methodName}"));
             }
         }
     }
 
-    private static bool IsConsoleErrorAccess(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
+    private static readonly string[] ConsoleStreamProperties = { "Error", "Out" };
+
+    private static string? GetConsolePropertyAccess(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
     {
         if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
             memberAccess.Expression is MemberAccessExpressionSyntax parentAccess)
@@ -104,35 +108,36 @@ public sealed class NoConsoleInServicesAnalyzer : DiagnosticAnalyzer
             var parentSymbol = context.SemanticModel.GetSymbolInfo(parentAccess, context.CancellationToken).Symbol;
             if (parentSymbol is IPropertySymbol propertySymbol &&
                 propertySymbol.ContainingType?.ToDisplayString() == "System.Console" &&
-                propertySymbol.Name == "Error")
+                Array.IndexOf(ConsoleStreamProperties, propertySymbol.Name) >= 0)
             {
-                return true;
+                return propertySymbol.Name;
             }
         }
 
-        return false;
+        return null;
     }
 
-    private static bool IsConsoleErrorAccessSyntactic(
+    private static string? GetConsolePropertyAccessSyntactic(
         SyntaxNodeAnalysisContext context,
         MemberAccessExpressionSyntax memberAccess)
     {
-        // Match pattern: Console.Error.Write/WriteLine
+        // Match pattern: Console.Error|Out.Write/WriteLine
         if (memberAccess.Expression is not MemberAccessExpressionSyntax parentAccess)
-            return false;
+            return null;
 
-        if (parentAccess.Name.Identifier.Text != "Error")
-            return false;
+        var propertyName = parentAccess.Name.Identifier.Text;
+        if (Array.IndexOf(ConsoleStreamProperties, propertyName) < 0)
+            return null;
 
         // Verify "Console" resolves to System.Console
         var consoleSymbol = context.SemanticModel.GetSymbolInfo(parentAccess.Expression, context.CancellationToken).Symbol;
         if (consoleSymbol is INamedTypeSymbol namedType &&
             namedType.ToDisplayString() == "System.Console")
         {
-            return true;
+            return propertyName;
         }
 
-        return false;
+        return null;
     }
 
     private static bool IsServicesPath(string filePath)
@@ -140,6 +145,6 @@ public sealed class NoConsoleInServicesAnalyzer : DiagnosticAnalyzer
         if (string.IsNullOrEmpty(filePath))
             return false;
 
-        return filePath.Contains("Services/") || filePath.Contains("Services\\");
+        return filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
     }
 }

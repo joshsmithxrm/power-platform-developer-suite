@@ -155,6 +155,152 @@ public class ValidateTopCountAnalyzerTests
     }
 
     [Fact]
+    public async Task PPDS010_InlineQueryWithoutTopCount_ReportsWarning()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                    public int? TopCount { get; set; }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    void DoWork()
+                    {
+                        _svc.RetrieveMultiple(new QueryExpression("account"));
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<ValidateTopCountAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "PPDS010",
+            "inline QueryExpression without TopCount initializer should flag");
+    }
+
+    [Fact]
+    public async Task PPDS010_TopCountAssignedAfterCall_ReportsWarning()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                    public int? TopCount { get; set; }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    void DoWork()
+                    {
+                        var qe = new QueryExpression("account");
+                        _svc.RetrieveMultiple(qe);
+                        qe.TopCount = 50;
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<ValidateTopCountAnalyzer>(code);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "PPDS010",
+            "TopCount assigned AFTER RetrieveMultiple should still flag");
+    }
+
+    [Fact]
+    public async Task PPDS010_MethodCallArgument_NoDiagnostic()
+    {
+        const string code = """
+            using System.Collections.Generic;
+            namespace Microsoft.Xrm.Sdk
+            {
+                public class Entity { }
+                public class EntityCollection
+                {
+                    public List<Entity> Entities { get; set; }
+                    public int TotalRecordCount { get; set; }
+                }
+                public interface IOrganizationService
+                {
+                    EntityCollection RetrieveMultiple(object query);
+                }
+            }
+            namespace Microsoft.Xrm.Sdk.Query
+            {
+                public class QueryExpression
+                {
+                    public QueryExpression(string name) { }
+                    public int? TopCount { get; set; }
+                }
+            }
+            namespace TestCode
+            {
+                using Microsoft.Xrm.Sdk;
+                using Microsoft.Xrm.Sdk.Query;
+                class Service
+                {
+                    private IOrganizationService _svc;
+                    QueryExpression GetQuery() => new QueryExpression("account") { TopCount = 10 };
+                    void DoWork()
+                    {
+                        _svc.RetrieveMultiple(GetQuery());
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<ValidateTopCountAnalyzer>(code);
+
+        diagnostics.Should().BeEmpty("method call arguments can't be statically analyzed — skip to avoid false positives");
+    }
+
+    [Fact]
     public async Task PPDS010_NonQueryExpressionArg_NoDiagnostic()
     {
         const string code = """

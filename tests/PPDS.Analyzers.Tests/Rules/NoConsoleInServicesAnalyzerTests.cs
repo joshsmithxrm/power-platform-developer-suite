@@ -51,6 +51,29 @@ public class NoConsoleInServicesAnalyzerTests
             .Which.Id.Should().Be("PPDS002");
     }
 
+    /// <summary>Console.Out.WriteLine() in Services/ should flag.</summary>
+    [Fact]
+    public async Task PPDS002_ConsoleOutWriteLineInService_ReportsWarning()
+    {
+        const string code = """
+            using System;
+            using System.IO;
+            class MyService
+            {
+                void DoWork()
+                {
+                    Console.Out.WriteLine("progress...");
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoConsoleInServicesAnalyzer>(code, "/src/PPDS.Cli/Services/MyService.cs");
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS002");
+    }
+
     /// <summary>Console.WriteLine() in Commands/ should NOT flag.</summary>
     [Fact]
     public async Task PPDS002_ConsoleWriteLineInCommand_NoDiagnostic()
@@ -89,6 +112,49 @@ public class NoConsoleInServicesAnalyzerTests
 
         var diagnostics = await AnalyzerTestHelper
             .GetDiagnosticsAsync<NoConsoleInServicesAnalyzer>(code, "/src/PPDS.Cli/Services/MyService.cs");
+
+        diagnostics.Should().BeEmpty();
+    }
+
+    /// <summary>Console.Write() (without Line) in Services/ should flag.</summary>
+    [Fact]
+    public async Task PPDS002_ConsoleWriteInService_ReportsWarning()
+    {
+        const string code = """
+            using System;
+            class MyService
+            {
+                void DoWork()
+                {
+                    Console.Write("progress...");
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoConsoleInServicesAnalyzer>(code, "/src/PPDS.Cli/Services/MyService.cs");
+
+        diagnostics.Should().ContainSingle()
+            .Which.Id.Should().Be("PPDS002");
+    }
+
+    /// <summary>Console.WriteLine() in non-PPDS.Cli Services/ should NOT flag.</summary>
+    [Fact]
+    public async Task PPDS002_ConsoleInUnrelatedServicesDir_NoDiagnostic()
+    {
+        const string code = """
+            using System;
+            class MyService
+            {
+                void DoWork()
+                {
+                    Console.WriteLine("output");
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoConsoleInServicesAnalyzer>(code, "/src/OtherProject/Services/MyService.cs");
 
         diagnostics.Should().BeEmpty();
     }

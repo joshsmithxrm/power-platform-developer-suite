@@ -101,6 +101,37 @@ public class NoUiFrameworkInServicesAnalyzerTests
         diagnostics.Should().BeEmpty();
     }
 
+    /// <summary>Terminal.Gui in non-PPDS.Cli Services/ should NOT flag.</summary>
+    [Fact]
+    public async Task PPDS003_TerminalGuiInUnrelatedServicesDir_NoDiagnostic()
+    {
+        const string code = """
+            namespace Terminal.Gui
+            {
+                public class MessageBox
+                {
+                    public static int Query(string title, string msg) => 0;
+                }
+            }
+
+            namespace MyApp
+            {
+                class MyService
+                {
+                    void DoWork()
+                    {
+                        Terminal.Gui.MessageBox.Query("Title", "Message");
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHelper
+            .GetDiagnosticsAsync<NoUiFrameworkInServicesAnalyzer>(code, "/src/OtherProject/Services/MyService.cs");
+
+        diagnostics.Should().BeEmpty();
+    }
+
     /// <summary>Normal code in Services/ should NOT flag.</summary>
     [Fact]
     public async Task PPDS003_NormalCodeInService_NoDiagnostic()

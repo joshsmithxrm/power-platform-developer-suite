@@ -110,6 +110,6 @@ public sealed class NoUiFrameworkInServicesAnalyzer : DiagnosticAnalyzer
         if (string.IsNullOrEmpty(filePath))
             return false;
 
-        return filePath.Contains("Services/") || filePath.Contains("Services\\");
+        return filePath.Contains("PPDS.Cli/Services/") || filePath.Contains("PPDS.Cli\\Services\\");
     }
 }
