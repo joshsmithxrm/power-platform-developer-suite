@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
@@ -111,12 +112,25 @@ public class PluginsDiffCommandE2ETests : CliE2ETestBase
 
             deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
 
-            // Now diff should show no drift (exit code 0)
-            var diffResult = await RunCliAsync(
-                "plugins", "diff",
-                "--config", TestRegistrationsPath);
+            // Deploy is async server-side; poll until diff shows no drift or timeout
+            var maxWait = TimeSpan.FromSeconds(30);
+            var pollInterval = TimeSpan.FromSeconds(2);
+            var sw = Stopwatch.StartNew();
+            CliResult diffResult;
 
-            diffResult.ExitCode.Should().Be(0, $"Diff should show no drift after deploy: {diffResult.StdErr}");
+            do
+            {
+                diffResult = await RunCliAsync(
+                    "plugins", "diff",
+                    "--config", TestRegistrationsPath);
+
+                if (diffResult.ExitCode == 0)
+                    break;
+
+                await Task.Delay(pollInterval);
+            } while (sw.Elapsed < maxWait);
+
+            diffResult.ExitCode.Should().Be(0, $"Diff should show no drift within {maxWait.TotalSeconds}s after deploy: {diffResult.StdErr}");
             diffResult.StdErr.Should().Contain("No drift");
         }
         finally
