@@ -1958,7 +1958,7 @@ public class RpcMethodHandler : IDisposable
             }
             catch (PpdsException ex)
             {
-                throw new RpcException(ex.ErrorCode, ex.UserMessage);
+                throw MapPpdsToRpcException(ex);
             }
         }, cancellationToken);
 

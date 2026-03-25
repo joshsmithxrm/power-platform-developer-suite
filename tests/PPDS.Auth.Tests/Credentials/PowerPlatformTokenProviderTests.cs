@@ -179,7 +179,7 @@ public class PowerPlatformTokenProviderTests
         var act = () => PowerPlatformTokenProvider.FromProfileWithSecret(profile, null!);
 
         act.Should().Throw<AuthenticationException>()
-            .WithMessage("*Client secret is required*");
+            .WithMessage("*Client secret not found*");
     }
 
     [Fact]

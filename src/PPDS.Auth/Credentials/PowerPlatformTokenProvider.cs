@@ -149,7 +149,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
 
         if (string.IsNullOrWhiteSpace(clientSecret))
             throw new AuthenticationException(
-                "Client secret is required for ClientSecret authentication. " +
+                $"Client secret not found for application '{profile.ApplicationId}'. " +
                 "Run 'ppds auth create' to recreate the profile with credentials.",
                 "Auth.InvalidCredentials");
 
