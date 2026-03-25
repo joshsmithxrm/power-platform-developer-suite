@@ -2,6 +2,16 @@
 """
 SessionStart hook: injects workflow state into AI context.
 Outputs current workflow status so the AI knows what's been done and what's pending.
+
+TODO: Wire up as post-compaction context re-injection hook.
+  Attempted SessionStart(compact), PreCompact, and PostCompact matchers in
+  settings.json — none fired on /compact in Claude Code v2.1.83. The script
+  works standalone (writes to stdout for compact, stderr for normal). When
+  Claude Code adds compaction hook support, add a compact matcher to
+  SessionStart in settings.json and use source=="compact" from stdin JSON
+  to switch output to stdout (context injection requires stdout, not stderr).
+  See also: Windows encoding issue — stdout needs io.TextIOWrapper with
+  encoding="utf-8" to handle unicode chars (arrows, checkmarks) on cp1252.
 """
 import json
 import os
@@ -10,21 +20,11 @@ import sys
 
 
 def main():
-    # Read stdin — check source for compact vs normal session start
-    source = None
+    # Read stdin
     try:
-        data = json.load(sys.stdin)
-        source = data.get("source")
+        json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):
         pass
-
-    # After compaction, write to stdout (context injection); normal session uses stderr
-    global _output
-    if source == "compact":
-        import io
-        _output = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    else:
-        _output = sys.stderr
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
@@ -58,7 +58,7 @@ def main():
             "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
             "  For bug fixes: /gates → /verify (if UI changed) → /pr\n"
             + _behavioral_rules(),
-            file=_output,
+            file=sys.stderr,
         )
         sys.exit(0)
 
@@ -69,7 +69,7 @@ def main():
         print(
             f"WORKFLOW STATE for branch {branch}:\n"
             "  ⚠ State file is corrupted. Delete .workflow/state.json and re-run steps.",
-            file=_output,
+            file=sys.stderr,
         )
         sys.exit(0)
 
@@ -155,7 +155,7 @@ def main():
 
     lines.append(_behavioral_rules())
 
-    print("\n".join(lines), file=_output)
+    print("\n".join(lines), file=sys.stderr)
     sys.exit(0)
 
 
@@ -205,7 +205,7 @@ def _show_main_guidance(project_dir):
     lines.append("To start new work: /design or python scripts/pipeline.py <plan-path>")
     lines.append("Planning and exploration are fine on main. Implementation requires a worktree.")
 
-    print("\n".join(lines), file=_output)
+    print("\n".join(lines), file=sys.stderr)
 
 
 def _behavioral_rules():
