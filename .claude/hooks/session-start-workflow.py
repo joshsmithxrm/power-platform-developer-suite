@@ -10,11 +10,21 @@ import sys
 
 
 def main():
-    # Read stdin
+    # Read stdin — check source for compact vs normal session start
+    source = None
     try:
-        json.load(sys.stdin)
+        data = json.load(sys.stdin)
+        source = data.get("source")
     except (json.JSONDecodeError, EOFError):
         pass
+
+    # After compaction, write to stdout (context injection); normal session uses stderr
+    global _output
+    if source == "compact":
+        import io
+        _output = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    else:
+        _output = sys.stderr
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
@@ -48,7 +58,7 @@ def main():
             "  For new features: /spec → /implement → /gates → /verify → /qa → /review → /pr\n"
             "  For bug fixes: /gates → /verify (if UI changed) → /pr\n"
             + _behavioral_rules(),
-            file=sys.stderr,
+            file=_output,
         )
         sys.exit(0)
 
@@ -59,7 +69,7 @@ def main():
         print(
             f"WORKFLOW STATE for branch {branch}:\n"
             "  ⚠ State file is corrupted. Delete .workflow/state.json and re-run steps.",
-            file=sys.stderr,
+            file=_output,
         )
         sys.exit(0)
 
@@ -145,7 +155,7 @@ def main():
 
     lines.append(_behavioral_rules())
 
-    print("\n".join(lines), file=sys.stderr)
+    print("\n".join(lines), file=_output)
     sys.exit(0)
 
 
@@ -195,7 +205,7 @@ def _show_main_guidance(project_dir):
     lines.append("To start new work: /design or python scripts/pipeline.py <plan-path>")
     lines.append("Planning and exploration are fine on main. Implementation requires a worktree.")
 
-    print("\n".join(lines), file=sys.stderr)
+    print("\n".join(lines), file=_output)
 
 
 def _behavioral_rules():
