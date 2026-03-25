@@ -291,6 +291,9 @@ def copy_file_to_worktree(src_path, worktree_path, dest_rel, logger):
     if not os.path.exists(src_path):
         return
     dest = os.path.join(worktree_path, dest_rel)
+    if os.path.exists(dest) and os.path.samefile(src_path, dest):
+        log(logger, "worktree", "FILE_SKIPPED_SAME", path=dest_rel)
+        return
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copy2(src_path, dest)
     log(logger, "worktree", "FILE_COPIED", src=src_path, dest=dest_rel)
@@ -497,7 +500,7 @@ def main():
                 else:
                     worktree_path = create_worktree(repo_root, name, branch, logger)
                     if not worktree_path:
-                        log(logger, "pipeline", "FAILED", stage="worktree")
+                        log(logger, "pipeline", "FAILED", failed_stage="worktree")
                         sys.exit(1)
 
                 # Relocate log to worktree
@@ -543,7 +546,7 @@ def main():
                     prompt = "/implement"  # Will generate plan from spec
                 exit_code, logger = run_claude(worktree_path, prompt, logger, "implement", args.dry_run)
                 if exit_code != 0:
-                    log(logger, "pipeline", "FAILED", stage="implement")
+                    log(logger, "pipeline", "FAILED", failed_stage="implement")
                     sys.exit(1)
 
                 # P4: Outcome verification + retry
@@ -551,7 +554,7 @@ def main():
                     log(logger, "implement", "OUTCOME_MISS", reason="no new commits, retrying")
                     exit_code, logger = run_claude(worktree_path, prompt, logger, "implement-retry", args.dry_run)
                     if exit_code != 0 or not verify_outcome(worktree_path, "implement", pre_commits):
-                        log(logger, "pipeline", "FAILED", stage="implement", reason="outcome verification failed")
+                        log(logger, "pipeline", "FAILED", failed_stage="implement", reason="outcome verification failed")
                         sys.exit(1)
 
                 # P8: Copy plan artifact back to main
@@ -561,7 +564,7 @@ def main():
                 prompt = f"/{stage}"
                 exit_code, logger = run_claude(worktree_path, prompt, logger, stage, args.dry_run)
                 if exit_code != 0:
-                    log(logger, "pipeline", "FAILED", stage=stage)
+                    log(logger, "pipeline", "FAILED", failed_stage=stage)
                     sys.exit(1)
 
                 # P4: Outcome verification + retry
@@ -569,7 +572,7 @@ def main():
                     log(logger, stage, "OUTCOME_MISS", reason="expected state not set, retrying")
                     exit_code, logger = run_claude(worktree_path, prompt, logger, f"{stage}-retry", args.dry_run)
                     if exit_code != 0:
-                        log(logger, "pipeline", "FAILED", stage=stage)
+                        log(logger, "pipeline", "FAILED", failed_stage=stage)
                         sys.exit(1)
 
             elif stage == "converge":
@@ -582,22 +585,22 @@ def main():
 
                     exit_code, logger = run_claude(worktree_path, "/converge", logger, f"converge-r{round_num + 1}", args.dry_run)
                     if exit_code != 0:
-                        log(logger, "pipeline", "FAILED", stage="converge")
+                        log(logger, "pipeline", "FAILED", failed_stage="converge")
                         sys.exit(1)
 
                     exit_code, logger = run_claude(worktree_path, "/gates", logger, f"gates-r{round_num + 1}", args.dry_run)
                     if exit_code != 0:
-                        log(logger, "pipeline", "FAILED", stage="gates-reconverge")
+                        log(logger, "pipeline", "FAILED", failed_stage="gates-reconverge")
                         sys.exit(1)
 
                     exit_code, logger = run_claude(worktree_path, "/verify", logger, f"verify-r{round_num + 1}", args.dry_run)
                     if exit_code != 0:
-                        log(logger, "pipeline", "FAILED", stage="verify-reconverge")
+                        log(logger, "pipeline", "FAILED", failed_stage="verify-reconverge")
                         sys.exit(1)
 
                     exit_code, logger = run_claude(worktree_path, "/review", logger, f"review-r{round_num + 1}", args.dry_run)
                     if exit_code != 0:
-                        log(logger, "pipeline", "FAILED", stage="review-reconverge")
+                        log(logger, "pipeline", "FAILED", failed_stage="review-reconverge")
                         sys.exit(1)
 
                     if check_review_passed(worktree_path):
@@ -605,14 +608,14 @@ def main():
                         break
                 else:
                     log(logger, "converge", "FAILED_TO_CONVERGE", max_rounds=args.max_converge)
-                    log(logger, "pipeline", "FAILED", stage="converge", reason="max rounds exceeded")
+                    log(logger, "pipeline", "FAILED", failed_stage="converge", reason="max rounds exceeded")
                     print(f"\nFAILED: Could not converge after {args.max_converge} rounds.", file=sys.stderr)
                     sys.exit(1)
 
             elif stage == "pr":
                 exit_code, logger = run_claude(worktree_path, "/pr", logger, "pr", args.dry_run)
                 if exit_code != 0:
-                    log(logger, "pipeline", "FAILED", stage="pr")
+                    log(logger, "pipeline", "FAILED", failed_stage="pr")
                     sys.exit(1)
                 pr_url = check_pr_created(worktree_path)
 
