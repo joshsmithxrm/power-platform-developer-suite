@@ -65,23 +65,23 @@ public sealed class DataProvidersListTool : McpToolBase
 
         var dataSources = dataSourceResult.Records.Select(record => new DataSourceSummary
         {
-            Id = GetGuid(record, "entitydatasourceid"),
-            Name = GetString(record, "name") ?? ""
+            Id = record.GetGuid("entitydatasourceid"),
+            Name = record.GetString("name") ?? ""
         }).ToList();
 
         var dataProviders = dataProviderResult.Records.Select(record => new DataProviderSummary
         {
-            Id = GetGuid(record, "entitydataproviderid"),
-            Name = GetString(record, "name") ?? "",
-            DataSourceName = GetString(record, "datasourcelogicalname"),
-            RetrievePlugin = GetGuidNullable(record, "retrieveplugin"),
-            RetrieveMultiplePlugin = GetGuidNullable(record, "retrievemultipleplugin"),
-            CreatePlugin = GetGuidNullable(record, "createplugin"),
-            UpdatePlugin = GetGuidNullable(record, "updateplugin"),
-            DeletePlugin = GetGuidNullable(record, "deleteplugin"),
-            IsManaged = GetBool(record, "ismanaged"),
-            CreatedOn = GetDateTime(record, "createdon"),
-            ModifiedOn = GetDateTime(record, "modifiedon")
+            Id = record.GetGuid("entitydataproviderid"),
+            Name = record.GetString("name") ?? "",
+            DataSourceName = record.GetString("datasourcelogicalname"),
+            RetrievePlugin = record.GetGuidNullable("retrieveplugin"),
+            RetrieveMultiplePlugin = record.GetGuidNullable("retrievemultipleplugin"),
+            CreatePlugin = record.GetGuidNullable("createplugin"),
+            UpdatePlugin = record.GetGuidNullable("updateplugin"),
+            DeletePlugin = record.GetGuidNullable("deleteplugin"),
+            IsManaged = record.GetBool("ismanaged"),
+            CreatedOn = record.GetDateTime("createdon"),
+            ModifiedOn = record.GetDateTime("modifiedon")
         }).ToList();
 
         return new DataProvidersListResult
@@ -93,54 +93,6 @@ public sealed class DataProvidersListTool : McpToolBase
         };
     }
 
-    // Value extraction helpers
-
-    private static Guid GetGuid(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static Guid? GetGuidNullable(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.Value?.ToString();
-        return null;
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is bool b) return b;
-            if (bool.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return false;
-    }
-
-    private static DateTime? GetDateTime(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is DateTime dt) return dt;
-            if (DateTime.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
 }
 
 /// <summary>

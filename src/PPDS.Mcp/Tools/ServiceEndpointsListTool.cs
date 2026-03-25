@@ -81,29 +81,29 @@ public sealed class ServiceEndpointsListTool : McpToolBase
 
         var endpoints = result.Records.Select(record =>
         {
-            var contractRaw = GetInt(record, "contract");
-            var authTypeRaw = GetInt(record, "authtype");
-            var messageFormatRaw = GetIntNullable(record, "messageformat");
-            var userClaimRaw = GetIntNullable(record, "userclaim");
+            var contractRaw = record.GetInt("contract");
+            var authTypeRaw = record.GetInt("authtype");
+            var messageFormatRaw = record.GetIntNullable("messageformat");
+            var userClaimRaw = record.GetIntNullable("userclaim");
             var contractType = MapContract(contractRaw);
             var isWebhook = contractRaw == ContractWebhook;
 
             return new ServiceEndpointSummary
             {
-                Id = GetGuid(record, "serviceendpointid"),
-                Name = GetString(record, "name") ?? "",
-                Description = GetString(record, "description"),
+                Id = record.GetGuid("serviceendpointid"),
+                Name = record.GetString("name") ?? "",
+                Description = record.GetString("description"),
                 ContractType = contractType,
                 IsWebhook = isWebhook,
-                Url = GetString(record, "url"),
-                NamespaceAddress = GetString(record, "namespaceaddress"),
-                Path = GetString(record, "path"),
+                Url = record.GetString("url"),
+                NamespaceAddress = record.GetString("namespaceaddress"),
+                Path = record.GetString("path"),
                 AuthType = MapAuthType(authTypeRaw),
                 MessageFormat = messageFormatRaw.HasValue ? MapMessageFormat(messageFormatRaw.Value) : null,
                 UserClaim = userClaimRaw.HasValue ? MapUserClaim(userClaimRaw.Value) : null,
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             };
         }).ToList();
 
@@ -151,64 +151,6 @@ public sealed class ServiceEndpointsListTool : McpToolBase
         _ => value.ToString()
     };
 
-    // Value extraction helpers
-
-    private static Guid GetGuid(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.Value?.ToString();
-        return null;
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is bool b) return b;
-            if (bool.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return false;
-    }
-
-    private static int GetInt(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is int i) return i;
-            if (int.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return 0;
-    }
-
-    private static int? GetIntNullable(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is int i) return i;
-            if (int.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static DateTime? GetDateTime(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is DateTime dt) return dt;
-            if (DateTime.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
 }
 
 /// <summary>

@@ -54,11 +54,11 @@ public sealed class DataAnalyzeTool : McpToolBase
         var recordCount = 0;
         if (countResult.Records.Count > 0 && countResult.Records[0].TryGetValue("count", out var countVal))
         {
-            if (countVal is QueryValue qv && qv.Value is int intVal)
+            if (countVal.Value is int intVal)
             {
                 recordCount = intVal;
             }
-            else if (countVal is QueryValue qv2 && int.TryParse(qv2.Value?.ToString(), out var parsed))
+            else if (int.TryParse(countVal.Value?.ToString(), out var parsed))
             {
                 recordCount = parsed;
             }

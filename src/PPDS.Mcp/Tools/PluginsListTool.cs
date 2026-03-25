@@ -55,17 +55,17 @@ public sealed class PluginsListTool : McpToolBase
 
         foreach (var record in assemblyResult.Records)
         {
-            var assemblyId = GetGuidValue(record, "pluginassemblyid");
+            var assemblyId = record.GetGuid("pluginassemblyid");
             if (assemblyId == Guid.Empty) continue;
 
             var assembly = new PluginAssemblyResult
             {
                 Id = assemblyId,
-                Name = GetStringValue(record, "name"),
-                Version = GetStringValue(record, "version"),
-                PublicKeyToken = GetStringValue(record, "publickeytoken"),
-                IsolationMode = GetFormattedValue(record, "isolationmode"),
-                SourceType = GetFormattedValue(record, "sourcetype"),
+                Name = record.GetString("name"),
+                Version = record.GetString("version"),
+                PublicKeyToken = record.GetString("publickeytoken"),
+                IsolationMode = record.GetFormatted("isolationmode"),
+                SourceType = record.GetFormatted("sourcetype"),
                 Types = []
             };
 
@@ -76,13 +76,13 @@ public sealed class PluginsListTool : McpToolBase
 
             foreach (var typeRecord in typesResult.Records)
             {
-                var typeId = GetGuidValue(typeRecord, "plugintypeid");
+                var typeId = typeRecord.GetGuid("plugintypeid");
 
                 var pluginType = new PluginTypeResult
                 {
                     Id = typeId,
-                    TypeName = GetStringValue(typeRecord, "typename"),
-                    FriendlyName = GetStringValue(typeRecord, "friendlyname"),
+                    TypeName = typeRecord.GetString("typename"),
+                    FriendlyName = typeRecord.GetString("friendlyname"),
                     Steps = []
                 };
 
@@ -106,7 +106,7 @@ public sealed class PluginsListTool : McpToolBase
 
         if (!string.IsNullOrWhiteSpace(nameFilter))
         {
-            conditions.Append($@"<condition attribute=""name"" operator=""like"" value=""%{EscapeXmlValue(nameFilter)}%"" />");
+            conditions.Append($@"<condition attribute=""name"" operator=""like"" value=""%{QueryValueExtensions.EscapeXml(nameFilter)}%"" />");
         }
 
         if (!includeHidden)
@@ -161,43 +161,6 @@ public sealed class PluginsListTool : McpToolBase
             </fetch>";
     }
 
-    private static Guid GetGuidValue(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static string? GetStringValue(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-        {
-            return qv.Value?.ToString();
-        }
-        return null;
-    }
-
-    private static string? GetFormattedValue(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-        {
-            return qv.FormattedValue ?? qv.Value?.ToString();
-        }
-        return null;
-    }
-
-    private static string EscapeXmlValue(string value)
-    {
-        return value
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&apos;");
-    }
 }
 
 /// <summary>

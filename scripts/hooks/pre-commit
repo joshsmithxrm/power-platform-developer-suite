@@ -69,3 +69,11 @@ if ! (cd "$EXT_DIR" && npx eslint src --quiet); then
 fi
 
 echo "[pre-commit] lint passed."
+
+echo "[pre-commit] Running Extension unit tests..."
+if ! npm test --prefix "$EXT_DIR"; then
+    echo ""
+    echo "[pre-commit] BLOCKED: Extension tests failed. Fix failures before committing."
+    exit 1
+fi
+echo "[pre-commit] Extension tests passed."

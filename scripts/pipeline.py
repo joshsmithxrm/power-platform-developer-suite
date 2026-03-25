@@ -354,7 +354,11 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "pipeline.log")
 
-    # Append mode for resume
+    # Append mode for resume.
+    # NOTE: A `with` statement is impractical here because the log file may be
+    # relocated mid-pipeline when the worktree is created (lines below copy the
+    # log to the worktree's .workflow/ directory and reopen it). The file is
+    # closed in the `finally` block at the end of main() instead.
     mode = "a" if args.from_stage else "w"
     logger = open(log_path, mode)
 

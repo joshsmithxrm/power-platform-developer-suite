@@ -19,8 +19,12 @@ def get_current_branch() -> str:
             text=True,
             timeout=5,
         )
+        if result.returncode != 0:
+            print(f"[protect-main-branch] WARNING: git command failed: {result.stderr.strip()}", file=sys.stderr)
+            return ""
         return result.stdout.strip()
-    except Exception:
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"[protect-main-branch] WARNING: Could not determine git branch: {e}", file=sys.stderr)
         return ""
 
 

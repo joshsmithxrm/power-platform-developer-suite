@@ -32,7 +32,7 @@ public sealed class EnvSelectTool : McpToolBase
         string environment,
         CancellationToken cancellationToken = default)
     {
-        await CreateScopeAsync(cancellationToken, (nameof(environment), environment)).ConfigureAwait(false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
         var collection = await Context.GetProfileCollectionAsync(cancellationToken).ConfigureAwait(false);
 

@@ -62,7 +62,7 @@ public sealed class PluginsGetTool : McpToolBase
         var isGuid = Guid.TryParse(nameOrId, out var id);
         var condition = isGuid
             ? $@"<condition attribute=""pluginassemblyid"" operator=""eq"" value=""{id}"" />"
-            : $@"<condition attribute=""name"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />";
+            : $@"<condition attribute=""name"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />";
 
         var fetchXml = $@"
             <fetch top=""1"">
@@ -95,16 +95,16 @@ public sealed class PluginsGetTool : McpToolBase
             EntityType = "assembly",
             Assembly = new PluginAssemblyDetail
             {
-                Id = GetGuid(record, "pluginassemblyid"),
-                Name = GetString(record, "name"),
-                Version = GetString(record, "version"),
-                PublicKeyToken = GetString(record, "publickeytoken"),
-                Culture = GetString(record, "culture"),
-                IsolationMode = GetFormatted(record, "isolationmode"),
-                SourceType = GetFormatted(record, "sourcetype"),
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                Id = record.GetGuid("pluginassemblyid"),
+                Name = record.GetString("name"),
+                Version = record.GetString("version"),
+                PublicKeyToken = record.GetString("publickeytoken"),
+                Culture = record.GetString("culture"),
+                IsolationMode = record.GetFormatted("isolationmode"),
+                SourceType = record.GetFormatted("sourcetype"),
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             }
         };
     }
@@ -118,8 +118,8 @@ public sealed class PluginsGetTool : McpToolBase
         var condition = isGuid
             ? $@"<condition attribute=""pluginpackageid"" operator=""eq"" value=""{id}"" />"
             : $@"<filter type=""or"">
-                    <condition attribute=""name"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />
-                    <condition attribute=""uniquename"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />
+                    <condition attribute=""name"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />
+                    <condition attribute=""uniquename"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />
                 </filter>";
 
         var fetchXml = $@"
@@ -150,13 +150,13 @@ public sealed class PluginsGetTool : McpToolBase
             EntityType = "package",
             Package = new PluginPackageDetail
             {
-                Id = GetGuid(record, "pluginpackageid"),
-                Name = GetString(record, "name"),
-                UniqueName = GetString(record, "uniquename"),
-                Version = GetString(record, "version"),
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                Id = record.GetGuid("pluginpackageid"),
+                Name = record.GetString("name"),
+                UniqueName = record.GetString("uniquename"),
+                Version = record.GetString("version"),
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             }
         };
     }
@@ -169,7 +169,7 @@ public sealed class PluginsGetTool : McpToolBase
         var isGuid = Guid.TryParse(nameOrId, out var id);
         var condition = isGuid
             ? $@"<condition attribute=""plugintypeid"" operator=""eq"" value=""{id}"" />"
-            : $@"<condition attribute=""typename"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />";
+            : $@"<condition attribute=""typename"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />";
 
         var fetchXml = $@"
             <fetch top=""1"">
@@ -203,15 +203,15 @@ public sealed class PluginsGetTool : McpToolBase
             EntityType = "type",
             PluginType = new PluginTypeDetail
             {
-                Id = GetGuid(record, "plugintypeid"),
-                TypeName = GetString(record, "typename"),
-                FriendlyName = GetString(record, "friendlyname"),
-                Name = GetString(record, "name"),
-                AssemblyId = GetGuidNullable(record, "pluginassemblyid"),
-                AssemblyName = GetString(record, "assemblyname"),
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                Id = record.GetGuid("plugintypeid"),
+                TypeName = record.GetString("typename"),
+                FriendlyName = record.GetString("friendlyname"),
+                Name = record.GetString("name"),
+                AssemblyId = record.GetGuidNullable("pluginassemblyid"),
+                AssemblyName = record.GetString("assemblyname"),
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             }
         };
     }
@@ -224,7 +224,7 @@ public sealed class PluginsGetTool : McpToolBase
         var isGuid = Guid.TryParse(nameOrId, out var id);
         var condition = isGuid
             ? $@"<condition attribute=""sdkmessageprocessingstepid"" operator=""eq"" value=""{id}"" />"
-            : $@"<condition attribute=""name"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />";
+            : $@"<condition attribute=""name"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />";
 
         var fetchXml = $@"
             <fetch top=""1"">
@@ -266,7 +266,7 @@ public sealed class PluginsGetTool : McpToolBase
         if (record == null)
             return new PluginsGetResult { Found = false };
 
-        var stateCode = GetInt(record, "statecode");
+        var stateCode = record.GetInt("statecode");
 
         return new PluginsGetResult
         {
@@ -274,24 +274,24 @@ public sealed class PluginsGetTool : McpToolBase
             EntityType = "step",
             Step = new PluginStepDetail
             {
-                Id = GetGuid(record, "sdkmessageprocessingstepid"),
-                Name = GetString(record, "name"),
-                Description = GetString(record, "description"),
-                Message = GetString(record, "messagename"),
-                PrimaryEntity = GetString(record, "primaryentity"),
-                SecondaryEntity = GetString(record, "secondaryentity"),
-                Stage = GetFormatted(record, "stage"),
-                Mode = GetFormatted(record, "mode"),
-                ExecutionOrder = GetInt(record, "rank"),
-                FilteringAttributes = GetString(record, "filteringattributes"),
-                Configuration = GetString(record, "configuration"),
+                Id = record.GetGuid("sdkmessageprocessingstepid"),
+                Name = record.GetString("name"),
+                Description = record.GetString("description"),
+                Message = record.GetString("messagename"),
+                PrimaryEntity = record.GetString("primaryentity"),
+                SecondaryEntity = record.GetString("secondaryentity"),
+                Stage = record.GetFormatted("stage"),
+                Mode = record.GetFormatted("mode"),
+                ExecutionOrder = record.GetInt("rank"),
+                FilteringAttributes = record.GetString("filteringattributes"),
+                Configuration = record.GetString("configuration"),
                 IsEnabled = stateCode == 0,
-                PluginTypeId = GetGuidNullable(record, "plugintypeid"),
-                PluginTypeName = GetString(record, "plugintypename"),
-                IsManaged = GetBool(record, "ismanaged"),
-                AsyncAutoDelete = GetBool(record, "asyncautodelete"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                PluginTypeId = record.GetGuidNullable("plugintypeid"),
+                PluginTypeName = record.GetString("plugintypename"),
+                IsManaged = record.GetBool("ismanaged"),
+                AsyncAutoDelete = record.GetBool("asyncautodelete"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             }
         };
     }
@@ -304,7 +304,7 @@ public sealed class PluginsGetTool : McpToolBase
         var isGuid = Guid.TryParse(nameOrId, out var id);
         var condition = isGuid
             ? $@"<condition attribute=""sdkmessageprocessingstepimageid"" operator=""eq"" value=""{id}"" />"
-            : $@"<condition attribute=""name"" operator=""eq"" value=""{EscapeXml(nameOrId)}"" />";
+            : $@"<condition attribute=""name"" operator=""eq"" value=""{QueryValueExtensions.EscapeXml(nameOrId)}"" />";
 
         var fetchXml = $@"
             <fetch top=""1"">
@@ -341,94 +341,21 @@ public sealed class PluginsGetTool : McpToolBase
             EntityType = "image",
             Image = new PluginImageDetail
             {
-                Id = GetGuid(record, "sdkmessageprocessingstepimageid"),
-                Name = GetString(record, "name"),
-                EntityAlias = GetString(record, "entityalias"),
-                ImageType = GetFormatted(record, "imagetype"),
-                Attributes = GetString(record, "attributes"),
-                MessagePropertyName = GetString(record, "messagepropertyname"),
-                StepId = GetGuidNullable(record, "sdkmessageprocessingstepid"),
-                StepName = GetString(record, "stepname"),
-                IsManaged = GetBool(record, "ismanaged"),
-                CreatedOn = GetDateTime(record, "createdon"),
-                ModifiedOn = GetDateTime(record, "modifiedon")
+                Id = record.GetGuid("sdkmessageprocessingstepimageid"),
+                Name = record.GetString("name"),
+                EntityAlias = record.GetString("entityalias"),
+                ImageType = record.GetFormatted("imagetype"),
+                Attributes = record.GetString("attributes"),
+                MessagePropertyName = record.GetString("messagepropertyname"),
+                StepId = record.GetGuidNullable("sdkmessageprocessingstepid"),
+                StepName = record.GetString("stepname"),
+                IsManaged = record.GetBool("ismanaged"),
+                CreatedOn = record.GetDateTime("createdon"),
+                ModifiedOn = record.GetDateTime("modifiedon")
             }
         };
     }
 
-    // Value extraction helpers
-
-    private static Guid GetGuid(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return Guid.Empty;
-    }
-
-    private static Guid? GetGuidNullable(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is Guid g) return g;
-            if (Guid.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static string? GetString(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.Value?.ToString();
-        return null;
-    }
-
-    private static string? GetFormatted(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv))
-            return qv.FormattedValue ?? qv.Value?.ToString();
-        return null;
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is bool b) return b;
-            if (bool.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return false;
-    }
-
-    private static int GetInt(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is int i) return i;
-            if (int.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return 0;
-    }
-
-    private static DateTime? GetDateTime(IReadOnlyDictionary<string, QueryValue> record, string key)
-    {
-        if (record.TryGetValue(key, out var qv) && qv.Value != null)
-        {
-            if (qv.Value is DateTime dt) return dt;
-            if (DateTime.TryParse(qv.Value.ToString(), out var parsed)) return parsed;
-        }
-        return null;
-    }
-
-    private static string EscapeXml(string value) =>
-        value
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&apos;");
 }
 
 /// <summary>
