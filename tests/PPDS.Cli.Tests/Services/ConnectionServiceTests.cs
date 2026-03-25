@@ -95,7 +95,7 @@ public class ConnectionServiceTests
         {
             await service.ListAsync();
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException or PpdsAuthException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException)
         {
             // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
         }
@@ -131,7 +131,7 @@ public class ConnectionServiceTests
         {
             await service.GetAsync("test-connection-id");
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException or PpdsAuthException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PpdsException)
         {
             // Expected - no mock HTTP client (may throw HttpRequestException, PpdsException, or PpdsAuthException)
         }

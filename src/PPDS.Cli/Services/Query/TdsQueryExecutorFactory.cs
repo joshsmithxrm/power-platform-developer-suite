@@ -27,8 +27,13 @@ public static class TdsQueryExecutorFactory
         IPowerPlatformTokenProvider tokenProvider;
         if (profile.AuthMethod == AuthMethod.ClientSecret)
         {
+            if (string.IsNullOrEmpty(profile.ApplicationId))
+                throw new AuthenticationException(
+                    $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.",
+                    "Auth.InvalidCredentials");
+
 #pragma warning disable PPDS012
-            var storedCredential = credentialStore.GetAsync(profile.ApplicationId ?? "").GetAwaiter().GetResult();
+            var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
             tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential?.ClientSecret ?? "");
         }

@@ -143,10 +143,17 @@ public static class ServiceRegistration
 
             if (profile.AuthMethod == AuthMethod.ClientSecret)
             {
+                if (string.IsNullOrEmpty(profile.ApplicationId))
+                {
+                    throw new AuthenticationException(
+                        $"Profile '{profile.DisplayIdentifier}' is configured for ClientSecret auth but has no ApplicationId.",
+                        "Auth.InvalidCredentials");
+                }
+
                 // DI factory delegates are synchronous; GetAsync is safe here because
                 // credential store uses file I/O, not network calls that would benefit from async.
 #pragma warning disable PPDS012 // Sync-over-async: DI factory cannot be async
-                var storedCredential = credentialStore.GetAsync(profile.ApplicationId ?? "").GetAwaiter().GetResult();
+                var storedCredential = credentialStore.GetAsync(profile.ApplicationId).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
                 tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential?.ClientSecret ?? "");
             }
