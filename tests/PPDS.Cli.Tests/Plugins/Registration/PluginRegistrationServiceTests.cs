@@ -17,6 +17,7 @@ using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Registration;
 
+[Trait("Category", "Unit")]
 public class PluginRegistrationServiceTests
 {
     private readonly Mock<IDataverseConnectionPool> _mockPool;

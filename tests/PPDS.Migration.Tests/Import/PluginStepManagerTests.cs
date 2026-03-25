@@ -115,6 +115,8 @@ public class PluginStepManagerTests
         updatedEntities.Should().HaveCount(1);
         updatedEntities[0].Id.Should().Be(stepId);
         updatedEntities[0].LogicalName.Should().Be("sdkmessageprocessingstep");
+        updatedEntities[0].GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1, "StateCode should be Disabled (1)");
+        updatedEntities[0].GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(2, "StatusCode should be Disabled (2)");
     }
 
     [Fact]
@@ -133,16 +135,10 @@ public class PluginStepManagerTests
         // Arrange
         var stepId1 = Guid.NewGuid();
         var stepId2 = Guid.NewGuid();
-        var callCount = 0;
 
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
-            .Callback<Entity>(_ =>
-            {
-                callCount++;
-                if (callCount == 1)
-                    throw new InvalidOperationException("First step failed");
-            })
+            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .ThrowsAsync(new InvalidOperationException("First step failed"))
             .Returns(Task.CompletedTask);
 
         // Act - should not throw
@@ -156,7 +152,7 @@ public class PluginStepManagerTests
     public async Task DisablePluginStepsAsync_RespectsCancellationToken()
     {
         // Arrange
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var stepId = Guid.NewGuid();
@@ -189,6 +185,8 @@ public class PluginStepManagerTests
         updatedEntities.Should().HaveCount(1);
         updatedEntities[0].Id.Should().Be(stepId);
         updatedEntities[0].LogicalName.Should().Be("sdkmessageprocessingstep");
+        updatedEntities[0].GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(0, "StateCode should be Enabled (0)");
+        updatedEntities[0].GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(1, "StatusCode should be Enabled (1)");
     }
 
     [Fact]
@@ -207,16 +205,10 @@ public class PluginStepManagerTests
         // Arrange
         var stepId1 = Guid.NewGuid();
         var stepId2 = Guid.NewGuid();
-        var callCount = 0;
 
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
-            .Callback<Entity>(_ =>
-            {
-                callCount++;
-                if (callCount == 1)
-                    throw new InvalidOperationException("First step failed");
-            })
+            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .ThrowsAsync(new InvalidOperationException("First step failed"))
             .Returns(Task.CompletedTask);
 
         // Act - should not throw

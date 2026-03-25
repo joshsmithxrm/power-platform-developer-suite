@@ -1052,7 +1052,7 @@ public class TieredImporterTests
 
         SetupSchemaValidatorNoMismatches();
 
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel(); // Cancel immediately
 
         var options = new ImportOptions { RespectDisablePluginsSetting = false };

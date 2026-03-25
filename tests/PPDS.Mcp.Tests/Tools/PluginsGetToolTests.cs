@@ -32,11 +32,13 @@ public sealed class PluginsGetToolTests
     #region Parameter Validation Tests
 
     [Fact]
-    public async Task ExecuteAsync_NullType_ThrowsNullReferenceException()
+    public async Task ExecuteAsync_NullType_ThrowsDueToMissingNullGuard()
     {
         // Arrange
-        // The tool calls type.ToLowerInvariant() without a null guard, so null type
-        // causes a NullReferenceException before reaching the switch.
+        // BUG: Production code calls type.ToLowerInvariant() without a null guard,
+        // so null type causes a NullReferenceException instead of ArgumentNullException.
+        // This test documents current behavior. When a null guard is added, update
+        // this test to expect ArgumentNullException with parameterName "type".
         var context = CreateContext();
         var tool = new PluginsGetTool(context);
 

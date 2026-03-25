@@ -82,12 +82,19 @@ def run_claude(worktree_path, prompt, logger, stage):
         result = subprocess.run(
             ["claude", "-p", prompt, "--verbose"],
             cwd=worktree_path,
-            # No timeout — claude -p runs until completion.
-            # Use --max-turns on the claude invocation to limit agent behavior.
+            timeout=3600,  # Safety net: 1 hour max per stage to prevent infinite hangs
         )
         duration = int(time.time() - start)
         log(logger, stage, "DONE", exit=result.returncode, duration=f"{duration}s")
         return result.returncode
+    except subprocess.TimeoutExpired:
+        duration = int(time.time() - start)
+        log(logger, stage, "TIMEOUT", duration=f"{duration}s")
+        print(
+            f"\nERROR: '{stage}' stage timed out after 3600s.",
+            file=sys.stderr,
+        )
+        return 1
     except FileNotFoundError:
         log(logger, stage, "ERROR", reason="claude command not found")
         print(
