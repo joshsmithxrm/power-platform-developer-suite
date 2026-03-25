@@ -73,6 +73,8 @@ Odd/even minor convention: odd minor = pre-release, even minor = stable. See `.p
 
 TUI-first multi-interface platform. All business logic in Application Services, never in UI code.
 
+- **TUI keyboard shortcuts:** Alt+Letter in dialogs, single letter in table/list views, Ctrl+Letter/F-key for global. Full convention in `specs/tui.md` § Keyboard Shortcut Convention.
+
 ## Git Hooks
 
 Pre-commit hook (`scripts/hooks/`) runs:

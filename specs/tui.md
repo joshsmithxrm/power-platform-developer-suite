@@ -1,7 +1,7 @@
 # TUI
 
 **Status:** Implemented
-**Last Updated:** 2026-01-23
+**Last Updated:** 2026-03-25
 **Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/)
 **Surfaces:** TUI
 
@@ -72,6 +72,37 @@ The PPDS TUI provides an interactive terminal interface for Power Platform devel
 | `ITuiThemeService` | Environment detection and color scheme selection |
 | `ITuiErrorService` | Thread-safe error collection with event notification |
 
+### Presenter/Handler Extraction Pattern
+
+When a TUI file exceeds ~500 lines, split it into a UI shell and an extracted logic class. The UI shell keeps Terminal.Gui layout and lifecycle; the extracted class owns business logic, state, and validation with zero Terminal.Gui dependencies.
+
+```
+┌─────────────────────┐         events          ┌─────────────────────┐
+│     UI Shell         │◀────────────────────────│   Presenter/Handler │
+│  (Terminal.Gui)      │                         │   (pure C#)         │
+│                      │─────── method calls ───▶│                     │
+│  - View declarations │                         │  - State management │
+│  - Layout            │                         │  - Validation       │
+│  - Event wiring      │                         │  - Business logic   │
+│  - CaptureState()    │                         │  - Events           │
+└──────────────────────┘                         └─────────────────────┘
+```
+
+**UI shell keeps:** View field declarations, Terminal.Gui layout/positioning, `Application.MainLoop.Invoke()` marshaling, `CaptureState()` (reads both presenter state and UI state), dialog launching, keyboard event wiring to presenter methods.
+
+**Extracted class gets:** State fields, validation rules, request/response building, async orchestration, events for status changes and results. Constructor takes `InteractiveSession` or equivalent dependencies — same DI the shell had.
+
+**Connection pattern:** The extracted class raises events; the UI shell subscribes and updates views. This mirrors the existing `ITuiErrorService` pattern.
+
+**Naming convention:**
+- Screens → `{Name}Presenter` (e.g., `SqlQueryPresenter`)
+- Dialogs → `{Name}FormBuilder` (e.g., `AuthMethodFormBuilder`)
+- Views → `{Name}Handler` (e.g., `TableKeyboardHandler`)
+
+**File placement:** Same directory as the UI shell. `SqlQueryScreen.cs` and `SqlQueryPresenter.cs` live side by side in `Tui/Screens/`.
+
+**Testability:** Extracted classes are testable with `TuiUnit` trait — no `Application.Init()` required. This is the primary motivation for the pattern.
+
 ### Dependencies
 
 - Depends on: [architecture.md](./architecture.md) for Application Services pattern
@@ -89,6 +120,8 @@ The PPDS TUI provides an interactive terminal interface for Power Platform devel
 3. UI updates from background threads must marshal to main loop via `Application.MainLoop.Invoke()`
 4. Connection pool is created once per session and reused across screens
 5. Dialogs must inherit from `TuiDialog` for consistent styling and hotkey handling
+6. Files exceeding ~500 lines should be split using the Presenter/Handler Extraction Pattern
+7. Keyboard shortcuts must follow the three-tier convention (see below)
 
 ### Primary Flows
 
@@ -115,6 +148,21 @@ The PPDS TUI provides an interactive terminal interface for Power Platform devel
 3. **Display**: Results populate `QueryResultsTableView` with pagination
 4. **Filter**: `/` shows filter bar; Enter applies filter to DataView
 5. **Export**: File > Export writes results to file via `IExportService`
+
+### Keyboard Shortcut Convention
+
+Three tiers prevent accidental triggers while maintaining speed:
+
+| Context | Modifier | Rationale | Examples |
+|---------|----------|-----------|---------|
+| Dialogs with text input | `Alt+Letter` | Prevents accidental triggers while typing | `Alt+A` Authenticate |
+| List/table views (no text input) | Single letter | Faster navigation, no text input conflict | `/` filter, `q` quit |
+| Global shortcuts | `Ctrl+Letter` or `F-key` | Available everywhere, won't conflict with text input | `Ctrl+E` export, `F5` execute |
+
+**Rules:**
+- `F-key` alternatives must exist for all `Ctrl+Shift` combos (Linux terminals cannot distinguish `Ctrl+T` from `Ctrl+Shift+T`)
+- Single-letter shortcuts must check `HasFocus` — only fire when the non-text-input view has focus
+- `Escape` follows context: closes filter → returns to query editor → does nothing (use `Ctrl+W` to close tab)
 
 ### Constraints
 
@@ -247,6 +295,76 @@ public interface ITuiStateCapture<out TState>
 ```
 
 Components implementing this interface enable automated testing without visual inspection. See Testing section for details.
+
+### AuthMethodFormBuilder
+
+Extracted from `ProfileCreationDialog` — owns auth method logic with no Terminal.Gui dependencies ([`AuthMethodFormBuilder.cs`](../src/PPDS.Cli/Tui/Dialogs/AuthMethodFormBuilder.cs)):
+
+```csharp
+internal sealed class AuthMethodFormBuilder
+{
+    IReadOnlyList<(string Label, AuthMethod Method)> GetAvailableMethods();
+    AuthFieldVisibility GetFieldVisibility(AuthMethod method);
+    ValidationResult Validate(AuthMethod method, AuthFormValues values);
+    ProfileCreateRequest BuildRequest(AuthMethod method, AuthFormValues values);
+}
+```
+
+`AuthFormValues` is a plain record holding form field strings. `AuthFieldVisibility` indicates which fields are visible per auth method. `ValidationResult` contains success/failure with error message.
+
+### SqlQueryPresenter
+
+Extracted from `SqlQueryScreen` — owns query execution, pagination, and history with no Terminal.Gui dependencies ([`SqlQueryPresenter.cs`](../src/PPDS.Cli/Tui/Screens/SqlQueryPresenter.cs)):
+
+```csharp
+internal sealed class SqlQueryPresenter
+{
+    string? LastSql { get; }
+    bool IsExecuting { get; }
+    bool UseTdsEndpoint { get; set; }
+
+    Task ExecuteAsync(string sql, string environmentUrl, CancellationToken ct);
+    Task LoadMoreAsync(string environmentUrl, CancellationToken ct);
+    Task<string> TranspileSqlAsync(string sql, string environmentUrl, CancellationToken ct);
+    Task<QueryPlanDescription> ExplainAsync(string sql, string environmentUrl, CancellationToken ct);
+    void ConfirmDml();
+    void Cancel();
+
+    event Action<StreamingChunkArgs> ChunkReceived;
+    event Action<QueryCompletedArgs> QueryCompleted;
+    event Action<QueryFailedArgs> QueryFailed;
+    event Action<string> StatusChanged;
+}
+```
+
+Takes `InteractiveSession` in constructor. The screen subscribes to events and marshals UI updates via `Application.MainLoop.Invoke()`.
+
+### TableKeyboardHandler
+
+Extracted from `QueryResultsTableView` — owns keyboard shortcut logic with `ITableViewState` abstraction ([`TableKeyboardHandler.cs`](../src/PPDS.Cli/Tui/Views/TableKeyboardHandler.cs)):
+
+```csharp
+internal interface ITableViewState
+{
+    int SelectedRow { get; }
+    int RowOffset { get; }
+    int VisibleHeight { get; }
+    bool HasFocus { get; }
+    DataTable? Table { get; }
+}
+
+internal sealed class TableKeyboardHandler
+{
+    TableKeyboardHandler(ITableViewState state, Func<string?> getEnvironmentUrl);
+
+    KeyHandleResult HandleKey(Key key);
+    CopyResult CopySelection(bool invertHeaders);
+    string? GetRecordUrl();
+    void ToggleGuidColumns();
+}
+```
+
+`KeyHandleResult` contains the action taken and a status message for the UI to display. `QueryResultsTableView` implements `ITableViewState` and delegates keyboard events to the handler.
 
 ---
 
@@ -387,6 +505,24 @@ Application.MainLoop?.Invoke(() => handler());
 - Positive: Immediate visual feedback prevents accidents
 - Positive: Consistent with traffic light mental model
 - Negative: URL heuristics may misclassify custom domains
+
+### Why Event-Based Presenter Extraction?
+
+**Context:** Three TUI files exceeded 500 lines with entangled UI and business logic. `SqlQueryScreen` (1,161 lines) was the worst — query execution, pagination state, history, and plan caching mixed with Terminal.Gui view management. This blocked unit testing (tests need `Application.Init()` for any Terminal.Gui type).
+
+**Decision:** Extract business logic into Presenter/Handler classes that raise events. UI shells subscribe and update views.
+
+**Alternatives considered:**
+- Interface-based ViewModel (MVVM): Rejected — Terminal.Gui 1.x has no data binding infrastructure, would require building a mini-framework
+- Static helper extraction: Rejected — state management stays in the screen, less testable
+- Leave as-is: Rejected — blocks autonomous testing, files continue to grow
+
+**Consequences:**
+- Positive: Extracted classes fully testable with `TuiUnit` (no `Application.Init()`)
+- Positive: Clear separation makes future changes safer
+- Positive: Event pattern matches existing `ITuiErrorService` convention
+- Negative: Two files per component instead of one
+- Negative: Event subscriptions add indirection
 
 ### Why Blue Background Rule?
 
@@ -593,6 +729,35 @@ public void ErrorService_StoresRecent_NewestFirst()
 
 ---
 
+## Acceptance Criteria — Presenter/Handler Extraction (#434–#437)
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-01 | `AuthMethodFormBuilder.GetAvailableMethods()` returns platform-aware list (CertificateStore only on Windows) | `AuthMethodFormBuilderTests.GetAvailableMethods_ExcludesCertStore_OnNonWindows` | 🔲 |
+| AC-02 | `AuthMethodFormBuilder.GetFieldVisibility(method)` returns correct visible fields for each of 6 auth methods | `AuthMethodFormBuilderTests.GetFieldVisibility_ClientSecret_ShowsSecretField` | 🔲 |
+| AC-03 | `AuthMethodFormBuilder.Validate(method, values)` returns error for missing required fields per auth method | `AuthMethodFormBuilderTests.Validate_ClientSecret_MissingAppId_ReturnsError` | 🔲 |
+| AC-04 | `AuthMethodFormBuilder.BuildRequest(method, values)` produces correct `ProfileCreateRequest` with method-specific fields | `AuthMethodFormBuilderTests.BuildRequest_CertificateFile_SetsCertFields` | 🔲 |
+| AC-05 | `ProfileCreationDialog` delegates validation and request building to `AuthMethodFormBuilder`; existing behavior unchanged | `ProfileCreationDialogTests.CaptureState_ReflectsSelectedMethod` | 🔲 |
+| AC-06 | `SqlQueryPresenter.ExecuteAsync()` raises `ChunkReceived` events for each streaming chunk | `SqlQueryPresenterTests.ExecuteAsync_RaisesChunkReceived_PerChunk` | 🔲 |
+| AC-07 | `SqlQueryPresenter.ExecuteAsync()` raises `QueryCompleted` with row count, elapsed ms, and execution mode | `SqlQueryPresenterTests.ExecuteAsync_RaisesQueryCompleted_WithStats` | 🔲 |
+| AC-08 | `SqlQueryPresenter.ExecuteAsync()` raises `QueryFailed` with appropriate error type for auth, DML confirmation, cancellation, and general errors | `SqlQueryPresenterTests.ExecuteAsync_AuthError_RaisesQueryFailed_WithAuthType` | 🔲 |
+| AC-09 | `SqlQueryPresenter.LoadMoreAsync()` updates pagination state and raises `ChunkReceived` | `SqlQueryPresenterTests.LoadMore_UpdatesPagingCookie` | 🔲 |
+| AC-10 | `SqlQueryPresenter` saves to history after successful execution | `SqlQueryPresenterTests.ExecuteAsync_SavesHistory` | 🔲 |
+| AC-11 | `SqlQueryPresenter` caches execution plan after successful execution | `SqlQueryPresenterTests.ExecuteAsync_CachesExecutionPlan` | 🔲 |
+| AC-12 | `SqlQueryPresenter.ConfirmDml()` sets confirmation flag; next execution sends `IsConfirmed=true` | `SqlQueryPresenterTests.ConfirmDml_NextExecute_SendsConfirmed` | 🔲 |
+| AC-13 | `SqlQueryScreen` delegates query execution to `SqlQueryPresenter`; subscribes to events to update UI; existing behavior unchanged | Manual + existing `SqlQueryScreenTests` pass | 🔲 |
+| AC-14 | `TableKeyboardHandler.HandleKey(Ctrl+C)` returns copy result via `ITableViewState` without Terminal.Gui dependency | `TableKeyboardHandlerTests.HandleKey_CtrlC_ReturnsCopyResult` | 🔲 |
+| AC-15 | `TableKeyboardHandler.GetRecordUrl()` builds correct Dynamics 365 URL from environment URL, entity name, and primary key | `TableKeyboardHandlerTests.GetRecordUrl_BuildsCorrectUrl` | 🔲 |
+| AC-16 | `TableKeyboardHandler.ToggleGuidColumns()` toggles internal state; caller re-applies column sizing | `TableKeyboardHandlerTests.ToggleGuidColumns_TogglesState` | 🔲 |
+| AC-17 | `ITableViewState` interface abstracts `TableView` read-only properties (SelectedRow, RowOffset, VisibleHeight, HasFocus, Table) | `TableKeyboardHandlerTests` uses mock `ITableViewState` | 🔲 |
+| AC-18 | `QueryResultsTableView` delegates keyboard handling to `TableKeyboardHandler`; existing behavior unchanged | Manual + `npm run tui:test` pass | 🔲 |
+| AC-19 | Keyboard shortcut convention documented in `specs/tui.md` with three-tier table | This spec (self-documenting) | 🔲 |
+| AC-20 | CLAUDE.md contains one-liner pointing to keyboard convention in `specs/tui.md` | Grep check | 🔲 |
+| AC-21 | All 3 extracted files (`AuthMethodFormBuilder`, `SqlQueryPresenter`, `TableKeyboardHandler`) conform to keyboard shortcut convention | Audit in implementation | 🔲 |
+| AC-22 | All existing TUI tests pass unchanged: `dotnet test --filter "Category=TuiUnit"` and `npm run tui:test` | CI gate | 🔲 |
+
+---
+
 ## Related Specs
 
 - [architecture.md](./architecture.md) - Application Services that TUI delegates to
@@ -608,6 +773,7 @@ public void ErrorService_StoresRecent_NewestFirst()
 
 | Date | Change |
 |------|--------|
+| 2026-03-25 | Added Presenter/Handler extraction pattern, keyboard shortcut convention, ACs for #434–#437 |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ## Roadmap
