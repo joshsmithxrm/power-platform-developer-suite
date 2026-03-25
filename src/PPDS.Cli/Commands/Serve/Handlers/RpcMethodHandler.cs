@@ -22,12 +22,14 @@ using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Security;
 using PPDS.Dataverse.Services;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
 using PPDS.Dataverse.Sql.Intellisense;
 using PPDS.Query.Intellisense;
+using PPDS.Query.Parsing;
 using System.Threading;
 using StreamJsonRpc;
 
@@ -1819,7 +1821,7 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
                 }
             }
 
@@ -1920,17 +1922,17 @@ public class RpcMethodHandler : IDisposable
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
             {
-                throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
             {
                 throw new RpcException(
                     ErrorCodes.Query.DmlConfirmationRequired,
-                    ex.Message,
+                    ex.UserMessage,
                     new DmlSafetyErrorData
                     {
                         Code = ErrorCodes.Query.DmlConfirmationRequired,
-                        Message = ex.Message,
+                        Message = ex.UserMessage,
                         DmlConfirmationRequired = true,
                     });
             }
@@ -1938,21 +1940,21 @@ public class RpcMethodHandler : IDisposable
             {
                 throw new RpcException(
                     ErrorCodes.Query.DmlBlocked,
-                    ex.Message,
+                    ex.UserMessage,
                     new DmlSafetyErrorData
                     {
                         Code = ErrorCodes.Query.DmlBlocked,
-                        Message = ex.Message,
+                        Message = ex.UserMessage,
                         DmlBlocked = true,
                     });
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
             {
-                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.Message);
+                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.UserMessage);
             }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsConnectionFailed)
             {
-                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.Message);
+                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.UserMessage);
             }
             catch (PpdsException ex)
             {
@@ -2093,7 +2095,7 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, ex.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
                 }
             }
 
@@ -2182,7 +2184,7 @@ public class RpcMethodHandler : IDisposable
                 };
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is PpdsException or QueryExecutionException or QueryParseException)
             {
                 _logger.LogWarning(ex, "Query plan building failed, falling back to FetchXML");
                 // Fall back to just the transpiled FetchXML if plan building fails
@@ -2198,7 +2200,7 @@ public class RpcMethodHandler : IDisposable
                 }
                 catch (PpdsException parseEx) when (parseEx.ErrorCode == ErrorCodes.Query.ParseError)
                 {
-                    throw new RpcException(ErrorCodes.Query.ParseError, parseEx.Message);
+                    throw new RpcException(ErrorCodes.Query.ParseError, parseEx.UserMessage);
                 }
             }
         }, cancellationToken);
@@ -2347,6 +2349,36 @@ public class RpcMethodHandler : IDisposable
 
         var insertPoint = fetchIndex + "<fetch".Length;
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
+    }
+
+    /// <summary>
+    /// Maps a PpdsException (or subclass) to an RpcException with structured error data.
+    /// Preserves subclass-specific properties (RequiresReauthentication, RetryAfter, etc.).
+    /// </summary>
+    private static RpcException MapPpdsToRpcException(PpdsException ex)
+    {
+        var data = new RpcErrorData { Code = ex.ErrorCode, Message = ex.UserMessage };
+
+        switch (ex)
+        {
+            case PpdsAuthException authEx:
+                data.RequiresReauthentication = authEx.RequiresReauthentication;
+                break;
+            case PpdsThrottleException throttleEx:
+                data.RetryAfterSeconds = throttleEx.RetryAfter.TotalSeconds;
+                break;
+            case PpdsValidationException validationEx:
+                data.ValidationErrors = validationEx.Errors
+                    .Select(e => new RpcValidationError { Field = e.Field, Message = e.Message })
+                    .ToList();
+                break;
+            case PpdsNotFoundException notFoundEx:
+                data.ResourceType = notFoundEx.ResourceType;
+                data.ResourceId = notFoundEx.ResourceId;
+                break;
+        }
+
+        return new RpcException(ex.ErrorCode, ex.UserMessage, data);
     }
 
     private static QueryResultResponse MapToResponse(QueryResult result, string? fetchXml)
@@ -2641,46 +2673,9 @@ public class RpcMethodHandler : IDisposable
                 Environment = result.EnvironmentUrl,
             };
         }
-        catch (PpdsAuthException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RequiresReauthentication = ex.RequiresReauthentication
-            });
-        }
-        catch (PpdsThrottleException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RetryAfterSeconds = ex.RetryAfter.TotalSeconds
-            });
-        }
-        catch (PpdsValidationException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ValidationErrors = ex.Errors.Select(e => new RpcValidationError { Field = e.Field, Message = e.Message }).ToList()
-            });
-        }
-        catch (PpdsNotFoundException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ResourceType = ex.ResourceType,
-                ResourceId = ex.ResourceId
-            });
-        }
         catch (PpdsException ex)
         {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage);
+            throw MapPpdsToRpcException(ex);
         }
     }
 
@@ -2720,46 +2715,9 @@ public class RpcMethodHandler : IDisposable
                 ProfileName = nameOrIndex,
             };
         }
-        catch (PpdsAuthException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RequiresReauthentication = ex.RequiresReauthentication
-            });
-        }
-        catch (PpdsThrottleException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RetryAfterSeconds = ex.RetryAfter.TotalSeconds
-            });
-        }
-        catch (PpdsValidationException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ValidationErrors = ex.Errors.Select(e => new RpcValidationError { Field = e.Field, Message = e.Message }).ToList()
-            });
-        }
-        catch (PpdsNotFoundException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ResourceType = ex.ResourceType,
-                ResourceId = ex.ResourceId
-            });
-        }
         catch (PpdsException ex)
         {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage);
+            throw MapPpdsToRpcException(ex);
         }
     }
 
@@ -2802,46 +2760,9 @@ public class RpcMethodHandler : IDisposable
                 NewName = result.Name ?? newName,
             };
         }
-        catch (PpdsAuthException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RequiresReauthentication = ex.RequiresReauthentication
-            });
-        }
-        catch (PpdsThrottleException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                RetryAfterSeconds = ex.RetryAfter.TotalSeconds
-            });
-        }
-        catch (PpdsValidationException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ValidationErrors = ex.Errors.Select(e => new RpcValidationError { Field = e.Field, Message = e.Message }).ToList()
-            });
-        }
-        catch (PpdsNotFoundException ex)
-        {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage, new RpcErrorData
-            {
-                Code = ex.ErrorCode,
-                Message = ex.UserMessage,
-                ResourceType = ex.ResourceType,
-                ResourceId = ex.ResourceId
-            });
-        }
         catch (PpdsException ex)
         {
-            throw new RpcException(ex.ErrorCode, ex.UserMessage);
+            throw MapPpdsToRpcException(ex);
         }
     }
 

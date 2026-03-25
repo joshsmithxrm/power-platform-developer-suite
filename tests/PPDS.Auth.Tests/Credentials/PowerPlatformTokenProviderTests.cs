@@ -82,7 +82,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfile(profile);
 
-        act.Should().Throw<ArgumentException>()
+        act.Should().Throw<AuthenticationException>()
             .WithMessage("*Cannot create user-delegated*FromProfileWithSecret*");
     }
 
@@ -97,7 +97,7 @@ public class PowerPlatformTokenProviderTests
 
         var act = () => PowerPlatformTokenProvider.FromProfile(profile);
 
-        act.Should().Throw<ArgumentException>()
+        act.Should().Throw<AuthenticationException>()
             .WithMessage("*not supported for Power Platform API tokens*");
     }
 

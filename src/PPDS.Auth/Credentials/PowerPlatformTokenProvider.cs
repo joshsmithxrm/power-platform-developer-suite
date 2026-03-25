@@ -108,15 +108,15 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
                 new PowerPlatformTokenProvider(profile.Cloud, profile.TenantId, profile.Username, profile.HomeAccountId),
 
             AuthMethod.ClientSecret =>
-                throw new ArgumentException(
+                throw new AuthenticationException(
                     "Cannot create user-delegated token provider from ClientSecret profile. " +
                     "Use FromProfileWithSecret() for SPN authentication.",
-                    nameof(profile)),
+                    "Auth.InvalidCredentials"),
 
-            _ => throw new ArgumentException(
+            _ => throw new AuthenticationException(
                 $"Auth method {profile.AuthMethod} is not supported for Power Platform API tokens. " +
                 "Supported methods: InteractiveBrowser, DeviceCode, ClientSecret.",
-                nameof(profile))
+                "Auth.InvalidCredentials")
         };
     }
 

@@ -28,7 +28,7 @@ public static class TdsQueryExecutorFactory
         if (profile.AuthMethod == AuthMethod.ClientSecret)
         {
 #pragma warning disable PPDS012
-            var storedCredential = credentialStore.GetAsync(profile.ApplicationId!).GetAwaiter().GetResult();
+            var storedCredential = credentialStore.GetAsync(profile.ApplicationId ?? "").GetAwaiter().GetResult();
 #pragma warning restore PPDS012
             tokenProvider = PowerPlatformTokenProvider.FromProfileWithSecret(profile, storedCredential?.ClientSecret ?? "");
         }
