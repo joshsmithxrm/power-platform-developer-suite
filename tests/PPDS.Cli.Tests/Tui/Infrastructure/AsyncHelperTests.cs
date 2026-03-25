@@ -14,8 +14,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(faultedTask, "TestContext");
 
-        // Allow ContinueWith to execute
-        await Task.Delay(100);
+        await WaitForErrors(errorService, count: 1);
 
         Assert.Single(errorService.RecentErrors);
         Assert.Contains("TestContext", errorService.RecentErrors[0].Context);
@@ -28,6 +27,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(Task.CompletedTask, "TestContext");
 
+        // No error expected — short delay is sufficient for the successful path
         await Task.Delay(50);
 
         Assert.Empty(errorService.RecentErrors);
@@ -42,7 +42,7 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(faultedTask, "AggregateTest");
 
-        await Task.Delay(100);
+        await WaitForErrors(errorService, count: 1);
 
         Assert.Single(errorService.RecentErrors);
     }
@@ -55,5 +55,14 @@ public sealed class AsyncHelperTests
             errorService.FireAndForget(Task.FromException(new Exception("boom")), "Sync"));
 
         Assert.Null(exception);
+    }
+
+    private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 2000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (errorService.RecentErrors.Count < count && Environment.TickCount64 < deadline)
+        {
+            await Task.Delay(25);
+        }
     }
 }
